@@ -27,6 +27,9 @@ namespace Lumina
 
         // Manifest the key was minted under, so a recompile mid-compile refuses the stale stages.
         uint32 Generation = 0;
+
+        // A rebuild of an unchanged graph keeps the stored permutations while the switch manifest still matches.
+        bool bKeepPermutations = false;
     };
 
     // Stages a compile dispatched and stages the shader compiler handed back, since a failed stage leaves the last good bytecode in place.
@@ -53,7 +56,8 @@ namespace Lumina
     // Material->PostLoad() so it registers and is ready for render. On a graph error returns bSuccess=false
     // with the errors and leaves the material not-ready. Editor-only (drives GShaderCompiler). Shared by the
     // material editor tool and the scene importer's procedural material generation.
-    EDITOR_API FMaterialGraphCompileResult CompileMaterialGraph(CMaterial* Material, CMaterialNodeGraph* Graph);
+    EDITOR_API FMaterialGraphCompileResult CompileMaterialGraph(CMaterial* Material, CMaterialNodeGraph* Graph,
+                                                                const FMaterialCompileTarget& Target = {});
 
     // Blocking compile of one permutation, leaving the material's own stages untouched.
     EDITOR_API FMaterialGraphCompileResult CompileMaterialPermutation(CMaterial* Material, CMaterialNodeGraph* Graph, uint64 Key);
@@ -81,7 +85,7 @@ namespace Lumina
 
     EDITOR_API void QueueMaterialFunctionRecompiles(const FGuid& FunctionGUID);
 
-    // Blocking recompile of a material saved against older shader templates, so a cook never ships stages the game cannot use.
+    // Blocking rebuild of stale or uncached stages and permutations, so a cook never ships stages the game cannot use.
     EDITOR_API bool RecompileMaterialIfStale(CMaterial* Material, FString& OutError);
 
     // Editor-tick drain for CMaterial's permutation queue, one dispatch-then-poll compile at a time.

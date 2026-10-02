@@ -33,8 +33,13 @@ namespace Lumina
         PROPERTY()
         uint8 Stage = 0;
 
+        /** Editor saves leave this empty when SourceHash is set; PostLoad refills it from the project shader cache. */
         PROPERTY()
         TVector<uint32> Spirv;
+
+        /** Hash of the graph code this stage was built from, excluding the templates; 0 when no graph built it. */
+        PROPERTY()
+        uint64 SourceHash = 0;
     };
 
     // The shader set for one static switch combination, owned by the root so every instance selecting it shares one.
@@ -98,10 +103,10 @@ namespace Lumina
         NODISCARD uint32 GetShaderRevision() const { return ShaderRevision; }
 
         // Stores the bytecode in the default set and commits its library entry.
-        void CommitShaderStage(EMaterialShaderStage Stage, TSpan<const uint32> Spirv);
+        void CommitShaderStage(EMaterialShaderStage Stage, TSpan<const uint32> Spirv, uint64 SourceHash = 0);
 
         // Stores the bytecode without committing, for compile callbacks off the game thread. PostLoad commits it.
-        void SetStageBinaries(EMaterialShaderStage Stage, TSpan<const uint32> Spirv);
+        void SetStageBinaries(EMaterialShaderStage Stage, TSpan<const uint32> Spirv, uint64 SourceHash = 0);
 
         // Drops one stage of the default set, such as the masked stages on a masked to opaque recompile.
         void ClearShaderStage(EMaterialShaderStage Stage);
@@ -112,10 +117,14 @@ namespace Lumina
         NODISCARD bool HasPermutation(uint64 Key) const;
 
         // Stores and commits one stage of permutation Key, adding the permutation when Key is new.
-        void CommitPermutationStage(uint64 Key, EMaterialShaderStage Stage, TSpan<const uint32> Spirv);
+        void CommitPermutationStage(uint64 Key, EMaterialShaderStage Stage, TSpan<const uint32> Spirv, uint64 SourceHash = 0);
 
         // CommitPermutationStage, refused when a recompile has renumbered the switches since Generation.
-        bool CommitPermutationStageIfCurrent(uint64 Key, uint32 Generation, EMaterialShaderStage Stage, TSpan<const uint32> Spirv);
+        bool CommitPermutationStageIfCurrent(uint64 Key, uint32 Generation, EMaterialShaderStage Stage, TSpan<const uint32> Spirv,
+            uint64 SourceHash = 0);
+
+        // Whether Key's permutation is stored but holds a stage the shader cache could not refill.
+        NODISCARD bool IsPermutationMissingBinaries(uint64 Key) const;
 
         // Permutation Key's own bytecode, with no fallback, so an unbuilt stage reads empty.
         NODISCARD const TVector<uint32>& GetPermutationStageBinaries(uint64 Key, EMaterialShaderStage Stage) const;
@@ -155,6 +164,12 @@ namespace Lumina
         // Content hash of every source a material template can reach.
         static uint64 GetShaderTemplateHash();
 
+        // Bump when FMaterialCompiler emits different code for an unchanged graph, or the cache serves stale shaders.
+        static constexpr uint64 MaterialCodegenVersion = 2;
+
+        // Project shader cache key for a stage built from SourceHash against the current templates and codegen.
+        static uint64 MakeShaderCacheKey(uint64 SourceHash);
+
         // Where a cook writes the template hash, so the shipped game compares against what its materials were built with.
         static constexpr const char* CookedShaderTemplateHashPath = "/Engine/ShaderTemplateHash.txt";
 
@@ -165,8 +180,11 @@ namespace Lumina
         // Asks the editor to compile permutation Key. Idempotent, so every instance may call it freely.
         static void RequestPermutation(CMaterial* Material, uint64 Key);
 
+        // Rebuilds a stored permutation the shader cache could not refill; the saved asset already holds it.
+        static void RequestPermutationRebuild(CMaterial* Material, uint64 Key);
+
         // Next queued permutation request, false when none remain.
-        static bool PopPermutationRequest(TStrongObjectPtr<CMaterial>& OutMaterial, uint64& OutKey);
+        static bool PopPermutationRequest(TStrongObjectPtr<CMaterial>& OutMaterial, uint64& OutKey, bool& bOutRebuild);
 #endif
 
         PROPERTY(Editable, Category = "Material")
@@ -231,7 +249,7 @@ namespace Lumina
         PROPERTY()
         TVector<FMaterialShaderPermutation> Permutations;
 
-        // GetShaderTemplateHash at the last compile. 0 marks an asset older than the hash, which recompiles once in the editor.
+        // GetShaderTemplateHash at the last compile, written by editor saves only while a stage keeps SPIR-V no graph can rebuild.
         PROPERTY()
         uint64 CompiledTemplateHash = 0;
 
@@ -255,6 +273,8 @@ namespace Lumina
         // Surfaces cache the entries this guards, so every bump wakes them.
         void BumpShaderRevision();
 
+        // False when a default stage's SPIR-V is in neither the asset nor the project shader cache.
+        bool RefillSerializedShadersFromCache();
         bool HasCompiledStage() const;
         void CommitSerializedShaders();
         void ApplyParameterDefaults();
