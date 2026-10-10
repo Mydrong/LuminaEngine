@@ -12,7 +12,7 @@ namespace
     {
     public:
 
-        FName GetName() const override { return FName("TestUpscaler"); }
+        EUpscaler GetType() const override { return EUpscaler::FSR; }
         bool  IsSupported() const override { return bSupported; }
         bool  IsTemporal() const override { return true; }
         float GetRenderScale(const FUIntVector2&, EUpscalerMode, float) const override { return 0.5f; }
@@ -45,11 +45,11 @@ namespace
     // Restores the project's choice, since the settings object is shared by every test in the run.
     struct FUpscalerSettingScope
     {
-        explicit FUpscalerSettingScope(const FName& Name)
+        explicit FUpscalerSettingScope(EUpscaler Type)
         {
             Settings = GetMutableDefault<CRendererSettings>();
             Previous = Settings->Upscaler;
-            Settings->Upscaler = Name;
+            Settings->Upscaler = Type;
         }
 
         ~FUpscalerSettingScope()
@@ -58,7 +58,7 @@ namespace
         }
 
         CRendererSettings* Settings = nullptr;
-        FName Previous;
+        EUpscaler Previous = EUpscaler::None;
     };
 }
 
@@ -107,16 +107,16 @@ TEST(SceneUpscaler, RegistryResolvesTheConfiguredSupportedUpscaler)
     FUpscalerRegistry::GetRegistered(Registered);
     EXPECT_EQ(std::count(Registered.begin(), Registered.end(), &Upscaler), 1) << "registering twice keeps one entry";
 
-    EXPECT_EQ(FUpscalerRegistry::Find(FName("TestUpscaler")), &Upscaler);
-    EXPECT_EQ(FUpscalerRegistry::Find(FName("NoSuchUpscaler")), nullptr);
-    EXPECT_EQ(FUpscalerRegistry::Find(FName()), nullptr);
+    EXPECT_EQ(FUpscalerRegistry::Find(EUpscaler::FSR), &Upscaler);
+    EXPECT_EQ(FUpscalerRegistry::Find(EUpscaler::DLSS), nullptr);
+    EXPECT_EQ(FUpscalerRegistry::Find(EUpscaler::None), nullptr);
 
     {
-        FUpscalerSettingScope Scope{FName()};
-        EXPECT_EQ(FUpscalerRegistry::GetActive(), nullptr) << "no name selects the built-in spatial upscale";
+        FUpscalerSettingScope Scope{EUpscaler::None};
+        EXPECT_EQ(FUpscalerRegistry::GetActive(), nullptr) << "None selects the built-in spatial upscale";
     }
     {
-        FUpscalerSettingScope Scope{FName("TestUpscaler")};
+        FUpscalerSettingScope Scope{EUpscaler::FSR};
         EXPECT_EQ(FUpscalerRegistry::GetActive(), &Upscaler);
 
         Upscaler.bSupported = false;
@@ -125,7 +125,7 @@ TEST(SceneUpscaler, RegistryResolvesTheConfiguredSupportedUpscaler)
     }
 
     FUpscalerRegistry::Unregister(&Upscaler);
-    EXPECT_EQ(FUpscalerRegistry::Find(FName("TestUpscaler")), nullptr);
+    EXPECT_EQ(FUpscalerRegistry::Find(EUpscaler::FSR), nullptr);
 }
 
 TEST(SceneUpscaler, ModesUseTheStandardRatios)

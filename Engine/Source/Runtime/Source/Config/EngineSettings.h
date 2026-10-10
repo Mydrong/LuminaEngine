@@ -259,6 +259,15 @@ namespace Lumina
         Ultra,
     };
 
+    // None is the built-in spatial upscale, which an unsupported or unregistered choice also falls back to.
+    REFLECT()
+    enum class EUpscaler : uint8
+    {
+        None,
+        DLSS,
+        FSR,
+    };
+
     // The standard upscaler quality modes, which each upscaler maps onto its own, plus a free percentage.
     REFLECT()
     enum class EUpscalerMode : uint8
@@ -403,9 +412,8 @@ namespace Lumina
         PROPERTY(Editable, Category = "Resolution", ClampMin = 25.0f, ClampMax = 100.0f)
         float ScreenPercentage = 100.0f;
 
-        // A registered upscaler such as DLSS, or None for the built-in spatial one, which falls back the same way on unsupported hardware.
         PROPERTY(Editable, Category = "Resolution")
-        FName Upscaler;
+        EUpscaler Upscaler = EUpscaler::None;
 
         // Sharpening on the built-in spatial upscale, which softens the image it enlarges.
         PROPERTY(Editable, Category = "Resolution", ClampMin = 0.0f, ClampMax = 1.0f)

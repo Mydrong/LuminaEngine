@@ -8,6 +8,7 @@
 
 namespace Lumina
 {
+    enum class EUpscaler : uint8;
     enum class EUpscalerMode : uint8;
 
     // One frame of a view for an upscaler. Everything is at render resolution except Output.
@@ -53,7 +54,7 @@ namespace Lumina
 
         virtual ~IUpscaler() = default;
 
-        virtual FName GetName() const = 0;
+        virtual EUpscaler GetType() const = 0;
 
         // False lets the renderer fall back to its spatial upscale, such as on a GPU the SDK does not support.
         virtual bool IsSupported() const = 0;
@@ -79,7 +80,7 @@ namespace Lumina
         static void Register(IUpscaler* Upscaler);
         static void Unregister(IUpscaler* Upscaler);
 
-        static IUpscaler* Find(const FName& Name);
+        static IUpscaler* Find(EUpscaler Type);
 
         // The one CRendererSettings::Upscaler names, or null for the built-in spatial upscale.
         static IUpscaler* GetActive();

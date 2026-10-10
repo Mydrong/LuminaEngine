@@ -66,16 +66,16 @@ namespace Lumina
         Upscalers.erase(Algo::Remove(Upscalers, Upscaler), Upscalers.end());
     }
 
-    IUpscaler* FUpscalerRegistry::Find(const FName& Name)
+    IUpscaler* FUpscalerRegistry::Find(EUpscaler Type)
     {
-        if (Name.IsNone())
+        if (Type == EUpscaler::None)
         {
             return nullptr;
         }
         FScopeLock Lock(GUpscalerMutex);
         for (IUpscaler* Upscaler : GetUpscalers())
         {
-            if (Upscaler->GetName() == Name)
+            if (Upscaler->GetType() == Type)
             {
                 return Upscaler;
             }

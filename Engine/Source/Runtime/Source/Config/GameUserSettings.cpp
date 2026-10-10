@@ -30,6 +30,17 @@ namespace Lumina
             return Project != EPresentMode::FIFO ? Project : EPresentMode::Immediate;
         }
 
+        const char* UpscalerName(EUpscaler Upscaler)
+        {
+            switch (Upscaler)
+            {
+            case EUpscaler::DLSS: return "DLSS";
+            case EUpscaler::FSR:  return "FSR";
+            case EUpscaler::None: break;
+            }
+            return "None";
+        }
+
         const char* UpscalerModeName(EUpscalerMode Mode)
         {
             switch (Mode)
@@ -139,8 +150,7 @@ namespace Lumina
             return;
         }
 
-        const FString UpscalerName = Upscaler.IsNone() ? FString() : Upscaler.ToString();
-        Scalability::OverrideSetting(kUpscalerKey, Lumina::Format("\"{}\"", UpscalerName));
+        Scalability::OverrideSetting(kUpscalerKey, Lumina::Format("\"{}\"", UpscalerName(Upscaler)));
         Scalability::OverrideSetting(kUpscalerModeKey, Lumina::Format("\"{}\"", UpscalerModeName(UpscalerMode)));
         Scalability::OverrideSetting(kScreenPercentageKey, Lumina::Format("{}", Math::Clamp(ScreenPercentage, 25.0f, 100.0f)));
     }
@@ -198,7 +208,7 @@ namespace Lumina
         FrameRateLimit = GetDefault<CRendererSettings>()->MaxFPS;
         SetOverallQuality(EQualityLevel::Default);
         bOverrideUpscaling = false;
-        Upscaler = FName();
+        Upscaler = EUpscaler::None;
         UpscalerMode = EUpscalerMode::Custom;
         ScreenPercentage = 100.0f;
     }

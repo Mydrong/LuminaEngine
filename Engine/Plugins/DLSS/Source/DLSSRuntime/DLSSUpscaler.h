@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Core/Threading/Thread.h"
+#include "Config/EngineSettings.h"
 #include "World/Scene/RenderScene/SceneUpscaler.h"
 
 struct NVSDK_NGX_Parameter;
@@ -15,7 +16,7 @@ namespace Lumina
 
         ~FDLSSUpscaler() override;
 
-        FName GetName() const override { return FName("DLSS"); }
+        EUpscaler GetType() const override { return EUpscaler::DLSS; }
         bool  IsSupported() const override;
         bool  IsTemporal() const override { return true; }
         float GetRenderScale(const FUIntVector2& DisplaySize, EUpscalerMode Mode, float RequestedScale) const override;

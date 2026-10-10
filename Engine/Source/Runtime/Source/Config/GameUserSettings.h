@@ -61,9 +61,8 @@ namespace Lumina
         PROPERTY()
         bool bOverrideUpscaling = false;
 
-        // A registered upscaler such as DLSS, or None for the built-in one.
         PROPERTY()
-        FName Upscaler;
+        EUpscaler Upscaler = EUpscaler::None;
 
         PROPERTY()
         EUpscalerMode UpscalerMode = EUpscalerMode::Custom;
