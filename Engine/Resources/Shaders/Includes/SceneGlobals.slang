@@ -19,7 +19,7 @@ struct FMippedTextureCubeArray
     uint MipCount()             { return Packed >> 24; }
 };
 
-// Must match FSceneRoot in SceneRenderTypes.h (368 B, scalar layout).
+// Must match FSceneRoot in SceneRenderTypes.h (416 B, scalar layout).
 struct FSceneRoot
 {
     GPUSpan<FBoneTransform>      Bones;
@@ -29,7 +29,9 @@ struct FSceneRoot
     GPUSpan<FCluster>            Clusters;
     // Per-view light bitmasks, GetClusterMaskWords() words per cluster.
     GPUSpan<uint>                ClusterLightMasks;
-    GPUSpan<FMaterialUniforms>   Materials;
+    // Per cluster, its first non-empty mask word in the low 16 bits and one past its last in the high 16.
+    GPUSpan<uint>                ClusterWordRanges;
+    FMaterialTable               Materials;
     GPUSpan<FMaterialCollection> Collections;
     GPUSpan<FBillboardInstance>  Billboards;
     GPUSpan<FCullView>           CullViews;
@@ -91,7 +93,8 @@ GPUSpan<FBoneTransform>      PrevBones()             { return GetSceneRoot().Pre
 GPUSpan<FTransform3x4>       PrevRetainedTransforms(){ return GetSceneRoot().PrevRetainedTransforms; }
 GPUSpan<FCluster>            Clusters()              { return GetSceneRoot().Clusters; }
 GPUSpan<uint>                ClusterLightMasks()     { return GetSceneRoot().ClusterLightMasks; }
-GPUSpan<FMaterialUniforms>   Materials()             { return GetSceneRoot().Materials; }
+GPUSpan<uint>                ClusterWordRanges()     { return GetSceneRoot().ClusterWordRanges; }
+FMaterialTable               Materials()             { return GetSceneRoot().Materials; }
 GPUSpan<FMaterialCollection> Collections()           { return GetSceneRoot().Collections; }
 GPUSpan<FBillboardInstance>  Billboards()            { return GetSceneRoot().Billboards; }
 GPUSpan<FCullView>           CullViews()             { return GetSceneRoot().CullViews; }
@@ -209,39 +212,74 @@ float3 SanitizeRadiance(float3 C)
 float3 FireflyTonemap(float3 C)   { return C / (1.0 + Luminance(C)); }
 float3 FireflyUntonemap(float3 C) { return C / max(1.0 - Luminance(C), 1e-4); }
 
+// Where a static meshlet's local vertex sits in the mesh's shared streams; mirrors Lumina::GetStaticVertexIndex.
+uint StaticVertexIndex(FMeshletHeader* Header, FMeshlet M, uint VertexLocalIdx)
+{
+    if (M.bShortVertexRefs)
+    {
+        const uint Word = Header.VertexRefs[M.VertexOffset + (VertexLocalIdx >> 1u)];
+        return M.BaseVertex + ((VertexLocalIdx & 1u) != 0u ? (Word >> 16u) : (Word & 0xFFFFu));
+    }
+    return M.BaseVertex + Header.VertexRefs[M.VertexOffset + VertexLocalIdx];
+}
+
+float3 LoadStaticPositionAt(FMeshletHeader* Header, uint VertexIndex)
+{
+    return DecodeMeshPosition(Header.PositionGrid, loadAligned<8>(Header.Positions + VertexIndex));
+}
+
 float3 LoadStaticPosition(FMeshletHeader* Header, FMeshlet M, uint VertexLocalIdx)
 {
-    return DecodeMeshletPosition(M, loadAligned<8>(Header.Positions + M.VertexOffset + VertexLocalIdx));
+    return LoadStaticPositionAt(Header, StaticVertexIndex(Header, M, VertexLocalIdx));
+}
+
+// An absent UV1 reads as UV0 and an absent color as white, which is what the importer would have written.
+void LoadOptionalStaticStreams(FMeshletHeader* Header, uint VertexIndex, inout FVertexData Data)
+{
+    const uint Flags = Header.VertexStreamFlags;
+    Data.UV1   = (Flags & MESH_VERTEX_STREAM_UV1) != 0u ? UnpackUV(Header.VertexUV1s[VertexIndex]) : Data.UV;
+    Data.Color = (Flags & MESH_VERTEX_STREAM_COLOR) != 0u ? UnpackColor(Header.VertexColors[VertexIndex]) : float4(1.0, 1.0, 1.0, 1.0);
 }
 
 // Field by field through the pointer, so whatever a pass leaves unused is never fetched at all.
 FVertexData LoadStaticVertex(FMeshletHeader* Header, FMeshlet M, uint VertexLocalIdx)
 {
-    FMeshletVertex* V = reinterpret<FMeshletVertex*>(Header.Vertices) + (M.VertexOffset + VertexLocalIdx);
+    const uint             VertexIndex = StaticVertexIndex(Header, M, VertexLocalIdx);
+    FMeshVertexAttributes* V           = reinterpret<FMeshVertexAttributes*>(Header.Vertices) + VertexIndex;
 
     FVertexData Data;
-    Data.Position = LoadStaticPosition(Header, M, VertexLocalIdx);
-    Data.Normal   = UnpackNormalSNorm16(V.NormalX, V.NormalY, V.NormalZ);
+    Data.Position = LoadStaticPositionAt(Header, VertexIndex);
+    Data.Normal   = UnpackNormal(V.Normal);
     Data.Tangent  = UnpackTangent(V.Tangent);
     Data.UV       = UnpackUV(V.UV);
-    Data.UV1      = UnpackUV(V.UV1);
-    Data.Color    = UnpackColor(V.Color);
+    LoadOptionalStaticStreams(Header, VertexIndex, Data);
     return Data;
 }
 
-// One load of the whole vertex, for a pass that consumes every attribute and would otherwise issue many narrow ones.
+// One load of the attributes, for a pass that consumes every one and would otherwise issue many narrow loads.
 FVertexData LoadStaticVertexWhole(FMeshletHeader* Header, FMeshlet M, uint VertexLocalIdx)
 {
-    const FMeshletVertex V = reinterpret<FMeshletVertex*>(Header.Vertices)[M.VertexOffset + VertexLocalIdx];
+    const uint                  VertexIndex = StaticVertexIndex(Header, M, VertexLocalIdx);
+    const FMeshVertexAttributes V           = reinterpret<FMeshVertexAttributes*>(Header.Vertices)[VertexIndex];
 
     FVertexData Data;
-    Data.Position = DecodeMeshletPosition(M, V.PositionX, V.PositionY, V.PositionZ);
-    Data.Normal   = UnpackNormalSNorm16(V.NormalX, V.NormalY, V.NormalZ);
+    Data.Position = LoadStaticPositionAt(Header, VertexIndex);
+    Data.Normal   = UnpackNormal(V.Normal);
     Data.Tangent  = UnpackTangent(V.Tangent);
     Data.UV       = UnpackUV(V.UV);
-    Data.UV1      = UnpackUV(V.UV1);
-    Data.Color    = UnpackColor(V.Color);
+    LoadOptionalStaticStreams(Header, VertexIndex, Data);
     return Data;
+}
+
+// Bind-pose position for a mesh that may be skinned, whose vertices are copied per meshlet instead of shared.
+float3 LoadBindPosePosition(FMeshletHeader* Header, FMeshlet M, uint VertexLocalIdx)
+{
+    if (Header.BonePaletteCount != 0u)
+    {
+        FMeshletSkinnedVertex* V = reinterpret<FMeshletSkinnedVertex*>(Header.Vertices) + (M.VertexOffset + VertexLocalIdx);
+        return DecodeMeshPosition(Header.PositionGrid, V.Position);
+    }
+    return LoadStaticPosition(Header, M, VertexLocalIdx);
 }
 
 FVertexData DecodePreSkinnedVertex(FPreSkinnedVertex S)
@@ -345,9 +383,8 @@ FSkinSource LoadSkinSource(FMeshletHeader* Header, FMeshlet M, uint VertexLocalI
 
     FSkinSource S;
 
-    // The source is quantized in its meshlet anchor box, the blended output is not.
-    S.Position = DecodeMeshletPosition(M, V.PositionX, V.PositionY, V.PositionZ);
-    S.Normal   = UnpackNormalSNorm16(V.NormalX, V.NormalY, V.NormalZ);
+    S.Position = DecodeMeshPosition(Header.PositionGrid, V.Position);
+    S.Normal   = UnpackNormal(V.Normal);
     S.Tangent  = UnpackTangent(V.Tangent);
     S.Slots    = UnpackUIntToUVec4(V.JointIndices);
     S.Weights  = unpack_u8u32(V.JointWeights) / float4(255.0);
@@ -432,61 +469,14 @@ FPreSkinnedVertex SkinVertex(FMeshletHeader* Header, FMeshlet M, uint MeshletInd
     return SkinVertexWith(Bones(), Header, M, MeshletIndex, VertexLocalIdx, BoneOffset);
 }
 
-// FMaterialUniforms is 592 B, so these address one field rather than fetch the block to extract from it.
-float GetMaterialScalar(uint MatIndex, uint Index)
-{
-    if (!Materials().Contains(MatIndex))
-    {
-        return 0.0;
-    }
-    return Materials().At(MatIndex).Scalars[Index];
-}
-
-float4 GetMaterialVec4(uint MatIndex, uint Index)
-{
-    if (!Materials().Contains(MatIndex))
-    {
-        return float4(0.0);
-    }
-    return loadAligned<16>(&Materials().At(MatIndex).Vectors[Index]);
-}
-
-uint GetMaterialTexture(uint MatIndex, uint Index)
-{
-    if (!Materials().Contains(MatIndex))
-    {
-        return 0u;
-    }
-    return Materials().At(MatIndex).Textures[Index];
-}
-
-uint GetMaterialFlags(uint MatIndex)
-{
-    if (!Materials().Contains(MatIndex))
-    {
-        return 0u;
-    }
-    return Materials().At(MatIndex).Flags;
-}
-
-float GetMaterialOpacityClip(uint MatIndex)
-{
-    if (!Materials().Contains(MatIndex))
-    {
-        return 0.0;
-    }
-    return Materials().At(MatIndex).OpacityClipValue;
-}
+float  GetMaterialScalar(uint MatIndex, uint Index)  { return Materials().Scalar(MatIndex, Index); }
+float4 GetMaterialVec4(uint MatIndex, uint Index)    { return Materials().Vec4(MatIndex, Index); }
+uint   GetMaterialTexture(uint MatIndex, uint Index) { return Materials().Texture(MatIndex, Index); }
+uint   GetMaterialFlags(uint MatIndex)               { return Materials().GetHeader(MatIndex).Flags; }
+float  GetMaterialOpacityClip(uint MatIndex)         { return Materials().GetHeader(MatIndex).OpacityClipValue; }
 
 // Slot is which of the material's own bindings (0 or 1), not the collection's index in the table.
-uint GetMaterialCollectionIndex(uint MatIndex, uint Slot)
-{
-    if (!Materials().Contains(MatIndex))
-    {
-        return 0u;
-    }
-    return Materials().At(MatIndex).CollectionIndices[Slot];
-}
+uint GetMaterialCollectionIndex(uint MatIndex, uint Slot) { return Materials().GetHeader(MatIndex).CollectionIndex(Slot); }
 
 float GetCollectionScalar(uint MatIndex, uint Slot, uint Index)
 {
@@ -516,6 +506,47 @@ uint GetInstanceEntityID(uint InstanceID)      { return Instances()[InstanceID].
 
 FLight GetLightAt(uint Index)       { return LightData().Lights.GetAligned(Index); }
 uint   GetNumLights()               { return LightData().Lights.Count;  }
+
+// Where a direction or world position lands in a light function's tile, in that tile's own 0-1 space.
+float2 LightFunctionTileUV(FLight Light, FLightFunction Function, float3 L, float3 WorldPos)
+{
+    if (HasFlag(Light.Flags, ELightFlags::Directional))
+    {
+        return frac(float2(dot(WorldPos, Function.Right.xyz), dot(WorldPos, Function.Up.xyz)) * Function.Right.w);
+    }
+
+    // L points at the light, so the light sees the surface along -L.
+    const float3 FromLight = -L;
+    if (HasFlag(Light.Flags, ELightFlags::Spot))
+    {
+        const float  Depth = max(dot(FromLight, -Light.Direction), 1e-4);
+        const float2 Plane = float2(dot(FromLight, Function.Right.xyz), dot(FromLight, Function.Up.xyz)) / Depth;
+        return Plane * (Function.Right.w * 0.5) + 0.5;
+    }
+    return OctEncode01(FromLight);
+}
+
+// The light function's color mask for this light at WorldPos, or white for a light without one.
+float3 LightFunctionMask(FLight Light, float3 L, float3 WorldPos)
+{
+    if (!HasFlag(Light.Flags, ELightFlags::LightFunction))
+    {
+        return float3(1.0);
+    }
+
+    const uint Slot = (Light.Flags >> LIGHT_FUNCTION_SLOT_SHIFT) & LIGHT_FUNCTION_SLOT_MASK;
+    if (!LightData().LightFunctions.Contains(Slot))
+    {
+        return float3(1.0);
+    }
+
+    // Inset by half a texel, so bilinear filtering never reads the neighboring tile.
+    const float  HalfTexel = 0.5 / float(LIGHT_FUNCTION_TILE_SIZE);
+    const float2 TileUV    = clamp(LightFunctionTileUV(Light, LightData().LightFunctions.Get(Slot), L, WorldPos), HalfTexel, 1.0 - HalfTexel);
+    const float2 Tile      = float2(Slot % LIGHT_FUNCTION_ATLAS_TILES, Slot / LIGHT_FUNCTION_ATLAS_TILES);
+    const float2 AtlasUV   = (Tile + TileUV) / float(LIGHT_FUNCTION_ATLAS_TILES);
+    return LightData().LightFunctionAtlas.SampleLevel(Samplers::LinearClamp, AtlasUV, 0.0).rgb;
+}
 float3 GetSunDirection()            { return LightData().SunDirection;  }
 float3 GetSkySunDirection()         { return LightData().SkySunDirection; }
 float3 GetAmbientLightColor()       { return LightData().AmbientLight.xyz; }
@@ -675,12 +706,12 @@ uint GetClusterMaskWords()
 // The cluster's non-empty mask words as [first, end), so a walk never loads a word with no light in it.
 uint2 GetClusterWordRange(uint ClusterIndex)
 {
-    if (!Clusters().Contains(ClusterIndex))
+    if (!ClusterWordRanges().Contains(ClusterIndex))
     {
         return uint2(0u, 0u);
     }
-    FCluster* Cluster = Clusters().At(ClusterIndex);
-    return uint2(Cluster.FirstWord, min(Cluster.EndWord, GetClusterMaskWords()));
+    const uint Packed = ClusterWordRanges().At(ClusterIndex)[0];
+    return uint2(Packed & 0xFFFFu, min(Packed >> 16u, GetClusterMaskWords()));
 }
 
 // Bit b of word w is light 32 * w + b.

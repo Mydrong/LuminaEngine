@@ -26,12 +26,22 @@
 // Y-fold axis, far below the 65535 Vulkan guarantees because the fold rounds group counts up to a multiple of it.
 #define MAX_DISPATCH_AXIS               1024
 
-// DXR2 COMPRESSED1 positions; Anchor + Offset stays below 2^24 so the decode is bit-identical, which early-Z relies on.
-#define MESHLET_POSITION_MAX            65535
-#define MESHLET_ANCHOR_MAX              8388607
-#define MESHLET_ANCHOR_MASK             0x00FFFFFFu
-#define MESHLET_ANCHOR_SIGN             0x00800000u
-#define MESHLET_EXPONENT_SHIFT          24u
+// One grid per mesh, 21 bits per axis in two words; anchor plus offset stays below 2^24 so the decode is exact, which early-Z relies on.
+#define MESH_POSITION_BITS              21
+#define MESH_POSITION_MAX               0x1FFFFFu
+
+// FMeshlet's last word, low bit first, is its vertex count, triangle count, LOD and whether its refs are 16-bit.
+#define MESHLET_COUNT_BITS              7
+#define MESHLET_COUNT_MASK              0x7Fu
+#define MESHLET_TRIANGLE_COUNT_SHIFT    7u
+#define MESHLET_LOD_BITS                3
+#define MESHLET_LOD_MASK                0x7u
+#define MESHLET_LOD_SHIFT               14u
+#define MESHLET_SHORT_REFS_SHIFT        17u
+
+// Which optional per-vertex streams a static mesh carries; an absent UV1 reads as UV0 and an absent color as white.
+#define MESH_VERTEX_STREAM_UV1          1u
+#define MESH_VERTEX_STREAM_COLOR        2u
 
 // meshoptimizer's 8-bit SNORM cone, axis in bytes 0..2 and cutoff in byte 3, each decoded as x / 127.
 #define MESHLET_CONE_SNORM_SCALE        127
@@ -62,12 +72,12 @@
 // A pair covering fewer pixels than this shades a lane per pixel, since a whole tile group would leave most lanes idle.
 #define MATERIAL_SPARSE_PIXELS          16u
 
-// FMaterialUniforms layout. Changing one side reinterprets every field after it.
+// Per-kind parameter caps. FMaterialUniforms holds every entry, and the GPU block keeps only each kind's used prefix.
 #define MAX_SCALARS                     24
 #define MAX_VECTORS                     24
 #define MAX_TEXTURES                    24
 
-// Collections one material may bind. Their indices sit in words FMaterialUniforms already reserved.
+// Collections one material may bind, each index packed into FMaterialHeader's Layout word.
 #define MAX_MATERIAL_COLLECTIONS        2
 
 // FMaterialCollectionUniforms layout, mirrored by FMaterialCollection in Common.slang.
@@ -77,18 +87,29 @@
 // Slot 0 is a reserved all-zero collection, so a material binding none reads zeros without a sentinel.
 #define MAX_PARAMETER_COLLECTIONS       64
 
+// FMaterialHeader's Layout word, each kind's count up to its last nonzero entry, then the two collection indices.
+#define MATERIAL_COUNT_MASK             31u
+#define MATERIAL_SCALAR_COUNT_SHIFT     5u
+#define MATERIAL_TEXTURE_COUNT_SHIFT    10u
+#define MATERIAL_COLLECTION_SHIFT       16u
+#define MATERIAL_COLLECTION_BITS        8u
+#define MATERIAL_COLLECTION_MASK        255u
+
 #define MAX_LIGHTS                      8192
 #define MAX_SHADOWS                     256
+
+// Light-function masks share one atlas of square tiles, so this many lights may carry one per frame.
+#define LIGHT_FUNCTION_ATLAS_TILES      4u
+#define LIGHT_FUNCTION_TILE_SIZE        512u
+#define MAX_LIGHT_FUNCTIONS             (LIGHT_FUNCTION_ATLAS_TILES * LIGHT_FUNCTION_ATLAS_TILES)
+// A light's atlas tile rides bits 8-15 of its flags, next to the LightFunction flag.
+#define LIGHT_FUNCTION_SLOT_SHIFT       8u
+#define LIGHT_FUNCTION_SLOT_MASK        255u
 #define NUM_CASCADES                    4
 
 // Hard cap on cull views, covering the camera, NUM_CASCADES, six per point light and one per spot.
 #define MAX_CULL_VIEWS                  128
 
-// The cluster light list packs two 13-bit light indices per uint.
-#define LIGHT_INDEX_MASK                0x1FFFu
-#define LIGHTS_PER_UINT                 2
-// Light-mask words one view's clusters share, each cluster holding one bit per light rounded up to whole words.
-#define MAX_CLUSTER_MASK_WORDS          (1 << 21)
 // LightCull gives each workgroup this block of clusters, so one bounding box pre-culls the lights for all of them.
 #define CLUSTER_CULL_BLOCK_X            8
 #define CLUSTER_CULL_BLOCK_Y            4
