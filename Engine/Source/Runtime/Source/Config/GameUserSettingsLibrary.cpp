@@ -116,12 +116,12 @@ namespace Lumina
         CGameUserSettings::Get().bOverrideUpscaling = bOverride;
     }
 
-    FName CGameUserSettingsLibrary::GetUpscaler()
+    EUpscaler CGameUserSettingsLibrary::GetUpscaler()
     {
         return CGameUserSettings::Get().Upscaler;
     }
 
-    void CGameUserSettingsLibrary::SetUpscaler(FName Upscaler)
+    void CGameUserSettingsLibrary::SetUpscaler(EUpscaler Upscaler)
     {
         CGameUserSettings& Settings = CGameUserSettings::Get();
         Settings.Upscaler = Upscaler;
@@ -154,20 +154,20 @@ namespace Lumina
 
     namespace
     {
-        TVector<FName> AvailableUpscalers()
+        TVector<EUpscaler> AvailableUpscalers()
         {
             TVector<IUpscaler*> Registered;
             FUpscalerRegistry::GetRegistered(Registered);
 
-            TVector<FName> Names;
+            TVector<EUpscaler> Types;
             for (IUpscaler* Upscaler : Registered)
             {
                 if (Upscaler != nullptr && Upscaler->IsSupported())
                 {
-                    Names.push_back(Upscaler->GetName());
+                    Types.push_back(Upscaler->GetType());
                 }
             }
-            return Names;
+            return Types;
         }
     }
 
@@ -176,10 +176,10 @@ namespace Lumina
         return (int32)AvailableUpscalers().size();
     }
 
-    FName CGameUserSettingsLibrary::GetAvailableUpscaler(int32 Index)
+    EUpscaler CGameUserSettingsLibrary::GetAvailableUpscaler(int32 Index)
     {
-        const TVector<FName> Names = AvailableUpscalers();
-        return Index >= 0 && Index < (int32)Names.size() ? Names[Index] : FName();
+        const TVector<EUpscaler> Types = AvailableUpscalers();
+        return Index >= 0 && Index < (int32)Types.size() ? Types[Index] : EUpscaler::None;
     }
 
     void CGameUserSettingsLibrary::RevertSettings()

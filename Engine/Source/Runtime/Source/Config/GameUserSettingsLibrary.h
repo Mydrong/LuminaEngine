@@ -79,12 +79,11 @@ namespace Lumina
         FUNCTION()
         static void SetOverrideUpscaling(bool bOverride);
 
-        // None is the built-in upscale.
         FUNCTION()
-        static FName GetUpscaler();
+        static EUpscaler GetUpscaler();
 
         FUNCTION()
-        static void SetUpscaler(FName Upscaler);
+        static void SetUpscaler(EUpscaler Upscaler);
 
         FUNCTION()
         static EUpscalerMode GetUpscalerMode();
@@ -104,7 +103,7 @@ namespace Lumina
         static int32 GetAvailableUpscalerCount();
 
         FUNCTION()
-        static FName GetAvailableUpscaler(int32 Index);
+        static EUpscaler GetAvailableUpscaler(int32 Index);
 
         FUNCTION()
         static void ApplySettings();

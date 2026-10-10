@@ -89,8 +89,7 @@ namespace Lumina
                 continue;
             }
 
-            // Slots hold bases split at save, so re-splitting would read X_1_1 back as X_1.
-            // checked before interning, or a corrupt file would leave junk in the process-wide name table
+            // Interned unsplit since save already split the base, and only after the length check so a corrupt file adds nothing.
             if (Length < sizeof(Stack))
             {
                 Ar.Serialize(Stack, (int64)Length);

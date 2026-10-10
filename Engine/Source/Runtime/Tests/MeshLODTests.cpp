@@ -101,6 +101,42 @@ namespace
         }
     }
 
+    // Leaf cards scattered through a canopy-sized box, each a separate quad sharing no vertex with any other.
+    void BuildCardCanopy(FMeshResource& Resource, uint32 NumCards, float BoxSize, float CardSize)
+    {
+        Resource.ResizeVertices(NumCards * 4u);
+        FGeometrySurface& Surface = Resource.GeometrySurfaces.emplace_back();
+        Surface.ID = "Canopy";
+
+        uint32 Seed = 12345u;
+        auto Next = [&Seed]() { Seed = Seed * 1664525u + 1013904223u; return (float)(Seed >> 8) / (float)(1u << 24); };
+
+        for (uint32 c = 0; c < NumCards; ++c)
+        {
+            const FVector3 Center(Next() * BoxSize, Next() * BoxSize, Next() * BoxSize);
+            const FVector3 Normal = Math::Normalize(FVector3(Next() - 0.5f, Next() - 0.5f, Next() - 0.5f) + FVector3(0.0f, 0.01f, 0.0f));
+            const FVector3 Helper = Math::Abs(Normal.y) < 0.9f ? FVector3(0.0f, 1.0f, 0.0f) : FVector3(1.0f, 0.0f, 0.0f);
+            const FVector3 Right  = Math::Normalize(Math::Cross(Normal, Helper)) * (CardSize * 0.5f);
+            const FVector3 Up     = Math::Normalize(Math::Cross(Right, Normal)) * (CardSize * 0.5f);
+
+            const FVector3 Corners[4] = { Center - Right - Up, Center + Right - Up, Center + Right + Up, Center - Right + Up };
+            const FVector2 UVs[4]     = { FVector2(0.0f, 0.0f), FVector2(1.0f, 0.0f), FVector2(1.0f, 1.0f), FVector2(0.0f, 1.0f) };
+            for (uint32 k = 0; k < 4u; ++k)
+            {
+                const uint32 i = c * 4u + k;
+                Resource.Positions[i] = Corners[k];
+                Resource.Normals[i]   = PackNormal(Normal);
+                Resource.SetUVAt(i, UVs[k]);
+                Resource.SetUV1At(i, FVector2(0.0f, 0.0f));
+                Resource.Colors[i] = 0xFFFFFFFFu;
+            }
+
+            const uint32 b = c * 4u;
+            Resource.Indices.insert(Resource.Indices.end(), { b, b + 1u, b + 2u, b, b + 2u, b + 3u });
+        }
+        Surface.IndexCount = (uint32)Resource.Indices.size();
+    }
+
     // Quantization moves a decoded position by a small fraction of the meshlet's extent.
     constexpr float kDecodeTolerance = 0.02f;
 }
@@ -198,6 +234,22 @@ TEST(MeshLOD, DestructiveLevelsMoveVertices)
     });
 
     EXPECT_GT(MovedVertices, 0u);
+}
+
+// Collapsing a card leaves a point on its own plane, so a plane-distance error reads near zero while the canopy thins.
+TEST(MeshLOD, CardFoliageErrorKeepsRisingAcrossLevels)
+{
+    FMeshResource Resource;
+    BuildCardCanopy(Resource, 4000u, 10.0f, 0.5f);
+    Import::Mesh::GenerateMeshlets(Resource);
+
+    const FGeometrySurface& Surface = Resource.GeometrySurfaces[0];
+    ASSERT_GE(Surface.NumLODs, 3u);
+
+    for (uint32 LOD = 2; LOD < Surface.NumLODs; ++LOD)
+    {
+        EXPECT_GT(Surface.LODError[LOD], Surface.LODError[LOD - 1] * 1.1f) << "LOD " << LOD;
+    }
 }
 
 #endif
