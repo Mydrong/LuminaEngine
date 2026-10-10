@@ -521,6 +521,268 @@ namespace Lumina::Import::Mesh
             return Inputs;
         }
 
+        FVector3 ClosestPointOnTriangle(const FVector3& P, const FVector3& A, const FVector3& B, const FVector3& C)
+        {
+            const FVector3 AB = B - A;
+            const FVector3 AC = C - A;
+            const FVector3 AP = P - A;
+            const float D1 = Math::Dot(AB, AP);
+            const float D2 = Math::Dot(AC, AP);
+            if (D1 <= 0.0f && D2 <= 0.0f)
+            {
+                return A;
+            }
+
+            const FVector3 BP = P - B;
+            const float D3 = Math::Dot(AB, BP);
+            const float D4 = Math::Dot(AC, BP);
+            if (D3 >= 0.0f && D4 <= D3)
+            {
+                return B;
+            }
+
+            const float VC = D1 * D4 - D3 * D2;
+            if (VC <= 0.0f && D1 >= 0.0f && D3 <= 0.0f)
+            {
+                return A + AB * (D1 / (D1 - D3));
+            }
+
+            const FVector3 CP = P - C;
+            const float D5 = Math::Dot(AB, CP);
+            const float D6 = Math::Dot(AC, CP);
+            if (D6 >= 0.0f && D5 <= D6)
+            {
+                return C;
+            }
+
+            const float VB = D5 * D2 - D1 * D6;
+            if (VB <= 0.0f && D2 >= 0.0f && D6 <= 0.0f)
+            {
+                return A + AC * (D2 / (D2 - D6));
+            }
+
+            const float VA = D3 * D6 - D5 * D4;
+            if (VA <= 0.0f && (D4 - D3) >= 0.0f && (D5 - D6) >= 0.0f)
+            {
+                return B + (C - B) * ((D4 - D3) / ((D4 - D3) + (D5 - D6)));
+            }
+
+            const float Denom = 1.0f / (VA + VB + VC);
+            return A + AB * (VB * Denom) + AC * (VC * Denom);
+        }
+
+        // Uniform cells over a triangle list, for the nearest-surface queries the LOD error measurement runs.
+        class FTriangleGrid
+        {
+        public:
+
+            FTriangleGrid(const TVector<FVector3>& InPositions, const uint32* InIndices, size_t IndexCount)
+                : Positions(InPositions)
+                , Indices(InIndices)
+                , NumTriangles(IndexCount / 3u)
+            {
+                if (NumTriangles == 0)
+                {
+                    return;
+                }
+
+                FVector3 Min(FLT_MAX);
+                FVector3 Max(-FLT_MAX);
+                for (size_t i = 0; i < NumTriangles * 3u; ++i)
+                {
+                    Min = Math::Min(Min, Positions[Indices[i]]);
+                    Max = Math::Max(Max, Positions[Indices[i]]);
+                }
+
+                const FVector3 Extent    = Math::Max(Max - Min, FVector3(1e-4f));
+                const float    LongAxis  = Math::Max(Extent.x, Math::Max(Extent.y, Extent.z));
+                const uint32   LongCells = (uint32)Math::Clamp(std::cbrt((float)NumTriangles) * 2.0f, 1.0f, 128.0f);
+                CellSize = LongAxis / (float)LongCells;
+                Origin   = Min;
+                for (int Axis = 0; Axis < 3; ++Axis)
+                {
+                    Dim[Axis] = (int32)Math::Clamp(std::ceil(Extent[Axis] / CellSize), 1.0f, 128.0f);
+                }
+
+                TVector<uint32> Counts((size_t)Dim[0] * Dim[1] * Dim[2] + 1u, 0u);
+                ForEachTriangleCell([&](size_t, uint32 Cell) { ++Counts[Cell]; });
+
+                CellStart.resize(Counts.size(), 0u);
+                for (size_t c = 1; c < Counts.size(); ++c)
+                {
+                    CellStart[c] = CellStart[c - 1] + Counts[c - 1];
+                }
+                CellTriangles.resize(CellStart.back());
+
+                TVector<uint32> Cursor(CellStart.begin(), CellStart.end() - 1);
+                ForEachTriangleCell([&](size_t Triangle, uint32 Cell) { CellTriangles[Cursor[Cell]++] = (uint32)Triangle; });
+            }
+
+            // FLT_MAX when the grid holds no triangles.
+            float Distance(const FVector3& P) const
+            {
+                if (NumTriangles == 0)
+                {
+                    return FLT_MAX;
+                }
+
+                int32 Center[3];
+                for (int Axis = 0; Axis < 3; ++Axis)
+                {
+                    Center[Axis] = Math::Clamp((int32)std::floor((P[Axis] - Origin[Axis]) / CellSize), 0, Dim[Axis] - 1);
+                }
+
+                const int32 MaxRing = Math::Max(Dim[0], Math::Max(Dim[1], Dim[2]));
+                float BestSq = FLT_MAX;
+                for (int32 Ring = 0; Ring <= MaxRing; ++Ring)
+                {
+                    for (int32 z = Center[2] - Ring; z <= Center[2] + Ring; ++z)
+                    {
+                        for (int32 y = Center[1] - Ring; y <= Center[1] + Ring; ++y)
+                        {
+                            for (int32 x = Center[0] - Ring; x <= Center[0] + Ring; ++x)
+                            {
+                                const bool bOnShell = Math::Abs(x - Center[0]) == Ring || Math::Abs(y - Center[1]) == Ring || Math::Abs(z - Center[2]) == Ring;
+                                if (!bOnShell || x < 0 || y < 0 || z < 0 || x >= Dim[0] || y >= Dim[1] || z >= Dim[2])
+                                {
+                                    continue;
+                                }
+                                const uint32 Cell = CellIndex(x, y, z);
+                                for (uint32 i = CellStart[Cell]; i < CellStart[Cell + 1]; ++i)
+                                {
+                                    const uint32*  Tri     = Indices + (size_t)CellTriangles[i] * 3u;
+                                    const FVector3 Closest = ClosestPointOnTriangle(P, Positions[Tri[0]], Positions[Tri[1]], Positions[Tri[2]]);
+                                    BestSq = Math::Min(BestSq, Math::LengthSquared(P - Closest));
+                                }
+                            }
+                        }
+                    }
+
+                    const float Unvisited = UnvisitedDistance(P, Center, Ring);
+                    if (Unvisited == FLT_MAX || BestSq <= Unvisited * Unvisited)
+                    {
+                        break;
+                    }
+                }
+                return std::sqrt(BestSq);
+            }
+
+        private:
+
+            // How near anything outside the searched block can be, where a block face on the grid boundary hides nothing.
+            float UnvisitedDistance(const FVector3& P, const int32 Center[3], int32 Ring) const
+            {
+                float Nearest = FLT_MAX;
+                for (int Axis = 0; Axis < 3; ++Axis)
+                {
+                    if (Center[Axis] - Ring > 0)
+                    {
+                        const float Face = Origin[Axis] + (float)(Center[Axis] - Ring) * CellSize;
+                        Nearest = Math::Min(Nearest, Math::Max(P[Axis] - Face, 0.0f));
+                    }
+                    if (Center[Axis] + Ring < Dim[Axis] - 1)
+                    {
+                        const float Face = Origin[Axis] + (float)(Center[Axis] + Ring + 1) * CellSize;
+                        Nearest = Math::Min(Nearest, Math::Max(Face - P[Axis], 0.0f));
+                    }
+                }
+                return Nearest;
+            }
+
+            uint32 CellIndex(int32 x, int32 y, int32 z) const
+            {
+                return (uint32)((z * Dim[1] + y) * Dim[0] + x);
+            }
+
+            template<typename TVisit>
+            void ForEachTriangleCell(TVisit&& Visit) const
+            {
+                for (size_t t = 0; t < NumTriangles; ++t)
+                {
+                    const FVector3& A = Positions[Indices[t * 3u + 0u]];
+                    const FVector3& B = Positions[Indices[t * 3u + 1u]];
+                    const FVector3& C = Positions[Indices[t * 3u + 2u]];
+                    int32 Lo[3];
+                    int32 Hi[3];
+                    for (int Axis = 0; Axis < 3; ++Axis)
+                    {
+                        const float TriMin = Math::Min(A[Axis], Math::Min(B[Axis], C[Axis]));
+                        const float TriMax = Math::Max(A[Axis], Math::Max(B[Axis], C[Axis]));
+                        Lo[Axis] = Math::Clamp((int32)std::floor((TriMin - Origin[Axis]) / CellSize), 0, Dim[Axis] - 1);
+                        Hi[Axis] = Math::Clamp((int32)std::floor((TriMax - Origin[Axis]) / CellSize), 0, Dim[Axis] - 1);
+                    }
+                    for (int32 z = Lo[2]; z <= Hi[2]; ++z)
+                    {
+                        for (int32 y = Lo[1]; y <= Hi[1]; ++y)
+                        {
+                            for (int32 x = Lo[0]; x <= Hi[0]; ++x)
+                            {
+                                Visit(t, CellIndex(x, y, z));
+                            }
+                        }
+                    }
+                }
+            }
+
+            const TVector<FVector3>& Positions;
+            const uint32*            Indices;
+            size_t                   NumTriangles;
+            FVector3                 Origin = FVector3(0.0f);
+            float                    CellSize = 1.0f;
+            int32                    Dim[3] = { 1, 1, 1 };
+            TVector<uint32>          CellStart;
+            TVector<uint32>          CellTriangles;
+        };
+
+        // Triangles past this are sampled at a stride, which bounds the import cost of a very dense surface.
+        constexpr size_t kMaxDistanceSampleTriangles = 131072u;
+
+        // The farther of source-to-result and result-to-source surface distance, sampled at vertices, edge midpoints and centroids.
+        float MeasureSimplificationDistance(const TVector<FVector3>& SourcePositions, const TVector<uint32>& SourceIndices,
+                                            const TVector<FVector3>& ResultPositions, const uint32* ResultIndices, size_t ResultCount)
+        {
+            LUMINA_PROFILE_SCOPE();
+
+            const FTriangleGrid ResultGrid(ResultPositions, ResultIndices, ResultCount);
+            const FTriangleGrid SourceGrid(SourcePositions, SourceIndices.data(), SourceIndices.size());
+
+            float Worst = 0.0f;
+            auto Sample = [&](const FTriangleGrid& Grid, const FVector3& P)
+            {
+                Worst = Math::Max(Worst, Grid.Distance(P));
+            };
+
+            // A card that collapsed away leaves its corners and center far from any surviving surface.
+            const size_t SourceTriangles = SourceIndices.size() / 3u;
+            const size_t SourceStride    = Math::Max<size_t>(SourceTriangles / kMaxDistanceSampleTriangles, 1u);
+            for (size_t t = 0; t < SourceTriangles; t += SourceStride)
+            {
+                const FVector3& A = SourcePositions[SourceIndices[t * 3u]];
+                const FVector3& B = SourcePositions[SourceIndices[t * 3u + 1u]];
+                const FVector3& C = SourcePositions[SourceIndices[t * 3u + 2u]];
+                Sample(ResultGrid, A);
+                Sample(ResultGrid, B);
+                Sample(ResultGrid, C);
+                Sample(ResultGrid, (A + B + C) * (1.0f / 3.0f));
+            }
+
+            // A surviving triangle can bridge the gap between cards, which only its interior reveals.
+            const size_t ResultTriangles = ResultCount / 3u;
+            const size_t ResultStride    = Math::Max<size_t>(ResultTriangles / kMaxDistanceSampleTriangles, 1u);
+            for (size_t t = 0; t < ResultTriangles; t += ResultStride)
+            {
+                const size_t    i = t * 3u;
+                const FVector3& A = ResultPositions[ResultIndices[i]];
+                const FVector3& B = ResultPositions[ResultIndices[i + 1u]];
+                const FVector3& C = ResultPositions[ResultIndices[i + 2u]];
+                Sample(SourceGrid, (A + B + C) * (1.0f / 3.0f));
+                Sample(SourceGrid, (A + B) * 0.5f);
+                Sample(SourceGrid, (B + C) * 0.5f);
+                Sample(SourceGrid, (C + A) * 0.5f);
+            }
+            return Worst;
+        }
+
         // Simplifies from the whole surface rather than the level above, so every error is measured against the source.
         void SimplifySurfaceLOD(const FSurfaceSimplifyInput& In, size_t TargetIndices, bool bDestructive,
                                 TVector<uint32>& OutIndices, FSurfaceMeshletResult& Out)
@@ -571,7 +833,11 @@ namespace Lumina::Import::Mesh
             }
 
             OutIndices.resize(NewCount);
-            Out.Error = RelativeError * In.ErrorScale;
+
+            // A collapsed card costs only its own size in the simplifier's error, however sparse the canopy gets, so the distance is measured.
+            const TVector<FVector3>& ResultPositions = Out.UpdatedPositions.empty() ? In.Positions : Out.UpdatedPositions;
+            const float Measured = MeasureSimplificationDistance(In.Positions, In.Indices, ResultPositions, OutIndices.data(), NewCount);
+            Out.Error = Math::Max(RelativeError * In.ErrorScale, Measured < FLT_MAX ? Measured : In.ErrorScale);
         }
 
         // Build meshlets for one (LOD, Surface) cell; quantization deferred to the serial pack pass.
