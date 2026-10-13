@@ -79,8 +79,8 @@ namespace Lumina
             return true;
         }
 
-        const void* PayloadA = GetValueFn(const_cast<void*>(ValueA));
-        const void* PayloadB = GetValueFn(const_cast<void*>(ValueB));
+        const void* PayloadA = Ops->GetValue(const_cast<void*>(ValueA));
+        const void* PayloadB = Ops->GetValue(const_cast<void*>(ValueB));
         return Inner->Identical(PayloadA, PayloadB);
     }
 
@@ -94,8 +94,8 @@ namespace Lumina
         }
 
         SetValue(Dst, nullptr);
-        void* DstPayload = GetValueFn(Dst);
-        const void* SrcPayload = GetValueFn(const_cast<void*>(Src));
+        void* DstPayload = Ops->GetValue(Dst);
+        const void* SrcPayload = Ops->GetValue(const_cast<void*>(Src));
         Inner->CopyCompleteValue(DstPayload, SrcPayload);
     }
 }

@@ -43,6 +43,9 @@ namespace Lumina::SkeletalUtils
 
     RUNTIME_API bool EntityHasSocket(ECS::FRegistry& Registry, ECS::FEntity Entity, const FName& SocketOrBone);
 
+    // The entity whose pose Follower copies, at the end of its leader chain, or null when it follows nothing or the chain loops.
+    RUNTIME_API ECS::FEntity ResolvePoseLeader(const ECS::FRegistry& Registry, ECS::FEntity Follower);
+
     // World-space socket-or-bone transform on Entity (folds in the entity's world matrix).
     RUNTIME_API bool GetSocketWorldTransform(ECS::FRegistry& Registry, ECS::FEntity Entity, const FName& SocketOrBone, FMatrix4& OutTransform);
 

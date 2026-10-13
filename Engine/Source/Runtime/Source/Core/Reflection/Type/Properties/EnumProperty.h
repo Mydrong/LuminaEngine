@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include "Core/Object/Class.h"
 #include "Core/Reflection/Type/LuminaTypes.h"
 #include "Memory/SmartPtr.h"
@@ -9,11 +9,10 @@ namespace Lumina
     {
     public:
 
-        explicit FEnumProperty(const FPropertyParams* Params)
-            : FProperty(Params)
+        explicit FEnumProperty(const FPropertyDesc& Desc)
+            : FProperty(Desc)
         {
-            auto* EnumParams = static_cast<const FEnumPropertyParams*>(Params);
-            CEnum* InternalEnum = EnumParams->EnumFunc();
+            CEnum* InternalEnum = Desc.Type->GetEnum();
             ASSERT(InternalEnum);
             SetEnum(InternalEnum);
         }

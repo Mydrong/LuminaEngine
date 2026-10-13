@@ -56,6 +56,7 @@ namespace Lumina::Scripting
     struct FScriptOptionalDesc
     {
         FScriptArrayElementDesc Payload;
+        FOptionalOps            Ops{};
     };
 
     // Heap payload rather than inline, so the slot is one fixed size and engaged is exactly a non-null payload.
@@ -107,7 +108,7 @@ namespace Lumina
     // Runtime-minted CStruct mirroring one C# script type's [Property] layout with real FProperties.
     class CScriptStruct : public CStruct
     {
-        DECLARE_CLASS(Lumina, CScriptStruct, CStruct, "/Script/Engine", RUNTIME_API)
+        DECLARE_CLASS(Lumina, CScriptStruct, CStruct, "/Types/Engine", RUNTIME_API)
         DEFINE_CLASS_FACTORY(CScriptStruct)
 
     public:
@@ -253,23 +254,7 @@ namespace Lumina
 
 namespace Lumina::Scripting
 {
-    /**
-     * Appends a C# script type's [Property] members to an already-minted CClass as REAL FPropertys, laid out
-     * in the trailing block past the C++ shim the class was minted from. That is what lets a script's
-     * properties be drawn by the stock FPropertyTable, serialized by SerializeTaggedProperties, and covered by
-     * undo / prefab overrides / replication -- instead of a parallel minted CStruct fed by a value blob.
-     *
-     * Every reflected property kind is supported, because the layout is planned by the same code that plans a
-     * CScriptStruct and each property brings its own value lifecycle (FProperty::ConstructValue /
-     * DestructValue / OwnsStorage). The ones that own storage are recorded on the class so
-     * StaticAllocateObject and ~CObjectBase drive them.
-     *
-     * Grows Target->Size/Alignment, so it MUST run before the CDO exists (CreateDefaultObject allocates from
-     * GetSize() and latches Link()). Declared defaults are NOT applied here: they are replayed against the CDO
-     * by DotNet::ApplyScriptableDefaults once it exists, and every later instance is copied from it.
-     *
-     * Returns the number of properties appended.
-     */
+    // Appends a script type's properties to its minted class as real FPropertys in the trailing block, so it must run before the class's CDO exists.
     RUNTIME_API uint32 AppendScriptPropertiesToClass(CScriptClass* Target, const FScriptExportSchema& Schema);
 
     /** Drops a minted class's layout records. Only safe once the class has no live instances. */

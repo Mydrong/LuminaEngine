@@ -5,8 +5,8 @@ using Lumina;
 namespace Lumina.Examples;
 
 // Drives UI/Examples/Menu.rml plus the Settings dialog it opens, both bound to this script as the "menu" model.
-[UIDocument("/Engine/Resources/Content/UI/Examples/Menu.rml", Interactive = true), DataModel("menu")]
-public sealed class MenuExample : UIScript
+[Reflect(UIDocument = "/Engine/Resources/Content/UI/Examples/Menu.rml", Interactive = true, DataModel = "menu")]
+public sealed class MenuExample : CUIScript
 {
     [Property(Tooltip = "Settings dialog, composed inside Window.rml's chrome.", AssetType = "rml")]
     public string SettingsDocument = "/Engine/Resources/Content/UI/Examples/Composition/Settings.rml";

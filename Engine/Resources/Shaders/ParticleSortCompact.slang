@@ -1,9 +1,9 @@
 #include "Includes/ParticleSimCommon.slang"
 #include "Shared/SharedConstants.h"
 
-// Orders one emitter back-to-front and compacts it into an indirect draw.
+// Each workgroup orders one emitter back-to-front and compacts it into an indirect draw.
 
-struct FParticleSortArgs
+struct FParticleSortEmitter
 {
     GPUSpan<FGPUParticle>           Particles;
     GPUSpan<uint>                   OutIndices;
@@ -14,6 +14,11 @@ struct FParticleSortArgs
     uint                            VertsPerParticle;
     uint                            _Pad0;
 };
+
+struct FParticleSortArgs
+{
+    GPUSpan<FParticleSortEmitter>   Emitters;
+};
 FParticleSortArgs* Pass() { return GetPassArgs<FParticleSortArgs>(); }
 
 // Above every live key, so dead slots sink past LiveCount and the sort compacts as it orders.
@@ -23,19 +28,20 @@ groupshared uint gsKeys[PARTICLE_SORT_CAPACITY];
 groupshared uint gsLiveCount;
 
 // Held one below kDeadKey, which a particle sitting on the camera would otherwise reach.
-uint ParticleDepthKey(FGPUParticle P, float3 CameraPos)
+uint ParticleDepthKey(FGPUParticle P, float3 CameraPos, uint SortMode)
 {
     const uint MaxKey = (1u << PARTICLE_SORT_DEPTH_BITS) - 1u;
-    return min((uint)(saturate(ParticleSortValue(P, CameraPos, Pass().SortMode)) * (float)MaxKey), MaxKey - 1u);
+    return min((uint)(saturate(ParticleSortValue(P, CameraPos, SortMode)) * (float)MaxKey), MaxKey - 1u);
 }
 
 // No lane may return early, or the barriers below go non-uniform and AMD hangs.
 [shader("compute")]
 [numthreads(PARTICLE_SORT_THREADS, 1, 1)]
-void ComputeMain(uint Lane : SV_GroupIndex)
+void ComputeMain(uint Lane : SV_GroupIndex, uint3 GroupId : SV_GroupID)
 {
-    const uint SortCount     = min(Pass().SortCount, PARTICLE_SORT_CAPACITY);
-    const uint ParticleCount = min(Pass().Particles.Count, SortCount);
+    const FParticleSortEmitter Emitter = Pass().Emitters.Get(GroupId.x);
+    const uint SortCount     = min(Emitter.SortCount, PARTICLE_SORT_CAPACITY);
+    const uint ParticleCount = min(Emitter.Particles.Count, SortCount);
     const float3 CameraPos   = GetCameraPosition();
 
     if (Lane == 0u)
@@ -50,12 +56,12 @@ void ComputeMain(uint Lane : SV_GroupIndex)
         uint Key = kDeadKey;
         if (i < ParticleCount)
         {
-            const FGPUParticle P = Pass().Particles.Get(i);
+            const FGPUParticle P = Emitter.Particles.Get(i);
 
             // Must match the liveness test in ParticleVertex.slang, which draws what this counts.
             if (P.Lifetime > 0.0 && P.Age < P.Lifetime && P.Size > 0.0)
             {
-                Key = (ParticleDepthKey(P, CameraPos) << PARTICLE_SORT_INDEX_BITS) | i;
+                Key = (ParticleDepthKey(P, CameraPos, Emitter.SortMode) << PARTICLE_SORT_INDEX_BITS) | i;
                 ++LocalLive;
             }
         }
@@ -97,16 +103,16 @@ void ComputeMain(uint Lane : SV_GroupIndex)
 
     for (uint i = Lane; i < LiveCount; i += PARTICLE_SORT_THREADS)
     {
-        Pass().OutIndices.Set(i, gsKeys[i] & PARTICLE_SORT_INDEX_MASK);
+        Emitter.OutIndices.Set(i, gsKeys[i] & PARTICLE_SORT_INDEX_MASK);
     }
 
     if (Lane == 0u)
     {
         FDrawIndirectArguments Args;
-        Args.VertexCount   = LiveCount * Pass().VertsPerParticle;
+        Args.VertexCount   = LiveCount * Emitter.VertsPerParticle;
         Args.InstanceCount = 1u;
         Args.VertexOffset  = 0u;
         Args.FirstInstance = 0u;
-        Pass().OutDrawArgs.Set(0u, Args);
+        Emitter.OutDrawArgs.Set(0u, Args);
     }
 }

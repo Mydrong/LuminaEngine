@@ -146,7 +146,26 @@ struct FParticleSimArgs
     GPUSpan<FParticleTerrain> Terrains;
 };
 
-FParticleSimArgs*      SimArgs()      { return GetPassArgs<FParticleSimArgs>(); }
+// One dispatch simulates every emitter that shares a shader, and each workgroup finds its emitter in Groups.
+struct FParticleSimBatch
+{
+    GPUSpan<FParticleSimArgs> Emitters;
+    // x indexes Emitters, y is the workgroup within that emitter.
+    GPUSpan<uint2>            Groups;
+};
+
+static FParticleSimArgs* gSimArgs;
+
+FParticleSimArgs*      SimArgs()      { return gSimArgs; }
+
+// Points this workgroup at its emitter and returns the particle slot the lane owns.
+uint BeginParticleSimGroup(uint GroupIndex, uint Lane)
+{
+    FParticleSimBatch* Batch = GetPassArgs<FParticleSimBatch>();
+    const uint2 Group = Batch.Groups.Get(GroupIndex);
+    gSimArgs = Batch.Emitters.At(Group.x);
+    return Group.y * PARTICLE_SIM_GROUP_SIZE + Lane;
+}
 FParticleSimParams*    SimParams()    { return SimArgs().Params; }
 GPUSpan<FGPUParticle> Particles()    { return SimArgs().Particles; }
 GPUSpan<uint>         SpawnCounter() { return SimArgs().SpawnCounter; }

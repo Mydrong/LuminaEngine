@@ -236,6 +236,20 @@ namespace Lumina::Platform
         }
     }
 
+    FString GetRuntimeModulePath()
+    {
+        HMODULE Module = nullptr;
+        if (!GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+            reinterpret_cast<LPCSTR>(&GetRuntimeModulePath), &Module))
+        {
+            return "";
+        }
+
+        char Buffer[MAX_PATH];
+        const DWORD Length = GetModuleFileNameA(Module, Buffer, MAX_PATH);
+        return Length == 0 ? FString() : FString(Buffer, Length);
+    }
+
     FString GetCurrentProcessPath()
     {
         char Buffer[MAX_PATH];

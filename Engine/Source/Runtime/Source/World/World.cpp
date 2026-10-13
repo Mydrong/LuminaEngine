@@ -1649,6 +1649,7 @@ namespace Lumina
                 if (Defaults->GetPriorities().IsStageEnabled((EUpdateStage)i))
                 {
                     Info.Stages.push_back((EUpdateStage)i);
+                    Info.Priorities.push_back(Defaults->GetPriorities().GetPriorityForStage((EUpdateStage)i));
                 }
             }
         });

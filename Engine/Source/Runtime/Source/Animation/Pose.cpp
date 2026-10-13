@@ -1345,10 +1345,10 @@ namespace Lumina
         }
     }
 
-    void AnimPose::ComposeLocalMatrices(const FPose& Pose, FMatrix4* OutMatrices)
+    void AnimPose::ComposeLocalMatrices(const FPose& Pose, FMatrix4* OutMatrices, int32 NumMatrices)
     {
         constexpr int32 kWidth = 8;
-        const int32 NumBones = Pose.GetNumBones();
+        const int32 NumBones = Detail::ResolveActiveBones(NumMatrices, Pose.GetNumBones());
 
         const float* RESTRICT Tx = Pose.Tx(); const float* RESTRICT Ty = Pose.Ty(); const float* RESTRICT Tz = Pose.Tz();
         const float* RESTRICT Sx = Pose.Sx(); const float* RESTRICT Sy = Pose.Sy(); const float* RESTRICT Sz = Pose.Sz();
@@ -1398,7 +1398,8 @@ namespace Lumina
         }
     }
 
-    void AnimPose::ToSkinningMatrices(const FPose& Pose, const FSkeletonResource* Skeleton, TVector<FMatrix4>& OutMatrices)
+    void AnimPose::ToSkinningMatrices(const FPose& Pose, const FSkeletonResource* Skeleton, TVector<FMatrix4>& OutMatrices,
+                                      int32 NumActiveBones, const int32* OutputSlot)
     {
         const int32 NumBones = Skeleton ? Skeleton->GetNumBones() : 0;
         OutMatrices.resize(NumBones);
@@ -1408,40 +1409,56 @@ namespace Lumina
             return;
         }
 
-        // Bones[] is parents-before-children, so a single linear FK pass works.
-        if (!Skeleton->HasFlatBoneCache())
-        {
-            for (int32 i = 0; i < NumBones; ++i)
-            {
-                const FMatrix4 Local = Detail::ComposeLocal(Pose, i);
-                const int32 Parent = Skeleton->GetBone(i).ParentIndex;
-                OutMatrices[i] = Parent != Constants::kIndexNone ? OutMatrices[Parent] * Local : Local;
-            }
-
-            for (int32 i = 0; i < NumBones; ++i)
-            {
-                OutMatrices[i] = OutMatrices[i] * Skeleton->GetBone(i).InvBindMatrix;
-            }
-            return;
-        }
+        const int32 Active = Detail::ResolveActiveBones(NumActiveBones, NumBones);
+        const auto Slot = [OutputSlot](int32 Bone) { return OutputSlot != nullptr ? OutputSlot[Bone] : Bone; };
 
         // Globals go to scratch so InvBind folds in during the same pass rather than a second sweep.
         thread_local TVector<FMatrix4> Globals;
         Globals.resize(NumBones);
-        ComposeLocalMatrices(Pose, Globals.data());
 
-        const int32* RESTRICT    Parents = Skeleton->BoneParents.data();
-        const FMatrix4* RESTRICT InvBind = Skeleton->BoneInvBind.data();
-
-        // Parents come first, so Globals[Parent] is already global while Globals[i] still holds the local.
-        for (int32 i = 0; i < NumBones; ++i)
+        // Bones[] is parents-before-children, so a single linear FK pass works.
+        if (!Skeleton->HasFlatBoneCache())
         {
-            const int32 Parent = Parents[i];
-            if (Parent != Constants::kIndexNone)
+            for (int32 i = 0; i < Active; ++i)
             {
-                Globals[i] = Globals[Parent] * Globals[i];
+                const FMatrix4 Local = Detail::ComposeLocal(Pose, i);
+                const int32 Parent = Skeleton->GetBone(i).ParentIndex;
+                Globals[i] = Parent != Constants::kIndexNone ? Globals[Parent] * Local : Local;
+                OutMatrices[Slot(i)] = Globals[i] * Skeleton->GetBone(i).InvBindMatrix;
             }
-            OutMatrices[i] = Globals[i] * InvBind[i];
+        }
+        else
+        {
+            ComposeLocalMatrices(Pose, Globals.data(), Active);
+
+            const int32* RESTRICT    Parents = Skeleton->BoneParents.data();
+            const FMatrix4* RESTRICT InvBind = Skeleton->BoneInvBind.data();
+
+            // Parents come first, so Globals[Parent] is already global while Globals[i] still holds the local.
+            for (int32 i = 0; i < Active; ++i)
+            {
+                const int32 Parent = Parents[i];
+                if (Parent != Constants::kIndexNone)
+                {
+                    Globals[i] = Globals[Parent] * Globals[i];
+                }
+                OutMatrices[Slot(i)] = Globals[i] * InvBind[i];
+            }
+        }
+
+        if (Active == NumBones)
+        {
+            return;
+        }
+
+        // A bone at its bind pose under its parent skins exactly like its nearest animated ancestor, so the tail copies that matrix.
+        thread_local TVector<int32> Carrier;
+        Carrier.resize(NumBones);
+        for (int32 i = Active; i < NumBones; ++i)
+        {
+            const int32 Parent = Skeleton->GetBone(i).ParentIndex;
+            Carrier[i] = Parent == Constants::kIndexNone ? Constants::kIndexNone : (Parent < Active ? Parent : Carrier[Parent]);
+            OutMatrices[Slot(i)] = Carrier[i] != Constants::kIndexNone ? OutMatrices[Slot(Carrier[i])] : FMatrix4(1.0f);
         }
     }
 }

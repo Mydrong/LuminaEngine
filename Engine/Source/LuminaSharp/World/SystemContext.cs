@@ -3,7 +3,7 @@ using Lumina;
 
 namespace LuminaSharp;
 
-// The native FSystemContext an EntitySystem reads from its world, restamped each stage.
+// The native FSystemContext an CEntitySystem reads from its world, restamped each stage.
 public readonly unsafe partial struct SystemContext
 {
     internal readonly IntPtr Handle;

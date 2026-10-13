@@ -345,7 +345,7 @@ namespace Lumina
      *  and debris, each wanting its own particle count, lifetime, blend mode and texture -- so the whole
      *  block moved here and the system became a list of these.
      *
-     *  Emitters simulate independently: one dispatch and one draw each, with no shared buffers. */
+     *  Emitters simulate independently, with no shared buffers. */
     REFLECT()
     class RUNTIME_API CParticleEmitter : public CObject
     {
@@ -355,8 +355,17 @@ namespace Lumina
 
         CParticleEmitter() = default;
 
+        void Serialize(FArchive& Ar) override;
         void PostLoad() override;
         void OnDestroy() override;
+
+        // The shader sources a generated simulation can reach, hashed once per run.
+        static uint64 GetSimulationTemplateHash();
+
+        // A generated stack with no shader for the current templates, which only an editor recompile can supply.
+        bool NeedsShaderCompile() const { return ShaderMode == EParticleShaderMode::Custom && !HasCustomComputeShader(); }
+
+        void StoreShaderInArtifactCache() const;
 
         /** The Particle-domain material to shade sprites with, or null when the texture path applies. */
         CMaterialInterface* GetRenderMaterial() const;
@@ -380,6 +389,12 @@ namespace Lumina
 
         PROPERTY()
         TVector<uint32> ComputeShaderBinaries;
+
+        // GetSimulationTemplateHash when the binaries in memory were built, never saved so a shader edit cannot dirty the asset.
+        uint64 CompiledTemplateHash = 0;
+
+        // Set when the asset still carried binaries from before the artifact cache, so the recompile asks for one save to drop them.
+        bool bLoadedEmbeddedBinaries = false;
 
         /** Module-stack value inputs, one float4 slot per parameter, in the order the compiler assigned.
          *  Uploaded verbatim each frame as the shader's ModuleParams array. Editing a module input
@@ -673,6 +688,13 @@ namespace Lumina
         PROPERTY(Editable, Category = "Render")
         bool bRandomStartFrame = false;
 
+    private:
+
+        uint64 MakeArtifactKey() const;
+        bool LoadShaderFromArtifactCache();
+        void CommitComputeShader();
+        void ReleaseComputeShader();
+
         FShaderH ComputeShader = {};
     };
 
@@ -744,9 +766,14 @@ namespace Lumina
      *  NOT on the component, so the render thread never touches a component the game thread may have destroyed. */
     struct FParticleGPUState
     {
+        // The one allocation every buffer below is a region of, so an emitter costs one allocation and one clear to set up.
+        RHI::FGPUAllocation Block = {};
+        uint64          BlockSize = 0;
         RHI::FGPUAllocation ParticleBuffer = {};  // RW structured buffer of FGPUParticle
         uint64          ParticleBufferSize = 0;
         RHI::FGPUAllocation SpawnCounterBuffer = {};  // Single uint, cleared per frame
+        // The counters this frame's simulation used, SpawnCounterBuffer or a slot of the renderer's shared counter buffer.
+        RHI::GPUPtr     FrameSpawnCounter   = 0;
         // Declared per-particle attributes, parallel to ParticleBuffer and indexed by the same index.
         RHI::FGPUAllocation AttributeBuffer = {};
         uint64          AttributeBufferSize = 0;

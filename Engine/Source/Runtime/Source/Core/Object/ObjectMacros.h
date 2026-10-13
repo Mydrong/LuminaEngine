@@ -1,31 +1,28 @@
-﻿#pragma once
+#pragma once
 
 #include "Core/Reflection/ReflectionMacros.h"
 #include "Memory/Construct.h"
 #include "ObjectCore.h"
 #include "Lumina.h"
 
-enum EInternal { EC_InternalUseOnlyConstructor };
-
-
-#define LUMINA_PURE_VIRTUAL(...) { UNREACHABLE(); }
 
 #define DECLARE_CLASS(TNamespace, TClass, TBaseClass, TPackage, TAPI) \
 private: \
-    friend struct FRIEND_STRUCT_NAME(TNamespace, TClass); \
+    friend struct LUMINA_TYPE_INFO(TClass); \
     TNamespace::TClass& operator=(TNamespace::TClass&&); \
     TNamespace::TClass& operator=(const TNamespace::TClass&); \
-    TAPI static Lumina::CClass* GetPrivateStaticClass(); \
+    TAPI static Lumina::CClass* CreateStaticClass(); \
 public: \
     using ThisClass = TNamespace::TClass; \
     using Super = TBaseClass; \
     inline static Lumina::CClass* StaticClass() \
     { \
-        LUMINA_STATIC_HELPER(Lumina::CClass*) \
+        static Lumina::CClass* Class = nullptr; \
+        if (Class == nullptr) \
         { \
-            StaticValue = GetPrivateStaticClass(); \
+            Class = CreateStaticClass(); \
         } \
-        return StaticValue; \
+        return Class; \
     } \
     inline static Lumina::FName StaticName() \
     { \
@@ -45,76 +42,48 @@ public: \
     } \
     private:
 
-
-// Every engine type named inside these macros is fully qualified: a reflected class may live in any
-// namespace, or none, and unqualified names only resolve while the type happens to sit in Lumina.
+// Qualified throughout, since a reflected class may live in any namespace or none.
 #define DEFINE_CLASS_FACTORY(TClass) \
     static Lumina::CObject* __PlacementNew(void* Memory) \
     { \
         return Lumina::Memory::ConstructAt(static_cast<TClass*>(Memory)); \
     }
 
+// Allocates the class object, which the generated descriptor later fills with properties and functions.
 #define IMPLEMENT_CLASS(TNamespace, TClass) \
-    Lumina::FClassRegistrationInfo CONCAT4(Registration_Info_CClass_, TNamespace, _, TClass); \
-    NO_API Lumina::CClass* TNamespace::TClass::GetPrivateStaticClass() \
+    NO_API Lumina::CClass* TNamespace::TClass::CreateStaticClass() \
     { \
-        if (CONCAT4(Registration_Info_CClass_, TNamespace, _, TClass).InnerSingleton == nullptr) \
+        static Lumina::CClass* Class = nullptr; \
+        if (Class == nullptr) \
         { \
-            Lumina::AllocateStaticClass( \
-                TNamespace::TClass::StaticPackage(), \
-                TEXT(#TClass), \
-                &CONCAT4(Registration_Info_CClass_, TNamespace, _, TClass).InnerSingleton, \
-                sizeof(TNamespace::TClass), \
-                alignof(TNamespace::TClass), \
-                &TNamespace::TClass::Super::StaticClass, \
-                &TNamespace::TClass::__PlacementNew); \
+            Lumina::AllocateStaticClass(TNamespace::TClass::StaticPackage(), TEXT(#TClass), &Class, \
+                sizeof(TNamespace::TClass), alignof(TNamespace::TClass), \
+                &TNamespace::TClass::Super::StaticClass, &TNamespace::TClass::__PlacementNew); \
         } \
-        return CONCAT4(Registration_Info_CClass_, TNamespace, _, TClass).InnerSingleton; \
+        return Class; \
     }
 
-
-/** Intrinsic class auto-register. */
+// A class the reflection system is built from, so nothing generates it and it registers itself.
 #define IMPLEMENT_INTRINSIC_CLASS(TClass, TBaseClass, TAPI) \
-    TAPI Lumina::CClass* Construct_CClass_Lumina_##TClass(); \
-    extern Lumina::FClassRegistrationInfo Registration_Info_CClass_Lumina_##TClass; \
-    struct Construct_CClass_Lumina_##TClass##_Statics \
-    { \
-        static Lumina::CClass* Construct() \
-        { \
-            ::Construct_CClass_Lumina_##TBaseClass(); \
-            Lumina::CClass* Class = Lumina::TClass::StaticClass(); \
-            Lumina::CObjectForceRegistration(Class); \
-            return Class; \
-        } \
-    }; \
-    Lumina::CClass* Construct_CClass_Lumina_##TClass() \
-    { \
-        if(!Registration_Info_CClass_Lumina_##TClass.OuterSingleton) \
-        { \
-            Registration_Info_CClass_Lumina_##TClass.OuterSingleton = Construct_CClass_Lumina_##TClass##_Statics::Construct(); \
-        } \
-        return Registration_Info_CClass_Lumina_##TClass.OuterSingleton; \
-    } \
     IMPLEMENT_CLASS(Lumina, TClass) \
-    static Lumina::FRegisterCompiledInInfo AutoInitialize_##TClass(&Construct_CClass_Lumina_##TClass, Lumina::TClass::StaticPackage(), TEXT(#TClass));
+    template<> TAPI Lumina::CClass* Lumina::StaticClass<Lumina::TClass>() \
+    { \
+        static Lumina::CClass* Class = nullptr; \
+        if (Class == nullptr) \
+        { \
+            Lumina::StaticClass<Lumina::TBaseClass>(); \
+            Class = Lumina::TClass::StaticClass(); \
+            Lumina::FinishRegistration(Class); \
+        } \
+        return Class; \
+    } \
+    static constexpr Lumina::FClassConstructor CONCAT(IntrinsicClass_, TClass)[] = { &Lumina::StaticClass<Lumina::TClass> }; \
+    static constexpr Lumina::FCompiledInTypes CONCAT(IntrinsicTypes_, TClass){ .Classes = CONCAT(IntrinsicClass_, TClass), .NumClasses = 1 }; \
+    static const Lumina::FTypeRegistrar CONCAT(IntrinsicRegistrar_, TClass)(CONCAT(IntrinsicTypes_, TClass));
 
+// The trailing metadata fields of a generated descriptor, whose runtime entries lead so a build without the editor keeps only those.
 #if USING(WITH_EDITOR)
-    #define METADATA_PARAMS(X, Y) X, Y
+    #define LUMINA_METADATA(Array, NumRuntime) , .Metadata = Array, .NumMetadata = (Lumina::uint16)std::size(Array)
 #else
-    #define METADATA_PARAMS(X, Y)
+    #define LUMINA_METADATA(Array, NumRuntime) , .Metadata = Array, .NumMetadata = NumRuntime
 #endif
-
-namespace LuminaAsserts_Private
-{
-    // sizeof()-via-overload to handle potential bitfield members.
-    template <typename T>
-    bool GetMemberNameCheckedJunk(const T&);
-    template <typename T>
-    bool GetMemberNameCheckedJunk(const volatile T&);
-    template <typename R, typename ...Args>
-    bool GetMemberNameCheckedJunk(R(*)(Args...));
-}
-
-/** Returns FName(MemberName) while statically asserting the member exists. */
-#define GET_MEMBER_NAME_CHECKED(ClassName, MemberName) \
-((void)sizeof(LuminaAsserts_Private::GetMemberNameCheckedJunk(((ClassName*)0)->MemberName)), FName(TEXT(#MemberName)))

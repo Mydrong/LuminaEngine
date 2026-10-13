@@ -1,4 +1,4 @@
-﻿#include "RuntimePCH.h"
+#include "RuntimePCH.h"
 #include "ScriptFunctionMint.h"
 #include "ScriptStruct.h"
 #include "Memory/Construct.h"
@@ -31,9 +31,10 @@
 #include "Scripting/ScriptValueBridge.h"
 #include "Containers/StringFormat.h"
 
+IMPLEMENT_INTRINSIC_CLASS(CScriptStruct, CStruct, RUNTIME_API)
+
 namespace Lumina
 {
-    IMPLEMENT_INTRINSIC_CLASS(CScriptStruct, CStruct, RUNTIME_API)
 
     using namespace Scripting;
 
@@ -55,36 +56,6 @@ namespace Lumina
 
     namespace
     {
-        // The property params take a stateless callback, so the value has to be ambient across the call.
-        template <typename T>
-        class TPendingValue
-        {
-        public:
-
-            explicit TPendingValue(T InValue)
-                : Previous(Current)
-            {
-                Current = InValue;
-            }
-
-            ~TPendingValue()
-            {
-                Current = Previous;
-            }
-
-            LE_NO_COPYMOVE(TPendingValue);
-
-            static T Get() { return Current; }
-
-        private:
-
-            static thread_local T Current;
-            T Previous;
-        };
-
-        template <typename T>
-        thread_local T TPendingValue<T>::Current{};
-
         // The entries are the layout here, so a reordered or renumbered enum must not reuse the old one.
         FString EnumKey(const FScriptExportType& Type)
         {
@@ -100,53 +71,67 @@ namespace Lumina
             return Key;
         }
 
-        void FillBaseParams(FPropertyParams& Params, EPropertyTypeFlags TypeFlags, uint32 Offset, const char* Name)
-        {
-            Params.Name          = Name;
-            Params.PropertyFlags = EPropertyFlags::Editable;
-            Params.TypeFlags     = TypeFlags;
-            Params.SetterFunc    = nullptr;
-            Params.GetterFunc    = nullptr;
-            Params.Offset        = (uint16)Offset;
-        }
-
         struct FKindTag
         {
             const char* Key = nullptr;
             const char* Value = "";
         };
 
+        EPropertyEditorFlags EditorFlagFromName(FStringView Name)
+        {
+            for (uint16 Bit = 0; Bit < PropertyEditorFlagBit::Count; ++Bit)
+            {
+                if (EqualsIgnoreCase(Name, FStringView(PropertyEditorFlagNames[Bit])))
+                {
+                    return EPropertyEditorFlags(1u << Bit);
+                }
+            }
+            return EPropertyEditorFlags::None;
+        }
+
         // Built in the arena that owns the property, since a script's keys and values are not static strings.
         void ApplyMeta(FPropertyArena& Arena, FProperty* Property, const FScriptExportMeta* Meta, const FKindTag& Extra)
         {
-            const size_t NumFromMeta = Meta != nullptr ? Meta->Entries.size() : 0;
-            const size_t Total = NumFromMeta + (Extra.Key != nullptr ? 1 : 0);
-            if (Total == 0)
+            const size_t MaxEntries = (Meta != nullptr ? Meta->Entries.size() : 0) + (Extra.Key != nullptr ? 1 : 0);
+            if (MaxEntries == 0)
             {
+                // A script property never passes through ConstructProperty, so its label is derived here or not at all.
+                Property->OnMetadataFinalized(Arena);
                 return;
             }
 
-            FMetaDataPairParam* Entries = static_cast<FMetaDataPairParam*>(
-                Arena.AllocateBytes(Total * sizeof(FMetaDataPairParam), alignof(FMetaDataPairParam)));
+            FMetadataEntry* Entries = static_cast<FMetadataEntry*>(
+                Arena.AllocateBytes(MaxEntries * sizeof(FMetadataEntry), alignof(FMetadataEntry)));
 
-            size_t Index = 0;
+            // A script's metadata arrives after its property, so the property takes a descriptor that carries it.
+            FPropertyDesc* Desc = Arena.EmplaceData<FPropertyDesc>(Property->GetDesc());
+
+            size_t Count = 0;
             if (Meta != nullptr)
             {
                 for (const FScriptExportMetaArg& Arg : Meta->Entries)
                 {
-                    Entries[Index].NameUTF8  = Arena.CopyString(Arg.Key.ToString());
-                    Entries[Index].ValueUTF8 = Arena.CopyString(Arg.Value);
-                    ++Index;
+                    const FString Key = Arg.Key.ToString();
+                    if (const EPropertyEditorFlags Flag = EditorFlagFromName(Key); Flag != EPropertyEditorFlags::None)
+                    {
+                        Desc->EditorFlags |= Flag;
+                        continue;
+                    }
+                    Entries[Count].Key   = Arena.CopyString(Key);
+                    Entries[Count].Value = Arena.CopyString(Arg.Value);
+                    ++Count;
                 }
             }
             if (Extra.Key != nullptr)
             {
-                Entries[Index].NameUTF8  = Extra.Key;
-                Entries[Index].ValueUTF8 = Extra.Value;
-                ++Index;
+                Entries[Count].Key   = Extra.Key;
+                Entries[Count].Value = Extra.Value;
+                ++Count;
             }
 
-            Property->SetMetadata(Entries, (uint16)Total);
+            Desc->Metadata    = Entries;
+            Desc->NumMetadata = (uint16)Count;
+            Property->Desc    = Desc;
             Property->OnMetadataFinalized(Arena);
         }
 
@@ -179,20 +164,36 @@ namespace Lumina
             return FKindTag{};
         }
 
-        // Every kind whose params add nothing beyond the base, which is what a schema can build with no
-        // kind-specific data of its own: the arithmetic kinds, plus strings and names.
+        // Arena-owned, because a script property outlives the call that minted it.
+        const FPropertyDesc& MakeDesc(FPropertyArena& Arena, const FName& Name, uint32 Offset, const FPropertyType* Type)
+        {
+            FPropertyDesc* Desc = Arena.EmplaceData<FPropertyDesc>();
+            Desc->Name   = Arena.CopyString(Name.ToString());
+            Desc->Offset = Offset;
+            Desc->Flags  = EPropertyFlags::Editable;
+            Desc->Type   = Type;
+            return *Desc;
+        }
+
+        // A script type already holds what it names, so it resolves to that rather than linking to it.
+        template<typename TProperty>
+        FProperty* MakeResolved(const FPropertyOwner& Owner, const FName& Name, uint32 Offset, EPropertyTypeFlags Kind, const void* Resolved)
+        {
+            FPropertyType* Type = Owner.Arena->EmplaceData<FPropertyType>();
+            Type->Kind     = Kind;
+            Type->Resolved = Resolved;
+            return Owner.Build<TProperty>(MakeDesc(*Owner.Arena, Name, Offset, Type));
+        }
+
+        // Every kind that names nothing, which a schema can build from the kind alone.
         FProperty* MakeBasic(EPropertyTypeFlags Kind, const FPropertyOwner& Owner, const FName& Name, uint32 Offset)
         {
             const FPropertyKindOps& Ops = GetPropertyKindOps(Kind);
-            if (!Ops.IsValid() || !Ops.bBaseParamsOnly)
+            if (!Ops.IsValid() || Ops.BasicType == nullptr)
             {
                 return nullptr;
             }
-
-            const FString NameStr = Name.ToString();
-            FPropertyParams Params{};
-            FillBaseParams(Params, Kind, Offset, NameStr.c_str());
-            return Ops.Construct(Owner, &Params);
+            return Ops.Construct(Owner, MakeDesc(*Owner.Arena, Name, Offset, Ops.BasicType));
         }
 
         FProperty* MakeScalar(EPropertyTypeFlags Kind, const FPropertyOwner& Owner, const FName& Name, uint32 Offset)
@@ -202,50 +203,24 @@ namespace Lumina
 
         FProperty* MakeStruct(const FPropertyOwner& Owner, const FName& Name, uint32 Offset, CStruct* Resolved)
         {
-            const TPendingValue<CStruct*> Pending(Resolved);
-            const FString NameStr = Name.ToString();
-            FStructPropertyParams Params{};
-            FillBaseParams(Params, EPropertyTypeFlags::Struct, Offset, NameStr.c_str());
-            Params.StructFunc    = +[]() -> CStruct* { return TPendingValue<CStruct*>::Get(); };
-            Params.NumMetaData   = 0;
-            Params.MetaDataArray = nullptr;
-            return Owner.Build<FStructProperty>(&Params);
+            return MakeResolved<FStructProperty>(Owner, Name, Offset, EPropertyTypeFlags::Struct, Resolved);
         }
 
         FProperty* MakeInstanced(const FPropertyOwner& Owner, const FName& Name, uint32 Offset, CStruct* MetaBase)
         {
-            const TPendingValue<CStruct*> Pending(MetaBase);
-            const FString NameStr = Name.ToString();
-            FInstancedStructPropertyParams Params{};
-            FillBaseParams(Params, EPropertyTypeFlags::InstancedStruct, Offset, NameStr.c_str());
-            Params.StructFunc    = +[]() -> CStruct* { return TPendingValue<CStruct*>::Get(); };
-            Params.NumMetaData   = 0;
-            Params.MetaDataArray = nullptr;
-            return Owner.Build<FInstancedStructProperty>(&Params);
+            return MakeResolved<FInstancedStructProperty>(Owner, Name, Offset, EPropertyTypeFlags::InstancedStruct, MetaBase);
         }
 
         FProperty* MakeObject(const FPropertyOwner& Owner, const FName& Name, uint32 Offset, CClass* TargetClass)
         {
-            const TPendingValue<CClass*> Pending(TargetClass != nullptr ? TargetClass : CObject::StaticClass());
-            const FString NameStr = Name.ToString();
-            FObjectPropertyParams Params{};
-            FillBaseParams(Params, EPropertyTypeFlags::Object, Offset, NameStr.c_str());
-            Params.ClassFunc     = +[]() -> CClass* { return TPendingValue<CClass*>::Get(); };
-            Params.NumMetaData   = 0;
-            Params.MetaDataArray = nullptr;
-            return Owner.Build<FObjectProperty>(&Params);
+            return MakeResolved<FObjectProperty>(Owner, Name, Offset, EPropertyTypeFlags::Object,
+                TargetClass != nullptr ? TargetClass : CObject::StaticClass());
         }
 
         FProperty* MakeSoftObject(const FPropertyOwner& Owner, const FName& Name, uint32 Offset, CClass* TargetClass)
         {
-            const TPendingValue<CClass*> Pending(TargetClass != nullptr ? TargetClass : CObject::StaticClass());
-            const FString NameStr = Name.ToString();
-            FSoftObjectPropertyParams Params{};
-            FillBaseParams(Params, EPropertyTypeFlags::SoftObject, Offset, NameStr.c_str());
-            Params.ClassFunc     = +[]() -> CClass* { return TPendingValue<CClass*>::Get(); };
-            Params.NumMetaData   = 0;
-            Params.MetaDataArray = nullptr;
-            return Owner.Build<FSoftObjectProperty>(&Params);
+            return MakeResolved<FSoftObjectProperty>(Owner, Name, Offset, EPropertyTypeFlags::SoftObject,
+                TargetClass != nullptr ? TargetClass : CObject::StaticClass());
         }
 
         bool ScalarSizeAlign(EPropertyTypeFlags Kind, uint32& Size, uint32& Align);
@@ -254,17 +229,8 @@ namespace Lumina
         FProperty* MakeEnum(const FPropertyOwner& Owner, const FName& Name, uint32 Offset, CEnum* Resolved,
             EPropertyTypeFlags Underlying)
         {
-            FEnumProperty* Property = nullptr;
-            {
-                const TPendingValue<CEnum*> Pending(Resolved);
-                const FString NameStr = Name.ToString();
-                FEnumPropertyParams Params{};
-                FillBaseParams(Params, EPropertyTypeFlags::Enum, Offset, NameStr.c_str());
-                Params.EnumFunc      = +[]() -> CEnum* { return TPendingValue<CEnum*>::Get(); };
-                Params.NumMetaData   = 0;
-                Params.MetaDataArray = nullptr;
-                Property = Owner.Build<FEnumProperty>(&Params);
-            }
+            FEnumProperty* Property = static_cast<FEnumProperty*>(
+                MakeResolved<FEnumProperty>(Owner, Name, Offset, EPropertyTypeFlags::Enum, Resolved));
 
             uint32 InnerSize = 0;
             uint32 InnerAlign = 0;
@@ -281,14 +247,7 @@ namespace Lumina
 
         FProperty* MakeArray(const FPropertyOwner& Owner, const FName& Name, uint32 Offset, const FVectorOps* Ops)
         {
-            const TPendingValue<const FVectorOps*> Pending(Ops);
-            const FString NameStr = Name.ToString();
-            FArrayPropertyParams Params{};
-            FillBaseParams(Params, EPropertyTypeFlags::Vector, Offset, NameStr.c_str());
-            Params.GetOpsFn      = +[]() -> const FVectorOps* { return TPendingValue<const FVectorOps*>::Get(); };
-            Params.NumMetaData   = 0;
-            Params.MetaDataArray = nullptr;
-            return Owner.Build<FArrayProperty>(&Params);
+            return MakeResolved<FArrayProperty>(Owner, Name, Offset, EPropertyTypeFlags::Vector, Ops);
         }
 
         bool ScalarSizeAlign(EPropertyTypeFlags Kind, uint32& Size, uint32& Align)
@@ -471,50 +430,36 @@ namespace Lumina
             }
         }
 
-        void FillOptionalParams(FOptionalPropertyParams& Params, const FScriptOptionalDesc* Desc)
+        void FillOptionalOps(FScriptOptionalDesc& Desc)
         {
-            Params.HasValueFn = &OptionalHasValue;
-            Params.GetValueFn = &OptionalGetValue;
-            Params.SetValueFn = &OptionalSetValue;
-            Params.ResetFn    = &OptionalReset;
+            Desc.Ops.HasValue = &OptionalHasValue;
+            Desc.Ops.GetValue = &OptionalGetValue;
+            Desc.Ops.SetValue = &OptionalSetValue;
+            Desc.Ops.Reset    = &OptionalReset;
 
-            // The description owns the params, so the self-reference keeps the two from drifting.
-            Params.ConstructContainerFn = [](void* Container, const void* Context)
+            // The description owns the ops, so the self-reference keeps the two from drifting.
+            Desc.Ops.ConstructContainer = [](void* Container, const void* Context)
             {
                 FScriptDynamicOptional* Optional = Memory::ConstructAt(static_cast<FScriptDynamicOptional*>(Container));
                 Optional->Desc = static_cast<const FScriptOptionalDesc*>(Context);
             };
-            Params.DestructContainerFn = [](void* Container, const void*)
+            Desc.Ops.DestructContainer = [](void* Container, const void*)
             {
                 static_cast<FScriptDynamicOptional*>(Container)->~FScriptDynamicOptional();
             };
-            Params.ContainerContext = Desc;
+            Desc.Ops.ContainerContext = &Desc;
         }
 
-        FProperty* MakeOptional(const FPropertyOwner& Owner, const FName& Name, uint32 Offset,
-            const FScriptOptionalDesc* Desc)
+        FProperty* MakeOptional(const FPropertyOwner& Owner, const FName& Name, uint32 Offset, const FOptionalOps* Ops)
         {
-            const FString NameStr = Name.ToString();
-            FOptionalPropertyParams Params{};
-            FillBaseParams(Params, EPropertyTypeFlags::Optional, Offset, NameStr.c_str());
-            FillOptionalParams(Params, Desc);
-            Params.NumMetaData   = 0;
-            Params.MetaDataArray = nullptr;
-            return Owner.Build<FOptionalProperty>(&Params);
+            return MakeResolved<FOptionalProperty>(Owner, Name, Offset, EPropertyTypeFlags::Optional, Ops);
         }
 
         // ---- Script dynamic map (type-erased pairs, linear find via the key property's Identical) ----
 
         FProperty* MakeMap(const FPropertyOwner& Owner, const FName& Name, uint32 Offset, const FMapOps* Ops)
         {
-            const TPendingValue<const FMapOps*> Pending(Ops);
-            const FString NameStr = Name.ToString();
-            FMapPropertyParams Params{};
-            FillBaseParams(Params, EPropertyTypeFlags::Map, Offset, NameStr.c_str());
-            Params.GetOpsFn      = +[]() -> const FMapOps* { return TPendingValue<const FMapOps*>::Get(); };
-            Params.NumMetaData   = 0;
-            Params.MetaDataArray = nullptr;
-            return Owner.Build<FMapProperty>(&Params);
+            return MakeResolved<FMapProperty>(Owner, Name, Offset, EPropertyTypeFlags::Map, Ops);
         }
 
         SIZE_T MapSize(const void* InMap)
@@ -710,7 +655,7 @@ namespace Lumina
         Params.Guid    = FGuid::New();
 
         TStrongObjectPtr<CScriptEnum> Enum = static_cast<CScriptEnum*>(StaticAllocateObject(Params));
-        CObjectForceRegistration(Enum.Get());
+        FinishRegistration(Enum.Get());
 
         Enum->ScriptTypeName  = Type.EnumName;
         Enum->UnderlyingType  = Type.EnumUnderlying;
@@ -765,7 +710,7 @@ namespace Lumina
         Params.Guid    = FGuid::New();
 
         TStrongObjectPtr<CScriptStruct> Sub = static_cast<CScriptStruct*>(StaticAllocateObject(Params));
-        CObjectForceRegistration(Sub.Get());
+        FinishRegistration(Sub.Get());
 
         FScriptExportSchema SubSchema;
         SubSchema.Fields = Type.Fields;
@@ -810,7 +755,7 @@ namespace Lumina
         Params.Guid    = FGuid::New();
 
         TStrongObjectPtr<CScriptStruct> Base = static_cast<CScriptStruct*>(StaticAllocateObject(Params));
-        CObjectForceRegistration(Base.Get());
+        FinishRegistration(Base.Get());
 
         // A type marker only. The ScriptInstanceBase tag hides it from the picker.
         FScriptExportSchema Empty;
@@ -858,7 +803,7 @@ namespace Lumina
         Params.Guid    = FGuid::New();
 
         TStrongObjectPtr<CScriptStruct> Sub = static_cast<CScriptStruct*>(StaticAllocateObject(Params));
-        CObjectForceRegistration(Sub.Get());
+        FinishRegistration(Sub.Get());
 
         FScriptExportSchema Schema;
         Schema.Fields = Candidate.Fields;
@@ -1111,6 +1056,7 @@ namespace Lumina
             {
                 return false;
             }
+            FillOptionalOps(*Desc);
             Out.bOptional = true;
             Out.OptionalDesc = Desc;
             Out.Size = sizeof(FScriptDynamicOptional);
@@ -1170,7 +1116,7 @@ namespace Lumina
         }
         if (Plan.bOptional)
         {
-            FProperty* Optional = MakeOptional(Owner, Field.Name, Offset, Plan.OptionalDesc);
+            FProperty* Optional = MakeOptional(Owner, Field.Name, Offset, &Plan.OptionalDesc->Ops);
             FProperty* Inner = CreateElement(Optional, *Type.ElementType, Plan.OptionalDesc->Payload);
             Plan.OptionalDesc->Payload.Inner = Inner;
             ApplyMeta(GetPropertyArena(), Optional, &Field.Meta, FKindTag{});
@@ -1571,7 +1517,7 @@ namespace Lumina::Scripting
         Params.Guid    = FGuid::New();
 
         TStrongObjectPtr<CScriptStruct> Record = static_cast<CScriptStruct*>(StaticAllocateObject(Params));
-        CObjectForceRegistration(Record.Get());
+        FinishRegistration(Record.Get());
 
         // Appended properties start past the shim, so they can never overlap a native member.
         const uint32 ShimSize  = Target->GetSize();

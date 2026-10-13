@@ -36,7 +36,7 @@ namespace Lumina
 
         EInstanceFlags  MaterialFlags = EInstanceFlags::None;
         uint64          MaterialID    = 0;
-        uint16          MaterialIdx   = 0;
+        uint32          MaterialIdx   = 0;
         bool            bMaterialCastsShadows = true;
 
         uint32  NumLODs                             = 1;

@@ -1,4 +1,4 @@
-﻿#include "RuntimePCH.h"
+#include "RuntimePCH.h"
 #include "Function.h"
 
 #include "Core/Object/Class.h"
@@ -66,11 +66,11 @@ namespace Lumina
         Thunk(*this, Context, Frame);
     }
 
-    FFunction* FFunctionBuilder::Build(FPropertyArena& Arena, CStruct* Owner, const FFunctionParams& Params,
+    FFunction* FFunctionBuilder::Build(FPropertyArena& Arena, CStruct* Owner, const FFunctionDesc& Desc,
                                       TSpan<FProperty* const> OrderedParams)
     {
-        return BuildCore(Arena, Owner, FName(Params.Name), Params.Flags, OrderedParams,
-                         Params.ReturnIndex, Params.ParmsSize, Params.Thunk);
+        return BuildCore(Arena, Owner, FName(Desc.Name), Desc.Flags, OrderedParams,
+                         Desc.ReturnIndex, Desc.FrameSize, Desc.Thunk);
     }
 
     FFunction* FFunctionBuilder::BuildMinted(FPropertyArena& Arena, CStruct* Owner, const FName& Name,

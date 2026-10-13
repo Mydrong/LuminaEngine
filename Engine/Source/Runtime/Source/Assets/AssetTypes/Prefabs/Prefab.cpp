@@ -136,6 +136,70 @@ namespace Lumina
             }
         }
 
+        bool IsScriptMarked(const THashSet<FName>& OverriddenPaths, const CClass* Class, const char* Marker)
+        {
+            return OverriddenPaths.find(FName((ScriptPathPrefix(Class) + Marker).c_str())) != OverriddenPaths.end();
+        }
+
+        // The overridden field paths of one script class, with the class prefix stripped.
+        THashSet<FName> ScriptClassPaths(const THashSet<FName>& OverriddenPaths, const CClass* Class)
+        {
+            const FString Prefix = ScriptPathPrefix(Class);
+            THashSet<FName> ClassPaths;
+            for (const FName& Path : OverriddenPaths)
+            {
+                const FStringView Full(Path.c_str());
+                if (Full.starts_with(FStringView(Prefix)))
+                {
+                    ClassPaths.insert(FName(FString(Full.substr(Prefix.size())).c_str()));
+                }
+            }
+            return ClassPaths;
+        }
+
+        // The variant side of ApplyInheritedScriptLeaves, writing only what the variant authored onto inherited script data.
+        void ApplyOverriddenScriptLeaves(SEntityScriptComponent& Dest, const SEntityScriptComponent& Authored, const THashSet<FName>& OverriddenPaths)
+        {
+            Dest.Scripts.erase(Algo::RemoveIf(Dest.Scripts, [&](const TStrongObjectPtr<CEntityScript>& Held)
+            {
+                return Held.Get() != nullptr && IsScriptMarked(OverriddenPaths, Held->GetClass(), ScriptRemovedMarker);
+            }), Dest.Scripts.end());
+
+            for (const TStrongObjectPtr<CEntityScript>& Held : Authored.Scripts)
+            {
+                CEntityScript* AuthoredScript = Held.Get();
+                if (AuthoredScript == nullptr)
+                {
+                    continue;
+                }
+
+                CClass* Class = AuthoredScript->GetClass();
+                const bool bAdded = IsScriptMarked(OverriddenPaths, Class, ScriptAddedMarker);
+                CEntityScript* DestScript = FindScriptOfClass(Dest, Class);
+                if (DestScript == nullptr)
+                {
+                    if (bAdded)
+                    {
+                        if (CEntityScript* Clone = EntityScripts::Clone(AuthoredScript))
+                        {
+                            Dest.Scripts.push_back(Clone);
+                        }
+                    }
+                    continue;
+                }
+
+                // An added script authors every field, even once the parent ships that class too.
+                if (bAdded)
+                {
+                    PrefabOverride::ApplyInheritedLeaves(Class, DestScript, AuthoredScript, {});
+                }
+                else
+                {
+                    PrefabOverride::ApplyOverriddenLeaves(Class, DestScript, AuthoredScript, ScriptClassPaths(OverriddenPaths, Class));
+                }
+            }
+        }
+
         // In place, so a live script keeps running and only the fields nobody overrode follow the prefab.
         void ApplyInheritedScriptLeaves(ECS::FRegistry& Registry, ECS::FEntity Entity, const SEntityScriptComponent& Prefab, const THashSet<FName>& OverriddenPaths,
             const TVector<const CClass*>* PreviouslyInherited)
@@ -164,17 +228,7 @@ namespace Lumina
                     }
                 }
 
-                const FString Prefix = ScriptPathPrefix(Class);
-                THashSet<FName> ClassPaths;
-                for (const FName& Path : OverriddenPaths)
-                {
-                    const FStringView Full(Path.c_str());
-                    if (Full.starts_with(FStringView(Prefix)))
-                    {
-                        ClassPaths.insert(FName(FString(Full.substr(Prefix.size())).c_str()));
-                    }
-                }
-                PrefabOverride::ApplyInheritedLeaves(Class, InstanceScript, PrefabScript, ClassPaths);
+                PrefabOverride::ApplyInheritedLeaves(Class, InstanceScript, PrefabScript, ScriptClassPaths(OverriddenPaths, Class));
             }
 
             // A script the prefab dropped goes too, unless the instance added that class itself.
@@ -1624,6 +1678,11 @@ namespace Lumina
                 {
                     Ops->EmplaceCopy(Registry, DestE, SrcPtr);
                 }
+                // A variant captured before scripts were diffed per field recorded the whole component, and resolves as it always did.
+                else if (CompStruct == SEntityScriptComponent::StaticStruct() && Leaves->find(PrefabOverride::WholeValuePath()) == Leaves->end())
+                {
+                    ApplyOverriddenScriptLeaves(*static_cast<SEntityScriptComponent*>(DstPtr), *static_cast<const SEntityScriptComponent*>(SrcPtr), *Leaves);
+                }
                 else
                 {
                     PrefabOverride::ApplyOverriddenLeaves(CompStruct, DstPtr, SrcPtr, *Leaves);
@@ -1817,8 +1876,16 @@ namespace Lumina
                 }
 
                 TVector<FName> Leaves;
-                PrefabOverride::CollectOverriddenLeaves(CompStruct, MyStorage.GetRaw(MineE),
-                    ParentStorage->GetRaw(ParentE), Leaves);
+                if (CompStruct == SEntityScriptComponent::StaticStruct())
+                {
+                    CollectScriptOverrides(*static_cast<const SEntityScriptComponent*>(MyStorage.GetRaw(MineE)),
+                        *static_cast<const SEntityScriptComponent*>(ParentStorage->GetRaw(ParentE)), Leaves);
+                }
+                else
+                {
+                    PrefabOverride::CollectOverriddenLeaves(CompStruct, MyStorage.GetRaw(MineE),
+                        ParentStorage->GetRaw(ParentE), Leaves);
+                }
 
                 for (const FName& Path : Leaves)
                 {

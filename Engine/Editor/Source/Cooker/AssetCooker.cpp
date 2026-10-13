@@ -22,6 +22,10 @@
 #include "Cooker/Graph/CookGraph.h"
 #include "Assets/AssetTypes/Material/Material.h"
 #include "Assets/AssetTypes/Material/MaterialInterface.h"
+#include "Assets/AssetTypes/Material/MaterialInstance.h"
+#include "Assets/AssetTypes/ParticleSystem/ParticleSystem.h"
+#include "Particles/ParticleOps.h"
+#include "Core/Math/Hash/Hash.h"
 #include "Assets/AssetTypes/Textures/Texture.h"
 #include "Core/Object/Class.h"
 #include "Core/Console/ConsoleVariable.h"
@@ -112,21 +116,20 @@ namespace Lumina
             return true;
         }
 
-        // One bad asset falls back to a verbatim copy with a WARN rather than killing the whole cook.
-        // Script packages of modules the shipped game never loads, whose objects in an asset are editor state such as a node graph.
-        const THashSet<FName>& EditorScriptPackages()
+        // Type packages of modules the shipped game never loads, whose objects in an asset are editor state such as a node graph.
+        const THashSet<FName>& EditorTypePackages()
         {
             static const THashSet<FName> Packages = []
             {
                 THashSet<FName> Out;
-                Out.insert(FName("/Script/Editor"));
+                Out.insert(FName("/Types/Editor"));
                 for (const FPlugin* Plugin : FPluginManager::Get().GetAllPlugins())
                 {
                     for (const FPluginModuleDescriptor& Module : Plugin->GetDescriptor().Modules)
                     {
                         if (Module.Type != EPluginModuleType::Runtime)
                         {
-                            Out.insert(FName((FString("/Script/") + Module.Name).c_str()));
+                            Out.insert(FName((FString("/Types/") + Module.Name).c_str()));
                         }
                     }
                 }
@@ -139,16 +142,49 @@ namespace Lumina
         bool IsEditorOnlyObject(const CObject* Object)
         {
             const CClass* Class = Object->GetClass();
-            return Class != nullptr && Class->GetPackage() != nullptr && EditorScriptPackages().contains(Class->GetPackage()->GetName());
+            return Class != nullptr && Class->GetPackage() != nullptr && EditorTypePackages().contains(Class->GetPackage()->GetName());
         }
 
+        // Every instance under a master, through instances of instances, since each may select its own permutation.
+        void CollectMaterialInstances(const FGuid& Parent, TVector<FAssetData*>& OutInstances, THashSet<FGuid>& Visited)
+        {
+            for (FAssetData* Referencer : FAssetRegistry::Get().GetReferencersOf(Parent))
+            {
+                if (Referencer == nullptr || Referencer->AssetClass != CMaterialInstance::StaticClass()->GetName()
+                    || !Visited.insert(Referencer->AssetGUID).second)
+                {
+                    continue;
+                }
+                OutInstances.push_back(Referencer);
+                CollectMaterialInstances(Referencer->AssetGUID, OutInstances, Visited);
+            }
+        }
+
+        // One bad asset falls back to a verbatim copy with a WARN rather than killing the whole cook.
         bool BundleAssetCooked(FPakWriter& Writer, FStringView VirtualPath, const TFunction<void(FStringView)>& LogFunc)
         {
             FAssetData* Data = FAssetRegistry::Get().GetAssetByPath(VirtualPath);
             const bool bMaterial = Data != nullptr && Data->AssetClass == CMaterial::StaticClass()->GetName();
+            const bool bParticleSystem = Data != nullptr && Data->AssetClass == CParticleSystem::StaticClass()->GetName();
+
+            // Permutations are baked into the master at cook time, so its instances are inputs to its cooked bytes.
+            TVector<FAssetData*> Instances;
+            if (bMaterial)
+            {
+                THashSet<FGuid> Visited;
+                CollectMaterialInstances(Data->AssetGUID, Instances, Visited);
+            }
 
             // A material's cooked bytes carry shaders built from the templates, so a template edit must miss the cache too.
-            const uint64 SourceHash = Data ? Data->ContentHash ^ (bMaterial ? CMaterial::GetShaderTemplateHash() : 0) : 0;
+            uint64 SourceHash = Data ? Data->ContentHash ^ (bMaterial ? CMaterial::GetShaderTemplateHash() : 0) : 0;
+            if (bParticleSystem)
+            {
+                SourceHash ^= CParticleEmitter::GetSimulationTemplateHash();
+            }
+            for (const FAssetData* Instance : Instances)
+            {
+                SourceHash = Hash::GetHash64(&Instance->ContentHash, sizeof(Instance->ContentHash), SourceHash);
+            }
             const FCookInputHash Key = FCookDDC::ComputeKey(SourceHash);
 
             TVector<uint8> CookedBytes;
@@ -176,12 +212,56 @@ namespace Lumina
                 FString Error;
                 if (!RecompileMaterialIfStale(Material, Error))
                 {
-                    LogCooker(LogFunc, Format("  [warn] {} has stale or uncached shaders that could not be rebuilt, since {}",
+                    LogCooker(LogFunc, Format("  [warn] {} predates the current shader templates and could not be recompiled, since {}",
                         VirtualPath, Error).c_str());
                 }
                 else if (bStale)
                 {
-                    LogCooker(LogFunc, Format("  rebuilt {} shaders from its graph", VirtualPath).c_str());
+                    LogCooker(LogFunc, Format("  recompiled {} against the current shader templates", VirtualPath).c_str());
+                }
+
+                // Editor assets carry no permutations, so each one an instance selects is pulled from the cache or compiled now.
+                if (Material != nullptr && !Material->StaticSwitches.empty())
+                {
+                    TVector<uint64> Keys;
+                    for (const FAssetData* InstanceData : Instances)
+                    {
+                        CPackage* InstancePackage = CPackage::LoadPackage(FStringView(InstanceData->Path.c_str(), InstanceData->Path.size()));
+                        const CMaterialInstance* Instance = InstancePackage != nullptr
+                            ? Cast<CMaterialInstance>(InstancePackage->LoadObjectByName(InstanceData->AssetName)) : nullptr;
+                        if (Instance != nullptr && Instance->GetMaterial() == Material && !Algo::Contains(Keys, Instance->GetStaticSwitchKey()))
+                        {
+                            Keys.push_back(Instance->GetStaticSwitchKey());
+                        }
+                    }
+
+                    if (const uint32 Failed = EnsureMaterialPermutations(Material, Keys); Failed != 0)
+                    {
+                        LogCooker(LogFunc, Format("  [warn] {} of {}'s static switch permutations could not be built; those instances draw with default switches",
+                            Failed, VirtualPath).c_str());
+                    }
+                }
+            }
+
+            if (bParticleSystem)
+            {
+                CParticleSystem* System = Cast<CParticleSystem>(Package->LoadObjectByName(Data->AssetName));
+                const int32 NumEmitters = System != nullptr ? (int32)System->Emitters.size() : 0;
+                for (int32 Index = 0; Index < NumEmitters; ++Index)
+                {
+                    const CParticleEmitter* Emitter = System->Emitters[Index].Get();
+                    if (Emitter == nullptr || !Emitter->NeedsShaderCompile())
+                    {
+                        continue;
+                    }
+
+                    // The cache had nothing for the current templates, and a game cannot compile, so the cook builds it now.
+                    FParticleEmitterCompileOutput Output;
+                    if (ParticleOps::FindStack(System, Index) == nullptr || !ParticleOps::CompileEmitter(System, Index, Output))
+                    {
+                        LogCooker(LogFunc, Format("  [warn] {} emitter {} has no simulation shader and could not be recompiled, so it will not simulate",
+                            VirtualPath, Index).c_str());
+                    }
                 }
             }
 
@@ -272,7 +352,7 @@ namespace Lumina
             const bool bEligible = Class != nullptr
                 && !Class->IsChildOf(CMaterialInterface::StaticClass())
                 && !Class->IsChildOf(CTexture::StaticClass())
-                && !(Class->GetPackage() != nullptr && EditorScriptPackages().contains(Class->GetPackage()->GetName()))
+                && !(Class->GetPackage() != nullptr && EditorTypePackages().contains(Class->GetPackage()->GetName()))
                 && !HasEditorOnlyData(Class, StructMemo);
 
             ClassMemo[Data->AssetClass] = bEligible;
@@ -560,12 +640,7 @@ namespace Lumina
                     return;
                 }
 
-                // Keyed by generated source no cooked game can rebuild, and cooked materials embed their own SPIR-V.
                 const FStringView VirtualPath(Info.VirtualPath.c_str(), Info.VirtualPath.size());
-                if (VFS::FileName(VirtualPath).starts_with("raw_"))
-                {
-                    return;
-                }
                 TVector<uint8> Bytes;
                 if (!VFS::ReadFile(Bytes, VirtualPath))
                 {

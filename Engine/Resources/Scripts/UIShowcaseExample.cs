@@ -6,7 +6,7 @@ using Lumina;
 namespace Lumina.Examples;
 
 // Drives UI/Examples/Showcase.rml. Attach as a C# Script component and press Play.
-public sealed class UIShowcaseExample : EntityScript
+public sealed class UIShowcaseExample : CEntityScript
 {
     [Property(Tooltip = "Showcase document to load.")]
     public string Document = "/Engine/Resources/Content/UI/Examples/Showcase.rml";

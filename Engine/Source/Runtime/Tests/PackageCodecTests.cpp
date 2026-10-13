@@ -19,7 +19,7 @@ namespace
     {
         static const bool bReady = []
         {
-            ProcessNewlyLoadedCObjects();
+            RegisterPendingTypes();
             VFS::Mount<VFS::FMemoryFileSystem>(kCodecAlias);
             return true;
         }();

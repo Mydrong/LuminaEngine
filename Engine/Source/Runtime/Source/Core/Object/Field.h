@@ -10,4 +10,3 @@ namespace Lumina
     class CClass;
 }
 
-RUNTIME_API Lumina::CClass* Construct_CClass_Lumina_CField();

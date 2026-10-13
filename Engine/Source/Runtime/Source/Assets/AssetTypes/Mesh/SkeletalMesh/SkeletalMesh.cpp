@@ -3,6 +3,7 @@
 #include "SkeletalMesh.h"
 #include "Assets/AssetTypes/Mesh/Skeleton/Skeleton.h"
 #include "Renderer/SkeletonResource.h"
+#include "Animation/BoneLOD.h"
 
 namespace Lumina
 {
@@ -24,6 +25,55 @@ namespace Lumina
 
         // Undo restores Skeleton alone, so the indices have to follow it back from here.
         RemapJointIndicesToSkeleton();
+    }
+
+    const BoneLOD::FBoneLODLayout* CSkeletalMesh::GetBoneLODLayout(const FSkeletonResource* InSkeleton) const
+    {
+        const FMeshResource* Resource = TryGetMeshResource();
+        if (InSkeleton == nullptr || Resource == nullptr || Resource->MeshletData.MeshletBoneIndices.empty())
+        {
+            return nullptr;
+        }
+
+        const uint64 LayoutKey = InSkeleton->BoneLayoutHash != 0 ? InSkeleton->BoneLayoutHash : InSkeleton->ComputeBoneLayoutHash();
+        const size_t PaletteEntries = Resource->MeshletData.MeshletBoneIndices.size();
+        const CSkeleton* SkeletonAsset = Skeleton.Get();
+        const uint32 SocketGeneration = SkeletonAsset != nullptr ? SkeletonAsset->GetSocketGeneration() : 0u;
+
+        const FBoneLODLayoutEntry* Active = ActiveBoneLODLayout.load(std::memory_order_acquire);
+        if (Active != nullptr && Active->Matches(LayoutKey, Resource, PaletteEntries, SocketGeneration))
+        {
+            return Active->Layout.get();
+        }
+
+        FScopeLock Lock(BoneLODMutex);
+        for (const TUniquePtr<FBoneLODLayoutEntry>& Entry : BoneLODLayouts)
+        {
+            if (Entry->Matches(LayoutKey, Resource, PaletteEntries, SocketGeneration))
+            {
+                ActiveBoneLODLayout.store(Entry.get(), std::memory_order_release);
+                return Entry->Layout.get();
+            }
+        }
+
+        // Socket bones only count when the socket asset describes this same skeleton.
+        TVector<int32> SocketBones;
+        if (SkeletonAsset != nullptr && SkeletonAsset->GetSkeletonResource() == InSkeleton)
+        {
+            SkeletonAsset->CollectSocketBones(SocketBones);
+        }
+
+        TUniquePtr<FBoneLODLayoutEntry> Entry = MakeUnique<FBoneLODLayoutEntry>();
+        Entry->LayoutKey        = LayoutKey;
+        Entry->Resource         = Resource;
+        Entry->PaletteEntries   = PaletteEntries;
+        Entry->SocketGeneration = SocketGeneration;
+        Entry->Layout           = BoneLOD::BuildLayout(*Resource, *InSkeleton, SocketBones);
+
+        const FBoneLODLayoutEntry* Published = Entry.get();
+        BoneLODLayouts.push_back(Move(Entry));
+        ActiveBoneLODLayout.store(Published, std::memory_order_release);
+        return Published->Layout.get();
     }
 
     void CSkeletalMesh::RemapJointIndicesToSkeleton()

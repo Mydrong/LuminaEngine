@@ -12,7 +12,7 @@ struct FDeferredMaterialArgs
     FTexture2DUInt VisBuffer;   // 0
     uint           FeedbackPhase;    // 4   which 1/STREAMING_FEEDBACK_WINDOW of the groups report streaming feedback this frame
     uint           NumSlots;         // 8   where the sparse half of Counts and Offsets starts
-    FTexture2D     SlotImage;   // 12  slot + 1 per pixel from classify
+    FTexture2DUInt SlotImage;   // 12  slot + 1 per pixel from classify
     uint           DrawListCount;    // 16  MeshletDrawList slot bound
     uint           SlotIndex;        // 20
     uint           ScreenW;          // 24
@@ -104,7 +104,7 @@ void ComputeMain(uint3 GroupID : SV_GroupID, uint Lane : SV_GroupThreadID)
         }
 
         // A tile is shared with other materials, so the slot classify stored keeps only this one's pixels.
-        if ((uint)(Pass().SlotImage.Load(int2(Texel)).r + 0.5) != Slot + 1u)
+        if (Pass().SlotImage.Load(int2(Texel)) != Slot + 1u)
         {
             return;
         }

@@ -5,6 +5,7 @@
 #include "Animation/Pose.h"
 #include "Animation/SkeletalMeshUtils.h"
 #include "World/ECS/Registry.h"
+#include "World/Entity/Components/FollowerPoseComponent.h"
 #include "World/Entity/Components/SkeletalMeshComponent.h"
 #include "World/Entity/Components/SocketAttachmentComponent.h"
 #include "World/Entity/Components/TransformComponent.h"
@@ -139,5 +140,42 @@ namespace Lumina
 
         const int32 BoneIndex = SkeletalUtils::FindClosestBone(*Registry, Entity, WorldLocation);
         return GetBoneName(World, Entity, BoneIndex);
+    }
+
+    void CSkeletalMeshLibrary::SetLeaderPose(CWorld* World, ECS::FEntity Follower, ECS::FEntity Leader)
+    {
+        ECS::FRegistry* Registry = RegistryOf(World);
+        if (Registry == nullptr || !Registry->IsValid(Follower) || Follower == Leader)
+        {
+            return;
+        }
+
+        if (!Registry->HasAll<SSkeletalMeshComponent>(Follower))
+        {
+            LOG_WARN("SetLeaderPose: entity {} has no skeletal mesh to drive.", Follower.Value);
+            return;
+        }
+
+        SFollowerPoseComponent& Link = Registry->EmplaceOrReplace<SFollowerPoseComponent>(Follower);
+        Link.Leader = Leader;
+    }
+
+    void CSkeletalMeshLibrary::ClearLeaderPose(CWorld* World, ECS::FEntity Follower)
+    {
+        ECS::FRegistry* Registry = RegistryOf(World);
+        if (Registry != nullptr && Registry->IsValid(Follower))
+        {
+            Registry->Remove<SFollowerPoseComponent>(Follower);
+        }
+    }
+
+    ECS::FEntity CSkeletalMeshLibrary::GetLeaderPose(CWorld* World, ECS::FEntity Follower)
+    {
+        ECS::FRegistry* Registry = RegistryOf(World);
+        if (Registry == nullptr || !Registry->IsValid(Follower))
+        {
+            return ECS::NullEntity;
+        }
+        return SkeletalUtils::ResolvePoseLeader(*Registry, Follower);
     }
 }

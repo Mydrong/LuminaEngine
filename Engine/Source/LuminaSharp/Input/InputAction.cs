@@ -78,7 +78,7 @@ public abstract partial class SInputBinding
     }
 
     // Applies the action's state and raises whatever the concrete binding raises. Called from
-    // EntityScript.OnAction every frame the bound action changes; never call it from game code.
+    // CEntityScript.OnAction every frame the bound action changes; never call it from game code.
     internal void Apply(in Lumina.FInputActionState Next)
     {
         // The first delivery has no previous frame to compare against: hand Raise the incoming state as the

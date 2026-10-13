@@ -60,12 +60,12 @@ namespace Lumina
         {
             FMemoryWriter Writer(Bytes);
             FObjectProxyArchiver Ar(Writer, /*bLoadIfFindFails*/ false);
-            Old->GetClass()->SerializeTaggedProperties(Ar, Old);
+            Old->GetClass()->SerializeProperties(Ar, Old);
         }
         {
             FMemoryReader Reader(Bytes);
             FObjectProxyArchiver Ar(Reader, /*bLoadIfFindFails*/ true);
-            NewClass->SerializeTaggedProperties(Ar, New);
+            NewClass->SerializeProperties(Ar, New);
         }
 
         if (PostReplace)

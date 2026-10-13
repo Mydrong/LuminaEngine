@@ -19,6 +19,7 @@
 #include "Platform/Time/PlatformTime.h"
 #include "Scripting/DotNet/DotNetHost.h"
 #include "Session/SessionOps.h"
+#include "Renderer/RenderManager.h"
 #include "FileSystem/FileSystem.h"
 #include "UI/Tools/EditorToolContext.h"
 #include "MCPTextMatch.h"
@@ -567,54 +568,110 @@ namespace Lumina::MCP
                 });
         }
 
+        Agent::FToolResult CaptureScene(const SScreenshotParams& In, SScreenshotResult& Out);
+        Agent::FToolResult CaptureEditorWindow(const SScreenshotParams& In, SScreenshotResult& Out, int32 GateTimeout);
+
         void RegisterScreenshot(FStringView Owner)
         {
             Agent::FToolRegistry::Get().Register<SScreenshotParams, SScreenshotResult>(
                 Owner, "editor.screenshot",
-                "Capture the active viewport to an image file and report where it landed.",
-                Agent::EToolEffect::ReadOnly, Agent::EToolThread::GameThread,
+                "Capture the active viewport, or with Source EditorUI the whole editor window, to an image file and report where it landed.",
+                Agent::EToolEffect::ReadOnly, Agent::EToolThread::Any,
                 [](const SScreenshotParams& In, SScreenshotResult& Out)
                 {
-                    Screenshot::ECaptureSource Source = Screenshot::ECaptureSource::FinalLDR;
-                    if (In.Source == "SceneHDR")
+                    const int32 GateTimeout = Agent::FGameThreadGate::GetDefaultTimeoutMilliseconds();
+                    if (In.Source == "EditorUI")
                     {
-                        Source = Screenshot::ECaptureSource::SceneHDR;
-                    }
-                    else if (!In.Source.empty() && In.Source != "FinalLDR")
-                    {
-                        return Agent::FToolResult::Error("Source has to be FinalLDR or SceneHDR.");
+                        return CaptureEditorWindow(In, Out, GateTimeout);
                     }
 
-                    Screenshot::FCaptureResult Captured;
-                    if (In.Tab.empty())
+                    Agent::FToolResult Result = Agent::FToolResult::Error("The game thread did not run the capture.");
+                    if (Agent::FGameThreadGate::Run([&In, &Out, &Result] { Result = CaptureScene(In, Out); }, GateTimeout)
+                        != Agent::EGameThreadResult::Ran)
                     {
-                        Captured = Screenshot::CaptureActiveWorld(Source, In.OutputPath);
+                        return Agent::FToolResult::Error("The game thread did not pick up the capture.");
                     }
-                    else
-                    {
-                        FString Error;
-                        CWorld* World = SessionOps::GetTabWorld(FStringView(In.Tab), Error);
-                        IRenderScene* Scene = World != nullptr ? World->GetRenderer() : nullptr;
-                        if (Scene == nullptr)
-                        {
-                            return Agent::FToolResult::Error(Error.empty() ? FString("That tab's world has no renderer right now.") : Error);
-                        }
-                        Captured = Screenshot::Capture(Scene, Source, In.OutputPath);
-                    }
-                    if (!Captured.bSuccess)
-                    {
-                        // A world with no viewport showing it has had its renderer reclaimed, so there is nothing to read back.
-                        return Agent::FToolResult::Error(Captured.ErrorMessage.empty()
-                            ? FString("The capture failed.")
-                            : Captured.ErrorMessage + " Bring a world viewport tab to the front in the editor and try again.");
-                    }
-
-                    Out.Path   = Captured.OutputPath;
-                    Out.Width  = static_cast<int32>(Captured.ResolutionX);
-                    Out.Height = static_cast<int32>(Captured.ResolutionY);
-
-                    return Agent::FToolResult::Ok(Lumina::Format("Wrote {}x{} to {}.", Out.Width, Out.Height, Out.Path));
+                    return Result;
                 });
+        }
+
+        Agent::FToolResult CaptureScene(const SScreenshotParams& In, SScreenshotResult& Out)
+        {
+            Screenshot::ECaptureSource Source = Screenshot::ECaptureSource::FinalLDR;
+            if (In.Source == "SceneHDR")
+            {
+                Source = Screenshot::ECaptureSource::SceneHDR;
+            }
+            else if (!In.Source.empty() && In.Source != "FinalLDR")
+            {
+                return Agent::FToolResult::Error("Source has to be FinalLDR, SceneHDR or EditorUI.");
+            }
+
+            Screenshot::FCaptureResult Captured;
+            if (In.Tab.empty())
+            {
+                Captured = Screenshot::CaptureActiveWorld(Source, In.OutputPath);
+            }
+            else
+            {
+                FString Error;
+                CWorld* World = SessionOps::GetTabWorld(FStringView(In.Tab), Error);
+                IRenderScene* Scene = World != nullptr ? World->GetRenderer() : nullptr;
+                if (Scene == nullptr)
+                {
+                    return Agent::FToolResult::Error(Error.empty() ? FString("That tab's world has no renderer right now.") : Error);
+                }
+                Captured = Screenshot::Capture(Scene, Source, In.OutputPath);
+            }
+            if (!Captured.bSuccess)
+            {
+                // A world with no viewport showing it has had its renderer reclaimed, so there is nothing to read back.
+                return Agent::FToolResult::Error(Captured.ErrorMessage.empty()
+                    ? FString("The capture failed.")
+                    : Captured.ErrorMessage + " Bring a world viewport tab to the front in the editor and try again.");
+            }
+
+            Out.Path   = Captured.OutputPath;
+            Out.Width  = static_cast<int32>(Captured.ResolutionX);
+            Out.Height = static_cast<int32>(Captured.ResolutionY);
+
+            return Agent::FToolResult::Ok(Lumina::Format("Wrote {}x{} to {}.", Out.Width, Out.Height, Out.Path));
+        }
+
+        // Waits off the game thread, since the copy rides along with a frame the editor has yet to present.
+        Agent::FToolResult CaptureEditorWindow(const SScreenshotParams& In, SScreenshotResult& Out, int32 GateTimeout)
+        {
+            uint64 Ticket = 0;
+            if (Agent::FGameThreadGate::Run([&Ticket] { Ticket = Render().RequestWindowCapture(); }, GateTimeout)
+                != Agent::EGameThreadResult::Ran)
+            {
+                return Agent::FToolResult::Error("The game thread did not pick up the capture.");
+            }
+
+            constexpr double kPresentTimeoutSeconds = 5.0;
+            const double Deadline = PlatformTime::Seconds() + kPresentTimeoutSeconds;
+            FRenderManager::FWindowCapture Capture;
+            bool bTaken = false;
+            while (!bTaken && PlatformTime::Seconds() < Deadline)
+            {
+                Threading::Sleep(16);
+                bTaken = Render().TakeWindowCapture(Ticket, Capture);
+            }
+            if (!bTaken)
+            {
+                return Agent::FToolResult::Error("The editor presented no frame within 5 seconds, which a minimized window does.");
+            }
+
+            const Screenshot::FCaptureResult Saved = Screenshot::SaveWindowCapture(Capture.Pixels, Capture.Width, Capture.Height, In.OutputPath);
+            if (!Saved.bSuccess)
+            {
+                return Agent::FToolResult::Error(Saved.ErrorMessage.empty() ? FString("Writing the capture failed.") : Saved.ErrorMessage);
+            }
+
+            Out.Path   = Saved.OutputPath;
+            Out.Width  = static_cast<int32>(Saved.ResolutionX);
+            Out.Height = static_cast<int32>(Saved.ResolutionY);
+            return Agent::FToolResult::Ok(Lumina::Format("Wrote the {}x{} editor window to {}.", Out.Width, Out.Height, Out.Path));
         }
 
         void RegisterLogTail(FStringView Owner)

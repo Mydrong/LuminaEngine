@@ -7,23 +7,10 @@ namespace Lumina::Reflection
 {
     namespace
     {
-        // Indexed rather than named after the parameter, so a parameter called Params cannot collide with
-        // the table beside it, and the reflected name stays whatever the signature spelled.
-        std::string ParamSymbol(const FReflectedFunction& Function, size_t Index)
-        {
-            return Names::FunctionParamsStatic(Function.Name) + "_P" + std::to_string(Index);
-        }
-
         // The real class name, since a call has to name the type rather than whatever alias reflects it.
         std::string QualifiedOwner(const FReflectedStruct& Owner)
         {
             return Owner.EmittedCppQualifiedName();
-        }
-
-        // The frames and thunks are emitted inside the type's namespace, so anything outside names them through it.
-        std::string NamespacePrefix(const FReflectedStruct& Owner)
-        {
-            return Owner.Namespace.empty() ? std::string() : (Owner.Namespace + "::");
         }
     }
 
@@ -46,15 +33,6 @@ namespace Lumina::Reflection
             return;
         }
 
-        // Emitted in the type's own namespace, because the member types are spelled the way the header
-        // spelled them: a parameter written as FName is Lumina::FName only from inside Lumina.
-        const bool bWrapInNamespace = !Namespace.empty();
-        if (bWrapInNamespace)
-        {
-            Writer.Linef("namespace %s", Namespace.c_str());
-            Writer.Line("{");
-        }
-
         for (const auto& Function : Functions)
         {
             if (!Function->bReflectNatively)
@@ -65,7 +43,6 @@ namespace Lumina::Reflection
             const std::string Parms = Names::FunctionParmsStruct(DisplayName, Function->Name);
             const std::string Thunk = Names::FunctionThunk(DisplayName, Function->Name);
 
-            Writer.Linef("// The frame %s is called through. The compiler lays it out, so the offsets below are the real ones.", Function->Name.c_str());
             Writer.Linef("struct %s", Parms.c_str());
             Writer.Line("{");
             for (size_t Index = 0; Index < Function->TopLevelParams.size(); ++Index)
@@ -75,16 +52,6 @@ namespace Lumina::Reflection
             }
             Writer.Line("};");
             Writer.Line();
-
-            // Beside the frame, since a container parameter's ops forwarder is referenced by its property
-            // definition and there is no owning type to hang it off.
-            for (auto& Entry : Function->ParamEntries)
-            {
-                if (Entry->HasAccessors())
-                {
-                    Entry->DefineAccessors(Writer, const_cast<FReflectedStruct*>(this));
-                }
-            }
 
             // The call itself: a static takes no object, and anything else dispatches through the pointer,
             // which is what makes a virtual reach its override.
@@ -158,76 +125,40 @@ namespace Lumina::Reflection
             Writer.Line("}");
             Writer.Line();
         }
+    }
 
-        if (bWrapInNamespace)
+    void FReflectedStruct::EmitFunctionTable(FCodeWriter& Writer) const
+    {
+        if (!HasNativeFunctions())
         {
-            Writer.Line("}");
+            return;
+        }
+
+        for (const auto& Function : Functions)
+        {
+            if (!Function->bReflectNatively || Function->TopLevelParams.empty())
+            {
+                continue;
+            }
+
+            Writer.Linef("static constexpr Lumina::FPropertyDesc %s[] =", Names::FunctionParamsTable(Function->Name).c_str());
+            Writer.BeginBlock();
+            for (const FReflectedProperty* Param : Function->TopLevelParams)
+            {
+                Param->EmitDescriptor(Writer);
+            }
+            Writer.PopIndent();
+            Writer.Line("};");
             Writer.Line();
         }
-    }
 
-    void FReflectedStruct::EmitFunctionFieldDeclarations(FCodeWriter& Writer) const
-    {
+        Writer.Line("static constexpr Lumina::FFunctionDesc Functions[] =");
+        Writer.BeginBlock();
         for (const auto& Function : Functions)
         {
             if (!Function->bReflectNatively)
             {
                 continue;
-            }
-
-            const std::string Statics = Names::FunctionParamsStatic(Function->Name);
-
-            for (size_t Index = 0; Index < Function->ParamEntries.size(); ++Index)
-            {
-                Writer.Linef("static const Lumina::%s %s;",
-                    Function->ParamEntries[Index]->GetPropertyParamType(), ParamSymbol(*Function, Index).c_str());
-            }
-
-            if (!Function->ParamEntries.empty())
-            {
-                Writer.Linef("static const Lumina::FPropertyParams* const %s_Params[];", Statics.c_str());
-            }
-            Writer.Linef("static const Lumina::FFunctionParams %s;", Statics.c_str());
-        }
-
-        if (HasNativeFunctions())
-        {
-            Writer.Line("static const Lumina::FFunctionParams* const FuncPointers[];");
-        }
-    }
-
-    void FReflectedStruct::EmitFunctionDefinitions(FCodeWriter& Writer, std::string_view StaticsName) const
-    {
-        const std::string Statics(StaticsName);
-
-        for (const auto& Function : Functions)
-        {
-            if (!Function->bReflectNatively)
-            {
-                continue;
-            }
-
-            const std::string FuncStatic = Names::FunctionParamsStatic(Function->Name);
-            const std::string Prefix = NamespacePrefix(*this);
-            const std::string Parms = Prefix + Names::FunctionParmsStruct(DisplayName, Function->Name);
-            const std::string Thunk = Prefix + Names::FunctionThunk(DisplayName, Function->Name);
-
-            for (size_t Index = 0; Index < Function->ParamEntries.size(); ++Index)
-            {
-                Writer.Appendf("const Lumina::%s %s::%s = ",
-                    Function->ParamEntries[Index]->GetPropertyParamType(), Statics.c_str(),
-                    ParamSymbol(*Function, Index).c_str());
-                Function->ParamEntries[Index]->AppendDefinition(Writer);
-            }
-
-            if (!Function->ParamEntries.empty())
-            {
-                Writer.Linef("const Lumina::FPropertyParams* const %s::%s_Params[] = {", Statics.c_str(), FuncStatic.c_str());
-                for (size_t Index = 0; Index < Function->ParamEntries.size(); ++Index)
-                {
-                    Writer.Linef("\t(const Lumina::FPropertyParams*)&%s::%s,", Statics.c_str(), ParamSymbol(*Function, Index).c_str());
-                }
-                Writer.Line("};");
             }
 
             std::string Flags = "Lumina::EFunctionFlags::None";
@@ -253,39 +184,17 @@ namespace Lumina::Reflection
                 }
             }
 
-            const std::string ParamsArg = Function->ParamEntries.empty()
-                ? std::string("nullptr")
-                : (FuncStatic + "_Params");
-            const std::string CountArg = Function->ParamEntries.empty()
-                ? std::string("0")
-                : ("(uint16)std::size(" + FuncStatic + "_Params)");
+            const std::string ParamsTable = Names::FunctionParamsTable(Function->Name);
+            const std::string Params = Function->TopLevelParams.empty()
+                ? std::string()
+                : (", .Params = " + ParamsTable + ", .NumParams = (Lumina::uint16)std::size(" + ParamsTable + ")");
 
-            Writer.Linef("const Lumina::FFunctionParams %s::%s = { \"%s\", %s, %s, %s, %d, (uint16)sizeof(%s), &%s };",
-                Statics.c_str(), FuncStatic.c_str(), Function->Name.c_str(), Flags.c_str(),
-                ParamsArg.c_str(), CountArg.c_str(), Function->ReturnIndex,
-                Parms.c_str(), Thunk.c_str());
-            Writer.Line();
+            Writer.Linef("{ .Name = \"%s\", .Flags = %s%s, .ReturnIndex = %d, .FrameSize = (Lumina::uint16)sizeof(%s), .Thunk = &%s },",
+                Function->Name.c_str(), Flags.c_str(), Params.c_str(), Function->ReturnIndex,
+                Names::FunctionParmsStruct(DisplayName, Function->Name).c_str(),
+                Names::FunctionThunk(DisplayName, Function->Name).c_str());
         }
-    }
-
-    void FReflectedStruct::EmitFunctionPointerTable(FCodeWriter& Writer, std::string_view StaticsName) const
-    {
-        if (!HasNativeFunctions())
-        {
-            return;
-        }
-
-        const std::string Statics(StaticsName);
-
-        Writer.Linef("const Lumina::FFunctionParams* const %s::FuncPointers[] = {", Statics.c_str());
-        for (const auto& Function : Functions)
-        {
-            if (!Function->bReflectNatively)
-            {
-                continue;
-            }
-            Writer.Linef("\t&%s::%s,", Statics.c_str(), Names::FunctionParamsStatic(Function->Name).c_str());
-        }
+        Writer.PopIndent();
         Writer.Line("};");
         Writer.Line();
     }

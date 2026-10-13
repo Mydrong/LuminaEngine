@@ -13,6 +13,7 @@
 #include "World/Entity/Components/InterpolatingMovementComponent.h"
 #include "World/Entity/Components/LightComponent.h"
 #include "World/Entity/Components/NameComponent.h"
+#include "World/Entity/Components/ParticleSystemComponent.h"
 #include "World/Entity/Components/PhysicsComponent.h"
 #include "World/Entity/Components/StaticMeshComponent.h"
 #include "World/Entity/Components/TransformComponent.h"
@@ -31,6 +32,7 @@ namespace Lumina::MCP
         constexpr const char* CasterName = "StressCaster";
         constexpr const char* BodyName = "StressBody";
         constexpr const char* MoverName = "StressMover";
+        constexpr const char* ParticleName = "StressParticles";
         constexpr float NoGround = -1.0e9f;
 
         CWorld* ResolveWorld(bool bEditorWorld, FString& OutLabel, FString& OutError)
@@ -130,6 +132,43 @@ namespace Lumina::MCP
             return Mesh;
         }
 
+        bool ResolveParticleSystems(const FString& List, TVector<CParticleSystem*>& OutSystems, FString& OutError)
+        {
+            FStringView Remaining(List);
+            while (!Remaining.empty())
+            {
+                const size_t Comma = Remaining.find(',');
+                FStringView Entry = Remaining.substr(0, Comma);
+                Remaining = Comma == FStringView::npos ? FStringView() : Remaining.substr(Comma + 1);
+                while (!Entry.empty() && Entry.front() == ' ') { Entry.remove_prefix(1); }
+                while (!Entry.empty() && Entry.back() == ' ') { Entry.remove_suffix(1); }
+                if (Entry.empty())
+                {
+                    continue;
+                }
+
+                CObject* Object = nullptr;
+                if (!Agent::ResolveAssetObject(Entry, Object, OutError))
+                {
+                    return false;
+                }
+                CParticleSystem* System = Cast<CParticleSystem>(Object);
+                if (System == nullptr)
+                {
+                    OutError = Lumina::Format("'{}' is not a particle system.", FString(Entry.data(), Entry.size()));
+                    return false;
+                }
+                OutSystems.push_back(System);
+            }
+
+            if (OutSystems.empty())
+            {
+                OutError = "Particles needs at least one asset in ParticleSystems.";
+                return false;
+            }
+            return true;
+        }
+
         float Vary(FRandomStream& Random, float Base)
         {
             return Base * (0.5f + Random.NextFloat());
@@ -191,6 +230,12 @@ namespace Lumina::MCP
 
             CStaticMesh* CasterMesh = nullptr;
             if ((In.Casters > 0 || In.Bodies > 0 || In.Movers > 0) && (CasterMesh = ResolveCasterMesh(In.CasterMesh, Error)) == nullptr)
+            {
+                return Agent::FToolResult::Error(Error);
+            }
+
+            TVector<CParticleSystem*> ParticleSystems;
+            if (In.Particles > 0 && !ResolveParticleSystems(In.ParticleSystems, ParticleSystems, Error))
             {
                 return Agent::FToolResult::Error(Error);
             }
@@ -311,12 +356,28 @@ namespace Lumina::MCP
                 ++Out.Movers;
             }
 
+            const int32 ParticleCount = Math::Clamp(In.Particles, 0, MaxPerCall);
+            for (int32 Index = 0; Index < ParticleCount; ++Index)
+            {
+                const FVector2 Spot = PlacePoint(Random, Center, In.AreaRadius, Camera, KeepClear);
+                const float Ground = GroundAt(World, Spot.x, Spot.y);
+                const FVector3 Location(Spot.x, (Ground > NoGround ? Ground : 0.0f) + Random.NextFloat() * In.Height, Spot.y);
+
+                const ECS::FEntity Entity = World->ConstructEntity(FName(ParticleName), FTransform(Location, FVector3(0.0f), FVector3(1.0f)));
+                if (Entity == ECS::NullEntity)
+                {
+                    continue;
+                }
+                World->EmplaceComponent<SParticleSystemComponent>(Entity).ParticleSystem = ParticleSystems[(size_t)Index % ParticleSystems.size()];
+                ++Out.Particles;
+            }
+
             Out.Center = { Center.x, Center.y };
             Out.Total = CountStressEntities(World);
             return Agent::FToolResult::Ok(Lumina::Format(
-                "Spawned {} light(s), {} casting shadows, {} caster(s), {} body(ies) and {} mover(s) around [{:.1f}, {:.1f}] in the {} world. "
+                "Spawned {} light(s), {} casting shadows, {} caster(s), {} body(ies), {} mover(s) and {} particle system(s) around [{:.1f}, {:.1f}] in the {} world. "
                 "{} stress entities in total.",
-                Out.Lights, Out.ShadowCasting, Out.Casters, Out.Bodies, Out.Movers, Center.x, Center.y, Out.World, Out.Total));
+                Out.Lights, Out.ShadowCasting, Out.Casters, Out.Bodies, Out.Movers, Out.Particles, Center.x, Center.y, Out.World, Out.Total));
         }
 
         Agent::FToolResult Clear(const SStressClearParams& In, SStressClearResult& Out)
@@ -537,8 +598,8 @@ namespace Lumina::MCP
 
         Registry.Register<SStressSpawnParams, SStressSpawnResult>(
             Owner, "stress.spawn",
-            "Scatter point and spot lights, with chosen shares casting shadows or scattering through fog, and meshes for "
-            "them to shadow, across the ground around a center. Seeded, so the same call rebuilds the same scene. Bypasses "
+            "Scatter point and spot lights, with chosen shares casting shadows or scattering through fog, meshes for "
+            "them to shadow, and particle system entities, across the ground around a center. Seeded, so the same call rebuilds the same scene. Bypasses "
             "undo; remove everything it made with stress.clear.",
             Agent::EToolEffect::Mutating, Agent::EToolThread::GameThread, &Spawn);
 

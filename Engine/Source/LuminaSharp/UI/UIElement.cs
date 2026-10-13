@@ -178,7 +178,7 @@ public readonly unsafe struct UIElement
     /// <summary>
     /// Subscribe to an RmlUi event on this element (e.g. "click", "mousedown", "change", "keydown"). The
     /// handler runs on the game thread during input/UI update. Dispose the returned subscription to
-    /// unsubscribe (do so before the world tears down, e.g. in <see cref="EntityScript.OnDetach"/>).
+    /// unsubscribe (do so before the world tears down, e.g. in <see cref="CEntityScript.OnDetach"/>).
     /// </summary>
     public UIEventSubscription On(string EventType, Action<UIEvent> Handler)
     {
@@ -191,7 +191,7 @@ public readonly unsafe struct UIElement
         ulong WorldId = World;
 
         // RmlUi dispatches outside every script callback, so the handler re-enters the subscriber's context.
-        EntityScript? Owner = Engine.ActiveScript;
+        Lumina.CEntityScript? Owner = Engine.ActiveScript;
 
         Lumina.FUIEventListener Listener = Lumina.CUILibrary.AddEventListener(UI.WorldOf(WorldId), Handle, EventType);
         if (!Listener.IsValid)

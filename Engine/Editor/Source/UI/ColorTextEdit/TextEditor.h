@@ -522,8 +522,6 @@ public:
 		static const Language* Cpp();
 		static const Language* Cs();
 		static const Language* AngelScript();
-		static const Language* Lua();
-		static const Language* Luau();
 		static const Language* Python();
 		static const Language* Glsl();
 		static const Language* Hlsl();

@@ -6,6 +6,7 @@
 #include "Containers/String.h"
 #include "Memory/SmartPtr.h"
 #include "Scripting/ScriptExports.h"
+#include "UI/Widgets/CategorizedPicker.h"
 
 namespace Lumina
 {
@@ -59,6 +60,9 @@ namespace Lumina
         // undo snapshot is taken BEFORE the mutation. Mutating mid-draw would also invalidate the vector the
         // draw loop is walking.
         TFunction<void()> PendingMutation;
+
+        // Owned here, so its search and open categories last as long as this inspector does.
+        FCategorizedPicker ScriptPicker;
         bool              bFinishPending = false;
 
         TVector<FSlotView> SlotViews;

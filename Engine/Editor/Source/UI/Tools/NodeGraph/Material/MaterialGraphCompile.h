@@ -5,6 +5,8 @@
 #include "Containers/String.h"
 #include "Memory/SmartPtr.h"
 #include <atomic>
+#include "Renderer/ShaderCompiler.h"
+#include "TaskSystem/TaskTypes.h"
 #include "UI/Tools/NodeGraph/EdGraphNode.h"
 #include "UI/Tools/NodeGraph/Material/MaterialCompiler.h"
 
@@ -27,9 +29,6 @@ namespace Lumina
 
         // Manifest the key was minted under, so a recompile mid-compile refuses the stale stages.
         uint32 Generation = 0;
-
-        // A rebuild of an unchanged graph keeps the stored permutations while the switch manifest still matches.
-        bool bKeepPermutations = false;
     };
 
     // Stages a compile dispatched and stages the shader compiler handed back, since a failed stage leaves the last good bytecode in place.
@@ -37,6 +36,7 @@ namespace Lumina
     {
         std::atomic<uint32> Dispatched{0};
         std::atomic<uint32> Committed{0};
+        FShaderCompileWaiter Stages;
     };
 
     struct FMaterialGraphCompileResult
@@ -48,6 +48,8 @@ namespace Lumina
         TVector<EdNodeGraph::FError>    Warnings;
         FString                         PixelSource;
         FString                         VertexSource;
+        // What the material itself contributes to its shaders, which keys its artifact cache entries.
+        uint64                          SourceHash = 0;
         FMaterialCompiler::FShaderStats Stats;
     };
 
@@ -56,38 +58,26 @@ namespace Lumina
     // Material->PostLoad() so it registers and is ready for render. On a graph error returns bSuccess=false
     // with the errors and leaves the material not-ready. Editor-only (drives GShaderCompiler). Shared by the
     // material editor tool and the scene importer's procedural material generation.
-    EDITOR_API FMaterialGraphCompileResult CompileMaterialGraph(CMaterial* Material, CMaterialNodeGraph* Graph,
-                                                                const FMaterialCompileTarget& Target = {});
+    EDITOR_API FMaterialGraphCompileResult CompileMaterialGraph(CMaterial* Material, CMaterialNodeGraph* Graph);
 
-    // Blocking compile of one permutation, leaving the material's own stages untouched.
-    EDITOR_API FMaterialGraphCompileResult CompileMaterialPermutation(CMaterial* Material, CMaterialNodeGraph* Graph, uint64 Key);
-
-    // Non-blocking split of the above, for callers that must not sit on the shader task swarm.
-    //
-    // Begin runs the graph and DISPATCHES every stage compile, returning as soon as they are queued. False
-    // means nothing was dispatched (null argument or a graph error) and OutResult already says why -- so a
-    // caller that parks state on a true return can never park it on a compile that will never land. Once
-    // GShaderCompiler->HasPendingRequests() reads false, Finish does the committing half: stage validation,
-    // texture/parameter extraction, template-hash stamp, PostLoad.
-    //
-    // Two things must outlive the gap. Compiler, because Finish reads the bound textures and parameters
-    // back off it. And Material, because the per-stage commit callbacks capture it RAW and fire on a
-    // worker -- hold a strong ref for the whole wait.
+    // Finish once OutResult.StageLog settles, holding Compiler and a strong ref to Material until then, since stage callbacks write into both.
     EDITOR_API bool BeginMaterialGraphCompile(CMaterial* Material, CMaterialNodeGraph* Graph, FMaterialCompiler& Compiler,
-                                              FMaterialGraphCompileResult& OutResult, const FMaterialCompileTarget& Target = {});
+                                              FMaterialGraphCompileResult& OutResult, const FMaterialCompileTarget& Target = {},
+                                              ETaskPriority Priority = ETaskPriority::Medium);
     EDITOR_API void FinishMaterialGraphCompile(CMaterial* Material, FMaterialCompiler& Compiler,
                                                FMaterialGraphCompileResult& InOutResult, const FMaterialCompileTarget& Target = {});
 
     // Inverts Key back into switch values; false when the manifest can express no such combination.
     EDITOR_API bool MakeMaterialPermutationTarget(const CMaterial* Material, uint64 Key, FMaterialCompileTarget& OutTarget);
 
-    EDITOR_API void ProcessMaterialRecompiles();
+    // The graph saved beside the material, or null for a cooked or code-built material that has none.
+    EDITOR_API CMaterialNodeGraph* LoadMaterialGraph(CMaterial* Material);
 
     EDITOR_API void QueueMaterialFunctionRecompiles(const FGuid& FunctionGUID);
 
-    // Blocking rebuild of stale or uncached stages and permutations, so a cook never ships stages the game cannot use.
+    // Blocking recompile of a material saved against older shader templates, so a cook never ships stages the game cannot use.
     EDITOR_API bool RecompileMaterialIfStale(CMaterial* Material, FString& OutError);
 
-    // Editor-tick drain for CMaterial's permutation queue, one dispatch-then-poll compile at a time.
-    EDITOR_API void ProcessMaterialPermutationRequests();
+    // Blocking. Pulls each permutation from the artifact cache or compiles it, returning how many could not be built.
+    EDITOR_API uint32 EnsureMaterialPermutations(CMaterial* Material, TSpan<const uint64> Keys);
 }

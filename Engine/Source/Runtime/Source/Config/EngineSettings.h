@@ -52,6 +52,9 @@ namespace Lumina
         // Scales Box3D's length tolerances, 1 for meter-scale content and about 0.1 for millimeter-thin bodies such as coins.
         PROPERTY(Editable, Category = "Physics", ClampMin = 0.01f, ClampMax = 100.0f)
         float PhysicsLengthUnitsPerMeter = 1.0f;
+
+        PROPERTY(Editable, Category = "Artifact Cache", ToolTip = "A folder the whole team can reach, such as a network share or a folder in the repository, so one person's shader compile serves everyone. Relative paths start at the project. Empty keeps the cache local.")
+        FString SharedArtifactCachePath;
     };
 
     // Texture streaming budget and policy. Project-scoped rather than per-user: the pool size a project

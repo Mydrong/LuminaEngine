@@ -110,7 +110,7 @@ public static unsafe class ScriptFunctionDispatch
             }
 
             // A script's method runs inside its own callback context, as every other script event does.
-            if (Target is EntityScript Script && !Script.Entity.IsNull)
+            if (Target is Lumina.CEntityScript Script && !Script.Entity.IsNull)
             {
                 using Engine.Scope Scope = Engine.Push(Script.World, Script.Entity, Script);
                 try

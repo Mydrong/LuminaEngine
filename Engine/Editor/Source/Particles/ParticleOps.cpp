@@ -13,6 +13,12 @@
 
 #include <cctype>
 
+namespace Lumina
+{
+    FParticleEmitterCompileJob::FParticleEmitterCompileJob() = default;
+    FParticleEmitterCompileJob::~FParticleEmitterCompileJob() = default;
+}
+
 namespace Lumina::ParticleOps
 {
     namespace
@@ -105,6 +111,16 @@ namespace Lumina::ParticleOps
         }
 
         return Stack;
+    }
+
+    CParticleEmitterStack* FindStack(CParticleSystem* System, int32 EmitterIndex)
+    {
+        CParticleEmitter* Emitter = EmitterAt(System, EmitterIndex);
+        if (Emitter == nullptr || System->GetPackage() == nullptr || Emitter->AuthoringStackName.empty())
+        {
+            return nullptr;
+        }
+        return Cast<CParticleEmitterStack>(System->GetPackage()->LoadObjectByName(Emitter->AuthoringStackName));
     }
 
     TVector<CClass*> GetModuleTypes()
@@ -214,6 +230,18 @@ namespace Lumina::ParticleOps
 
     bool CompileEmitter(CParticleSystem* System, int32 EmitterIndex, FParticleEmitterCompileOutput& Out)
     {
+        FParticleEmitterCompileJob Job;
+        if (!BeginCompileEmitter(System, EmitterIndex, Job, Out))
+        {
+            return false;
+        }
+        Job.Waiter.Wait();
+        return FinishCompileEmitter(Job, Out);
+    }
+
+    bool BeginCompileEmitter(CParticleSystem* System, int32 EmitterIndex, FParticleEmitterCompileJob& Job,
+                             FParticleEmitterCompileOutput& Out, ETaskPriority Priority)
+    {
         CParticleEmitter* Emitter = EmitterAt(System, EmitterIndex);
         CParticleEmitterStack* Stack = FindOrCreateStack(System, EmitterIndex);
         if (Emitter == nullptr || Stack == nullptr)
@@ -221,8 +249,18 @@ namespace Lumina::ParticleOps
             Out.Errors.push_back("That emitter does not exist.");
             return false;
         }
+        if (GShaderCompiler == nullptr)
+        {
+            Out.Errors.push_back("No shader compiler is running in this process.");
+            return false;
+        }
 
-        FParticleCompiler Compiler;
+        Job.System       = System;
+        Job.EmitterIndex = EmitterIndex;
+        Job.Compiler     = MakeUnique<FParticleCompiler>();
+        Job.Binaries     = MakeShared<TVector<uint32>>();
+
+        FParticleCompiler& Compiler = *Job.Compiler;
         Stack->CompileStacks(Compiler);
 
         if (Compiler.HasErrors())
@@ -241,24 +279,38 @@ namespace Lumina::ParticleOps
             return false;
         }
 
-        bool bCompiled = false;
-        IShaderCompiler* ShaderCompiler = GShaderCompiler;
         FShaderCompileOptions Options;
         Options.DebugName = FString(System->GetName().c_str()) + "_" + Emitter->EmitterName + "_Sim";
         // Without a template path the raw cache keys to zero and skips itself, so every save paid a full Slang compile.
         Options.TemplateVirtualPath = "/Engine/Resources/Shaders/Particles/ParticleSimulateTemplate.slang";
-        ShaderCompiler->CompilerShaderRaw(Source, Options, [Emitter, &bCompiled](const FShaderHeader& Header) mutable
+        Options.Priority = Priority;
+        GShaderCompiler->CompilerShaderRaw(Source, Options, [Binaries = Job.Binaries](const FShaderHeader& Header)
         {
-            Emitter->ComputeShaderBinaries.assign(Header.Binaries.begin(), Header.Binaries.end());
-            bCompiled = !Header.Binaries.empty();
-        });
-        ShaderCompiler->Flush();
+            Binaries->assign(Header.Binaries.begin(), Header.Binaries.end());
+        }, Job.Waiter.Track());
+        return true;
+    }
 
-        if (!bCompiled)
+    bool FinishCompileEmitter(FParticleEmitterCompileJob& Job, FParticleEmitterCompileOutput& Out)
+    {
+        CParticleSystem* System = Job.System.Get();
+        CParticleEmitter* Emitter = EmitterAt(System, Job.EmitterIndex);
+        CParticleEmitterStack* Stack = FindStack(System, Job.EmitterIndex);
+        if (Emitter == nullptr || Stack == nullptr || Job.Compiler == nullptr)
+        {
+            Out.Errors.push_back("The emitter went away while its shader compiled.");
+            return false;
+        }
+
+        if (Job.Binaries == nullptr || Job.Binaries->empty())
         {
             Out.Errors.push_back("The generated shader failed to compile. The editor log has the Slang diagnostics.");
             return false;
         }
+
+        const FParticleCompiler& Compiler = *Job.Compiler;
+        Emitter->ComputeShaderBinaries = Move(*Job.Binaries);
+        Emitter->CompiledTemplateHash  = CParticleEmitter::GetSimulationTemplateHash();
 
         // RefreshModuleParams checks against this before doing a value-only update.
         Emitter->ModuleParamValues   = Compiler.GetParamValues();
@@ -287,6 +339,7 @@ namespace Lumina::ParticleOps
         // Route the renderer to the generated module-stack shader.
         Emitter->ShaderMode = EParticleShaderMode::Custom;
         SyncLifetimeRange(System, Emitter, Stack);
+        Emitter->StoreShaderInArtifactCache();
         Emitter->PostLoad();
         Out.bSucceeded = true;
         return true;
@@ -296,7 +349,7 @@ namespace Lumina::ParticleOps
     {
         CParticleEmitter* Emitter = EmitterAt(System, EmitterIndex);
         CParticleEmitterStack* Stack = FindOrCreateStack(System, EmitterIndex);
-        if (Emitter == nullptr || Stack == nullptr || Emitter->ComputeShaderBinaries.empty())
+        if (Emitter == nullptr || Stack == nullptr || !Emitter->HasCustomComputeShader())
         {
             return false;
         }

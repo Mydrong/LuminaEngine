@@ -11,7 +11,7 @@ namespace Lumina
 {
     class CWorld;
 
-    /** Socket and bone lookups. A SocketOrBone is a socket authored on the asset, or a raw bone name. */
+    /** Socket and bone lookups, and leader poses. A SocketOrBone is a socket authored on the asset, or a raw bone name. */
     REFLECT()
     class RUNTIME_API CSkeletalMeshLibrary : public CFunctionLibrary
     {
@@ -49,5 +49,17 @@ namespace Lumina
         /** Bone origin nearest WorldLocation, which approximates the hit bone on a single-body mesh. */
         FUNCTION()
         static FName FindClosestBone(CWorld* World, ECS::FEntity Entity, FVector3 WorldLocation);
+
+        /** Drives Follower's skeletal mesh from Leader's pose instead of its own animation. A null Leader follows the nearest parent with a skeletal mesh. */
+        FUNCTION()
+        static void SetLeaderPose(CWorld* World, ECS::FEntity Follower, ECS::FEntity Leader);
+
+        /** Stops Follower copying a leader, so its own animation drives it again. */
+        FUNCTION()
+        static void ClearLeaderPose(CWorld* World, ECS::FEntity Follower);
+
+        /** The entity whose pose Follower ends up copying, null when it follows nothing. */
+        FUNCTION()
+        static ECS::FEntity GetLeaderPose(CWorld* World, ECS::FEntity Follower);
     };
 }

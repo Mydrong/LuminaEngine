@@ -1,17 +1,17 @@
-﻿#include "RuntimePCH.h"
+#include "RuntimePCH.h"
 #include "StructProperty.h"
 
 namespace Lumina
 {
     void FStructProperty::Serialize(FArchive& Ar, void* Value)
     {
-        Struct->SerializeTaggedProperties(Ar, Value);
+        Struct->SerializeProperties(Ar, Value);
     }
 
     void FStructProperty::SerializeItem(IStructuredArchive::FSlot Slot, void* Value, void const* Defaults)
     {
         FArchiveRecord Record = Slot.EnterRecord();
-        Struct->SerializeTaggedProperties(Record, Value, Defaults);
+        Struct->SerializeProperties(Record, Value, Defaults);
     }
 
     void FStructProperty::NetSerialize(FNetArchive& Ar, void* Value)
@@ -45,9 +45,6 @@ namespace Lumina
             return;
         }
 
-        for (FProperty* Current : Struct->GetProperties())
-        {
-            Current->CopyCompleteValue_InContainer(Dst, Src);
-        }
+        Struct->CopyProperties(Dst, Src);
     }
 }

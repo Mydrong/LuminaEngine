@@ -28,7 +28,7 @@ public static unsafe class RpcRuntime
     }
 
     // False runs the body here and only here. True means the call goes out once Call has its arguments.
-    public static bool Begin(EntityScript Script, string Method, out RpcCall Call)
+    public static bool Begin(Lumina.CEntityScript Script, string Method, out RpcCall Call)
     {
         Call = default;
         IntPtr Handle = NativeObjectMarshal.ToHandle(Script);
@@ -95,7 +95,7 @@ public static unsafe class RpcRuntime
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(System.Runtime.CompilerServices.CallConvStdcall) })]
     public static void NetDispatchSession(IntPtr Handle, int Event, uint ConnectionId, int Reason)
     {
-        if (GCHandle.FromIntPtr(Handle).Target is not EntityScript Script || Script is not INetworkListener Listener)
+        if (GCHandle.FromIntPtr(Handle).Target is not Lumina.CEntityScript Script || Script is not INetworkListener Listener)
         {
             return;
         }
@@ -131,7 +131,7 @@ public static unsafe class RpcRuntime
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(System.Runtime.CompilerServices.CallConvStdcall) })]
     public static void NetDispatchSync(IntPtr Handle, byte* Names, int NamesSize, int After)
     {
-        if (GCHandle.FromIntPtr(Handle).Target is not EntityScript Script)
+        if (GCHandle.FromIntPtr(Handle).Target is not Lumina.CEntityScript Script)
         {
             return;
         }

@@ -7,7 +7,6 @@
 #include "Containers/Vector.h"
 #include "ObjectHandleTyped.h"
 
-RUNTIME_API Lumina::CClass* Construct_CClass_Lumina_CClass();
 #include "Memory/SmartPtr.h"
 
 namespace Lumina
@@ -48,7 +47,7 @@ namespace Lumina
     {
     public:
 
-        DECLARE_CLASS(Lumina, CScriptClass, CClass, "/Script/Engine", RUNTIME_API)
+        DECLARE_CLASS(Lumina, CScriptClass, CClass, "/Types/Engine", RUNTIME_API)
         DEFINE_CLASS_FACTORY(CScriptClass)
 
         CScriptClass() = default;
@@ -101,14 +100,8 @@ namespace Lumina
             return Word < ScriptOverrideSlots.size() && (ScriptOverrideSlots[Word] & (1ull << (Slot & 63))) != 0;
         }
 
-        /** EScriptUpdatePhase for a minted entity-script class, from its C# [UpdatePhase]. */
+        // EScriptUpdatePhase from the UpdatePhase metadata up the chain, resolved at mint since the script tick reads it per script.
         uint8 ScriptUpdatePhase = 0;
-
-        // From the C# [ParallelUpdate], the managed spelling of REFLECT(ParallelUpdate).
-        bool bScriptParallelUpdate = false;
-
-        // ENetRealm from the C# [HostOnly], [ClientOnly] and [Cosmetic], the managed spelling of the REFLECT specifiers.
-        uint8 ScriptNetRealm = 0;
 
         // The class metadata the C# attributes set last reload, so a removed or changed attribute does not linger on a reused class.
         TVector<FName> ScriptClassMetaKeys;

@@ -41,7 +41,6 @@
 #include <Tools/Screenshot/ScreenshotCapture.h>
 #include <World/World.h>
 #include <World/Entity/Systems/CameraSystem.h>
-#include "UI/Tools/NodeGraph/Material/MaterialGraphCompile.h"
 #include "Config/EngineSettings.h"
 #include "Input/Key.h"
 #include "implot.h"
@@ -514,6 +513,9 @@ namespace Lumina
         // Editor links its own ImGui copy; install allocator here because StartupModule never runs (editor links directly, not LoadModule'd).
         ImGuiX::InstallImGuiAllocator();
 
+        // Only the ImGui copy that builds the font atlas fills its word-wrap tables, so this one breaks text mid-word until told to.
+        ImTextInitClassifiers();
+
         // Plugin DLLs link their own ImGui, so the module manager syncs every plugin that opted in.
         FModuleManager::Get().NotifyImGuiReady(Context, PlotContext);
 
@@ -549,19 +551,19 @@ namespace Lumina
         NamePicker::RegisterBuiltInSources();
 
         PropertyCustomizationRegistry = Memory::New<FPropertyCustomizationRegistry>();
-        PropertyCustomizationRegistry->RegisterPropertyCustomization(TBaseStructure<FVector2>::Get()->GetName(), []
+        PropertyCustomizationRegistry->RegisterPropertyCustomization(StaticStruct<FVector2>()->GetName(), []
         {
             return FVec2PropertyCustomization::MakeInstance();
         });
-        PropertyCustomizationRegistry->RegisterPropertyCustomization(TBaseStructure<FVector3>::Get()->GetName(), []
+        PropertyCustomizationRegistry->RegisterPropertyCustomization(StaticStruct<FVector3>()->GetName(), []
         {
             return FVec3PropertyCustomization::MakeInstance();
         });
-        PropertyCustomizationRegistry->RegisterPropertyCustomization(TBaseStructure<FVector4>::Get()->GetName(), []
+        PropertyCustomizationRegistry->RegisterPropertyCustomization(StaticStruct<FVector4>()->GetName(), []
         {
             return FVec4PropertyCustomization::MakeInstance();
         });
-        PropertyCustomizationRegistry->RegisterPropertyCustomization(TBaseStructure<FQuat>::Get()->GetName(), []
+        PropertyCustomizationRegistry->RegisterPropertyCustomization(StaticStruct<FQuat>()->GetName(), []
         {
             return FVec3PropertyCustomization::MakeInstance();
         });
@@ -569,7 +571,7 @@ namespace Lumina
         {
             return FEntityScriptComponentCustomization::MakeInstance();
         });
-        PropertyCustomizationRegistry->RegisterPropertyCustomization(TBaseStructure<FTransform>::Get()->GetName(), []
+        PropertyCustomizationRegistry->RegisterPropertyCustomization(StaticStruct<FTransform>()->GetName(), []
         {
             return FTransformPropertyCustomization::MakeInstance();
         });
@@ -1074,9 +1076,8 @@ namespace Lumina
         // A small budget avoids a hitch while cold thumbnails fill in a few per frame.
         CThumbnailManager::Get().ProcessRenderQueue();
 
-        // Queued in CMaterial::PostLoad when an asset's baked shaders predate the current templates.
-        ProcessMaterialRecompiles();
-        ProcessMaterialPermutationRequests();
+        MaterialCompiles.Tick();
+        ParticleCompiles.Tick();
     }
 
     void FEditorUI::OnUpdate(const FUpdateContext& UpdateContext)
@@ -3001,6 +3002,14 @@ namespace Lumina
 
     void FEditorUI::OpenAssetSearchModal()
     {
+        // A package has a thumbnail and its own editor, while a loose file opens by path.
+        enum class EOpenAs : uint8
+        {
+            Package,
+            FileEditor,
+            ScriptEditor,
+        };
+
         // The list cannot change while a modal is up, and re-walking the registry per keystroke is waste.
         struct FEntry
         {
@@ -3009,6 +3018,9 @@ namespace Lumina
             FFixedString Path;
             // Precomputed, since the alternative is interning the path on every visible row every frame.
             FName        PathName;
+            EOpenAs      OpenAs = EOpenAs::Package;
+            // A script opens in the external editor, which needs its disk path rather than the virtual one shown.
+            FString      DiskPath;
         };
 
         TVector<FEntry> Entries;
@@ -3016,6 +3028,24 @@ namespace Lumina
         {
             Entries.push_back(FEntry{ Asset->AssetGUID, FFixedString(Asset->AssetName.c_str()), Asset->Path,
                                       FName(Asset->Path.c_str()) });
+        }
+
+        for (const FTextAssetData* Text : FAssetRegistry::Get().GetTextAssetsOfKind(ETextAssetKind::None))
+        {
+            const FStringView FileName = VFS::FileName(FStringView(Text->Path.c_str(), Text->Path.size()));
+            Entries.push_back(FEntry{ Text->Guid, FFixedString(FileName.data(), FileName.size()), Text->Path, FName(), EOpenAs::FileEditor });
+        }
+
+        TVector<FString> ScriptFiles;
+        DotNet::GatherScriptSourceFiles(ScriptFiles);
+        for (FString& Script : ScriptFiles)
+        {
+            const FStringView   DiskPath(Script.c_str(), Script.size());
+            const FStringView   FileName    = VFS::FileName(DiskPath);
+            const FFixedString  VirtualPath = VFS::ResolveToVirtualPath(DiskPath);
+            Entries.push_back(FEntry{ FGuid(), FFixedString(FileName.data(), FileName.size()),
+                                      VirtualPath.empty() ? FFixedString(Script.c_str()) : VirtualPath, FName(),
+                                      EOpenAs::ScriptEditor, Move(Script) });
         }
 
         if (Entries.empty())
@@ -3133,7 +3163,9 @@ namespace Lumina
 
                         // A miss starts the async resolve and draws the generic icon, same as the content browser tiles.
                         ImTextureRef Thumbnail = ImGuiX::ToImTextureRef(GenericAssetIcon);
-                        if (FPackageThumbnail* Ready = CThumbnailManager::Get().GetThumbnailForPackage(Entry.PathName))
+                        FPackageThumbnail* Ready = Entry.OpenAs == EOpenAs::Package
+                            ? CThumbnailManager::Get().GetThumbnailForPackage(Entry.PathName) : nullptr;
+                        if (Ready != nullptr)
                         {
                             Thumbnail = ImGuiX::ToImTextureRef(Ready->LoadedImage);
                         }
@@ -3162,7 +3194,19 @@ namespace Lumina
 
             if (bChosen)
             {
-                OpenAssetEditor(Matches[Selected]->GUID);
+                const FEntry& Chosen = *Matches[Selected];
+                switch (Chosen.OpenAs)
+                {
+                case EOpenAs::Package:
+                    OpenAssetEditor(Chosen.GUID);
+                    break;
+                case EOpenAs::FileEditor:
+                    OpenFileEditor(FStringView(Chosen.Path.c_str(), Chosen.Path.size()));
+                    break;
+                case EOpenAs::ScriptEditor:
+                    OpenScriptEditor(FStringView(Chosen.DiskPath.c_str(), Chosen.DiskPath.size()));
+                    break;
+                }
                 return true;
             }
 

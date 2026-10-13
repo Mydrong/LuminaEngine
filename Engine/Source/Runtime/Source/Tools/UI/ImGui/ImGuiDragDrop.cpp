@@ -235,30 +235,6 @@ namespace Lumina::DragDrop
         return true;
     }
 
-    bool AcceptScript(FFixedString& OutPath)
-    {
-        const ImGuiPayload* P = ImGui::AcceptDragDropPayload(GImGuiPayloadType, ImGuiDragDropFlags_AcceptBeforeDelivery);
-        if (!P)
-        {
-            return false;
-        }
-        if (GPayload.Kind != EPayloadKind::File)
-        {
-            return false;
-        }
-        if (!IExtensionEquals(GPayload.FileExtension, FStringView("luau"))
-         && !IExtensionEquals(GPayload.FileExtension, FStringView("lua")))
-        {
-            return false;
-        }
-        if (!P->IsDelivery())
-        {
-            return false;
-        }
-        OutPath = GPayload.FilePath;
-        return true;
-    }
-
     void EndFrameTick()
     {
         // Mirror ImGui clearing its payload on drag end so a stale FPayload doesn't outlive the drag.

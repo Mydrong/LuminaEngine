@@ -6,7 +6,7 @@
 
 namespace Lumina
 {
-    // Generic editor picker for FAssetRef slots. Reads the property's AssetType meta (e.g. "luau", "rml")
+    // Generic editor picker for FAssetRef slots. Reads the property's AssetType meta (e.g. "rml", "rcss")
     // to filter the candidate list + drag-drop, and writes back both the path and the stable GUID so the
     // reference survives later renames. Registered against FAssetRef::StaticStruct()->GetName().
     class FAssetRefPropertyCustomization : public IPropertyTypeCustomization

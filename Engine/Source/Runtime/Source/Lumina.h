@@ -4,7 +4,7 @@
 
 #define LUMINA_VERSION_MAJOR 0
 #define LUMINA_VERSION_MINOR 1
-#define LUMINA_VERSION_PATCH 54
+#define LUMINA_VERSION_PATCH 76
 
 #define LUMINA_VERSION_TEXT_DETAIL(x) #x
 #define LUMINA_VERSION_TEXT(x) LUMINA_VERSION_TEXT_DETAIL(x)
@@ -13,9 +13,6 @@
 
 
 // Declares a zero-initialized function-local static and enters the block only on first use.
-#define LUMINA_STATIC_HELPER(InType)                                          \
-static InType StaticValue = {};                                               \
-if (!StaticValue)
 
 [[deprecated("Use Lumina::Constants::kIndexNone instead.")]]
 constexpr auto INDEX_NONE = -1;

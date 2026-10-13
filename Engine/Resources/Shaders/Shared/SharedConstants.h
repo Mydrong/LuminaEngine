@@ -59,11 +59,12 @@
 #define MATERIAL_PIXEL_GROUP_SIZE       (MATERIAL_CLASSIFY_TILE * MATERIAL_CLASSIFY_TILE)
 // Frames one streaming-feedback readback spans; the deferred material pass reports a rotating 1/N of its groups each frame.
 #define STREAMING_FEEDBACK_WINDOW       4u
-// Distinct deferred shaders one frame may bin, bounded by the R16F slot image holding slot + 1 exactly.
-#define MATERIAL_MAX_SLOTS              2048u
-// A classified pair packs its slot under the tile index, so these bits have to cover MATERIAL_MAX_SLOTS.
-#define MATERIAL_PAIR_SLOT_BITS         11u
-#define MATERIAL_PAIR_SLOT_MASK         ((1u << MATERIAL_PAIR_SLOT_BITS) - 1u)
+// Distinct deferred shaders one frame may bin, bounded by the R16_UINT slot image holding slot + 1.
+#define MATERIAL_MAX_SLOTS              65535u
+// The set a classify tile dedupes its slots in, twice the 64 a tile can hold so a probe stays short.
+#define MATERIAL_TILE_CLAIM_BUCKETS     128u
+// A pair past a tile's inline records is stored as its tile index, then its slot.
+#define MATERIAL_OVERFLOW_PAIR_WORDS    2u
 // Slots a tile records inline, past which its pairs go to the overflow list.
 #define MATERIAL_TILE_SLOTS             4u
 // A slot word plus a 64-bit pixel mask for each inline pair.
@@ -120,6 +121,8 @@
 #define COL_B_SHIFT                     16
 #define COL_A_SHIFT                     24
 #define COL_A_MASK                      0xFF000000
+
+#define PARTICLE_SIM_GROUP_SIZE         64u
 
 // Emitter slots one workgroup can sort in groupshared; larger emitters take the multi-pass sort.
 #define PARTICLE_SORT_CAPACITY          2048u

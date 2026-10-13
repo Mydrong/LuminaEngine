@@ -11,6 +11,7 @@
 // SHADING_COMPUTE has no rasterizer, so nothing it reaches may use ddx or ddy.
 #ifndef TRANSLUCENT
 #include "Includes/DBuffer.slang"
+#include "Includes/Weather.slang"
 #endif
 
 // Specialized per pipeline; 0 dead-strips the guarded block and its resource access.
@@ -603,6 +604,8 @@ FGBufferData BuildGBufferData(FBaseVertexOutput Input, FMaterialPixelInputs Mate
         float2 DBufferUV = Input.Position.xy / float2(Scene().ScreenSize.xy);
         ApplyDBuffer(G.BaseColor, G.WorldNormal, G.Roughness, G.Metallic, G.AmbientOcclusion, G.Emissive, DBufferUV);
     }
+
+    ApplyRainWetness(G, mul(GetInverseCameraView(), float4(Input.FragPos.xyz, 1.0)).xyz, normalize(Input.NormalWS.xyz));
 #endif
 
 #ifndef SHADING_COMPUTE

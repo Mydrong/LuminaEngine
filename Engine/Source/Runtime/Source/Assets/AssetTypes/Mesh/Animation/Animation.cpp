@@ -162,6 +162,12 @@ namespace Lumina
             }
         }
 
+        // In pose order, so rotation batches land on consecutive bones and a bone LOD cut ends the walk.
+        std::sort(Resolved.AnimatedBones.begin(), Resolved.AnimatedBones.end(), [&Resolved](int32 A, int32 B)
+        {
+            return Resolved.CompressedBones[A] < Resolved.CompressedBones[B];
+        });
+
         Resolved.OverlayStride  = Stride;
         Resolved.OverlayValues  = Move(Values);
         Resolved.OverlayMask    = Move(Mask);
@@ -600,6 +606,10 @@ namespace Lumina
             Detail::ApplyConstantOverlay(*Resolved, OutPose, ActiveBones);
             for (const int32 b : Resolved->AnimatedBones)
             {
+                if (Resolved->CompressedBones[b] >= ActiveBones)
+                {
+                    break;
+                }
                 DecodeBone((SIZE_T)b);
             }
         }

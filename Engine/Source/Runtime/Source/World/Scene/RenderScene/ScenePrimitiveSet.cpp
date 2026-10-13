@@ -103,7 +103,7 @@ namespace Lumina
     // Linear scan over a list that stays tiny (one entry per material instance of one master).
     static void NoteDeferredMaterial(FSceneBatchRegistry::FBatch& Batch, const FResolvedSurface& Surface)
     {
-        if (Surface.DeferredShader == nullptr || Surface.MaterialIdx == (uint16)-1
+        if (Surface.DeferredShader == nullptr || Surface.MaterialIdx == Constants::kIndexNoneU32
             || Surface.BatchKey.bTranslucent != 0u)
         {
             return;
@@ -1228,7 +1228,7 @@ namespace Lumina
     // Whether the batch still records the shader this surface resolved to for its material slot.
     static bool DeferredMaterialMatches(const FSceneBatchRegistry::FBatch& Batch, const FResolvedSurface& Surface)
     {
-        if (Surface.DeferredShader == nullptr || Surface.MaterialIdx == (uint16)-1
+        if (Surface.DeferredShader == nullptr || Surface.MaterialIdx == Constants::kIndexNoneU32
             || Surface.BatchKey.bTranslucent != 0u)
         {
             return true;

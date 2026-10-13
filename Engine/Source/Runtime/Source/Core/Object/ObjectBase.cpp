@@ -1,9 +1,8 @@
-﻿#include "RuntimePCH.h"
+#include "RuntimePCH.h"
 #include "ObjectBase.h"
 #include "Class.h"
 #include "Cast.h"
 #include "ScriptClass.h"
-#include "DeferredRegistry.h"
 #include "Lumina.h"
 #include "ManagedInstance.h"
 #include "ObjectAllocator.h"
@@ -27,24 +26,23 @@ namespace Lumina
     static THashSet<TStrongObjectPtr<CObjectBase>> GRootedObjects;
     static FMutex RootMutex;
 
-    struct FPendingRegistrantInfo
+    struct FPendingTypes
     {
-        static TVector<CObjectBase*>& Get()
-        {
-            static TVector<CObjectBase*> PendingRegistrantInfo;
-            return PendingRegistrantInfo;
-        }
-    };
-    
-    struct FPendingRegistrant
-    {
-        CObjectBase*        Object;
-        FPendingRegistrant* Next;
+        // Classes allocated before the object system could finish them, completed in allocation order.
+        TVector<CObjectBase*>            Registrants;
+
+        TVector<const FCompiledInTypes*> Modules;
+        size_t                           NumRegistered = 0;
+
+        // A default object can register types of its own, so the pass must not restart while it builds one.
+        bool                             bRegistering = false;
     };
 
-    static FPendingRegistrant* GFirstPendingRegistrant = nullptr;
-    static FPendingRegistrant* GLastPendingRegistrant = nullptr;
-
+    static FPendingTypes& PendingTypes()
+    {
+        static FPendingTypes Pending;
+        return Pending;
+    }
 
     // Thread local, so two threads constructing at once never read each other's object.
     static thread_local const FConstructCObjectParams* GConstructing = nullptr;
@@ -123,20 +121,7 @@ namespace Lumina
 
     void CObjectBase::BeginRegister()
     {
-        FPendingRegistrant* PendingRegistrant = new FPendingRegistrant{this, nullptr };
-        FPendingRegistrantInfo::Get().push_back(this);
-
-        if (GLastPendingRegistrant)
-        {
-            GLastPendingRegistrant->Next = PendingRegistrant;
-        }
-        else
-        {
-            ASSERT(!GFirstPendingRegistrant);
-            GFirstPendingRegistrant = PendingRegistrant;
-        }
-
-        GLastPendingRegistrant = PendingRegistrant;
+        PendingTypes().Registrants.push_back(this);
     }
 
     void CObjectBase::FinishRegister(CClass* InClass, const TCHAR* InName)
@@ -277,142 +262,105 @@ namespace Lumina
         FObjectHashTables::Get().AddObject(this);
     }
 
-    static void DequeuePendingAutoRegistrations(TVector<FPendingRegistrant>& OutPending)
+    void FinishRegistration(CObjectBase* Object)
     {
-        FPendingRegistrant* NextPendingRegistrant = GFirstPendingRegistrant;
-        GFirstPendingRegistrant = nullptr;
-        GLastPendingRegistrant = nullptr;
-        while(NextPendingRegistrant)
-        {
-            FPendingRegistrant* PendingRegistrant = NextPendingRegistrant;
-            OutPending.push_back(*PendingRegistrant);
-            NextPendingRegistrant = PendingRegistrant->Next;
-            Memory::Delete(PendingRegistrant);
-        }
-    }
-
-    static void ProcessRegistrants()
-    {
-        TVector<FPendingRegistrant> PendingRegistrants;
-        DequeuePendingAutoRegistrations(PendingRegistrants);
-
-        for (size_t Index = 0; Index < PendingRegistrants.size(); ++Index)
-        {
-            const FPendingRegistrant& PendingRegistrant = PendingRegistrants[Index];
-
-            CObjectForceRegistration(PendingRegistrant.Object);
-
-            DequeuePendingAutoRegistrations(PendingRegistrants);
-        }
-    }
-    
-    void CObjectForceRegistration(CObjectBase* Object)
-    {
-        TVector<CObjectBase*>& Pending = FPendingRegistrantInfo::Get();
-        int32 Index = VectorFindIndex(Pending, Object);
-        
+        TVector<CObjectBase*>& Pending = PendingTypes().Registrants;
+        const int32 Index = VectorFindIndex(Pending, Object);
         if (Index != Constants::kIndexNone)
         {
             Pending.erase(Pending.begin() + Index);
             Object->FinishRegister(static_cast<CClass*>(Object)->GetMetaClass(), TEXT(""));
         }
     }
-    
-    FDeferredRegistrationSnapshot SnapshotDeferredRegistrations()
-    {
-        FDeferredRegistrationSnapshot Snapshot;
-        Snapshot.NumClasses = FClassDeferredRegistry::Get().NumRegistrations();
-        Snapshot.NumEnums   = FEnumDeferredRegistry::Get().NumRegistrations();
-        Snapshot.NumStructs = FStructDeferredRegistry::Get().NumRegistrations();
 
-        return Snapshot;
+    FTypeRegistrar::FTypeRegistrar(const FCompiledInTypes& Types)
+    {
+        PendingTypes().Modules.push_back(&Types);
     }
 
-    void RollbackDeferredRegistrations(const FDeferredRegistrationSnapshot& Snapshot)
+    size_t SnapshotPendingTypes()
     {
-        FClassDeferredRegistry::Get().TruncateRegistrations(Snapshot.NumClasses);
-        FEnumDeferredRegistry::Get().TruncateRegistrations(Snapshot.NumEnums);
-        FStructDeferredRegistry::Get().TruncateRegistrations(Snapshot.NumStructs);
+        return PendingTypes().Modules.size();
     }
 
-    static void LoadAllCompiledInEnumsAndStructs()
+    void RollbackPendingTypes(size_t Snapshot)
     {
-        FEnumDeferredRegistry& EnumRegistry = FEnumDeferredRegistry::Get();
-        FStructDeferredRegistry& StructRegistry = FStructDeferredRegistry::Get();
+        FPendingTypes& Pending = PendingTypes();
 
-        EnumRegistry.ProcessRegistrations();
-        StructRegistry.ProcessRegistrations();
-    }
-
-    // Re-entrancy guard for SettleDeferredRegistrations. The pass creates default objects itself, and a CDO
-    // must not restart the pass that is building it.
-    static bool GProcessingNewlyLoadedCObjects = false;
-
-    void SettleDeferredRegistrations()
-    {
-        if (!GProcessingNewlyLoadedCObjects)
+        // A registered module's types are live, so only the refused module's tail can be dropped.
+        ASSERT(Snapshot >= Pending.NumRegistered);
+        if (Snapshot < Pending.Modules.size())
         {
-            ProcessNewlyLoadedCObjects();
+            Pending.Modules.resize(Snapshot);
         }
     }
 
-    void ProcessNewlyLoadedCObjects()
+    void SettlePendingTypes()
     {
-        const TGuardValue<bool> Guard(GProcessingNewlyLoadedCObjects, true);
-
-        FClassDeferredRegistry& ClassRegistry = FClassDeferredRegistry::Get();
-        FEnumDeferredRegistry& EnumRegistry = FEnumDeferredRegistry::Get();
-        FStructDeferredRegistry& StructRegistry = FStructDeferredRegistry::Get();
-
-        while (GFirstPendingRegistrant
-            || ClassRegistry.HasPendingRegistrations()
-            || EnumRegistry.HasPendingRegistrations()
-            || StructRegistry.HasPendingRegistrations())
+        if (!PendingTypes().bRegistering)
         {
-            ProcessRegistrants();
-            LoadAllCompiledInEnumsAndStructs();
+            RegisterPendingTypes();
+        }
+    }
 
-            if (ClassRegistry.HasPendingRegistrations())
+    void RegisterPendingTypes()
+    {
+        FPendingTypes& Pending = PendingTypes();
+        const TGuardValue<bool> Guard(Pending.bRegistering, true);
+        while (!Pending.Registrants.empty() || Pending.NumRegistered < Pending.Modules.size())
+        {
+            // Finishing one can allocate another, which queues behind it.
+            while (!Pending.Registrants.empty())
             {
-                TVector<CClass*> NewClasses;
-                ClassRegistry.ProcessRegistrations([&NewClasses](CClass& Class)
+                FinishRegistration(Pending.Registrants.front());
+            }
+
+            const size_t First = Pending.NumRegistered;
+            const size_t Last = Pending.Modules.size();
+            Pending.NumRegistered = Last;
+
+            // Enums and structs first, since a class's properties can name either.
+            for (size_t Index = First; Index < Last; ++Index)
+            {
+                const FCompiledInTypes& Types = *Pending.Modules[Index];
+                for (uint32 Enum = 0; Enum < Types.NumEnums; ++Enum)
                 {
-                    NewClasses.push_back(&Class);
-                });
-
-                THashMap<const CClass*, int32> DepthMemo;
-
-                TFunction<int32(const CClass*)> GetClassDepth;
-                GetClassDepth = [&](const CClass* Cls) -> int32
+                    Types.Enums[Enum]();
+                }
+                for (uint32 Struct = 0; Struct < Types.NumStructs; ++Struct)
                 {
-                    if (!Cls)
-                    {
-                        return 0;
-                    }
-
-                    int32& Memo = DepthMemo[Cls];
-                    if (Memo != 0)
-                    {
-                        return Memo;
-                    }
-
-                    Memo = 1 + GetClassDepth(Cls->GetSuperClass());
-                    return Memo;
-                };
-                
-                // Base classes before derived.
-                Algo::Sort(NewClasses, [&](const CClass* A, const CClass* B)
-                {
-                    return GetClassDepth(A) < GetClassDepth(B);
-                });
-
-                for (CClass* NewClass : NewClasses)
-                {
-                    NewClass->GetDefaultObject();
+                    Types.Structs[Struct]();
                 }
             }
+
+            TVector<CClass*> NewClasses;
+            for (size_t Index = First; Index < Last; ++Index)
+            {
+                const FCompiledInTypes& Types = *Pending.Modules[Index];
+                for (uint32 Class = 0; Class < Types.NumClasses; ++Class)
+                {
+                    NewClasses.push_back(Types.Classes[Class]());
+                }
+            }
+
+            auto Depth = [](const CClass* Class)
+            {
+                int32 Result = 0;
+                for (; Class != nullptr; Class = Class->GetSuperClass())
+                {
+                    ++Result;
+                }
+                return Result;
+            };
+
+            // Bases first, so a default object never sees an incomplete parent.
+            Algo::Sort(NewClasses, [&Depth](const CClass* A, const CClass* B) { return Depth(A) < Depth(B); });
+
+            for (CClass* NewClass : NewClasses)
+            {
+                NewClass->GetDefaultObject();
+            }
         }
-        
     }
 
     void InitializeCObjectSystem()
@@ -430,65 +378,5 @@ namespace Lumina
         GObjectArray.Shutdown();
 
         FObjectHashTables::Get().Clear();
-    }
-
-
-    void RegisterCompiledInInfo(CClass*(*RegisterFn)(), const TCHAR* Package, const TCHAR* Name)
-    {
-        FClassDeferredRegistry::Get().AddRegistration(RegisterFn);
-    }
-
-    void RegisterCompiledInInfo(CEnum*(*RegisterFn)(), const FEnumRegisterCompiledInInfo& Info)
-    {
-        FEnumDeferredRegistry::Get().AddRegistration(RegisterFn);
-    }
-
-    void RegisterCompiledInInfo(CStruct*(*RegisterFn)(), const FStructRegisterCompiledInInfo& Info)
-    {
-        FStructDeferredRegistry::Get().AddRegistration(RegisterFn);
-    }
-
-    CEnum* GetStaticEnum(CEnum*(* RegisterFn)(), const TCHAR* Name)
-    {
-        return RegisterFn();
-    }
-
-    void RegisterCompiledInInfo(const FClassRegisterCompiledInInfo* Info, size_t NumClassInfo)
-    {
-        for (const FClassRegisterCompiledInInfo* It = Info; It != Info + NumClassInfo; ++It)
-        {
-            RegisterCompiledInInfo(It->RegisterFn, Info->Package, Info->Name);
-        }
-    }
-
-    void RegisterCompiledInInfo(const FEnumRegisterCompiledInInfo* EnumInfo, size_t NumEnumInfo, const FClassRegisterCompiledInInfo* ClassInfo, size_t NumClassInfo)
-    {
-        for (const FClassRegisterCompiledInInfo* It = ClassInfo; It != ClassInfo + NumClassInfo; ++It)
-        {
-            RegisterCompiledInInfo(It->RegisterFn, ClassInfo->Package, ClassInfo->Name);
-        }
-
-        for (const FEnumRegisterCompiledInInfo* It = EnumInfo; It != EnumInfo + NumEnumInfo; ++It)
-        {
-            RegisterCompiledInInfo(It->RegisterFn, *It);
-        }
-    }
-
-    void RegisterCompiledInInfo(const FEnumRegisterCompiledInInfo* EnumInfo, size_t NumEnumInfo, const FClassRegisterCompiledInInfo* ClassInfo, size_t NumClassInfo, const FStructRegisterCompiledInInfo* StructInfo, size_t NumStructInfo)
-    {
-        for (const FClassRegisterCompiledInInfo* It = ClassInfo; It != ClassInfo + NumClassInfo; ++It)
-        {
-            RegisterCompiledInInfo(It->RegisterFn, ClassInfo->Package, ClassInfo->Name);
-        }
-
-        for (const FEnumRegisterCompiledInInfo* It = EnumInfo; It != EnumInfo + NumEnumInfo; ++It)
-        {
-            RegisterCompiledInInfo(It->RegisterFn, *It);
-        }
-
-        for (const FStructRegisterCompiledInInfo* It = StructInfo; It != StructInfo + NumStructInfo; ++It)
-        {
-            RegisterCompiledInInfo(It->RegisterFn, *It);
-        }
     }
 }

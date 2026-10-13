@@ -1,8 +1,11 @@
 #include "RuntimePCH.h"
 #include "ShaderPaths.h"
 
+#include "ShaderCache.h"
 #include "ShaderCompiler.h"
 #include "ShaderLibrary.h"
+#include "Containers/Algorithm.h"
+#include "Core/Math/Hash/Hash.h"
 #include "Core/Plugin/Plugin.h"
 #include "Core/Plugin/PluginManager.h"
 #include "Core/Threading/Thread.h"
@@ -188,5 +191,46 @@ namespace Lumina::Shaders
         });
 
         return (uint32)ShaderPaths.size();
+    }
+
+    uint64 HashSourceDirectories(TSpan<const FStringView> Directories)
+    {
+        struct FEntry
+        {
+            FString Path;
+            uint64  ContentHash;
+        };
+        TVector<FEntry> Files;
+
+        for (FStringView Directory : Directories)
+        {
+            VFS::RecursiveDirectoryIterator(Directory, [&Files](const VFS::FFileInfo& Info)
+            {
+                if (Info.IsDirectory() || (Info.GetExt() != ".slang" && Info.GetExt() != ".h"))
+                {
+                    return;
+                }
+                FString Source;
+                if (VFS::ReadFile(Source, Info.VirtualPath.c_str()))
+                {
+                    // Checkout line endings differ per machine and must not change the hash.
+                    Source.erase(Algo::Remove(Source, '\r'), Source.end());
+                    Files.push_back({ FString(Info.VirtualPath.c_str()), Hash::XXHash::GetHash64(Source) });
+                }
+            });
+        }
+
+        Algo::Sort(Files, [](const FEntry& A, const FEntry& B) { return A.Path < B.Path; });
+
+        size_t Result = Files.size();
+        Hash::HashCombine(Result, (size_t)FShaderCache::kShaderCacheVersion);
+        for (const FEntry& File : Files)
+        {
+            Hash::HashCombine(Result, (size_t)Hash::GetHash64(File.Path));
+            Hash::HashCombine(Result, (size_t)File.ContentHash);
+        }
+
+        // 0 is the serialized never-compiled sentinel, so a real hash must never collide with it.
+        return Result != 0 ? (uint64)Result : 1ull;
     }
 }

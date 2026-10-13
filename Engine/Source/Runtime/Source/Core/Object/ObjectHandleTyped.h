@@ -332,10 +332,4 @@ namespace Lumina
     {
         return GetTypeHash(Object.GetHandle());
     }
-
-    // A module built against the old size reads the wrong bytes, because property offsets bake in at compile time.
-    static_assert(sizeof(TStrongObjectPtr<CObjectBase>) == 16,
-        "TStrongObjectPtr changed size. Bump LUMINA_MODULE_ABI_VERSION in ModuleManager.h so stale modules are rejected, then update this assert.");
-    static_assert(sizeof(TWeakObjectPtr<CObjectBase>) == 8,
-        "TWeakObjectPtr changed size. Bump LUMINA_MODULE_ABI_VERSION in ModuleManager.h so stale modules are rejected, then update this assert.");
 }

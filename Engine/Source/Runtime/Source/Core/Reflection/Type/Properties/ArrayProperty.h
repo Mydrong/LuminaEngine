@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "Core/Reflection/Type/LuminaTypes.h"
 #include "Containers/ContainerOps.h"
@@ -11,10 +11,10 @@ namespace Lumina
     class FArrayProperty : public FProperty
     {
     public:
-        explicit FArrayProperty(const FArrayPropertyParams* Params)
-            : FProperty(Params)
+        explicit FArrayProperty(const FPropertyDesc& Desc)
+            : FProperty(Desc)
         {
-            Ops = Params->GetOpsFn ? Params->GetOpsFn() : nullptr;
+            Ops = Desc.Type->GetVectorOps();
             SetElementSize(Ops != nullptr ? Ops->ContainerSize : 0);
         }
         

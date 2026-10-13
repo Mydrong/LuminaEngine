@@ -193,7 +193,7 @@ namespace Lumina::Physics
         virtual void Simulate() = 0;
         virtual void StopSimulate() = 0;
 
-        // Game-thread drain of step-side events (Lua, ECS::FEventDispatcher). Pair with Update.
+        // Game-thread drain of step-side events (ECS::FEventDispatcher). Pair with Update.
         virtual void DispatchPendingEvents() {}
         
         virtual void DeactivateBody(ECS::FEntity Entity) = 0;

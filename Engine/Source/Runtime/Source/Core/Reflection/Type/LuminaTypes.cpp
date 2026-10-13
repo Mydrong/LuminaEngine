@@ -1,9 +1,10 @@
-﻿#include "RuntimePCH.h"
+#include "RuntimePCH.h"
 #include "LuminaTypes.h"
 #include "Core/Object/Field.h"
 #include "Core/Object/Class.h"
 #include "Core/Serialization/NetArchive.h"
 #include "Log/Log.h"
+#include <charconv>
 #include "Properties/ArrayProperty.h"
 #include "Properties/EnumProperty.h"
 #include "Properties/MapProperty.h"
@@ -74,30 +75,49 @@ namespace Lumina
         return Table.Names[(size_t)TypeFlags];
     }
     
-    FCStringView FProperty::GetMetadata(FStringView Key) const
+    const FMetadataEntry* FProperty::FindMetadata(FStringView Key) const
     {
-        // A property carries a handful of pairs, so a scan beats hashing and never touches the name pool.
-        // Case-insensitive because the keys used to be FNames, whose comparison is case-folded.
-        for (uint16 Index = 0; Index < NumMetadata; ++Index)
+        // A property carries a handful of entries, so a scan beats hashing. Case-insensitive like the FNames the keys once were.
+        for (uint16 Index = 0; Index < Desc->NumMetadata; ++Index)
         {
-            if (EqualsIgnoreCase(Key, FStringView(MetadataEntries[Index].NameUTF8)))
+            if (EqualsIgnoreCase(Key, FStringView(Desc->Metadata[Index].Key)))
             {
-                return FCStringView(MetadataEntries[Index].ValueUTF8);
+                return &Desc->Metadata[Index];
             }
         }
-        return FCStringView();
+        return nullptr;
+    }
+
+    FCStringView FProperty::GetMetadata(FStringView Key) const
+    {
+        const FMetadataEntry* Entry = FindMetadata(Key);
+        return Entry != nullptr ? FCStringView(Entry->Value) : FCStringView();
     }
 
     bool FProperty::HasMetadata(FStringView Key) const
     {
-        for (uint16 Index = 0; Index < NumMetadata; ++Index)
+        return FindMetadata(Key) != nullptr;
+    }
+
+    TOptional<double> FProperty::GetMetadataNumber(FStringView Key) const
+    {
+        FStringView Text = GetMetadata(Key);
+        if (!Text.empty() && Text.front() == '+')
         {
-            if (EqualsIgnoreCase(Key, FStringView(MetadataEntries[Index].NameUTF8)))
-            {
-                return true;
-            }
+            Text.remove_prefix(1);
         }
-        return false;
+        if (!Text.empty() && (Text.back() == 'f' || Text.back() == 'F'))
+        {
+            Text.remove_suffix(1);
+        }
+
+        double Value = 0.0;
+        const auto [End, Error] = std::from_chars(Text.data(), Text.data() + Text.size(), Value);
+        if (Text.empty() || Error != std::errc() || End != Text.data() + Text.size())
+        {
+            return {};
+        }
+        return Value;
     }
 
     void FProperty::OnMetadataFinalized(FPropertyArena& Arena)
@@ -144,22 +164,6 @@ namespace Lumina
         return Display;
     }
     
-    void FProperty::CallSetter(void* Container, const void* InValue) const
-    {
-        if (!HasSetter())
-        {
-            LOG_CRITICAL("Calling a setter but the property has no setter defined.");
-        }
-    }
-
-    void FProperty::CallGetter(const void* Container, void* OutValue) const
-    {
-        if (!HasGetter())
-        {
-            LOG_CRITICAL("Calling a getter but the property has no getter defined.");
-        }
-    }
-
     void* FProperty::GetValuePtrInternal(void* ContainerPtr, int64 ArrayIndex) const
     {
         void* PropertyPtr = (uint8*)ContainerPtr + Offset;

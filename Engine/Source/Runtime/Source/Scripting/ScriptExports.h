@@ -15,7 +15,7 @@ namespace Lumina
 // Per-script-type schema + value model bridging the C# [Property] reflection to the native editor.
 namespace Lumina::Scripting
 {
-    // The schema kind is the shared reflected taxonomy Lumina::EPropertyTypeFlags (ObjectCore.h), mirrored by
+    // The schema kind is the shared reflected taxonomy Lumina::EPropertyTypeFlags (PropertyFlags.h), mirrored by
     // LuminaSharp.EPropertyType. Script-specific shapes are carried as data on FScriptExportType rather than as
     // distinct kinds: an input binding is String + bInputAction; an asset ref
     // is SoftObject + TargetClass; a native vs.

@@ -13,7 +13,7 @@
 
       Heap          NT-heap provider + stacks. Sees every HeapAlloc/HeapFree, which is what
                     anything in a separate DLL using the CRT does -- slang.dll, the Vulkan
-                    driver's internals, Luau, basisu. Must LAUNCH the process (heap tracing
+                    driver's internals, basisu. Must LAUNCH the process (heap tracing
                     is enabled at process creation), high overhead, ETL grows fast.
 
     Analyze with WPA:

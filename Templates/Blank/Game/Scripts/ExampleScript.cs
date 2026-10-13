@@ -8,10 +8,10 @@ namespace GameScripts;
 /// Starter C# entity script. Add a "C# Script" component to an entity in your scene and select this
 /// script, then press Play. Scripts compile inside the editor on save -- no rebuild, no restart.
 ///
-/// EntityScript gives you: Entity, World, Registry, the cached Transform, and lifecycle hooks
+/// CEntityScript gives you: Entity, World, Registry, the cached Transform, and lifecycle hooks
 /// (OnAttach / OnReady / OnUpdate / OnDetach), plus input and collision callbacks.
 /// </summary>
-public sealed class ExampleScript : EntityScript
+public sealed class ExampleScript : CEntityScript
 {
     [Property(Tooltip = "Degrees per second to spin around the up (Y) axis.")]
     public float SpinSpeed = 90.0f;

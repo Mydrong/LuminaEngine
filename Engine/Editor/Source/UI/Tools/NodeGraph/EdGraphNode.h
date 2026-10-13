@@ -97,6 +97,9 @@ namespace Lumina
         // Null for ordinary leaf nodes. May lazily allocate the graph.
         virtual CEdNodeGraph* GetEnterableSubGraph() { return nullptr; }
 
+        // A comment box annotates the canvas and compiles to nothing, so graph tools leave it out of their passes.
+        virtual bool IsCommentNode() const { return false; }
+
         // True for wire-passthrough nodes (e.g. CEdNode_Reroute): graph walks skip them and resolve
         // through to the real source/target, and the compiler emits nothing for them.
         virtual bool IsRerouteNode() const { return false; }

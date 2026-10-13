@@ -3,8 +3,9 @@
 // Particle material vertex template; expands the sprite, then lets the graph displace the corner.
 
 [shader("vertex")]
-FParticleMaterialVertexOutput VertexMain(uint VertexIndex : SV_VulkanVertexID)
+FParticleMaterialVertexOutput VertexMain(uint VertexIndex : SV_VulkanVertexID, uint DrawIndex : SV_DrawIndex)
 {
+    BeginParticleDraw(DrawIndex);
     FGPUParticle P;
     const FParticleSprite Sprite = ExpandParticleSprite(VertexIndex, P);
 
@@ -23,6 +24,7 @@ FParticleMaterialVertexOutput VertexMain(uint VertexIndex : SV_VulkanVertexID)
         Out.Velocity     = float3(0.0, 0.0, 0.0);
         Out.Center       = float3(0.0, 0.0, 0.0);
         Out.SizeLifeRand = float4(0.0, 0.0, 0.0, 0.0);
+        Out.DrawIndex    = DrawIndex;
         Out.Position     = float4(2.0, 2.0, 2.0, 1.0);
         return Out;
     }
@@ -64,6 +66,7 @@ FParticleMaterialVertexOutput VertexMain(uint VertexIndex : SV_VulkanVertexID)
     Out.Velocity     = P.Velocity;
     Out.Center       = P.Position;
     Out.SizeLifeRand = float4(ParticleSize, ParticleLife, ParticleSeedRandom);
+    Out.DrawIndex    = DrawIndex;
     Out.Position     = WorldToClip(WorldPosition);
     return Out;
 }

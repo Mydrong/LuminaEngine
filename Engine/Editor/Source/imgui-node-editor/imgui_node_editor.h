@@ -351,6 +351,7 @@ IMGUI_NODE_EDITOR_API void EndDelete();
 
 IMGUI_NODE_EDITOR_API void SetNodePosition(NodeId nodeId, const ImVec2& editorPosition);
 IMGUI_NODE_EDITOR_API void SetGroupSize(NodeId nodeId, const ImVec2& size);
+IMGUI_NODE_EDITOR_API ImVec2 GetGroupSize(NodeId nodeId); // Zero for a node that is not a group
 IMGUI_NODE_EDITOR_API ImVec2 GetNodePosition(NodeId nodeId);
 IMGUI_NODE_EDITOR_API ImVec2 GetNodeSize(NodeId nodeId);
 IMGUI_NODE_EDITOR_API void CenterNodeOnScreen(NodeId nodeId);

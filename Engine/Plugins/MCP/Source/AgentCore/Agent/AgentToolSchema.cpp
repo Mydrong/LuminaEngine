@@ -188,7 +188,7 @@ namespace Lumina::Agent
 
             case EPropertyTypeFlags::String:
                 // RawJson strings carry any JSON value, which the server re-encodes before the struct is read.
-                if (Property->HasMetadata("RawJson"))
+                if (Property->HasEditorFlag(EPropertyEditorFlags::RawJson))
                 {
                     Out["description"] = "Any JSON value.";
                     break;

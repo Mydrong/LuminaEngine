@@ -6,21 +6,19 @@
 #include "Nodes/MaterialNode_Function.h"
 #include "Assets/AssetTypes/Material/Material.h"
 #include "Assets/AssetTypes/MaterialFunction/MaterialFunction.h"
-#include "Assets/AssetManager/AssetManager.h"
 #include "Assets/AssetRegistry/AssetData.h"
 #include "Assets/AssetRegistry/AssetRegistry.h"
 #include "Assets/AssetTypes/Textures/Texture.h"
-#include "Core/Math/Hash/Hash.h"
 #include "Core/Object/Cast.h"
 #include "Core/Object/Class.h"
 #include "Core/Object/Package/Package.h"
-#include "Core/CoreEditorDelegates.h"
+#include "Core/Math/Hash/Hash.h"
 #include "Memory/Memory.h"
 #include "Paths/Paths.h"
 #include "Renderer/MaterialTypes.h"
+#include "Renderer/RenderManager.h"
 #include "Renderer/ShaderCompiler.h"
 #include "Renderer/ShaderLibrary.h"
-#include "Tools/UI/ImGui/ImGuiX.h"
 #include "Log/Log.h"
 
 namespace Lumina
@@ -106,28 +104,6 @@ namespace Lumina
         bool IsStageRequired(const CMaterial* Material, EMaterialShaderStage Stage)
         {
             return Material->IsStageRequired(Stage);
-        }
-
-        // Every stored permutation key stays valid while the switch manifest is unchanged.
-        bool HasSameStaticSwitches(const CMaterial* Material, const FMaterialCompiler& Compiler)
-        {
-            TVector<FMaterialStaticSwitch> Compiled;
-            Compiler.GetStaticSwitches(Compiled);
-            if (Compiled.size() != Material->StaticSwitches.size())
-            {
-                return false;
-            }
-
-            for (size_t i = 0; i < Compiled.size(); ++i)
-            {
-                const FMaterialStaticSwitch& Stored = Material->StaticSwitches[i];
-                if (Compiled[i].ParameterName != Stored.ParameterName || Compiled[i].BitIndex != Stored.BitIndex
-                    || Compiled[i].bDefaultValue != Stored.bDefaultValue)
-                {
-                    return false;
-                }
-            }
-            return true;
         }
 
         const char* StageDisplayName(EMaterialShaderStage Stage)
@@ -298,7 +274,7 @@ namespace Lumina
     }
 
     bool BeginMaterialGraphCompile(CMaterial* Material, CMaterialNodeGraph* Graph, FMaterialCompiler& Compiler,
-        FMaterialGraphCompileResult& Result, const FMaterialCompileTarget& Target)
+        FMaterialGraphCompileResult& Result, const FMaterialCompileTarget& Target, ETaskPriority Priority)
     {
         if (Material == nullptr || Graph == nullptr)
         {
@@ -337,10 +313,7 @@ namespace Lumina
         if (!Target.bPermutation)
         {
             // A recompile renumbers switch bits, so every key minted against the old manifest is void.
-            if (!Target.bKeepPermutations || !HasSameStaticSwitches(Material, Compiler))
-            {
-                Material->ClearPermutations();
-            }
+            Material->ClearPermutations();
             Material->SetReadyForRender(false);
         }
 
@@ -358,6 +331,23 @@ namespace Lumina
         // BuildShaders yields both the pixel and vertex source with the $MATERIAL_INPUTS tokens substituted.
         Compiler.BuildShaders(Result.PixelSource, Result.VertexSource, Material->GetMaterialType());
         Result.Stats = Compiler.GetStats();
+
+        // The template text is left out on purpose, since the artifact key adds the template hash and an engine shader edit must not change the asset.
+        if (!Target.bPermutation)
+        {
+            uint32 RequiredStages = 0;
+            for (size_t s = 0; s < (size_t)EMaterialShaderStage::Count; ++s)
+            {
+                RequiredStages |= IsStageRequired(Material, (EMaterialShaderStage)s) ? (1u << s) : 0u;
+            }
+
+            const uint64 Settings[] = { (uint64)Material->GetMaterialType(), (uint64)Material->GetBlendMode(),
+                                        Material->IsOITResolved() ? 1ull : 0ull, (uint64)RequiredStages };
+            uint64 Hash = Hash::GetHash64(Settings, sizeof(Settings), 0x534F5552434548ull);
+            Hash = Hash::GetHash64(Compiler.GetPixelGraphSource(), Hash);
+            Hash = Hash::GetHash64(Compiler.BuildVertexStageBody(Material->GetMaterialType()), Hash);
+            Result.SourceHash = Hash != 0 ? Hash : 1;
+        }
 
         IShaderCompiler* ShaderCompiler = GShaderCompiler;
 
@@ -392,40 +382,26 @@ namespace Lumina
         const uint64 TargetKey    = Target.Key;
         const uint32 TargetGen    = Target.Generation;
         Result.StageLog = MakeShared<FMaterialStageCommitLog>();
-        auto CommitStage = [Material, bPermutation, TargetKey, TargetGen, Log = Result.StageLog](EMaterialShaderStage Stage, uint64 SourceHash)
+        auto DispatchStage = [ShaderCompiler, Material, bPermutation, TargetKey, TargetGen, Priority, Log = Result.StageLog]
+            (const FString& Source, FShaderCompileOptions&& StageOptions, EMaterialShaderStage Stage)
         {
+            StageOptions.Priority = Priority;
             Log->Dispatched.fetch_or(1u << (uint32)Stage, std::memory_order_relaxed);
-            return [Material, Stage, SourceHash, bPermutation, TargetKey, TargetGen, Log](const FShaderHeader& Header)
+
+            auto Commit = [Material, Stage, bPermutation, TargetKey, TargetGen, Log](const FShaderHeader& Header)
             {
-                Log->Committed.fetch_or(1u << (uint32)Stage, std::memory_order_release);
                 const TSpan<const uint32> Spirv(Header.Binaries.data(), Header.Binaries.size());
                 if (bPermutation)
                 {
-                    Material->CommitPermutationStageIfCurrent(TargetKey, TargetGen, Stage, Spirv, SourceHash);
+                    Material->CommitPermutationStageIfCurrent(TargetKey, TargetGen, Stage, Spirv);
                 }
                 else
                 {
-                    Material->CommitShaderStage(Stage, Spirv, SourceHash);
+                    Material->CommitShaderStage(Stage, Spirv);
                 }
+                Log->Committed.fetch_or(1u << (uint32)Stage, std::memory_order_release);
             };
-        };
-
-        // Template files stay out of SourceHash, since the cache key folds in their current state on every load.
-        const uint64        GraphCodeHash = Compiler.GetGeneratedCodeHash();
-        const EMaterialType MaterialType  = Material->GetMaterialType();
-        auto CompileStage = [&](const FString& Source, FShaderCompileOptions&& StageOptions, EMaterialShaderStage Stage)
-        {
-            uint64 SourceHash = GraphCodeHash;
-            Hash::HashCombine(SourceHash, (uint64)Stage);
-            Hash::HashCombine(SourceHash, (uint64)MaterialType);
-            for (const FString& Define : StageOptions.MacroDefinitions)
-            {
-                Hash::HashCombine(SourceHash, FStringView(Define.data(), Define.size()));
-            }
-            SourceHash = SourceHash != 0 ? SourceHash : 1;
-
-            StageOptions.MaterialCacheKey = CMaterial::MakeShaderCacheKey(SourceHash);
-            ShaderCompiler->CompilerShaderRaw(Source, Move(StageOptions), CommitStage(Stage, SourceHash));
+            ShaderCompiler->CompilerShaderRaw(Source, Move(StageOptions), Move(Commit), Log->Stages.Track());
         };
 
         // A permutation was dropped whole above, so per-stage clears would only touch the master's.
@@ -448,7 +424,7 @@ namespace Lumina
 
         if (IsStageRequired(Material, EMaterialShaderStage::Vertex))
         {
-            CompileStage(Result.VertexSource, Move(VSOptions), EMaterialShaderStage::Vertex);
+            DispatchStage(Result.VertexSource, Move(VSOptions), EMaterialShaderStage::Vertex);
         }
 
         // Separate compiles rather than spec-constant variants, since they declare different OUTPUT types.
@@ -475,7 +451,7 @@ namespace Lumina
                 {
                     CompileOptions.MacroDefinitions.emplace_back(Geo.Define);
                 }
-                CompileStage(*Geo.Source, Move(CompileOptions), Geo.Stage);
+                DispatchStage(*Geo.Source, Move(CompileOptions), Geo.Stage);
             }
 
             if (IsStageRequired(Material, EMaterialShaderStage::VisBufferMeshMasked))
@@ -486,34 +462,34 @@ namespace Lumina
                 FShaderCompileOptions VisMaskedOptions; VisMaskedOptions.DebugName = MatName + " [VBMM]";
                 VisMaskedOptions.MacroDefinitions.emplace_back("VISBUFFER_MASKED_GEOM");
                 AddMaskedInterpolantDefines(MaskedIO, false, VisMaskedOptions.MacroDefinitions);
-                CompileStage(VisSource, Move(VisMaskedOptions), EMaterialShaderStage::VisBufferMeshMasked);
+                DispatchStage(VisSource, Move(VisMaskedOptions), EMaterialShaderStage::VisBufferMeshMasked);
 
                 const FString MaskedPSSource = Compiler.BuildPixelShaderFromTemplate(MeshShaderDir + "VisBufferMaskedPixel.slang");
                 FShaderCompileOptions MaskedPSOptions; MaskedPSOptions.DebugName = MatName + " [MVBP]";
                 MaskedPSOptions.MacroDefinitions.emplace_back("VISBUFFER_PRIMID");
                 AddMaskedInterpolantDefines(MaskedIO, false, MaskedPSOptions.MacroDefinitions);
-                CompileStage(MaskedPSSource, Move(MaskedPSOptions), EMaterialShaderStage::MaskedVisBufferPixel);
+                DispatchStage(MaskedPSSource, Move(MaskedPSOptions), EMaterialShaderStage::MaskedVisBufferPixel);
 
                 // The shadow lane too, so a cut-out casts its own silhouette and not its quad.
                 FShaderCompileOptions ShadowMaskedOptions; ShadowMaskedOptions.DebugName = MatName + " [MSSM]";
                 ShadowMaskedOptions.MacroDefinitions.emplace_back("MESHLET_MESH_MASKED_SHADOW");
                 AddMaskedInterpolantDefines(MaskedIO, true, ShadowMaskedOptions.MacroDefinitions);
-                CompileStage(MeshSource, Move(ShadowMaskedOptions), EMaterialShaderStage::MeshShadowMasked);
+                DispatchStage(MeshSource, Move(ShadowMaskedOptions), EMaterialShaderStage::MeshShadowMasked);
 
                 const FString ShadowPSSource = Compiler.BuildPixelShaderFromTemplate(MeshShaderDir + "ShadowMaskedPixel.slang");
                 FShaderCompileOptions ShadowPSOptions; ShadowPSOptions.DebugName = MatName + " [SMP]";
                 AddMaskedInterpolantDefines(MaskedIO, true, ShadowPSOptions.MacroDefinitions);
-                CompileStage(ShadowPSSource, Move(ShadowPSOptions), EMaterialShaderStage::ShadowMaskedPixel);
+                DispatchStage(ShadowPSSource, Move(ShadowPSOptions), EMaterialShaderStage::ShadowMaskedPixel);
             }
 
             const FString DeferredSource = Compiler.BuildDeferredShaderFromTemplate(MeshShaderDir + "DeferredMaterial.slang", EMaterialType::PBR);
             FShaderCompileOptions DeferredOptions; DeferredOptions.DebugName = MatName + " [DM]";
 
             // The runtime model check lives in ShadeGBuffer, so forward and deferred cannot drift apart.
-            CompileStage(DeferredSource, Move(DeferredOptions), EMaterialShaderStage::Deferred);
+            DispatchStage(DeferredSource, Move(DeferredOptions), EMaterialShaderStage::Deferred);
         }
 
-        CompileStage(Result.PixelSource, Move(Options), EMaterialShaderStage::Pixel);
+        DispatchStage(Result.PixelSource, Move(Options), EMaterialShaderStage::Pixel);
 
 
         return true;
@@ -647,21 +623,35 @@ namespace Lumina
 
         // Stamped before PostLoad, which compares it and queues stale materials for auto-recompile.
         Material->CompiledTemplateHash = CMaterial::GetShaderTemplateHash();
+        if (!Target.bPermutation)
+        {
+            Material->SourceHash = Result.SourceHash;
+        }
 
         Material->PostLoad();
+
+        // Published so the next load, on this machine or any sharing the cache, skips the compile.
+        if (Target.bPermutation)
+        {
+            Material->StorePermutationInArtifactCache(Target.Key);
+        }
+        else
+        {
+            Material->StoreShadersInArtifactCache();
+        }
 
         Result.bSuccess = true;
     }
 
-    FMaterialGraphCompileResult CompileMaterialGraph(CMaterial* Material, CMaterialNodeGraph* Graph, const FMaterialCompileTarget& Target)
+    FMaterialGraphCompileResult CompileMaterialGraph(CMaterial* Material, CMaterialNodeGraph* Graph)
     {
         FMaterialGraphCompileResult Result;
         FMaterialCompiler Compiler;
 
-        if (BeginMaterialGraphCompile(Material, Graph, Compiler, Result, Target))
+        if (BeginMaterialGraphCompile(Material, Graph, Compiler, Result))
         {
-            GShaderCompiler->Flush();
-            FinishMaterialGraphCompile(Material, Compiler, Result, Target);
+            Result.StageLog->Stages.Wait();
+            FinishMaterialGraphCompile(Material, Compiler, Result);
             CollectGrassOutputs(Material, Graph);
         }
 
@@ -674,84 +664,36 @@ namespace Lumina
         return Result;
     }
 
-    FMaterialGraphCompileResult CompileMaterialPermutation(CMaterial* Material, CMaterialNodeGraph* Graph, uint64 Key)
+    // The graph is saved beside the material in its own package, under a fixed name.
+    CMaterialNodeGraph* LoadMaterialGraph(CMaterial* Material)
     {
-        FMaterialGraphCompileResult Result;
-        FMaterialCompileTarget      Target;
-
-        if (!MakeMaterialPermutationTarget(Material, Key, Target))
+        CPackage* Package = (Material != nullptr) ? Material->GetPackage() : nullptr;
+        if (Package == nullptr)
         {
-            return Result;
+            return nullptr;
         }
 
-        FMaterialCompiler Compiler;
-        if (BeginMaterialGraphCompile(Material, Graph, Compiler, Result, Target))
+        FString GraphName = "AssetMaterialGraph";
+        CMaterialNodeGraph* Graph = Cast<CMaterialNodeGraph>(Package->LoadObjectByName(GraphName));
+        if (Graph == nullptr)
         {
-            GShaderCompiler->Flush();
-            FinishMaterialGraphCompile(Material, Compiler, Result, Target);
+            return nullptr;
         }
 
-        // Deliberately not MarkCompiled, since the graph is unchanged and its default stages still current.
-        return Result;
-    }
-
-    namespace
-    {
-        // Dispatches then POLLS across frames, since Flush would park the game thread for the compile.
-        struct FPendingMaterialRecompile
-        {
-            // The per-stage commit callbacks capture the material RAW, so this ref has to outlive the wait.
-            TStrongObjectPtr<CMaterial>   Material;
-            // Finish reads bound textures and parameters back off it, so it outlives the dispatch.
-            TUniquePtr<FMaterialCompiler> Compiler;
-            FMaterialGraphCompileResult   Result;
-            TStrongObjectPtr<CMaterialNodeGraph> Graph;
-            uint64                        GraphContentVersion = 0;
-            bool                          bFunctionChange = false;
-            bool                          bSaveWhenComplete = false;
-        };
-
-        FPendingMaterialRecompile GPendingMaterialRecompile;
-        TVector<FGuid> GFunctionRecompileQueue;
-        THashSet<FGuid> GQueuedFunctionMaterials;
-
-        struct FPendingPermutationCompile
-        {
-            TStrongObjectPtr<CMaterial>   Material;
-            TUniquePtr<FMaterialCompiler> Compiler;
-            FMaterialGraphCompileResult   Result;
-            FMaterialCompileTarget        Target;
-            // Rebuilding what the asset already stores, so nothing new needs saving.
-            bool                          bRebuild = false;
-        };
-
-        FPendingPermutationCompile GPendingPermutation;
-
-        // The graph is saved beside the material in its own package, under a fixed name.
-        CMaterialNodeGraph* LoadMaterialGraph(CMaterial* Material)
-        {
-            CPackage* Package = (Material != nullptr) ? Material->GetPackage() : nullptr;
-            if (Package == nullptr)
-            {
-                return nullptr;
-            }
-
-            FString GraphName = "AssetMaterialGraph";
-            CMaterialNodeGraph* Graph = Cast<CMaterialNodeGraph>(Package->LoadObjectByName(GraphName));
-            if (Graph == nullptr)
-            {
-                return nullptr;
-            }
-
-            // The graph's PostLoad already restored wiring, and Initialize only creates the drawing context.
-            Graph->SetMaterial(Material);
-            Graph->ValidateGraph();
-            return Graph;
-        }
+        // The graph's PostLoad already restored wiring, and Initialize only creates the drawing context.
+        Graph->SetMaterial(Material);
+        Graph->ValidateGraph();
+        return Graph;
     }
 
     void QueueMaterialFunctionRecompiles(const FGuid& FunctionGUID)
     {
+        FRenderManager* Renderer = TryRender();
+        if (Renderer == nullptr)
+        {
+            return;
+        }
+
         FAssetRegistry& Registry = FAssetRegistry::Get();
         const FName MaterialClass = CMaterial::StaticClass()->GetName();
         const FName FunctionClass = CMaterialFunction::StaticClass()->GetName();
@@ -772,10 +714,9 @@ namespace Lumina
                         Functions.push_back(Referencer->AssetGUID);
                     }
                 }
-                else if (Referencer->AssetClass == MaterialClass &&
-                         GQueuedFunctionMaterials.insert(Referencer->AssetGUID).second)
+                else if (Referencer->AssetClass == MaterialClass)
                 {
-                    GFunctionRecompileQueue.push_back(Referencer->AssetGUID);
+                    Renderer->GetMaterialCompileQueue().QueueFunctionRecompile(Referencer->AssetGUID);
                 }
             }
         }
@@ -783,27 +724,7 @@ namespace Lumina
 
     bool RecompileMaterialIfStale(CMaterial* Material, FString& OutError)
     {
-        if (Material == nullptr)
-        {
-            return true;
-        }
-
-        // A cooked game cannot compile, so a stored permutation the cache could not refill is built here too.
-        auto GatherMissingPermutations = [Material]()
-        {
-            TVector<uint64> Keys;
-            for (const FMaterialShaderPermutation& Permutation : Material->Permutations)
-            {
-                if (Material->IsPermutationMissingBinaries(Permutation.Key))
-                {
-                    Keys.push_back(Permutation.Key);
-                }
-            }
-            return Keys;
-        };
-
-        const bool bStale = Material->CompiledTemplateHash != CMaterial::GetShaderTemplateHash();
-        if (!bStale && GatherMissingPermutations().empty())
+        if (Material == nullptr || Material->CompiledTemplateHash == CMaterial::GetShaderTemplateHash())
         {
             return true;
         }
@@ -815,235 +736,57 @@ namespace Lumina
             return false;
         }
 
-        if (bStale)
+        const FMaterialGraphCompileResult Result = CompileMaterialGraph(Material, Graph);
+        if (!Result.bSuccess)
         {
-            FMaterialCompileTarget Target;
-            Target.bKeepPermutations = true;
-
-            const FMaterialGraphCompileResult Result = CompileMaterialGraph(Material, Graph, Target);
-            if (!Result.bSuccess)
-            {
-                OutError = Lumina::Format("its graph failed to compile with {} error(s)", Result.Errors.size());
-                return false;
-            }
-        }
-
-        for (uint64 Key : GatherMissingPermutations())
-        {
-            if (!CompileMaterialPermutation(Material, Graph, Key).bSuccess)
-            {
-                OutError = Lumina::Format("its static switch permutation {:016X} failed to compile", Key);
-                return false;
-            }
+            OutError = Lumina::Format("its graph failed to compile with {} error(s)", Result.Errors.size());
+            return false;
         }
         return true;
     }
 
-    void ProcessMaterialPermutationRequests()
+    uint32 EnsureMaterialPermutations(CMaterial* Material, TSpan<const uint64> Keys)
     {
-        // One at a time, since a permutation is a full multi-stage compile like any other.
-        if (GPendingPermutation.Compiler != nullptr)
+        if (Material == nullptr)
         {
-            if (GShaderCompiler->HasPendingRequests())
+            return (uint32)Keys.size();
+        }
+
+        struct FPermutationCompile
+        {
+            FMaterialCompiler           Compiler;
+            FMaterialGraphCompileResult Result;
+            FMaterialCompileTarget      Target;
+        };
+
+        uint32 Failed = 0;
+        CMaterialNodeGraph* Graph = nullptr;
+        TVector<TUniquePtr<FPermutationCompile>> Compiles;
+        for (uint64 Key : Keys)
+        {
+            if (Material->LoadPermutationFromArtifactCache(Key))
             {
-                return;
+                continue;
             }
 
-            CMaterial* Material = GPendingPermutation.Material.Get();
-            FinishMaterialGraphCompile(Material, *GPendingPermutation.Compiler, GPendingPermutation.Result,
-                GPendingPermutation.Target);
-
-            CPackage* Package   = (Material != nullptr) ? Material->GetPackage() : nullptr;
-            const FString Name  = (Material != nullptr) ? FString(Material->GetName().c_str()) : FString("<destroyed>");
-            const bool bSuccess = GPendingPermutation.Result.bSuccess;
-            const bool bRebuild = GPendingPermutation.bRebuild;
-
-            // A recompile that superseded this permutation fails it with no errors, and says so itself.
-            const bool bReportable = !GPendingPermutation.Result.Errors.empty();
-
-            GPendingPermutation = {};
-
-            if (bSuccess && Package != nullptr && !bRebuild)
+            Graph = Graph != nullptr ? Graph : LoadMaterialGraph(Material);
+            TUniquePtr<FPermutationCompile> Compile = MakeUnique<FPermutationCompile>();
+            if (Graph == nullptr || !MakeMaterialPermutationTarget(Material, Key, Compile->Target) ||
+                !BeginMaterialGraphCompile(Material, Graph, Compile->Compiler, Compile->Result, Compile->Target))
             {
-                // The permutation is stored on the master, so it is the master that has to be saved.
-                Package->MarkDirty();
+                ++Failed;
+                continue;
             }
-            else if (!bSuccess && bReportable)
-            {
-                ImGuiX::Notifications::NotifyError("Material '{0}': a static switch permutation failed to compile", Name.c_str());
-            }
-            return;
+            Compiles.push_back(Move(Compile));
         }
 
-        TStrongObjectPtr<CMaterial> Material;
-        uint64                      Key      = 0;
-        bool                        bRebuild = false;
-        if (!CMaterial::PopPermutationRequest(Material, Key, bRebuild))
+        // Every permutation is dispatched before the first wait, so their stages share the workers.
+        for (const TUniquePtr<FPermutationCompile>& Compile : Compiles)
         {
-            return;
+            Compile->Result.StageLog->Stages.Wait();
+            FinishMaterialGraphCompile(Material, Compile->Compiler, Compile->Result, Compile->Target);
+            Failed += Compile->Result.bSuccess ? 0u : 1u;
         }
-
-        // Requested before the material finished loading or recompiling, or satisfied while queued.
-        if (!Material.IsValid() || !Material->IsReadyForRender())
-        {
-            return;
-        }
-        if (bRebuild ? !Material->IsPermutationMissingBinaries(Key) : Material->HasPermutation(Key))
-        {
-            return;
-        }
-
-        FMaterialCompileTarget Target;
-        if (!MakeMaterialPermutationTarget(Material.Get(), Key, Target))
-        {
-            return;
-        }
-
-        CMaterialNodeGraph* Graph = LoadMaterialGraph(Material.Get());
-        if (Graph == nullptr)
-        {
-            LOG_WARN("Material '{0}': an instance selects a static switch permutation this material has not "
-                     "compiled, and it has no saved graph to compile it from. The instance draws with every "
-                     "switch at its default.", Material->GetName().c_str());
-            return;
-        }
-
-        TUniquePtr<FMaterialCompiler> Compiler = MakeUnique<FMaterialCompiler>();
-        FMaterialGraphCompileResult   Result;
-
-        if (!BeginMaterialGraphCompile(Material.Get(), Graph, *Compiler, Result, Target))
-        {
-            ImGuiX::Notifications::NotifyError("Material '{0}': a static switch permutation failed to compile",
-                Material->GetName().c_str());
-            return;
-        }
-
-        GPendingPermutation.Material = Material;
-        GPendingPermutation.Compiler = Move(Compiler);
-        GPendingPermutation.Result   = Move(Result);
-        GPendingPermutation.Target   = Move(Target);
-        GPendingPermutation.bRebuild = bRebuild;
-    }
-
-    void ProcessMaterialRecompiles()
-    {
-        // One material at a time keeps the swarm's work bounded and the poll below unambiguous.
-        if (GPendingMaterialRecompile.Compiler != nullptr)
-        {
-            // Global across every compile, so an unrelated burst delays this finish but never commits wrong.
-            if (GShaderCompiler->HasPendingRequests())
-            {
-                return;
-            }
-
-            CMaterial* Material = GPendingMaterialRecompile.Material.Get();
-            FinishMaterialGraphCompile(Material, *GPendingMaterialRecompile.Compiler, GPendingMaterialRecompile.Result);
-            const bool bGraphUnchanged = GPendingMaterialRecompile.Graph != nullptr &&
-                GPendingMaterialRecompile.Graph->GetTreeContentVersion() == GPendingMaterialRecompile.GraphContentVersion;
-            if (GPendingMaterialRecompile.bFunctionChange && bGraphUnchanged)
-            {
-                GPendingMaterialRecompile.Graph->MarkCompiled();
-            }
-
-            // Read before the reset, since the material may be the only thing still naming the package.
-            CPackage* Package = (Material != nullptr) ? Material->GetPackage() : nullptr;
-            const FString Name = (Material != nullptr) ? FString(Material->GetName().c_str()) : FString("<destroyed>");
-            const bool bSuccess = GPendingMaterialRecompile.Result.bSuccess;
-            const bool bFunctionChange = GPendingMaterialRecompile.bFunctionChange;
-            const bool bSaveWhenComplete = GPendingMaterialRecompile.bSaveWhenComplete;
-            const bool bSuperseded = Material != nullptr && GQueuedFunctionMaterials.contains(Material->GetGUID());
-
-            GPendingMaterialRecompile = {};
-
-            // A template-only rebuild leaves the saved graph and stage hashes as they were, so there is nothing to save.
-            if (bSuccess && Package != nullptr && !bFunctionChange)
-            {
-                LOG_INFO("Material '{0}' rebuilt its shaders from its graph", Name.c_str());
-            }
-            else if (bSuccess && Package != nullptr)
-            {
-                Package->MarkDirty();
-                if (bSaveWhenComplete && bGraphUnchanged && !bSuperseded)
-                {
-                    FCoreEditorDelegates::OnAssetPreSave.Broadcast(Material);
-                    if (CPackage::SavePackage(Package, Package->GetPackagePath()))
-                    {
-                        FAssetRegistry::Get().AssetSaved(Material);
-                        FCoreEditorDelegates::OnAssetSaved.Broadcast(Material);
-                        LOG_INFO("Material '{0}' recompiled and saved after a material function changed", Name.c_str());
-                    }
-                    else
-                    {
-                        ImGuiX::Notifications::NotifyError("Material '{0}' recompiled but could not be saved", Name.c_str());
-                    }
-                }
-                else
-                {
-                    ImGuiX::Notifications::NotifyInfo("Material '{0}' recompiled after a material function changed; save to keep", Name.c_str());
-                }
-            }
-            else
-            {
-                ImGuiX::Notifications::NotifyError("Material '{0}' failed to recompile", Name.c_str());
-            }
-            return;
-        }
-
-        const bool bFunctionChange = !GFunctionRecompileQueue.empty();
-        TStrongObjectPtr<CMaterial> Material;
-        if (bFunctionChange)
-        {
-            const FGuid MaterialGUID = GFunctionRecompileQueue.back();
-            GFunctionRecompileQueue.pop_back();
-            GQueuedFunctionMaterials.erase(MaterialGUID);
-            const FAssetData* Data = FAssetRegistry::Get().GetAssetByGUID(MaterialGUID);
-            if (Data != nullptr)
-            {
-                Material = Cast<CMaterial>(FAssetManager::Get().LoadAssetSynchronous(Data->Path, MaterialGUID));
-            }
-        }
-        else
-        {
-            Material = CMaterial::PopStaleTemplateMaterial();
-        }
-
-        if (!Material.IsValid() || (!bFunctionChange && Material->CompiledTemplateHash == CMaterial::GetShaderTemplateHash()))
-        {
-            return;
-        }
-
-        CMaterialNodeGraph* Graph = LoadMaterialGraph(Material.Get());
-        if (Graph == nullptr)
-        {
-            LOG_WARN("Material '{0}' has stale or uncached shaders but no saved graph to rebuild them from", Material->GetName().c_str());
-            return;
-        }
-
-        const bool bSaveWhenComplete = bFunctionChange && !Material->GetPackage()->IsDirty() && !Graph->NeedsCompile();
-
-        TUniquePtr<FMaterialCompiler> Compiler = MakeUnique<FMaterialCompiler>();
-        FMaterialGraphCompileResult   Result;
-
-        FMaterialCompileTarget Target;
-        Target.bKeepPermutations = true;
-
-        // A graph that failed up front has nothing to wait for and would hold the slot until unrelated work.
-        if (!BeginMaterialGraphCompile(Material.Get(), Graph, *Compiler, Result, Target))
-        {
-            if (bFunctionChange)
-            {
-                Graph->MarkCompiled();
-            }
-            ImGuiX::Notifications::NotifyError("Material '{0}' failed to recompile", Material->GetName().c_str());
-            return;
-        }
-
-        GPendingMaterialRecompile.Material        = Material;
-        GPendingMaterialRecompile.Compiler        = Move(Compiler);
-        GPendingMaterialRecompile.Result          = Move(Result);
-        GPendingMaterialRecompile.Graph           = Graph;
-        GPendingMaterialRecompile.GraphContentVersion = Graph->GetTreeContentVersion();
-        GPendingMaterialRecompile.bFunctionChange = bFunctionChange;
-        GPendingMaterialRecompile.bSaveWhenComplete = bSaveWhenComplete;
+        return Failed;
     }
 }

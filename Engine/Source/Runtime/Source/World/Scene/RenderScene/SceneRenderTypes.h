@@ -210,6 +210,7 @@ namespace Lumina
         NoContactShadows        = BIT(12),  // thin geometry whose screen-space contact march only returns noise
         CastFarShadow           = BIT(13),  // also drawn into the sun's far cascade, which every other caster skips
         HasDistanceField        = BIT(14),  // the mesh carries a distance field the sun's far shadows can trace
+        Foliage                 = BIT(15),  // scattered grass and painted foliage, which rain splashes pass through
     };
 
     ENUM_CLASS_FLAGS(EInstanceFlags);
@@ -1162,6 +1163,7 @@ namespace Lumina
             Cascade         = BIT(7),
             FarCascade      = BIT(8),
             OrthographicLOD = BIT(9),
+            NoFoliage       = BIT(10),
         };
     }
 
@@ -1343,6 +1345,37 @@ namespace Lumina
         float _Pad0             = 0.0f;
     };
 
+    // Mirrors FWeatherData in Common.slang. Absent unless a weather component is rendering this frame.
+    struct FWeatherGPU
+    {
+        FMatrix4 RainViewProjection;
+        FMatrix4 RainInverseViewProjection;
+        // xyz = fall direction, w = average fall speed in meters per second.
+        FVector4 RainFall;
+        // xy = integrated wind offset, z = wind influence, w = turbulence.
+        FVector4 RainWind;
+        // x = intensity, y = drops per cubic meter, z = drop size in mm, w = size variation.
+        FVector4 RainDrops;
+        // x = streak length, y = brightness, z = opacity, w = haze density.
+        FVector4 RainLook;
+        // rgb = tint, w = drop radius around the camera.
+        FVector4 RainTint;
+        // x = wetness, y = puddle level, z = puddle coverage, w = puddle scale.
+        FVector4 Surface;
+        // x = ripple intensity, y = drip intensity, z = wrapped weather time, w = splash size.
+        FVector4 Surface2;
+        // xy = current wind in meters per second, z = vertical fall offset, w = drop field tile size.
+        FVector4 Motion;
+        uint32   RainOcclusionIndex = Constants::kIndexNoneU32;
+        // World depth range of the occlusion map, which turns its depth delta into meters.
+        float    OcclusionDepthRange = 1.0f;
+        float    OcclusionTexelWorld = 0.1f;
+        uint32   NumDrops = 0;
+        uint32   DebugMode = 0;
+        uint32   _Pad[3] = {};
+    };
+    static_assert(sizeof(FWeatherGPU) == 288, "FWeatherGPU must match FWeatherData in Common.slang.");
+
     struct FSceneGlobalData
     {
         FCameraData       CameraData;
@@ -1392,7 +1425,11 @@ namespace Lumina
         float           FogCloudShadowExtent = 0.0f;
         // The additive emission layer decals write, ~0u when no decal rendered.
         uint32          DBufferDIndex        = Constants::kIndexNoneU32;
+
+        // Empty unless weather is rendering, which is the one check every surface pays.
+        RHI::TGPUSpan<FWeatherGPU> Weather;
     };
+    static_assert(offsetof(FSceneGlobalData, Weather) % 16 == 0, "Weather must follow DBufferDIndex with no C++ padding.");
     // alignas(16) here but 4-byte aligned in scalar layout, so C++ must not pad in front of it, which the 16 check alone cannot see.
     static_assert(offsetof(FSceneGlobalData, FogParams) % 16 == 0 &&
                   offsetof(FSceneGlobalData, FogParams) == offsetof(FSceneGlobalData, _PadFogParams) + sizeof(FSceneGlobalData::_PadFogParams),

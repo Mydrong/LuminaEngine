@@ -12,6 +12,7 @@
 #include "Assets/AssetTypes/Mesh/Skeleton/Skeleton.h"
 #include "Assets/AssetTypes/Mesh/StaticMesh/StaticMesh.h"
 #include "Renderer/MeshData.h"
+#include "World/Entity/Components/FollowerPoseComponent.h"
 #include "World/Entity/Components/SkeletalMeshComponent.h"
 #include "World/Entity/Components/StaticMeshComponent.h"
 #include "World/Entity/Components/TransformComponent.h"
@@ -275,5 +276,55 @@ namespace Lumina::SkeletalUtils
                 Rot[4] = Packed[4];
             }
         }
+    }
+
+    namespace
+    {
+        // An unset leader is the nearest ancestor with a skeletal mesh, which is how a modular piece is usually attached.
+        ECS::FEntity DirectPoseLeader(const ECS::FRegistry& Registry, ECS::FEntity Entity, const SFollowerPoseComponent& Follower)
+        {
+            if (Follower.Leader != ECS::NullEntity)
+            {
+                return Follower.Leader;
+            }
+
+            const ECS::FHierarchy& Hierarchy = Registry.GetHierarchy();
+            for (ECS::FEntity Parent = Hierarchy.GetParent(Entity); Parent != ECS::NullEntity; Parent = Hierarchy.GetParent(Parent))
+            {
+                if (Registry.HasAll<SSkeletalMeshComponent>(Parent))
+                {
+                    return Parent;
+                }
+            }
+            return ECS::NullEntity;
+        }
+    }
+
+    ECS::FEntity ResolvePoseLeader(const ECS::FRegistry& Registry, ECS::FEntity Follower)
+    {
+        // Deeper than any real outfit, and what stops a cycle.
+        constexpr int32 kMaxHops = 8;
+
+        ECS::FEntity Cursor = Follower;
+        for (int32 Hop = 0; Hop < kMaxHops; ++Hop)
+        {
+            const SFollowerPoseComponent* Link = Registry.TryGet<SFollowerPoseComponent>(Cursor);
+            if (Link == nullptr)
+            {
+                return Cursor == Follower ? ECS::NullEntity : Cursor;
+            }
+
+            const ECS::FEntity Next = DirectPoseLeader(Registry, Cursor, *Link);
+            if (Next == ECS::NullEntity || !Registry.IsValid(Next))
+            {
+                return Cursor == Follower ? ECS::NullEntity : Cursor;
+            }
+            if (Next == Follower || Next == Cursor)
+            {
+                return ECS::NullEntity;
+            }
+            Cursor = Next;
+        }
+        return ECS::NullEntity;
     }
 }

@@ -12,6 +12,7 @@
 #include "UI/Properties/PropertyTable.h"
 #include "Session/SessionOps.h"
 #include "UI/Tools/EditorToolContext.h"
+#include "UI/Widgets/EntityScriptPicker.h"
 
 namespace Lumina
 {
@@ -35,27 +36,6 @@ namespace Lumina
             }
             OutShort = View.substr(Dot + 1);
             OutNamespace = View.substr(0, Dot);
-        }
-
-        // Rebuilt per frame, since this is an inspector and the set changes on every script hot reload.
-        void GatherScriptClasses(TVector<CClass*>& Out)
-        {
-            Out.clear();
-            CClass* Base = CEntityScript::StaticClass();
-
-            for (TObjectIterator<CClass> It; It; ++It)
-            {
-                CClass* Class = *It;
-                if (Class == nullptr || Class == Base || !Class->IsChildOf(Base))
-                {
-                    continue;
-                }
-                if (Class->HasAnyFlag(OF_DefaultObject) || Class->HasAnyFlag(OF_MarkedDestroy))
-                {
-                    continue;
-                }
-                Out.push_back(Class);
-            }
         }
     }
 
@@ -224,40 +204,18 @@ namespace Lumina
             ImGui::PopID();
         }
 
-        // Add picker. Listing classes rather than C# type names is what makes a C++ script selectable here.
-        TVector<CClass*> Classes;
-        GatherScriptClasses(Classes);
-
         ImGui::Separator();
         ImGui::Spacing();
 
-        // Sized to its label rather than the panel: this is an action, and a full-width field reads as one
-        // more empty property with the arrow stranded at the far edge.
-        const char* AddLabel = LE_ICON_PLUS " Add Script";
-        const float AddWidth = ImGui::CalcTextSize(AddLabel).x
-            + ImGui::GetFrameHeight()
-            + ImGui::GetStyle().FramePadding.x * 3.0f;
-        ImGui::SetNextItemWidth(AddWidth);
+        // Filed by source folder, because a project accumulates far more script classes than a flat list stays usable for.
+        ScriptPicker.SearchHint = "Search scripts...";
+        ScriptPicker.ItemNoun   = "scripts";
+        ScriptPicker.TrailingCategory = EntityScriptPicker::NativeCategory;
+        const FPickerItem* Picked = ScriptPicker.DrawButton("##AddEntityScript", LE_ICON_PLUS " Add Script", &EntityScriptPicker::GatherItems);
 
-        // Searchable, because a project accumulates far more script classes than a flat list stays usable for.
-        const int32 Picked = ImGuiX::SearchableCombo("##AddEntityScript", AddLabel,
-            (int32)Classes.size(), Constants::kIndexNone,
-            [&Classes](int32 ItemIndex) -> FFixedString
-            {
-                FStringView Short;
-                FStringView Namespace;
-                const FString Name = Classes[ItemIndex]->GetName().ToString();
-                SplitTypeName(Name, Short, Namespace);
-                return Namespace.empty()
-                    ? FFixedString(Short.data(), Short.size())
-                    : FFixedString(Lumina::Format("{}   {}", FString(Short.data(), Short.size()),
-                        FString(Namespace.data(), Namespace.size())).c_str());
-            },
-            GScriptIcon);
-
-        if (Picked != Constants::kIndexNone && Picked < (int32)Classes.size())
+        CClass* Class = Picked != nullptr ? FindObject<CClass>(FName(Picked->Key)) : nullptr;
+        if (Class != nullptr)
         {
-            CClass* Class = Classes[Picked];
             PendingMutation = [Component, Class]
             {
                 // The driver adopts an owner-less script next tick, the same path a deserialized script takes.

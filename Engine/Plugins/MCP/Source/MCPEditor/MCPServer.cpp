@@ -63,7 +63,7 @@ namespace Lumina::MCP
             ParamsType->ForEachProperty<FProperty>([&Arguments](FProperty* Property)
             {
                 if (Property == nullptr || Property->GetType() != EPropertyTypeFlags::String
-                    || !Property->HasMetadata("RawJson"))
+                    || !Property->HasEditorFlag(EPropertyEditorFlags::RawJson))
                 {
                     return;
                 }

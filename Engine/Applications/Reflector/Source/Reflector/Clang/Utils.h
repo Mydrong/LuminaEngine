@@ -161,6 +161,39 @@ namespace Lumina::ClangUtils
         return Result;
     }
 
+    // The specifier text a reflection macro attached to this declaration as an annotation, false when it has none.
+    inline bool TryGetAnnotation(const CXCursor& Cursor, std::string_view Prefix, std::string& OutSpecifiers)
+    {
+        struct FSearch
+        {
+            std::string_view Prefix;
+            std::string*     Out;
+            bool             bFound = false;
+        };
+
+        FSearch Search{ Prefix, &OutSpecifiers };
+        clang_visitChildren(Cursor, [](CXCursor Child, CXCursor, CXClientData Data) -> CXChildVisitResult
+        {
+            FSearch& State = *static_cast<FSearch*>(Data);
+            if (clang_getCursorKind(Child) != CXCursor_AnnotateAttr)
+            {
+                return CXChildVisit_Continue;
+            }
+
+            const std::string Annotation = GetCursorSpelling(Child);
+            if (!Annotation.starts_with(State.Prefix))
+            {
+                return CXChildVisit_Continue;
+            }
+
+            *State.Out = Annotation.substr(State.Prefix.size());
+            State.bFound = true;
+            return CXChildVisit_Break;
+        }, &Search);
+
+        return Search.bFound;
+    }
+
     // True when libclang fell back to its location-derived placeholder (e.g. "(unnamed struct at ...)"),
     // which would leak the build path into generated identifiers and break consumers.
     inline bool IsLibclangPlaceholderName(std::string_view Name)

@@ -63,8 +63,8 @@ namespace
         OutShimSize = Minted->GetSize();
         Scripting::AppendScriptPropertiesToClass(Minted, Schema);
 
-        // Drain deferred registration FIRST, since Link latches and would lose the base's properties.
-        ProcessNewlyLoadedCObjects();
+        // Register the reflected types first, since Link latches and would lose the base's properties.
+        RegisterPendingTypes();
         Minted->GetDefaultObject();   // Link (chains supers) + CDO at the enlarged size
         return Minted;
     }
@@ -147,7 +147,7 @@ TEST(ScriptClassProperties, ScriptPropertiesRoundTripThroughTheStockSerializer)
     {
         FMemoryWriter Writer(Bytes);
         FObjectProxyArchiver Ar(Writer, /*bLoadIfFindFails*/ false);
-        Sub->SerializeTaggedProperties(Ar, Source);
+        Sub->SerializeProperties(Ar, Source);
     }
     ASSERT_FALSE(Bytes.empty());
 
@@ -156,7 +156,7 @@ TEST(ScriptClassProperties, ScriptPropertiesRoundTripThroughTheStockSerializer)
     {
         FMemoryReader Reader(Bytes);
         FObjectProxyArchiver Ar(Reader, /*bLoadIfFindFails*/ true);
-        Sub->SerializeTaggedProperties(Ar, Restored);
+        Sub->SerializeProperties(Ar, Restored);
     }
 
     EXPECT_FLOAT_EQ(*Speed->GetValuePtr<float>(Restored), 3.5f) << "script property did not round-trip";
@@ -226,7 +226,7 @@ TEST(ScriptClassProperties, StringPropertiesRoundTripThroughTheStockSerializer)
     {
         FMemoryWriter Writer(Bytes);
         FObjectProxyArchiver Ar(Writer, /*bLoadIfFindFails*/ false);
-        Sub->SerializeTaggedProperties(Ar, Source);
+        Sub->SerializeProperties(Ar, Source);
     }
     ASSERT_FALSE(Bytes.empty());
 
@@ -235,7 +235,7 @@ TEST(ScriptClassProperties, StringPropertiesRoundTripThroughTheStockSerializer)
     {
         FMemoryReader Reader(Bytes);
         FObjectProxyArchiver Ar(Reader, /*bLoadIfFindFails*/ true);
-        Sub->SerializeTaggedProperties(Ar, Restored);
+        Sub->SerializeProperties(Ar, Restored);
     }
 
     EXPECT_STREQ(Label->GetValuePtr<FString>(Restored)->c_str(), "round trip me");
@@ -472,7 +472,7 @@ TEST(ScriptClassProperties, AppendedContainersRoundTripThroughTheStockSerializer
     {
         FMemoryWriter Writer(Bytes);
         FObjectProxyArchiver Ar(Writer, /*bLoadIfFindFails*/ false);
-        Sub->SerializeTaggedProperties(Ar, Source);
+        Sub->SerializeProperties(Ar, Source);
     }
     ASSERT_FALSE(Bytes.empty());
 
@@ -481,7 +481,7 @@ TEST(ScriptClassProperties, AppendedContainersRoundTripThroughTheStockSerializer
     {
         FMemoryReader Reader(Bytes);
         FObjectProxyArchiver Ar(Reader, /*bLoadIfFindFails*/ true);
-        Sub->SerializeTaggedProperties(Ar, Restored);
+        Sub->SerializeProperties(Ar, Restored);
     }
 
     void* RestoredArray = Ints->GetValuePtr<uint8>(Restored);
@@ -688,7 +688,7 @@ TEST(ScriptClassReload, ValuesSurviveARebuildThroughTheStockSerializer)
     {
         FMemoryWriter Writer(Buffer);
         FObjectProxyArchiver Ar(Writer, /*bLoadIfFindFails*/ false);
-        Sub->SerializeTaggedProperties(Ar, Authored);
+        Sub->SerializeProperties(Ar, Authored);
     }
 
     // The instance has to be gone before the class can be rebuilt under it.
@@ -707,7 +707,7 @@ TEST(ScriptClassReload, ValuesSurviveARebuildThroughTheStockSerializer)
     {
         FMemoryReader Reader(Buffer);
         FObjectProxyArchiver Ar(Reader, /*bLoadIfFindFails*/ true);
-        Sub->SerializeTaggedProperties(Ar, Restored);
+        Sub->SerializeProperties(Ar, Restored);
     }
 
     // Survived the rebuild.

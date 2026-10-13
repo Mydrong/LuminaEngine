@@ -1,4 +1,4 @@
-﻿#include "Platform/Time/PlatformTime.h"
+#include "Platform/Time/PlatformTime.h"
 #include "RuntimePCH.h"
 #include "Package.h"
 #include "Core/Profiler/AssetLoadTracker.h"
@@ -23,10 +23,10 @@
 #include "Core/Templates/IntegerCompare.h"
 
 
+IMPLEMENT_INTRINSIC_CLASS(CPackage, CObject, RUNTIME_API)
+
 namespace Lumina
 {
-    IMPLEMENT_INTRINSIC_CLASS(CPackage, CObject, RUNTIME_API)
-
     FPackageDestroyedDelegate CPackage::OnPackageDestroyed;
 
     namespace

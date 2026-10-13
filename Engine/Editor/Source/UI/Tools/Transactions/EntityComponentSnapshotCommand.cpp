@@ -120,7 +120,7 @@ namespace Lumina
             const int64 DataStart = Ar.Tell();
             if (Component != nullptr)
             {
-                ComponentType->SerializeTaggedProperties(Ar, Component);
+                ComponentType->SerializeProperties(Ar, Component);
             }
             const int64 DataEnd = Ar.Tell();
 
@@ -173,7 +173,7 @@ namespace Lumina
                 void* Component = Ops->Emplace(Registry, Entity);
                 if (Component != nullptr)
                 {
-                    ComponentType->SerializeTaggedProperties(Ar, Component);
+                    ComponentType->SerializeProperties(Ar, Component);
 
                     // The write above is a raw store, so the registry signal has to be raised by hand.
                     Ops->Patch(Registry, Entity);

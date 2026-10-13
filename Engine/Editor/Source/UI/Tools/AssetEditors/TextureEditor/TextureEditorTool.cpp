@@ -1,4 +1,4 @@
-﻿#include "TextureEditorTool.h"
+#include "TextureEditorTool.h"
 
 #include "Assets/AssetTypes/Textures/Texture.h"
 #include "Assets/AssetTypes/Textures/TextureArray.h"
@@ -42,7 +42,7 @@ namespace Lumina
     void FTextureEditorTool::OnPropertyEditFinished(const FPropertyChangedEvent& Event)
     {
         // Never Stream, Filter and Address Mode carry no RequiresRecook, since no stored pixel depends on them.
-        if (Event.Property == nullptr || !Event.Property->HasMetadata("RequiresRecook"))
+        if (Event.Property == nullptr || !Event.Property->HasEditorFlag(EPropertyEditorFlags::RequiresRecook))
         {
             return;
         }

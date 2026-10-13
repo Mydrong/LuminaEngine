@@ -28,7 +28,7 @@ namespace Lumina
         FUNCTION()
         static bool IsCursorOverUI(CWorld* World);
 
-        //~ UI scripts, the calls LuminaSharp.UIScript makes on itself
+        //~ UI scripts, callable on any CUIScript from either language
 
         FUNCTION()
         static void ShowScriptUI(CEntityScript* Script);

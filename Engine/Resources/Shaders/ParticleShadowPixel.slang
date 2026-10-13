@@ -5,6 +5,7 @@
 [shader("pixel")]
 void PixelMain(FParticleVertexOutput In)
 {
+    BeginParticleDraw(In.DrawIndex);
     float Coverage = In.Color.a;
     if (In.TextureIndex != 0u)
     {

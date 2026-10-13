@@ -3762,7 +3762,7 @@ namespace Lumina
             Contents += "namespace GameScripts;\n\n";
             Contents += "public sealed class ";
             Contents += ClassName.c_str();
-            Contents += " : EntityScript\n";
+            Contents += " : CEntityScript\n";
             Contents += "{\n";
             Contents += "    public override void OnReady()\n";
             Contents += "    {\n";

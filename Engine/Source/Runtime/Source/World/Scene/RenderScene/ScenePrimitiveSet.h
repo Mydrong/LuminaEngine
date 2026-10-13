@@ -106,7 +106,7 @@ namespace Lumina
 
         struct FDeferredMaterialSlot
         {
-            uint16              MaterialIndex;
+            uint32              MaterialIndex;
             FShaderH DeferredShader;
         };
 
@@ -173,7 +173,7 @@ namespace Lumina
         uint32          BatchIndex;
         uint32          InstanceSlot;
         uint32          SurfaceDescIndex;   // interned LOD table
-        uint16          MaterialIndex;
+        uint32          MaterialIndex;
         EInstanceFlags  MaterialFlags;
         bool            bMaterialCastsShadows;
         // Held so the release decrements the same counter the bind incremented, whatever the primitive
@@ -332,6 +332,9 @@ namespace Lumina
         // Rolling sweep, a slab of the table per call, so the cost never scales with scene size at once.
         void                        ReleaseStaleBoneSlices(uint32 FrameNumber, uint32 GraceFrames);
         uint32                      GetBoneSliceExtent() const { return BoneSliceExtent; }
+
+        // The skeletal primitive Entity renders through, ~0u when it has none.
+        uint32                      FindSkeletalPrimitive(ECS::FEntity Entity) const { return FindLinked(Entity, EPrimitiveSource::SkeletalMesh); }
 
         const FSurfaceDescGPU*      GetSurfaceDescs() const     { return SurfaceDescs.data(); }
         uint32                      GetSurfaceDescCount() const { return (uint32)SurfaceDescs.size(); }

@@ -29,6 +29,7 @@
 #include "TaskSystem/FiberSync.h"
 #include "World/Entity/Components/PostProcessSettings.h"
 #include "World/Entity/Components/CloudComponent.h"
+#include "World/Entity/Systems/WeatherState.h"
 
 namespace Lumina
 {
@@ -442,6 +443,8 @@ namespace Lumina
 
                 bool                             bClouds              = false;
                 SCloudComponent                  Clouds               = {};
+                // Weather wind drift added on top of the cloud component's own.
+                FVector2                         CloudWindOffset      = FVector2(0.0f);
 
                 TVector<FGPUFogVolume>           FogVolumes;
                 uint32                           FarShaftSteps        = 0;
@@ -449,6 +452,23 @@ namespace Lumina
                 bool                             bLocalVolumetricLights = false;
                 float                            FarShaftDistance     = 4000.0f;
             } Volumetrics;
+
+            // Inactive unless a weather component is playing, which leaves every weather pass and allocation idle.
+            struct FWeather
+            {
+                bool                             bActive                  = false;
+                bool                             bDrops                   = false;
+                FWeatherState                    State                    = {};
+                int32                            OcclusionShadowDataIndex = Constants::kIndexNone;
+                uint32                           OcclusionCullView        = Constants::kIndexNoneU32;
+                uint32                           OcclusionResolution      = 0;
+                FMatrix4                         OcclusionViewProjection  = FMatrix4(1.0f);
+                float                            OcclusionDepthRange      = 1.0f;
+                float                            OcclusionTexelWorld      = 0.1f;
+                FVector3                         FallDirection            = FVector3(0.0f, -1.0f, 0.0f);
+                uint32                           NumDrops                 = 0;
+                uint32                           NumSplashes              = 0;
+            } Weather;
 
             // Splines uploaded this frame. Headers index into the two shared arrays; everything is world
             // space (SSplineComponent authors in entity-local space and the extract bakes the transform in).
@@ -977,6 +997,8 @@ namespace Lumina
         const SEnvironmentComponent* ExtractEnvironment(ECS::FRegistry& Registry, FFrameData& Frame);
         void ExtractSkyLight(ECS::FRegistry& Registry, FFrameData& Frame, const SEnvironmentComponent* ActiveEnv);
         void ExtractFog(ECS::FRegistry& Registry, FFrameData& Frame);
+        void ExtractWeather(ECS::FRegistry& Registry, FFrameData& Frame);
+        void ApplyWeatherToClouds(FFrameData& Frame);
 
         // Render-phase half: buffer resize + upload commands; reads extract-phase state.
         void CompileDrawCommands_Render(RHI::FCmdListH CL);
@@ -1014,6 +1036,13 @@ namespace Lumina
         TVector<uint32>                        SkinnedCandidates;
         TVector<uint32>                        SkinnedCandidateBones;
         TVector<uint32>                        PendingSliceAllocs;
+        // Candidates that may skin from their leader's slice, settled once every own slice is laid out.
+        TVector<uint32>                        SharedPoseCandidates;
+        TAtomic<uint32>                        SharedPoseCursor{0};
+        // Per primitive, set when this frame's slice is the leader's, so the emit leaves it to the leader.
+        TVector<uint8>                         BoneSliceBorrowed;
+        // Ranges the layout packed for ungathered leaders, kept apart because other gather tasks own the thread locals then.
+        TVector<FUIntVector2>                  LeaderPoseUploadRanges;
         TAtomic<uint32>                        SkinnedCandidateCursor{0};
         TAtomic<uint32>                        PendingSliceCursor{0};
         uint32                                 SkinnedCandidateCount = 0;
@@ -1125,7 +1154,7 @@ namespace Lumina
 
         /** Culls every view's meshlets into the draw list and publishes the slice each pass draws.
             The sole authority: nothing rasterizes a meshlet this did not keep. */
-        void MeshletCullPass(RHI::FCmdListH CL, EMeshletSlice Slice);
+        void MeshletCullPass(RHI::FCmdListH CL, EMeshletSlice Slice, bool bCascadePhase = false);
 
         void DrawMeshletBatch(RHI::FCmdListH CL, const FMeshDrawCommand& Batch, const FMeshletPassContext& Ctx);
 
@@ -1241,7 +1270,7 @@ namespace Lumina
         void LaunchInstanceBlockBounds();
         void JoinInstanceBlockBounds();
         void FinishInstanceBlockBounds(RHI::FCmdListH CL);
-        void DispatchMeshletBlockBuild(RHI::FCmdListH CL, bool bLatePass);
+        void DispatchMeshletBlockBuild(RHI::FCmdListH CL, bool bLatePass, bool bCascadePhase = false);
         bool bSplitMeshletPhasesThisFrame = false;
         void FlushStagedWrites(RHI::FCmdListH CL);
 
@@ -1505,9 +1534,14 @@ namespace Lumina
         FSceneBuffer RetainedTransformBuffer { "Retained.Transforms", 1.5f, EBufferInit::Zeroed };
         FSceneBuffer RetainedStaticBuffer { "Retained.Static", 1.5f, EBufferInit::Zeroed };
         FSceneBuffer SurfaceDescBuffer { "Retained.SurfaceDescs", 1.5f, EBufferInit::Zeroed };
-        FSceneBuffer BoneArenaBuffer { "Skinning.BoneArena", 1.5f };
+        // One arena per frame slot, since the next frame's upload can run on compute while this frame's passes still read poses.
+        TArray<FSceneBuffer, RHI::kFramesInFlight> BoneArenaRing = MakeSceneRing<RHI::kFramesInFlight>("Skinning.BoneArena", 1.5f);
+        // The upload serial each slot's arena last matched the mirror at, so it knows which dirty ranges it missed.
+        TArray<uint64, RHI::kFramesInFlight>       BoneArenaSyncedSerial = {};
+        uint64                                     BoneUploadSerial = 0;
+        TVector<FUIntVector2>                      LastBoneUploadRanges;
+        RHI::FGPUAllocation GetBoneArena() const { return BoneArenaRing[CurrentFrameSlot]; }
         // Snapshots taken before each frame's incremental uploads land, so motion vectors have a past.
-        RHI::FGPUAllocation                                        PrevBoneArenaBuffer;
         RHI::FGPUAllocation                                        PrevRetainedTransformBuffer;
         bool                                                bPrevMotionStateValid = false;
         void SnapshotMotionState(RHI::FCmdListH CL);
@@ -1554,6 +1588,33 @@ namespace Lumina
         std::atomic<bool>                                   bDepthPyramidValid{false};
 
         std::atomic<bool>                                   bCascadePyramidValid{false};
+
+        static constexpr uint32                             kReceiverMaskDim = 128;
+        FSceneBuffer                                        ReceiverMaskBuffer { "Shadow.ReceiverMask", 1.0f };
+        bool                                                bShadowReceiverCullThisFrame = false;
+        bool                                                bReceiverMaskValid = false;
+        RHI::TGPUSpan<uint32>                               ReceiverMaskFinal;
+        bool WantsShadowReceiverCull(const FFrameData& Frame) const;
+        void ShadowReceiverMaskPass(RHI::FCmdListH CL);
+
+        // The graphics value the next frame's compute cull waits on, the last submission that reads what the cull rewrites.
+        uint64                                              FrameCullGateValue = 0;
+        // Set when the cascade pyramid was released to compute for the next frame's cull, and names the image released.
+        RHI::FTextureH                                      CascadePyramidOnCompute = {};
+        bool ShouldCullOnCompute(const FFrameData& Frame) const;
+        static bool HasGrassScatter(const FFrameData& Frame);
+
+        FSceneImage                                         RainOcclusionImage;
+        FSceneBuffer                                        RainVisibleBuffer  { "Weather.RainVisible", 1.25f };
+        FSceneBuffer                                        RainArgsBuffer     { "Weather.RainArgs", 1.0f };
+        FSceneBuffer                                        RainSplashBuffer   { "Weather.Splashes", 1.0f, EBufferInit::Zeroed };
+        uint32                                              RainSplashCursor   = 0;
+        uint32                                              WeatherIdleFrames  = 0;
+
+        void PublishWeatherGlobals(FSceneGlobalData& Globals);
+        void WeatherOcclusionPass(RHI::FCmdListH CL);
+        void RainPass(RHI::FCmdListH CL);
+        void ReleaseIdleWeatherResources();
 
         FMatrix4                                            CascadeHZBViewProjection[NumCascades] = {};
         FVector4                                            CascadeHZBNdcScale[NumCascades] = {};
@@ -1685,6 +1746,48 @@ namespace Lumina
         uint64                                            ParticlePoolBytes = 0;
         // Set once a pooled buffer is handed out this frame, since its previous frame's reads need a barrier before the clear.
         bool                                              bParticlePoolReuseBarrierIssued = false;
+        // Emitters given buffers this frame, held under a cap so a mass spawn ramps in over a few frames.
+        uint32                                            ParticleSetupsThisFrame = 0;
+
+        // One simulation dispatch, planned before any is recorded so independent emitters can share a barrier.
+        struct FParticleSimStep
+        {
+            RHI::FPipelineH Pipeline;
+            // Where this step's FParticleSimArgs sit in ParticleSimArgsScratch.
+            uint32          ArgsOffset = 0;
+            // Zero for a batched step, whose counters sit in ParticleCounterArena and are cleared together.
+            RHI::GPUPtr     SpawnCounter = 0;
+            RHI::GPUPtr     EventCounts = 0;
+            uint32          Groups = 0;
+            bool            bBarrierAfter = false;
+        };
+        // Spawn counters for every batched emitter, so one fill clears them all.
+        RHI::FGPUAllocation                               ParticleCounterArena = {};
+        uint32                                            ParticleCounterArenaSlots = 0;
+        uint32                                            ParticleCounterSlotsUsed = 0;
+        // Per-emitter sort arguments gathered for the single compact sort dispatch. Reused each frame.
+        TVector<uint8>                                    ParticleSortScratch;
+        // Planned simulation arguments, and the emitter and group tables of the dispatch being built. Reused each frame.
+        TVector<uint8>                                    ParticleSimArgsScratch;
+        TVector<uint8>                                    ParticleSimBatchEmitters;
+        TVector<FUIntVector2>                             ParticleSimBatchGroups;
+        // One planned particle draw, so consecutive ones on a pipeline go out as a single multi-draw.
+        struct FParticleDraw
+        {
+            RHI::FPipelineH Pipeline;
+            bool            bWriteDepth = false;
+        };
+        // Planned draws with their FParticlePushConstants and FParticleDrawArgsSource bytes. Reused each frame.
+        TVector<FParticleDraw>                            ParticleDraws;
+        TVector<uint8>                                    ParticleDrawConstants;
+        TVector<uint8>                                    ParticleDrawArgSources;
+        // Every particle draw's indirect arguments back to back, gathered on the GPU each frame.
+        RHI::FGPUAllocation                               ParticleDrawArgsArena = {};
+        uint32                                            ParticleDrawArgsArenaSlots = 0;
+        // Single-step emitters with no parent run back to back; the rest keep a barrier around every step. Reused each frame.
+        TVector<FParticleSimStep>                         ParticleBatchedSteps;
+        TVector<FParticleSimStep>                         ParticleSerialSteps;
+        void RecordParticleSimSteps(RHI::FCmdListH CL);
 
         FScenePrimitiveSet                      ScenePrimitives;
         TVector<ECS::FEntity>                   MovedTransformScratch;

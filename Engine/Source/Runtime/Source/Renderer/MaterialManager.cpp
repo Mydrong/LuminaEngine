@@ -11,8 +11,8 @@ namespace Lumina::RHI
     static constexpr uint32 kInitialMaterialSlots = 1024;
     static constexpr uint32 kInitialPoolUnits     = 16384;
 
-    // The draw path carries the index as a uint16 and treats the maximum as no material.
-    static constexpr uint32 kMaxMaterialSlots = 65535;
+    // Far past any real scene, while keeping the pool's unit count inside 32 bits.
+    static constexpr uint32 kMaxMaterialSlots = 1u << 20;
 
     // Kept in hand when a grow is staged, so the swap can land before the table is really full.
     static constexpr uint32 kGrowSlack     = 64;

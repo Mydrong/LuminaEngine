@@ -16,7 +16,7 @@ namespace
 {
     void* FindTestClass()
     {
-        static const bool bReady = [] { ProcessNewlyLoadedCObjects(); return true; }();
+        static const bool bReady = [] { RegisterPendingTypes(); return true; }();
         (void)bReady;
 
         const char* Name = "CScriptableTest";

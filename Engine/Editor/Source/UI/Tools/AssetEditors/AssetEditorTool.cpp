@@ -116,7 +116,7 @@ namespace Lumina
 
     void FAssetEditorTool::SerializeAssetForUndo(FArchive& Ar, CObject* InAsset)
     {
-        InAsset->GetClass()->SerializeTaggedProperties(Ar, InAsset);
+        InAsset->GetClass()->SerializeProperties(Ar, InAsset);
     }
 
     FObjectSnapshotCommand::FSerializer FAssetEditorTool::MakeAssetUndoSerializer()

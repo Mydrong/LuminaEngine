@@ -234,11 +234,12 @@ namespace Lumina
         FShaderCompileOptions Options;
         Options.bGenerateReflectionData = true;
         Options.MacroDefinitions.assign(Defines.begin(), Defines.end());
+        FShaderCompileWaiter Waiter;
         GShaderCompiler->CompileShaderPath(FString(Path.c_str()), Options, [](const FShaderHeader& Header)
         {
             Commit(Header);
-        });
-        GShaderCompiler->Flush();
+        }, Waiter.Track());
+        Waiter.Wait();
 
         FScopeLock Lock(Library->Mutex);
         const FShaderH Handle = Library->FindOrCreate(Hash);

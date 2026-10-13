@@ -99,7 +99,7 @@ TEST(ObjectTemplateInit, TheCDOItselfKeepsItsConstructorValues)
 
 TEST(ObjectConstruction, AConstructorSeesItsOwnClassNameAndPackage)
 {
-    CPackage* Package = FindObject<CPackage>("/Script/Engine");
+    CPackage* Package = FindObject<CPackage>("/Types/Engine");
     ASSERT_NE(Package, nullptr) << "no package to construct into, so the assertion below proves nothing";
 
     CConstructorIdentityTest* Object = NewObject<CConstructorIdentityTest>(

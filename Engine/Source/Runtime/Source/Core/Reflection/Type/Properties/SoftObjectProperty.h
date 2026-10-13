@@ -10,12 +10,10 @@ namespace Lumina
     class LUMINA_VISIBLE_TYPE FSoftObjectProperty : public FProperty
     {
     public:
-        DECLARE_FPROPERTY(EPropertyTypeFlags::SoftObject)
-
-        explicit FSoftObjectProperty(const FSoftObjectPropertyParams* Params)
-            : FProperty(Params)
+        explicit FSoftObjectProperty(const FPropertyDesc& Desc)
+            : FProperty(Desc)
         {
-            ObjectClass = Params->ClassFunc ? Params->ClassFunc() : nullptr;
+            ObjectClass = Desc.Type->GetClass();
             // Storage is FSoftObjectPath (path + GUID). TSoftObjectPtr<T> is
             // layout-identical (single FSoftObjectPath member, no vtable).
             SetElementSize(sizeof(FSoftObjectPath));

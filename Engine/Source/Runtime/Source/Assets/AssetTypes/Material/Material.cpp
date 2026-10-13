@@ -1,6 +1,7 @@
 ﻿#include "RuntimePCH.h"
 #include "Material.h"
 #include "Core/Engine/Engine.h"
+#include "Core/ArtifactCache/ArtifactCache.h"
 #include "Renderer/SpirvStrip.h"
 #include "Assets/AssetTypes/Material/MaterialInstance.h"
 #include "Assets/AssetTypes/Material/MaterialParameterCollection.h"
@@ -13,12 +14,11 @@
 #include "Memory/MemoryTracking.h"
 #include "Paths/Paths.h"
 #include "Renderer/RenderManager.h"
-#include "Renderer/ErrorHandling/CrashTracker.h"
-#include "Renderer/RHI.h"
 #include "Renderer/RHITexture.h"
 #include "Renderer/ShaderCache.h"
 #include "Renderer/ShaderCompiler.h"
 #include "Renderer/ShaderLibrary.h"
+#include "Renderer/ShaderPaths.h"
 #include "World/Scene/RenderScene/MeshResolveCache.h"
 #include "Types/Byte.h"
 #include "Log/Log.h"
@@ -32,6 +32,85 @@ namespace Lumina
         CMaterial* GDefaultTerrainMaterial = nullptr;
 
         constexpr const char* kMaterialShaderDirectory = "/Engine/Resources/Shaders/MaterialShader/";
+
+        // Folded into every material artifact key, so bumping it orphans entries whose layout or codegen no longer matches.
+        constexpr uint64 kMaterialArtifactVersion = 1;
+
+        // Stage count, then per stage its id, word count and words.
+        TVector<uint8> PackStageBlobs(const TVector<FMaterialStageBlob>& Blobs)
+        {
+            TVector<uint8> Bytes;
+            auto Append = [&Bytes](const void* Data, size_t Size)
+            {
+                const uint8* Begin = (const uint8*)Data;
+                Bytes.insert(Bytes.end(), Begin, Begin + Size);
+            };
+
+            const uint32 Count = (uint32)Blobs.size();
+            Append(&Count, sizeof(Count));
+            for (const FMaterialStageBlob& Blob : Blobs)
+            {
+                const uint32 Words = (uint32)Blob.Spirv.size();
+                Append(&Blob.Stage, sizeof(Blob.Stage));
+                Append(&Words, sizeof(Words));
+                Append(Blob.Spirv.data(), Words * sizeof(uint32));
+            }
+            return Bytes;
+        }
+
+        bool UnpackStageBlobs(const TVector<uint8>& Bytes, TVector<FMaterialStageBlob>& OutBlobs)
+        {
+            size_t Offset = 0;
+            auto Read = [&Bytes, &Offset](void* Out, size_t Size)
+            {
+                if (Offset + Size > Bytes.size())
+                {
+                    return false;
+                }
+                Memory::Memcpy(Out, Bytes.data() + Offset, Size);
+                Offset += Size;
+                return true;
+            };
+
+            uint32 Count = 0;
+            if (!Read(&Count, sizeof(Count)) || Count > (uint32)EMaterialShaderStage::Count)
+            {
+                return false;
+            }
+
+            OutBlobs.clear();
+            OutBlobs.reserve(Count);
+            for (uint32 i = 0; i < Count; ++i)
+            {
+                FMaterialStageBlob& Blob = OutBlobs.emplace_back();
+                uint32 Words = 0;
+                if (!Read(&Blob.Stage, sizeof(Blob.Stage)) || !Read(&Words, sizeof(Words)) || Blob.Stage >= (uint8)EMaterialShaderStage::Count)
+                {
+                    return false;
+                }
+                Blob.Spirv.resize(Words);
+                if (!Read(Blob.Spirv.data(), Words * sizeof(uint32)))
+                {
+                    return false;
+                }
+            }
+            return Offset == Bytes.size();
+        }
+
+        // Test hosts run without an engine, and they simply compile every time.
+        bool LoadStageBlobs(uint64 Key, TVector<FMaterialStageBlob>& OutBlobs)
+        {
+            TVector<uint8> Bytes;
+            return GEngine != nullptr && GEngine->GetArtifactCache().Load(Key, Bytes) && UnpackStageBlobs(Bytes, OutBlobs);
+        }
+
+        void StoreStageBytes(uint64 Key, const TVector<uint8>& Bytes)
+        {
+            if (GEngine != nullptr)
+            {
+                GEngine->GetArtifactCache().Store(Key, Bytes);
+            }
+        }
         constexpr const char* kPixelInputsToken        = "$MATERIAL_INPUTS";
         constexpr const char* kVertexInputsToken       = "$MATERIAL_VERTEX_INPUTS";
 
@@ -75,50 +154,8 @@ namespace Lumina
             return It != Blobs.end() ? It->Spirv : Empty;
         }
 
-        // Self-copy safe for PostLoad; a recompile that changed the stage's code drops the cache entry it replaced.
-        void AssignStageBlob(FMaterialStageBlob& Blob, TSpan<const uint32> Spirv, uint64 SourceHash)
-        {
-            if (Blob.Spirv.data() != Spirv.data())
-            {
-                Blob.Spirv.assign(Spirv.data(), Spirv.data() + Spirv.size());
-            }
-
-            if (Blob.SourceHash != 0 && Blob.SourceHash != SourceHash)
-            {
-                FShaderCache::DeleteRaw(CMaterial::MakeShaderCacheKey(Blob.SourceHash), FShaderCache::kMaterialCacheDirectory);
-            }
-            Blob.SourceHash = SourceHash;
-        }
-
-#if USING(WITH_EDITOR)
-        // Editor saves keep only each stage's SourceHash, so its SPIR-V comes back from the project shader cache.
-        bool RefillFromShaderCache(TVector<FMaterialStageBlob>& Blobs)
-        {
-            bool bAllFound = true;
-            for (FMaterialStageBlob& Blob : Blobs)
-            {
-                if (!Blob.Spirv.empty() || Blob.SourceHash == 0)
-                {
-                    continue;
-                }
-
-                FShaderHeader Cached;
-                if (!FShaderCache::TryLoadRaw(CMaterial::MakeShaderCacheKey(Blob.SourceHash), Cached, FShaderCache::kMaterialCacheDirectory))
-                {
-                    bAllFound = false;
-                    continue;
-                }
-
-                // A cached binary still has to reach the crash tracker, or it resolves as unknown.
-                RHI::GetCrashTracker().RegisterShader(Cached.Binaries, Cached.DebugName);
-                Blob.Spirv = Move(Cached.Binaries);
-            }
-            return bAllFound;
-        }
-#endif
-
         // Copies Spirv into Stage's blob. The source may already be that blob, which PostLoad commits in place.
-        void StoreStageBinaries(TVector<FMaterialStageBlob>& Blobs, EMaterialShaderStage Stage, TSpan<const uint32> Spirv, uint64 SourceHash)
+        void StoreStageBinaries(TVector<FMaterialStageBlob>& Blobs, EMaterialShaderStage Stage, TSpan<const uint32> Spirv)
         {
             FMaterialStageBlob* Blob = FindStageBlob(Blobs, Stage);
             if (Blob == nullptr)
@@ -126,7 +163,10 @@ namespace Lumina
                 Blob = &Blobs.emplace_back();
                 Blob->Stage = (uint8)Stage;
             }
-            AssignStageBlob(*Blob, Spirv, SourceHash);
+            if (Blob->Spirv.data() != Spirv.data())
+            {
+                Blob->Spirv.assign(Spirv.data(), Spirv.data() + Spirv.size());
+            }
         }
 
         void ReleaseEntries(TSpan<FShaderH> Entries)
@@ -280,27 +320,12 @@ namespace Lumina
         }
 
 #if USING(WITH_EDITOR)
-        // Both queues fill during the parallel PostLoad wave and drain on the game thread, hence the mutexes.
-        FMutex                               StaleTemplateMutex;
-        TVector<TStrongObjectPtr<CMaterial>> StaleTemplateMaterials;
-
-        struct FPermutationRequest
+        // A tool or test host without a renderer compiles nothing, so the material simply stays on its fallback.
+        void QueueEditorRecompile(CMaterial* Material)
         {
-            TStrongObjectPtr<CMaterial> Material;
-            uint64                      Key = 0;
-            bool                        bRebuild = false;
-        };
-
-        FMutex                       PermutationRequestMutex;
-        TVector<FPermutationRequest> PermutationRequests;
-
-        // Idempotent, since every instance's PostLoad can reach the same root before the drain runs.
-        void QueueStaleTemplateMaterial(CMaterial* Material)
-        {
-            FScopeLock Lock(StaleTemplateMutex);
-            if (!Algo::AnyOf(StaleTemplateMaterials, [Material](const TStrongObjectPtr<CMaterial>& Queued) { return Queued.Get() == Material; }))
+            if (FRenderManager* Renderer = TryRender())
             {
-                StaleTemplateMaterials.push_back(Material);
+                Renderer->GetMaterialCompileQueue().QueueRecompile(Material);
             }
         }
 #endif
@@ -310,53 +335,54 @@ namespace Lumina
     {
         LUMINA_MEMORY_SCOPE("Materials");
 
-        if (!Ar.IsWriting())
+        // A legacy asset keeps its bytecode until a compile gives it the source hash its cache entries are keyed by.
+        if (!Ar.IsWriting() || (!Ar.IsCooking() && SourceHash == 0))
         {
             CMaterialInterface::Serialize(Ar);
             return;
         }
 
+        // Bytecode is derived data, so an editor save leaves it to the artifact cache and the asset only changes when the material does.
+        if (!Ar.IsCooking())
+        {
+            FRecursiveScopeLock Lock(ShaderStageMutex);
+            TVector<FMaterialStageBlob> CompiledStages = Move(Stages);
+            TVector<FMaterialShaderPermutation> CompiledPermutations = Move(Permutations);
+            const uint64 CompiledHash = CompiledTemplateHash;
+            Stages.clear();
+            Permutations.clear();
+            CompiledTemplateHash = 0;
+
+            CMaterialInterface::Serialize(Ar);
+
+            Stages = Move(CompiledStages);
+            Permutations = Move(CompiledPermutations);
+            CompiledTemplateHash = CompiledHash;
+            return;
+        }
+
+        // The shipped game never debugs its shaders, and the embedded source and line tables are a third of each binary.
         FRecursiveScopeLock Lock(ShaderStageMutex);
         TVector<FMaterialStageBlob> EditorStages = Stages;
         TVector<FMaterialShaderPermutation> EditorPermutations = Permutations;
-        const uint64 EditorTemplateHash = CompiledTemplateHash;
 
-        bool bKeptSpirv = false;
-        const bool bCooking = Ar.IsCooking();
-        auto PrepareBlobs = [bCooking, &bKeptSpirv](TVector<FMaterialStageBlob>& Blobs)
+        auto StripBlobs = [](TVector<FMaterialStageBlob>& Blobs)
         {
             for (FMaterialStageBlob& Blob : Blobs)
             {
-                if (bCooking)
-                {
-                    // The shipped game never debugs its shaders, and the embedded source and line tables are a third of each binary.
-                    Spirv::StripDebugInfo(Blob.Spirv);
-                }
-                else if (Blob.SourceHash != 0)
-                {
-                    // The graph rebuilds it, so a shader template edit never changes the saved asset.
-                    Blob.Spirv.clear();
-                }
-                bKeptSpirv |= !Blob.Spirv.empty();
+                Spirv::StripDebugInfo(Blob.Spirv);
             }
         };
-        PrepareBlobs(Stages);
+        StripBlobs(Stages);
         for (FMaterialShaderPermutation& Permutation : Permutations)
         {
-            PrepareBlobs(Permutation.Stages);
-        }
-
-        // Only kept SPIR-V is checked against it, and writing it otherwise would diff on every template edit.
-        if (!bCooking && !bKeptSpirv)
-        {
-            CompiledTemplateHash = 0;
+            StripBlobs(Permutation.Stages);
         }
 
         CMaterialInterface::Serialize(Ar);
 
         Stages = Move(EditorStages);
         Permutations = Move(EditorPermutations);
-        CompiledTemplateHash = EditorTemplateHash;
     }
 
     // The engine publishes GShaderCompiler before the first CDO and tests do not, so the creators check for it.
@@ -376,25 +402,35 @@ namespace Lumina
     {
         LUMINA_MEMORY_SCOPE("Materials");
 
-        const bool bMissingStage = !RefillSerializedShadersFromCache();
-
-        // A stamped hash with no stages is an asset saved before Stages existed, and it recompiles like a stale one.
+        // A compiled material has a source hash, bytecode, or the template stamp of an asset saved before either existed.
         const bool bHasCompiledStage = HasCompiledStage();
-        if (bHasCompiledStage || CompiledTemplateHash != 0 || bMissingStage)
+        if (bHasCompiledStage || CompiledTemplateHash != 0 || SourceHash != 0)
         {
-            const bool bStale = GetPackage() != nullptr
-                             && (bMissingStage || CompiledTemplateHash != GetShaderTemplateHash() || !bHasCompiledStage);
+            // Bytecode already in memory came from a cook, an older asset or the compile that just ran, and is current when its stamp matches.
+            bool bStale = GetPackage() != nullptr && (CompiledTemplateHash != GetShaderTemplateHash() || !bHasCompiledStage);
+            if (bStale && SourceHash != 0 && LoadShadersFromArtifactCache())
+            {
+                bStale = false;
+            }
+
             if (!bStale)
             {
                 CommitSerializedShaders();
+#if USING(WITH_EDITOR)
+                // Recompiled once in the background so the asset gains a source hash and can drop its embedded bytecode.
+                if (SourceHash == 0 && GetPackage() != nullptr)
+                {
+                    QueueEditorRecompile(this);
+                }
+#endif
             }
             else
             {
 #if USING(WITH_EDITOR)
-                QueueStaleTemplateMaterial(this);
+                QueueEditorRecompile(this);
 #else
-                LOG_ERROR("Material '{}' was compiled against shader templates {:016x} but this build has {:016x}{}, so it cannot be used. Recook the content.",
-                          GetPackage()->GetPackagePath().c_str(), CompiledTemplateHash, GetShaderTemplateHash(), bHasCompiledStage ? "" : " and no compiled stage");
+                LOG_ERROR("Material '{}' has no shaders for templates {:016x}. Open the project in the editor once so they compile into the artifact cache, or cook the content.",
+                          GetPackage()->GetPackagePath().c_str(), GetShaderTemplateHash());
 #endif
             }
 
@@ -781,17 +817,17 @@ namespace Lumina
         return DefaultEntries[(size_t)Stage];
     }
 
-    void CMaterial::CommitShaderStage(EMaterialShaderStage Stage, TSpan<const uint32> Spirv, uint64 SourceHash)
+    void CMaterial::CommitShaderStage(EMaterialShaderStage Stage, TSpan<const uint32> Spirv)
     {
         FRecursiveScopeLock Lock(ShaderStageMutex);
-        StoreStageBinaries(Stages, Stage, Spirv, SourceHash);
+        StoreStageBinaries(Stages, Stage, Spirv);
         SwapStageEntry(DefaultEntries[(size_t)Stage], MakeStageEntryName(Stage, 0, false), Stage, Spirv);
     }
 
-    void CMaterial::SetStageBinaries(EMaterialShaderStage Stage, TSpan<const uint32> Spirv, uint64 SourceHash)
+    void CMaterial::SetStageBinaries(EMaterialShaderStage Stage, TSpan<const uint32> Spirv)
     {
         FRecursiveScopeLock Lock(ShaderStageMutex);
-        StoreStageBinaries(Stages, Stage, Spirv, SourceHash);
+        StoreStageBinaries(Stages, Stage, Spirv);
     }
 
     void CMaterial::ClearShaderStage(EMaterialShaderStage Stage)
@@ -813,7 +849,7 @@ namespace Lumina
         return Key == GetDefaultStaticSwitchKey() || FindPermutation(Key) != nullptr;
     }
 
-    void CMaterial::CommitPermutationStage(uint64 Key, EMaterialShaderStage Stage, TSpan<const uint32> Spirv, uint64 SourceHash)
+    void CMaterial::CommitPermutationStage(uint64 Key, EMaterialShaderStage Stage, TSpan<const uint32> Spirv)
     {
         FRecursiveScopeLock Lock(ShaderStageMutex);
 
@@ -824,12 +860,11 @@ namespace Lumina
             Permutation->Key = Key;
         }
 
-        StoreStageBinaries(Permutation->Stages, Stage, Spirv, SourceHash);
+        StoreStageBinaries(Permutation->Stages, Stage, Spirv);
         SwapStageEntry(Permutation->Entries[(size_t)Stage], MakeStageEntryName(Stage, Key, true), Stage, Spirv);
     }
 
-    bool CMaterial::CommitPermutationStageIfCurrent(uint64 Key, uint32 Generation, EMaterialShaderStage Stage, TSpan<const uint32> Spirv,
-        uint64 SourceHash)
+    bool CMaterial::CommitPermutationStageIfCurrent(uint64 Key, uint32 Generation, EMaterialShaderStage Stage, TSpan<const uint32> Spirv)
     {
         // One lock over the test and the commit, or a clear between them would revive the permutation it dropped.
         FRecursiveScopeLock Lock(ShaderStageMutex);
@@ -837,15 +872,8 @@ namespace Lumina
         {
             return false;
         }
-        CommitPermutationStage(Key, Stage, Spirv, SourceHash);
+        CommitPermutationStage(Key, Stage, Spirv);
         return true;
-    }
-
-    bool CMaterial::IsPermutationMissingBinaries(uint64 Key) const
-    {
-        FRecursiveScopeLock Lock(ShaderStageMutex);
-        const FMaterialShaderPermutation* Permutation = FindPermutation(Key);
-        return Permutation != nullptr && Algo::AnyOf(Permutation->Stages, [](const FMaterialStageBlob& Blob) { return Blob.Spirv.empty(); });
     }
 
     const TVector<uint32>& CMaterial::GetPermutationStageBinaries(uint64 Key, EMaterialShaderStage Stage) const
@@ -954,53 +982,6 @@ namespace Lumina
         return MakeStaticSwitchKey({});
     }
 
-    bool CMaterial::RefillSerializedShadersFromCache()
-    {
-#if USING(WITH_EDITOR)
-        bool bMissingStage = false;
-        TVector<uint64> PermutationsToRebuild;
-        {
-            // A compile dispatched before this one landed can still be writing Stages from a worker.
-            FRecursiveScopeLock Lock(ShaderStageMutex);
-
-            bMissingStage = !RefillFromShaderCache(Stages);
-
-            // The cache key folds in the current templates, so a full refill is current whatever the asset stamped.
-            const bool bAllFromGraph = !Stages.empty() && !Algo::AnyOf(Stages, [](const FMaterialStageBlob& Blob) { return Blob.SourceHash == 0; });
-            if (!bMissingStage && bAllFromGraph)
-            {
-                CompiledTemplateHash = GetShaderTemplateHash();
-            }
-
-            for (FMaterialShaderPermutation& Permutation : Permutations)
-            {
-                if (RefillFromShaderCache(Permutation.Stages))
-                {
-                    continue;
-                }
-
-                // Half a permutation draws one surface out of two shader sets, so none of it commits until rebuilt.
-                for (FMaterialStageBlob& Blob : Permutation.Stages)
-                {
-                    if (Blob.SourceHash != 0)
-                    {
-                        Blob.Spirv.clear();
-                    }
-                }
-                PermutationsToRebuild.push_back(Permutation.Key);
-            }
-        }
-
-        for (uint64 Key : PermutationsToRebuild)
-        {
-            RequestPermutationRebuild(this, Key);
-        }
-        return !bMissingStage;
-#else
-        return true;
-#endif
-    }
-
     bool CMaterial::HasCompiledStage() const
     {
         // A compile dispatched before this one landed can still be writing Stages from a worker.
@@ -1016,7 +997,7 @@ namespace Lumina
         {
             if (!Blob.Spirv.empty() && Blob.Stage < (uint8)EMaterialShaderStage::Count)
             {
-                CommitShaderStage((EMaterialShaderStage)Blob.Stage, TSpan<const uint32>(Blob.Spirv.data(), Blob.Spirv.size()), Blob.SourceHash);
+                CommitShaderStage((EMaterialShaderStage)Blob.Stage, TSpan<const uint32>(Blob.Spirv.data(), Blob.Spirv.size()));
             }
         }
 
@@ -1028,11 +1009,86 @@ namespace Lumina
                 const FMaterialStageBlob& Blob = Permutations[p].Stages[s];
                 if (!Blob.Spirv.empty() && Blob.Stage < (uint8)EMaterialShaderStage::Count)
                 {
-                    CommitPermutationStage(Permutations[p].Key, (EMaterialShaderStage)Blob.Stage, TSpan<const uint32>(Blob.Spirv.data(), Blob.Spirv.size()),
-                        Blob.SourceHash);
+                    CommitPermutationStage(Permutations[p].Key, (EMaterialShaderStage)Blob.Stage, TSpan<const uint32>(Blob.Spirv.data(), Blob.Spirv.size()));
                 }
             }
         }
+    }
+
+    uint64 CMaterial::MakeArtifactKey(uint64 PermutationKey) const
+    {
+        const uint64 Parts[] = { SourceHash, GetShaderTemplateHash(), kMaterialArtifactVersion, PermutationKey };
+        return Hash::GetHash64(Parts, sizeof(Parts), 0x4D41544C41525446ull);
+    }
+
+    bool CMaterial::LoadShadersFromArtifactCache()
+    {
+        TVector<FMaterialStageBlob> Blobs;
+        if (!LoadStageBlobs(MakeArtifactKey(GetDefaultStaticSwitchKey()), Blobs))
+        {
+            return false;
+        }
+
+        FRecursiveScopeLock Lock(ShaderStageMutex);
+        Stages = Move(Blobs);
+        CompiledTemplateHash = GetShaderTemplateHash();
+        return HasCompiledStage();
+    }
+
+    bool CMaterial::LoadPermutationFromArtifactCache(uint64 Key)
+    {
+        if (SourceHash == 0 || HasPermutation(Key))
+        {
+            return HasPermutation(Key);
+        }
+
+        TVector<FMaterialStageBlob> Blobs;
+        if (!LoadStageBlobs(MakeArtifactKey(Key), Blobs))
+        {
+            return false;
+        }
+
+        FRecursiveScopeLock Lock(ShaderStageMutex);
+        for (const FMaterialStageBlob& Blob : Blobs)
+        {
+            CommitPermutationStage(Key, (EMaterialShaderStage)Blob.Stage, TSpan<const uint32>(Blob.Spirv.data(), Blob.Spirv.size()));
+        }
+        return true;
+    }
+
+    void CMaterial::StoreShadersInArtifactCache()
+    {
+        if (SourceHash == 0)
+        {
+            return;
+        }
+
+        TVector<uint8> Bytes;
+        {
+            FRecursiveScopeLock Lock(ShaderStageMutex);
+            Bytes = PackStageBlobs(Stages);
+        }
+        StoreStageBytes(MakeArtifactKey(GetDefaultStaticSwitchKey()), Bytes);
+    }
+
+    void CMaterial::StorePermutationInArtifactCache(uint64 Key)
+    {
+        if (SourceHash == 0)
+        {
+            return;
+        }
+
+        TVector<uint8> Bytes;
+        {
+            FRecursiveScopeLock Lock(ShaderStageMutex);
+            const FMaterialShaderPermutation* Permutation = FindPermutation(Key);
+            if (Permutation == nullptr)
+            {
+                return;
+            }
+            Bytes = PackStageBlobs(Permutation->Stages);
+        }
+        StoreStageBytes(MakeArtifactKey(Key), Bytes);
     }
 
     void CMaterial::ApplyParameterDefaults()
@@ -1257,124 +1313,11 @@ namespace Lumina
             }
 #endif
 
-            struct FEntry
-            {
-                FString Path;
-                uint64  ContentHash;
-            };
-            TVector<FEntry> Files;
-
-            auto Gather = [&Files](FStringView Directory)
-            {
-                VFS::RecursiveDirectoryIterator(Directory, [&Files](const VFS::FFileInfo& Info)
-                {
-                    if (Info.IsDirectory() || Info.GetExt() != ".slang")
-                    {
-                        return;
-                    }
-                    FString Source;
-                    if (VFS::ReadFile(Source, Info.VirtualPath.c_str()))
-                    {
-                        // Checkout line endings differ per machine and must not change the hash.
-                        Source.erase(Algo::Remove(Source, '\r'), Source.end());
-                        Files.push_back({ FString(Info.VirtualPath.c_str()), Hash::XXHash::GetHash64(Source) });
-                    }
-                });
-            };
-
             // Everything a material template can reach, the templates themselves plus the shared includes.
-            Gather("/Engine/Resources/Shaders/MaterialShader");
-            Gather("/Engine/Resources/Shaders/Includes");
-
-            Algo::Sort(Files, [](const FEntry& A, const FEntry& B) { return A.Path < B.Path; });
-
-            size_t Result = Files.size();
-            Hash::HashCombine(Result, (size_t)FShaderCache::kShaderCacheVersion);
-            for (const FEntry& File : Files)
-            {
-                Hash::HashCombine(Result, (size_t)Hash::GetHash64(File.Path));
-                Hash::HashCombine(Result, (size_t)File.ContentHash);
-            }
-
-            // 0 is the serialized never-compiled sentinel, so a real hash must never collide with it.
-            return Result != 0 ? (uint64)Result : 1ull;
+            constexpr FStringView Directories[] = { "/Engine/Resources/Shaders/MaterialShader", "/Engine/Resources/Shaders/Includes" };
+            return Shaders::HashSourceDirectories(Directories);
         }();
         return CachedHash;
     }
 
-    uint64 CMaterial::MakeShaderCacheKey(uint64 SourceHash)
-    {
-        size_t Key = (size_t)SourceHash;
-        Hash::HashCombine(Key, (size_t)GetShaderTemplateHash());
-        Hash::HashCombine(Key, (size_t)MaterialCodegenVersion);
-
-        // 0 is the cache's do-not-cache key.
-        return Key != 0 ? (uint64)Key : 1ull;
-    }
-
-#if USING(WITH_EDITOR)
-    TStrongObjectPtr<CMaterial> CMaterial::PopStaleTemplateMaterial()
-    {
-        FScopeLock Lock(StaleTemplateMutex);
-        if (StaleTemplateMaterials.empty())
-        {
-            return nullptr;
-        }
-        TStrongObjectPtr<CMaterial> Material = StaleTemplateMaterials.back();
-        StaleTemplateMaterials.pop_back();
-        return Material;
-    }
-
-    void CMaterial::RequestPermutation(CMaterial* Material, uint64 Key)
-    {
-        // A cooked material has no graph to compile from, and the default permutation always exists.
-        if (!IsValid(Material) || Material->GetPackage() == nullptr || Material->HasPermutation(Key))
-        {
-            return;
-        }
-
-        FScopeLock Lock(PermutationRequestMutex);
-        const bool bQueued = Algo::AnyOf(PermutationRequests, [Material, Key](const FPermutationRequest& Request)
-        {
-            return Request.Material == Material && Request.Key == Key;
-        });
-        if (!bQueued)
-        {
-            PermutationRequests.push_back({ Material, Key });
-        }
-    }
-
-    void CMaterial::RequestPermutationRebuild(CMaterial* Material, uint64 Key)
-    {
-        if (!IsValid(Material) || Material->GetPackage() == nullptr)
-        {
-            return;
-        }
-
-        FScopeLock Lock(PermutationRequestMutex);
-        for (FPermutationRequest& Request : PermutationRequests)
-        {
-            if (Request.Material == Material && Request.Key == Key)
-            {
-                Request.bRebuild = true;
-                return;
-            }
-        }
-        PermutationRequests.push_back({ Material, Key, true });
-    }
-
-    bool CMaterial::PopPermutationRequest(TStrongObjectPtr<CMaterial>& OutMaterial, uint64& OutKey, bool& bOutRebuild)
-    {
-        FScopeLock Lock(PermutationRequestMutex);
-        if (PermutationRequests.empty())
-        {
-            return false;
-        }
-        OutMaterial = PermutationRequests.back().Material;
-        OutKey      = PermutationRequests.back().Key;
-        bOutRebuild = PermutationRequests.back().bRebuild;
-        PermutationRequests.pop_back();
-        return true;
-    }
-#endif
 }

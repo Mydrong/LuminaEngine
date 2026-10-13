@@ -111,8 +111,15 @@ float ThinningHash(float3 Position)
     return float(H >> 8u) * (1.0 / 16777216.0);
 }
 
-// Every lane tests every view, so the group stages them once rather than each lane streaming 128 bytes per view.
-groupshared FCullView gsViews[MAX_CULL_VIEWS];
+// Staging all MAX_CULL_VIEWS took 16 KB a group and stalled half the launches on shared memory, so only the first few are staged.
+static const uint kStagedCullViews = 8u;
+groupshared FCullView gsViews[kStagedCullViews];
+
+// The view index is uniform, so a view past the staged ones is one broadcast load rather than one per lane.
+FCullView GetCullView(uint View)
+{
+    return View < kStagedCullViews ? gsViews[View] : CullViews().GetAligned(View);
+}
 
 [shader("compute")]
 [numthreads(LOCAL_SIZE_X, 1, 1)]
@@ -127,9 +134,9 @@ void ComputeMain(uint3 GlobalID : SV_DispatchThreadID, uint3 GroupID : SV_GroupI
 
     // Ahead of every early return, since the whole group has to reach the barrier.
     const uint NumViews = min(Pass().NumViews, (uint)MAX_CULL_VIEWS);
-    for (uint StageView = LocalID.x; StageView < NumViews; StageView += LOCAL_SIZE_X)
+    if (LocalID.x < min(NumViews, kStagedCullViews))
     {
-        gsViews[StageView] = CullViews().GetAligned(StageView);
+        gsViews[LocalID.x] = CullViews().GetAligned(LocalID.x);
     }
     GroupMemoryBarrierWithGroupSync();
 
@@ -241,6 +248,7 @@ void ComputeMain(uint3 GlobalID : SV_DispatchThreadID, uint3 GroupID : SV_GroupI
     const bool bCaster     = Cull.HasFlag(EInstanceFlags::CastShadow);
     const bool bShadowOnly = Cull.HasFlag(EInstanceFlags::ShadowOnly);
     const bool bFarCaster  = Cull.HasFlag(EInstanceFlags::CastFarShadow);
+    const bool bFoliage    = Cull.HasFlag(EInstanceFlags::Foliage);
     const uint DrawID   = Cull.DrawID;
     const bool bInRange = DrawID < Pass().NumBatches;
     bool bAnyView = false;
@@ -257,7 +265,7 @@ void ComputeMain(uint3 GlobalID : SV_DispatchThreadID, uint3 GroupID : SV_GroupI
     // Needed before the compacted slot is claimed, because that slot indexes the range slab.
     for (uint v = 0; v < NumViews; ++v)
     {
-        if (IsInstanceVisibleToView(gsViews[v], Center, Radius, bNoCull, bCaster, bShadowOnly, bFarCaster))
+        if (IsInstanceVisibleToView(GetCullView(v), Center, Radius, bNoCull, bCaster, bShadowOnly, bFarCaster, bFoliage))
         {
             bAnyView = true;
             break;
@@ -294,7 +302,7 @@ void ComputeMain(uint3 GlobalID : SV_DispatchThreadID, uint3 GroupID : SV_GroupI
     // The primary camera's pick, which the instance carries for anything that reads it outside a view.
     if (bSelectPerView && bHasGeometry && NumViews > 0u)
     {
-        const uint2 CameraRange = SelectViewMeshletRange(Desc, gsViews[0], Cull.SphereBounds, MaxScale);
+        const uint2 CameraRange = SelectViewMeshletRange(Desc, GetCullView(0u), Cull.SphereBounds, MaxScale);
         SurfaceMeshletOffset = CameraRange.x;
         SurfaceMeshletCount  = CameraRange.y;
     }
@@ -302,12 +310,12 @@ void ComputeMain(uint3 GlobalID : SV_DispatchThreadID, uint3 GroupID : SV_GroupI
     // The single per-(instance, view) decision, read by BuildMeshletBlocks so the reservation and the append cannot disagree.
     for (uint v = 0; v < NumViews; ++v)
     {
-        FCullView View = gsViews[v];
+        FCullView View = GetCullView(v);
 
         uint2 Range   = uint2(0u, 0u);
         uint  Emitted = 0u;
 
-        if (IsInstanceVisibleToView(View, Center, Radius, bNoCull, bCaster, bShadowOnly, bFarCaster))
+        if (IsInstanceVisibleToView(View, Center, Radius, bNoCull, bCaster, bShadowOnly, bFarCaster, bFoliage))
         {
             if (bSelectPerView)
             {

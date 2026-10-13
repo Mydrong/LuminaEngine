@@ -183,7 +183,7 @@ namespace Lumina
         bool HasCurve(const FName& CurveName) const;
 
         // Sizes VMState from the current graph if it has not been initialized
-        // yet, so Lua / the system can set parameters before the VM's first tick.
+        // yet, so a script or the system can set parameters before the VM's first tick.
         void EnsureStateInitialized();
     };
 }

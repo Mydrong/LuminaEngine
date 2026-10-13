@@ -13,11 +13,10 @@ namespace Lumina
         // party libs the engine itself depends on. Engine-only.
         Earliest,
 
-        // After core (memory/log/task/physics) but before render/Lua/world.
+        // After core (memory/log/task/physics) but before render and world.
         Core,
 
-        // After Lua + reflection (ProcessNewlyLoadedCObjects) but before any
-        // world or editor UI exists. Most gameplay extensions go here.
+        // After reflected types are registered, before any world or editor UI exists, where most gameplay extensions go.
         PreEngineInit,
 
         // After world manager exists, before the project DLL loads.
@@ -26,7 +25,7 @@ namespace Lumina
         // After all engine init has finished, before the main loop.
         PostEngineInit,
 
-        // After the project DLL loads; for modules building on project types (e.g. Lua bindings).
+        // After the project DLL loads; for modules building on project types (e.g. script bindings).
         PostProjectLoad,
 
         // Editor-only: after the editor UI is initialized. Editor tooling

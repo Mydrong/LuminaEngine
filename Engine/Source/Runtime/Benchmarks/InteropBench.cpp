@@ -116,7 +116,7 @@ namespace LuminaInteropBench
         {
             Lumina::Paths::InitializePaths();
             // Registers the reflected types, without which a property offset resolves to zero.
-            Lumina::ProcessNewlyLoadedCObjects();
+            Lumina::RegisterPendingTypes();
             DotNet::Initialize();
         }
 

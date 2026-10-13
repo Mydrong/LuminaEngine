@@ -1400,7 +1400,7 @@ namespace Lumina
                 Push.GridSide           = GridSide;
 
                 // The block is shared by every species on this mesh, so per-type shading flags join here, not in the binding.
-                EInstanceFlags SpeciesFlags = Species.bReceiveShadow ? EInstanceFlags::ReceiveShadow : EInstanceFlags::None;
+                EInstanceFlags SpeciesFlags = EInstanceFlags::Foliage | (Species.bReceiveShadow ? EInstanceFlags::ReceiveShadow : EInstanceFlags::None);
                 if (!Species.bContactShadows)
                 {
                     SpeciesFlags |= EInstanceFlags::NoContactShadows;

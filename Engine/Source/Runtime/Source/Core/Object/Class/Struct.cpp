@@ -1,4 +1,4 @@
-﻿#include "RuntimePCH.h"
+#include "RuntimePCH.h"
 #include "Core/Reflection/Type/Function.h"
 #include "Core/Object/Class.h"
 #include "Core/Object/Class/StructTraits.h"
@@ -6,7 +6,7 @@
 #include "Containers/Function.h"
 #include "Core/Reflection/Type/LuminaTypes.h"
 #include "Core/Reflection/Type/Properties/ArrayProperty.h"
-#include "Core/Reflection/Type/Properties/PropertyTag.h"
+#include "Core/Reflection/Type/Properties/PropertyHeader.h"
 #include "Core/Serialization/NetArchive.h"
 #include "Memory/Memory.h"
 #include "Log/Log.h"
@@ -48,10 +48,7 @@ namespace Lumina
             Ops->Copy(Dest, Src);
             return;
         }
-        for (FProperty* Current : AllProperties)
-        {
-            Current->CopyCompleteValue_InContainer(Dest, Src);
-        }
+        CopyProperties(Dest, Src);
     }
 
     bool CStruct::CompareStruct(const void* A, const void* B) const
@@ -146,6 +143,42 @@ namespace Lumina
             AllFunctions.insert(AllFunctions.end(),
                 SuperStruct->AllFunctions.begin(), SuperStruct->AllFunctions.end());
         }
+
+        TrivialCopyRuns.clear();
+        NonTrivialProperties.clear();
+
+        TVector<FProperty*> Trivial;
+        for (FProperty* Property : AllProperties)
+        {
+            // An enum's own size is only known once its inner arrives, so one without it copies through its call.
+            const bool bRawCopy = Property->IsTrivial() && Property->GetElementSize() != 0;
+            (bRawCopy ? Trivial : NonTrivialProperties).push_back(Property);
+        }
+
+        Algo::Sort(Trivial, [](const FProperty* A, const FProperty* B) { return A->Offset < B->Offset; });
+        for (const FProperty* Property : Trivial)
+        {
+            if (!TrivialCopyRuns.empty() && TrivialCopyRuns.back().Offset + TrivialCopyRuns.back().Size == Property->Offset)
+            {
+                TrivialCopyRuns.back().Size += (uint32)Property->GetElementSize();
+            }
+            else
+            {
+                TrivialCopyRuns.push_back({ Property->Offset, (uint32)Property->GetElementSize() });
+            }
+        }
+    }
+
+    void CStruct::CopyProperties(void* Dest, const void* Src) const
+    {
+        for (const FCopyRun& Run : TrivialCopyRuns)
+        {
+            Memory::Memcpy(static_cast<uint8*>(Dest) + Run.Offset, static_cast<const uint8*>(Src) + Run.Offset, Run.Size);
+        }
+        for (const FProperty* Property : NonTrivialProperties)
+        {
+            Property->CopyCompleteValue_InContainer(Dest, Src);
+        }
     }
 
     void CStruct::Unlink()
@@ -154,6 +187,8 @@ namespace Lumina
         AllProperties.clear();
         OwnFunctions.clear();
         AllFunctions.clear();
+        TrivialCopyRuns.clear();
+        NonTrivialProperties.clear();
         bLinked = false;
     }
 
@@ -213,14 +248,14 @@ namespace Lumina
     }
     
     // Entities were saved as plain 32-bit numbers before they had a kind of their own, and the packed bits match.
-    static bool IsEntityRetag(EPropertyTypeFlags PropertyType, EPropertyTypeFlags TagType)
+    static bool IsEntityRetag(EPropertyTypeFlags PropertyType, EPropertyTypeFlags HeaderType)
     {
         const auto IsPacked32 = [](EPropertyTypeFlags Type)
         {
             return Type == EPropertyTypeFlags::Int32 || Type == EPropertyTypeFlags::UInt32;
         };
-        return (PropertyType == EPropertyTypeFlags::Entity && IsPacked32(TagType))
-            || (TagType == EPropertyTypeFlags::Entity && IsPacked32(PropertyType));
+        return (PropertyType == EPropertyTypeFlags::Entity && IsPacked32(HeaderType))
+            || (HeaderType == EPropertyTypeFlags::Entity && IsPacked32(PropertyType));
     }
 
     static bool ReadNumericValue(FArchive& Ar, EPropertyTypeFlags Type, double& OutValue)
@@ -259,7 +294,7 @@ namespace Lumina
         }
     }
     
-    void CStruct::SerializeTaggedProperties(FArchive& Ar, void* Data) const
+    void CStruct::SerializeProperties(FArchive& Ar, void* Data) const
     {
         if (StructOps && StructOps->HasSerializer())
         {
@@ -285,24 +320,24 @@ namespace Lumina
                     continue;
                 }
 
-                FPropertyTag PropertyTag;
-                PropertyTag.Type = Current->GetType();
-                PropertyTag.Name = Current->GetPropertyName();
+                FPropertyHeader Header;
+                Header.Type = Current->GetType();
+                Header.Name = Current->GetPropertyName();
 
-                // placeholder rewritten with the final size, so nothing in the tag may be variable length
-                int64 TagPosition = Ar.Tell();
-                Ar << PropertyTag;
-                int64 AfterTagPosition = Ar.Tell();
+                // placeholder rewritten with the final size, so nothing in the header may be variable length
+                int64 HeaderPosition = Ar.Tell();
+                Ar << Header;
+                int64 AfterHeaderPosition = Ar.Tell();
 
                 void* ValuePtr = Current->GetValuePtr<void>(Data);
 
                 Current->Serialize(Ar, ValuePtr);
 
                 int64 DataEndPosition = Ar.Tell();
-                PropertyTag.Size = (int32)(DataEndPosition - AfterTagPosition);
+                Header.Size = (int32)(DataEndPosition - AfterHeaderPosition);
 
-                Ar.Seek(TagPosition);
-                Ar << PropertyTag;
+                Ar.Seek(HeaderPosition);
+                Ar << Header;
             
                 Ar.Seek(DataEndPosition);
 
@@ -322,7 +357,7 @@ namespace Lumina
 
             if (NumProperties > Ar.GetMaxSerializeSize())
             {
-                LOG_ERROR("Archiver corrupted: struct claims {} tagged properties (max {})", NumProperties, Ar.GetMaxSerializeSize());
+                LOG_ERROR("Archiver corrupted: struct claims {} serialized properties (max {})", NumProperties, Ar.GetMaxSerializeSize());
                 Ar.SetHasError(true);
                 return;
             }
@@ -330,15 +365,15 @@ namespace Lumina
             size_t NextInOrder = 0;
             for (uint32 i = 0; i < NumProperties; ++i)
             {
-                FPropertyTag Tag;
-                Ar << Tag;
+                FPropertyHeader Header;
+                Ar << Header;
         
                 int64 DataStartPos = Ar.Tell();
         
                 FProperty* FoundProperty = nullptr;
 
                 // O(1) fast path assuming order is unchanged.
-                if (NextInOrder < AllProperties.size() && AllProperties[NextInOrder]->GetPropertyName() == Tag.Name)
+                if (NextInOrder < AllProperties.size() && AllProperties[NextInOrder]->GetPropertyName() == Header.Name)
                 {
                     FoundProperty = AllProperties[NextInOrder];
                     ++NextInOrder;
@@ -349,7 +384,7 @@ namespace Lumina
                 {
                     for (FProperty* Search : AllProperties)
                     {
-                        if (Search->GetPropertyName() == Tag.Name)
+                        if (Search->GetPropertyName() == Header.Name)
                         {
                             FoundProperty = Search;
                             break;
@@ -357,7 +392,7 @@ namespace Lumina
                     }
                 }
 
-                // Match old tag names against the ';'-joined Aliases metadata of renamed properties.
+                // Match old header names against the ';'-joined Aliases metadata of renamed properties.
                 if (FoundProperty == nullptr)
                 {
                     for (FProperty* Search : AllProperties)
@@ -375,7 +410,7 @@ namespace Lumina
                                 End = Aliases.size();
                             }
                             // FName's two-arg ctor takes a NUMBER, not a length, so that spelling never matched an alias.
-                            if (End > Start && FName(FStringView(Aliases.data() + Start, End - Start)) == Tag.Name)
+                            if (End > Start && FName(FStringView(Aliases.data() + Start, End - Start)) == Header.Name)
                             {
                                 FoundProperty = Search;
                                 break;
@@ -393,52 +428,52 @@ namespace Lumina
                 {
                     if (!FoundProperty->ShouldSerialize())
                     {
-                        LOG_WARN("Property '{}' that was previously serialized, is not marked transient. Skipping.", Tag.Name.ToString());
-                        Ar.Seek(DataStartPos + Tag.Size);
+                        LOG_WARN("Property '{}' that was previously serialized, is not marked transient. Skipping.", Header.Name.ToString());
+                        Ar.Seek(DataStartPos + Header.Size);
                         continue;
                     }
                     
-                    if (FoundProperty->GetType() == Tag.Type)
+                    if (FoundProperty->GetType() == Header.Type)
                     {
                         void* ValuePtr = FoundProperty->GetValuePtr<void>(Data);
                         FoundProperty->Serialize(Ar, ValuePtr);
                     }
-                    else if (IsEntityRetag(FoundProperty->GetType(), Tag.Type))
+                    else if (IsEntityRetag(FoundProperty->GetType(), Header.Type))
                     {
                         FoundProperty->Serialize(Ar, FoundProperty->GetValuePtr<void>(Data));
                     }
-                    else if (IsPropertyNumeric(FoundProperty->GetType()) && IsPropertyNumeric(Tag.Type))
+                    else if (IsPropertyNumeric(FoundProperty->GetType()) && IsPropertyNumeric(Header.Type))
                     {
                         double OldValue = 0.0;
-                        if (!ReadNumericValue(Ar, Tag.Type, OldValue))
+                        if (!ReadNumericValue(Ar, Header.Type, OldValue))
                         {
-                            LOG_ERROR("Failed to read numeric value for property '{}'", Tag.Name);
+                            LOG_ERROR("Failed to read numeric value for property '{}'", Header.Name);
                         }
                         else if (IsValueValidForType(OldValue, FoundProperty->GetType()))
                         {
                             SetConvertedNumericValue(*FoundProperty, Data, OldValue);
 
                             LOG_WARN("Property '{}' type changed from '{}' to '{}', converted value to new type.",
-                            Tag.Name, PropertyTypeToString(Tag.Type), PropertyTypeToString(FoundProperty->GetType()));
+                            Header.Name, PropertyTypeToString(Header.Type), PropertyTypeToString(FoundProperty->GetType()));
                         }
                         else
                         {
                             LOG_WARN("Property '{}' type changed from '{}' to '{}', but the value cannot fit in the new type.",
-                            Tag.Name, PropertyTypeToString(Tag.Type), PropertyTypeToString(FoundProperty->GetType()));
+                            Header.Name, PropertyTypeToString(Header.Type), PropertyTypeToString(FoundProperty->GetType()));
                         }
                     }
                 }
                 else
                 {
-                    LOG_WARN("Property '{}' of type '{}' not found in struct, skipping", Tag.Name.ToString(), PropertyTypeToString(Tag.Type));
+                    LOG_WARN("Property '{}' of type '{}' not found in struct, skipping", Header.Name.ToString(), PropertyTypeToString(Header.Type));
                 }
         
-                Ar.Seek(DataStartPos + Tag.Size);
+                Ar.Seek(DataStartPos + Header.Size);
             }
         }
     }
 
-    void CStruct::SerializeTaggedProperties(IStructuredArchive::FRecord& Record, void* Data, void const* Defaults) const
+    void CStruct::SerializeProperties(IStructuredArchive::FRecord& Record, void* Data, void const* Defaults) const
     {
         for (FProperty* Current : AllProperties)
         {

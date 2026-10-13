@@ -12,7 +12,7 @@ struct FDeferredLightingArgs
     FRWTexture2D    HDR;
     uint            ScreenW;
     uint            ScreenH;
-    FTexture2D      SlotImage;  // slot + 1 per pixel from the classify count, 0 where nothing deferred shades it
+    FTexture2DUInt  SlotImage;  // slot + 1 per pixel from the classify count, 0 where nothing deferred shades it
     uint            _Pad0;
     uint            _Pad1;
     uint            _Pad2;
@@ -30,7 +30,7 @@ void ComputeMain(uint3 DTid : SV_DispatchThreadID)
         return;
     }
 
-    if (Pass().SlotImage.Load(int2(Texel)).r < 0.5)
+    if (Pass().SlotImage.Load(int2(Texel)) == 0u)
     {
         return;
     }

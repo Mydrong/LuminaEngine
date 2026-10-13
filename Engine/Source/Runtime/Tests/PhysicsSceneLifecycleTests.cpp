@@ -17,7 +17,7 @@ namespace
     protected:
         void SetUp() override
         {
-            ProcessNewlyLoadedCObjects();
+            RegisterPendingTypes();
             World = NewObject<CWorld>(nullptr, NAME_None, FGuid::New(), OF_Transient);
             Registry = &ECS::GetWorldRegistry(*World);
             Registry->Ctx().Emplace<ECS::FEventDispatcher*>(&Dispatcher);

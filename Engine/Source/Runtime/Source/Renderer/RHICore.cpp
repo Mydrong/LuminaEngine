@@ -801,12 +801,14 @@ namespace Lumina::RHI
 
         Alignment = Math::Max<uint64>(Alignment, (uint64)kDefaultAlign);
 
-        const uint64 Padded = Size + Alignment;
+        // Rounded to whole root-data chunks, so a 16-byte load of the last field never reads past the block.
+        const uint64 ChunkedSize = Math::AlignUp(Size, kRootDataAlign);
+        const uint64 Padded      = ChunkedSize + Alignment;
         const uint64 RawOffset = Slice.Cursor.fetch_add(Padded, std::memory_order_relaxed);
         
         if (RawOffset + Padded > Slice.Capacity)
         {
-            const FGPUAllocation Mem = Malloc(Size, Alignment, EMemoryType::CPUWrite);
+            const FGPUAllocation Mem = Malloc(ChunkedSize, Alignment, EMemoryType::CPUWrite);
             // An overflow visible in the memory tool signals an undersized ring slice, and naming is cheap.
             SetDebugName(Mem.Gpu, "Transient.Overflow");
             Retire(Mem);

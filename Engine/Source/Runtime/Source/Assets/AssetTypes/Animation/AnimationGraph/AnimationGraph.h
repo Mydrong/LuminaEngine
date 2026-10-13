@@ -125,7 +125,7 @@ namespace Lumina
         return *reinterpret_cast<CObject* const*>(Base + Binding.Offset);
     }
 
-    // A named value editor/Lua tweak at runtime to drive blend weights, playback speeds, etc.
+    // A named value the editor or a script tweaks at runtime to drive blend weights, playback speeds, etc.
     struct FAnimGraphParameter
     {
         FName Name;
@@ -434,7 +434,7 @@ namespace Lumina
         PROPERTY()
         TVector<TStrongObjectPtr<CBlendSpace>> BlendSpaces;
 
-        /** Lua- and editor-tweakable parameters that drive the graph. */
+        /** Script- and editor-tweakable parameters that drive the graph. */
         TVector<FAnimGraphParameter> Parameters;
 
         /** Object-valued inputs; the runtime fills these so nodes can swap which asset they sample. */

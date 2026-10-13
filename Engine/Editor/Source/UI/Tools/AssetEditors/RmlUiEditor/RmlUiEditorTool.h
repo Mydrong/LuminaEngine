@@ -23,7 +23,7 @@ namespace Rml
 namespace Lumina
 {
     // Editor for raw .rml files. Not in the CObject asset pipeline: documents stay as
-    // plain text so Lua/RmlUi can include each other without a binary package layer.
+    // plain text so RmlUi documents can include each other without a binary package layer.
     class FRmlUiEditorTool : public FAssetEditorTool
     {
     public:

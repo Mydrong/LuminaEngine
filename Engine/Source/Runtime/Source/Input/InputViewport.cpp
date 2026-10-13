@@ -1,6 +1,7 @@
 ﻿#include "RuntimePCH.h"
 #include "InputViewport.h"
 
+#include "Core/Diagnostics/BenchmarkRun.h"
 #include "Core/Windows/Window.h"
 #include "Events/Event.h"
 #include "Input/InputActionMap.h"
@@ -502,7 +503,8 @@ namespace Lumina
 
     EMouseMode FInputViewportRegistry::GetActiveEffectiveMouseMode() const
     {
-        if (ActiveViewport == nullptr)
+        // A benchmark run is unattended, and a captured cursor would vanish from whoever is using the machine.
+        if (ActiveViewport == nullptr || Benchmark::IsActive())
         {
             return EMouseMode::Normal;
         }

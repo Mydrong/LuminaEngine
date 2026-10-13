@@ -1,30 +1,133 @@
-﻿#include "ReflectedType.h"
+#include "ReflectedType.h"
 
 #include <algorithm>
 #include <array>
 #include <ranges>
 
 #include "Reflector/CodeGeneration/CodeWriter.h"
+#include "Reflector/CodeGeneration/ReflectionNames.h"
+#include "Reflector/ReflectionCore/ReflectedHeader.h"
+#include "Reflector/ReflectionCore/ReflectedProject.h"
 #include "Reflector/Types/Properties/ReflectedProperty.h"
 
 namespace Lumina::Reflection
 {
-    void EmitMetadataArray(FCodeWriter& Writer, std::string_view SymbolBase, const std::vector<FMetadataPair>& Metadata)
+    namespace
     {
-        if (Metadata.empty())
+        // Entries every build keeps, then the editor's, which a build without the editor counts off the end.
+        std::vector<const FMetadataPair*> StoredMetadata(const std::vector<FMetadataPair>& Metadata, ESpecifierTarget Target, size_t& OutNumRuntime)
+        {
+            std::vector<const FMetadataPair*> Stored;
+            for (const ESpecifierStorage Wanted : { ESpecifierStorage::Metadata, ESpecifierStorage::EditorMetadata })
+            {
+                for (const FMetadataPair& Pair : Metadata)
+                {
+                    if (!Pair.Key.empty() && GetSpecifierStorage(Target, Pair.Key) == Wanted)
+                    {
+                        Stored.push_back(&Pair);
+                    }
+                }
+                if (Wanted == ESpecifierStorage::Metadata)
+                {
+                    OutNumRuntime = Stored.size();
+                }
+            }
+            return Stored;
+        }
+    }
+
+    void EmitMetadataArray(FCodeWriter& Writer, std::string_view SymbolBase, const std::vector<FMetadataPair>& Metadata, ESpecifierTarget Target)
+    {
+        size_t NumRuntime = 0;
+        const std::vector<const FMetadataPair*> Stored = StoredMetadata(Metadata, Target, NumRuntime);
+        if (Stored.empty())
         {
             return;
         }
 
-        Writer.Linef("static constexpr Lumina::FMetaDataPairParam %.*s_Metadata[] = {",
+        Writer.Linef("static constexpr Lumina::FMetadataEntry %.*s_Metadata[] = {",
             static_cast<int>(SymbolBase.size()), SymbolBase.data());
 
-        for (const FMetadataPair& Pair : Metadata)
+        for (const FMetadataPair* Pair : Stored)
         {
-            Writer.Linef("\t{ \"%s\", \"%s\" },", Pair.Key.c_str(), Pair.Value.c_str());
+            Writer.Linef("\t{ \"%s\", \"%s\" },", Pair->Key.c_str(), Pair->Value.c_str());
         }
 
         Writer.Line("};");
+    }
+
+    std::string MetadataField(std::string_view SymbolBase, const std::vector<FMetadataPair>& Metadata, ESpecifierTarget Target)
+    {
+        size_t NumRuntime = 0;
+        if (StoredMetadata(Metadata, Target, NumRuntime).empty())
+        {
+            return {};
+        }
+        return " LUMINA_METADATA(" + std::string(SymbolBase) + "_Metadata, " + std::to_string(NumRuntime) + ")";
+    }
+
+    std::string FReflectedType::GetTypeFunctionName() const
+    {
+        return "GetType_" + Names::FriendlyFromParts(Namespace, DisplayName);
+    }
+
+    const char* FReflectedType::AccessorName() const
+    {
+        switch (Type)
+        {
+        case EType::Class: return "StaticClass";
+        case EType::Enum:  return "StaticEnum";
+        default:           return "StaticStruct";
+        }
+    }
+
+    void FReflectedType::OpenNamespace(FCodeWriter& Writer) const
+    {
+        if (!Namespace.empty())
+        {
+            Writer.Linef("namespace %s", Namespace.c_str());
+            Writer.Line("{");
+        }
+    }
+
+    void FReflectedType::CloseNamespace(FCodeWriter& Writer) const
+    {
+        if (!Namespace.empty())
+        {
+            Writer.Line("}");
+        }
+        Writer.Line();
+    }
+
+    void FReflectedType::EmitTypeFunctions(FCodeWriter& Writer, const std::string& ExtraConstruction) const
+    {
+        const std::string Kind = GetTypeName();
+        const std::string Api = Names::ProjectApiMacro(Header->Project->Name);
+        const std::string Function = GetTypeFunctionName();
+
+        Writer.Line("namespace Lumina::Generated");
+        Writer.Line("{");
+        Writer.Linef("	Lumina::%s* %s()", Kind.c_str(), Function.c_str());
+        Writer.Line("	{");
+        Writer.Linef("		static Lumina::%s* Type = nullptr;", Kind.c_str());
+        Writer.Line("		if (Type == nullptr)");
+        Writer.Line("		{");
+        Writer.Linef("			Lumina::Construct%s(&Type, %s::Desc);", Kind.c_str(), TypeInfoQualifiedName().c_str());
+        if (!ExtraConstruction.empty())
+        {
+            Writer.Linef("			%s", ExtraConstruction.c_str());
+        }
+        Writer.Line("		}");
+        Writer.Line("		return Type;");
+        Writer.Line("	}");
+        Writer.Line("}");
+        Writer.Line();
+
+        Writer.Linef("template<> %s Lumina::%s* Lumina::%s<%s>()", Api.c_str(), Kind.c_str(), AccessorName(), EmittedCppQualifiedName().c_str());
+        Writer.Line("{");
+        Writer.Linef("	return Lumina::Generated::%s();", Function.c_str());
+        Writer.Line("}");
+        Writer.Line();
     }
 
     namespace
@@ -113,29 +216,5 @@ namespace Lumina::Reflection
     {
         FMetadataParser Parser(InMetadata);
         Metadata = std::move(Parser.Metadata);
-    }
-
-    bool FReflectedType::DeclareAccessors(FCodeWriter& Writer, const std::string& FileID)
-    {
-        const bool bHasAnyAccessor = std::any_of(Props.begin(), Props.end(),
-            [](const auto& Prop) { return Prop->HasAccessors(); });
-
-        if (!bHasAnyAccessor)
-        {
-            return false;
-        }
-
-        Writer.Linef("#define %s_%u_ACCESSORS \\", FileID.c_str(), GeneratedBodyLineNumber);
-
-        for (const auto& Prop : Props)
-        {
-            Prop->DeclareAccessors(Writer, FileID);
-        }
-
-        // The last Macro line still ends with a line continuation, so strip it to close the define cleanly.
-        Writer.FinalizeMacro();
-        Writer.Line();
-
-        return true;
     }
 }

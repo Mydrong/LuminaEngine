@@ -4,15 +4,14 @@
 #include "Core/Object/ObjectCore.h"
 #include "Core/Object/PropertyArena.h"
 #include "Core/Serialization/Structured/StructuredArchive.h"
-#include "Metadata/PropertyMetadata.h"
 #include "Platform/GenericPlatform.h"
 #include "Log/Log.h"
+#include "Containers/Optional.h"
 #include "Containers/StringFormat.h"
 
 
 namespace Lumina
 {
-    struct FPropertyParams;
     class CStruct;
     class IStructuredArchive;
     class FNetArchive;
@@ -20,21 +19,18 @@ namespace Lumina
 
 namespace Lumina
 {
-
-    #define DECLARE_FPROPERTY(Type) \
-    static EPropertyTypeFlags StaticType() { return Type; }
-    
     /** Exactly one cache line; keep the member block packed when adding to it. */
     class LUMINA_VISIBLE_TYPE FProperty
     {
     public:
         
-        explicit FProperty(const FPropertyParams* Params)
+        explicit FProperty(const FPropertyDesc& InDesc)
+            : Name(InDesc.Name)
+            , Offset(InDesc.Offset)
+            , Flags(InDesc.Flags | InDesc.Type->Flags)
+            , TypeFlags(InDesc.Type->Kind)
+            , Desc(&InDesc)
         {
-            Offset      = Params->Offset;
-            Name        = Params->Name;
-            TypeFlags   = Params->TypeFlags;
-            Flags       = Params->PropertyFlags;
         }
         
         virtual ~FProperty() = default;
@@ -122,8 +118,7 @@ namespace Lumina
         virtual bool OwnsStorage() const { return false; }
         virtual void SerializeItem(IStructuredArchive::FSlot Slot, void* Value, void const* Defaults = nullptr) { }
 
-        /** Compact network serialization (no FName tag / size prefix). Defaults to the raw Serialize
-         *  path; override per type to quantize (e.g. transforms/quats). Value points at the field. */
+        // Compact network serialization without a property header, which a type overrides to quantize.
         RUNTIME_API virtual void NetSerialize(FNetArchive& Ar, void* Value);
 
         /** Defaults to byte-wise memcmp; non-trivial types (FString, structs, arrays) override. */
@@ -150,27 +145,29 @@ namespace Lumina
         NODISCARD bool IsOutParam()     const       { return EnumHasAnyFlags(Flags, EPropertyFlags::OutParam); }
         NODISCARD bool IsRefParam()     const       { return EnumHasAnyFlags(Flags, EPropertyFlags::RefParam); }
         NODISCARD bool ShouldSerialize()const       { return !EnumHasAnyFlags(Flags, EPropertyFlags::NoSerialize); }
-        NODISCARD bool IsEditable()     const       { return EnumHasAnyFlags(Flags, EPropertyFlags::Editable); }
         NODISCARD bool IsConst()        const       { return EnumHasAnyFlags(Flags, EPropertyFlags::Const); }
-        NODISCARD bool IsInner()        const       { return EnumHasAnyFlags(Flags, EPropertyFlags::SubField); }
         NODISCARD bool IsProtected()    const       { return EnumHasAnyFlags(Flags, EPropertyFlags::Protected); }
-        NODISCARD bool IsPrivate()      const       { return EnumHasAnyFlags(Flags, EPropertyFlags::Private); }
-        NODISCARD bool IsScriptReadOnly() const     { return EnumHasAnyFlags(Flags, EPropertyFlags::ScriptReadOnly); }
-        NODISCARD bool IsScriptWritable() const     { return EnumHasAnyFlags(Flags, EPropertyFlags::ScriptWritable); }
         NODISCARD bool IsScriptHidden() const       { return EnumHasAnyFlags(Flags, EPropertyFlags::ScriptHidden); }
         NODISCARD bool IsVisible()      const       { return EnumHasAnyFlags(Flags, EPropertyFlags::ReadOnly | EPropertyFlags::Editable); }
         NODISCARD bool IsTrivial()      const       { return EnumHasAnyFlags(Flags, EPropertyFlags::Trivial); }
-        NODISCARD bool IsBuiltin()      const       { return EnumHasAnyFlags(Flags, EPropertyFlags::Builtin); }
-        NODISCARD bool CanBeBulkSerialized() const  { return EnumHasAnyFlags(Flags, EPropertyFlags::BulkSerialize); }
 
         
         /** Empty when the key is absent. Null-terminated, so it hands straight to a C API. */
         RUNTIME_API FCStringView GetMetadata(FStringView Key) const;
         RUNTIME_API bool HasMetadata(FStringView Key) const;
-        FCStringView TryGetMetadata(FStringView Key) const { return GetMetadata(Key); }
+        RUNTIME_API const FMetadataEntry* FindMetadata(FStringView Key) const;
 
-        /** The generated table outlives the binary, so this is stored rather than copied. */
-        void SetMetadata(const FMetaDataPairParam* Entries, uint16 Count) { MetadataEntries = Entries; NumMetadata = Count; }
+        // Unset when the key is absent or its value is not a number, which the Reflector already refuses for a C++ property.
+        RUNTIME_API TOptional<double> GetMetadataNumber(FStringView Key) const;
+
+        template<typename T>
+        TOptional<T> GetMetadataNumber(FStringView Key) const
+        {
+            const TOptional<double> Value = GetMetadataNumber(Key);
+            return Value ? TOptional<T>(static_cast<T>(*Value)) : TOptional<T>();
+        }
+
+        NODISCARD bool HasEditorFlag(EPropertyEditorFlags Flag) const { return EnumHasAnyFlags(Desc->EditorFlags, Flag); }
 
         /** Places the display name in Arena, so it costs a pointer rather than an FString and a malloc. */
         RUNTIME_API void OnMetadataFinalized(FPropertyArena& Arena);
@@ -178,15 +175,14 @@ namespace Lumina
 
         RUNTIME_API virtual FString ToString(const void* Data) const { return "<unknown>"; }
         
-        virtual bool HasSetter() const { return false; }
+        NODISCARD const FPropertyDesc& GetDesc() const { return *Desc; }
 
-        virtual bool HasGetter() const { return false; }
+        NODISCARD bool HasSetter() const { return Desc->Setter != nullptr; }
+        NODISCARD bool HasGetter() const { return Desc->Getter != nullptr; }
+        NODISCARD bool HasSetterOrGetter() const { return HasSetter() || HasGetter(); }
 
-        virtual bool HasSetterOrGetter() const { return false; }
-
-        RUNTIME_API virtual void CallSetter(void* Container, const void* InValue) const;
-
-        RUNTIME_API virtual void CallGetter(const void* Container, void* OutValue) const;
+        void CallSetter(void* Container, const void* InValue) const { Desc->Setter(Container, InValue); }
+        void CallGetter(const void* Container, void* OutValue) const { Desc->Getter(Container, OutValue); }
 
         
     private:
@@ -202,78 +198,22 @@ namespace Lumina
         EPropertyFlags      Flags = EPropertyFlags::None;
         EPropertyTypeFlags  TypeFlags = EPropertyTypeFlags::None;
 
-        // Sits in the byte the flags above leave over rather than costing the property anything of its own.
-        uint16              NumMetadata = 0;
-
         // Arena-owned, so a display name costs a pointer here instead of an FString and its allocation.
         const char*         DisplayName = nullptr;
 
         // Set when the property is attached; an inner is reached through the property that holds it instead.
         CStruct*            OwnerStruct = nullptr;
 
-        // Points at the generated static table, or at one the arena built for a script-minted property.
-        const FMetaDataPairParam* MetadataEntries = nullptr;
-    };
-
-    template <typename PropertyBaseClass>
-    class TPropertyWithSetterAndGetter : public PropertyBaseClass
-    {
-    public:
-        
-        template <typename PropertyCodegenParams>
-        explicit TPropertyWithSetterAndGetter(const PropertyCodegenParams* Prop)
-            : PropertyBaseClass(Prop)
-            , SetterFunc(Prop->SetterFunc)
-            , GetterFunc(Prop->GetterFunc)
-        {
-        }
-
-        virtual bool HasSetter() const override
-        {
-            return !!SetterFunc;
-        }
-
-        virtual bool HasGetter() const override
-        {
-            return !!GetterFunc;
-        }
-
-        virtual bool HasSetterOrGetter() const override
-        {
-            return !!SetterFunc || !!GetterFunc;
-        }
-
-        virtual void CallSetter(void* Container, const void* InValue) const override
-        {
-            if (SetterFunc == nullptr)
-            {
-                LOG_CRITICAL("Calling a setter but the property has no setter defined.");
-                return;
-            }
-            SetterFunc(Container, InValue);
-        }
-
-        virtual void CallGetter(const void* Container, void* OutValue) const override
-        {
-            if (GetterFunc == nullptr)
-            {
-                LOG_CRITICAL("Calling a getter but the property has no getter defined.");
-            }
-            GetterFunc(Container, OutValue);
-        }
-
-    protected:
-
-        SetterFuncPtr SetterFunc = nullptr;
-        GetterFuncPtr GetterFunc = nullptr;
+        // The generated descriptor, or one the arena built for a script or inner property.
+        const FPropertyDesc* Desc = nullptr;
     };
 
     class FNumericProperty : public FProperty
     {
     public:
 
-        explicit FNumericProperty(const FPropertyParams* Params)
-            :FProperty(Params)
+        explicit FNumericProperty(const FPropertyDesc& Desc)
+            :FProperty(Desc)
         {}
 
         RUNTIME_API virtual void SetIntPropertyValue(void* Data, uint64 Value) const { }
@@ -327,8 +267,8 @@ namespace Lumina
 
         using TTypeInfo = TPropertyTypeLayout<TCPPType>;
         
-        explicit TProperty(const FPropertyParams* Params)
-            :TBacking(Params)
+        explicit TProperty(const FPropertyDesc& Desc)
+            :TBacking(Desc)
         {
             this->ElementSize = TTypeInfo::Size;
         }
@@ -355,8 +295,8 @@ namespace Lumina
         using TTypeInfo = TPropertyTypeLayout<TCPPType>;
         using Super = TProperty<FNumericProperty, TCPPType>;
 
-        explicit TProperty_Numeric(const FPropertyParams* Params)
-            :Super(Params)
+        explicit TProperty_Numeric(const FPropertyDesc& Desc)
+            :Super(Desc)
         {}
 
         virtual FString ToString(const void* Data) const override;
@@ -420,10 +360,8 @@ namespace Lumina
     public:
         using Super = TProperty_Numeric<bool>;
 
-        DECLARE_FPROPERTY(EPropertyTypeFlags::Bool)
-
-        explicit FBoolProperty(const FPropertyParams* Params)
-            : Super(Params)
+        explicit FBoolProperty(const FPropertyDesc& Desc)
+            : Super(Desc)
         {}
 
         // Tight: a bool is one bit on the wire.
@@ -434,10 +372,9 @@ namespace Lumina
     {
     public:
         using Super = TProperty_Numeric<int8>;
-        DECLARE_FPROPERTY(EPropertyTypeFlags::Int8)
 
-        explicit FInt8Property(const FPropertyParams* Params)
-            : Super(Params)
+        explicit FInt8Property(const FPropertyDesc& Desc)
+            : Super(Desc)
         {}
     };
 
@@ -445,10 +382,9 @@ namespace Lumina
     {
     public:
         using Super = TProperty_Numeric<int16>;
-        DECLARE_FPROPERTY(EPropertyTypeFlags::Int16)
 
-        explicit FInt16Property(const FPropertyParams* Params)
-            : Super(Params)
+        explicit FInt16Property(const FPropertyDesc& Desc)
+            : Super(Desc)
         {}
     };
 
@@ -456,10 +392,9 @@ namespace Lumina
     {
     public:
         using Super = TProperty_Numeric<int32>;
-        DECLARE_FPROPERTY(EPropertyTypeFlags::Int32)
 
-        explicit FInt32Property(const FPropertyParams* Params)
-            : Super(Params)
+        explicit FInt32Property(const FPropertyDesc& Desc)
+            : Super(Desc)
         {}
     };
 
@@ -467,10 +402,9 @@ namespace Lumina
     {
     public:
         using Super = TProperty_Numeric<int64>;
-        DECLARE_FPROPERTY(EPropertyTypeFlags::Int64)
 
-        explicit FInt64Property(const FPropertyParams* Params)
-            : Super(Params)
+        explicit FInt64Property(const FPropertyDesc& Desc)
+            : Super(Desc)
         {}
     };
 
@@ -478,10 +412,9 @@ namespace Lumina
     {
     public:
         using Super = TProperty_Numeric<uint8>;
-        DECLARE_FPROPERTY(EPropertyTypeFlags::UInt8)
 
-        explicit FUInt8Property(const FPropertyParams* Params)
-            : Super(Params)
+        explicit FUInt8Property(const FPropertyDesc& Desc)
+            : Super(Desc)
         {}
     };
 
@@ -489,10 +422,9 @@ namespace Lumina
     {
     public:
         using Super = TProperty_Numeric<uint16>;
-        DECLARE_FPROPERTY(EPropertyTypeFlags::UInt16)
 
-        explicit FUInt16Property(const FPropertyParams* Params)
-            : Super(Params)
+        explicit FUInt16Property(const FPropertyDesc& Desc)
+            : Super(Desc)
         {}
     };
 
@@ -500,10 +432,9 @@ namespace Lumina
     {
     public:
         using Super = TProperty_Numeric<uint32>;
-        DECLARE_FPROPERTY(EPropertyTypeFlags::UInt32)
 
-        explicit FUInt32Property(const FPropertyParams* Params)
-            : Super(Params)
+        explicit FUInt32Property(const FPropertyDesc& Desc)
+            : Super(Desc)
         {}
     };
 
@@ -512,10 +443,9 @@ namespace Lumina
     {
     public:
         using Super = TProperty_Numeric<uint32>;
-        DECLARE_FPROPERTY(EPropertyTypeFlags::Entity)
 
-        explicit FEntityProperty(const FPropertyParams* Params)
-            : Super(Params)
+        explicit FEntityProperty(const FPropertyDesc& Desc)
+            : Super(Desc)
         {}
 
         // Routed through the archive so a save game can translate ids between worlds.
@@ -529,10 +459,9 @@ namespace Lumina
     {
     public:
         using Super = TProperty_Numeric<uint64>;
-        DECLARE_FPROPERTY(EPropertyTypeFlags::UInt64)
 
-        explicit FUInt64Property(const FPropertyParams* Params)
-            : Super(Params)
+        explicit FUInt64Property(const FPropertyDesc& Desc)
+            : Super(Desc)
         {}
     };
 
@@ -540,10 +469,9 @@ namespace Lumina
     {
     public:
         using Super = TProperty_Numeric<float>;
-        DECLARE_FPROPERTY(EPropertyTypeFlags::Float)
 
-        explicit FFloatProperty(const FPropertyParams* Params)
-            : Super(Params)
+        explicit FFloatProperty(const FPropertyDesc& Desc)
+            : Super(Desc)
         {}
     };
 
@@ -551,10 +479,9 @@ namespace Lumina
     {
     public:
         using Super = TProperty_Numeric<double>;
-        DECLARE_FPROPERTY(EPropertyTypeFlags::Double)
 
-        explicit FDoubleProperty(const FPropertyParams* Params)
-            : Super(Params)
+        explicit FDoubleProperty(const FPropertyDesc& Desc)
+            : Super(Desc)
         {}
     };
 

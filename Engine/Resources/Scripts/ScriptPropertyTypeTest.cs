@@ -1,4 +1,5 @@
 using LuminaSharp;
+using Lumina;
 
 namespace Lumina.Tests;
 
@@ -22,7 +23,7 @@ namespace Lumina.Tests;
 ///   2. a round-trip check per type, which necessarily overwrites values -- so each check restores what it
 ///      found. Running this script must not disturb what you authored.
 /// </summary>
-public class ScriptPropertyTypeTest : EntityScript
+public class ScriptPropertyTypeTest : CEntityScript
 {
     public enum ETestMode
     {

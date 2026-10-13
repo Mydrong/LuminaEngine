@@ -20,7 +20,7 @@ namespace
         FCreationGate()
         {
             // The harness only starts the object system, so the deferred class pass has to run here.
-            ProcessNewlyLoadedCObjects();
+            RegisterPendingTypes();
             CWorldSubsystemTest::bAllowCreation = true;
         }
 

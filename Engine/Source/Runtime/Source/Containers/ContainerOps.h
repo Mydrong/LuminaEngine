@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Containers/HashTable.h"
+#include "Containers/Optional.h"
 #include "Memory/Construct.h"
 #include "Containers/Vector.h"
 
@@ -179,5 +180,52 @@ namespace Lumina
     const FMapOps* GetMapOps()
     {
         return GetMapOpsFor<THashMap<K, V>>();
+    }
+
+    struct FOptionalOps
+    {
+        bool  (*HasValue)(const void* Optional);
+        void* (*GetValue)(void* Optional);
+
+        // A null value default-constructs the payload.
+        void  (*SetValue)(void* Optional, const void* Value);
+        void  (*Reset)(void* Optional);
+
+        // Null for a TOptional, which its owner constructs, and set for a script optional that owns heap storage.
+        void  (*ConstructContainer)(void* Optional, const void* Context);
+        void  (*DestructContainer)(void* Optional, const void* Context);
+        const void* ContainerContext;
+    };
+
+    template <typename TContainer>
+    const FOptionalOps* GetOptionalOpsFor()
+    {
+        using T = typename TContainer::value_type;
+        static const FOptionalOps Ops =
+        {
+            [](const void* O) { return static_cast<const TContainer*>(O)->has_value(); },
+            [](void* O) -> void*
+            {
+                TContainer* Optional = static_cast<TContainer*>(O);
+                return Optional->has_value() ? &Optional->value() : nullptr;
+            },
+            [](void* O, const void* Value)
+            {
+                TContainer* Optional = static_cast<TContainer*>(O);
+                if (Value != nullptr)
+                {
+                    *Optional = *static_cast<const T*>(Value);
+                }
+                else
+                {
+                    Optional->emplace();
+                }
+            },
+            [](void* O) { static_cast<TContainer*>(O)->reset(); },
+            nullptr,
+            nullptr,
+            nullptr,
+        };
+        return &Ops;
     }
 }

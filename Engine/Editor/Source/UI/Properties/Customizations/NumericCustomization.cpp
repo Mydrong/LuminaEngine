@@ -1,4 +1,4 @@
-﻿#include <string>
+#include <string>
 #include "CoreTypeCustomization.h"
 #include "imgui.h"
 #include "Core/Object/ObjectCore.h"
@@ -115,25 +115,13 @@ namespace Lumina
         ImGui::PushItemWidth(ImGui::GetContentRegionAvail().x);
         FStructProperty* Prop = static_cast<FStructProperty*>(Property->Property);
 
-        TOptional<float> MinOpt;
-        TOptional<float> MaxOpt;
-
-        if (Prop->HasMetadata("ClampMin"))
-        {
-            MinOpt = std::stof(Prop->GetMetadata("ClampMin").c_str());
-        }
-        if (Prop->HasMetadata("ClampMax"))
-        {
-            MaxOpt = std::stof(Prop->GetMetadata("ClampMax").c_str());
-        }
-
-        float Min = MinOpt ? MinOpt.value() : 0.0f;
-        float Max = MaxOpt ? MaxOpt.value() : 0.0f;
+        const float Min = Prop->GetMetadataNumber<float>("ClampMin").value_or(0.0f);
+        const float Max = Prop->GetMetadataNumber<float>("ClampMax").value_or(0.0f);
 
         float Speed = ResolveDragSpeed(Prop, 0.01f);
         const FString UnitFormat = BuildUnitFormat(Prop, "%.3f");
         const char* Format = UnitFormat.empty() ? "%.3f" : UnitFormat.c_str();
-        if (Prop->HasMetadata("NoDrag"))
+        if (Prop->HasEditorFlag(EPropertyEditorFlags::NoDrag))
         {
             // An UNSCALED base, so the plus and minus buttons step the same amount every press.
             float Step = ResolveBaseStep(Prop, 0.01f);
@@ -186,31 +174,19 @@ namespace Lumina
 
         ImGui::PushItemWidth(ImGui::GetContentRegionAvail().x);
 
-        if (Prop->HasMetadata("Color"))
+        if (Prop->HasEditorFlag(EPropertyEditorFlags::Color))
         {
             ImGui::ColorEdit3("##", Math::ValuePtr(DisplayValue));
         }
         else
         {
-            TOptional<float> MinOpt;
-            TOptional<float> MaxOpt;
-
-            if (Prop->HasMetadata("ClampMin"))
-            {
-                MinOpt = std::stof(Prop->GetMetadata("ClampMin").c_str());
-            }
-            if (Prop->HasMetadata("ClampMax"))
-            {
-                MaxOpt = std::stof(Prop->GetMetadata("ClampMax").c_str());
-            }
-
-            float Min = MinOpt ? MinOpt.value() : 0.0f;
-            float Max = MaxOpt ? MaxOpt.value() : 0.0f;
+            const float Min = Prop->GetMetadataNumber<float>("ClampMin").value_or(0.0f);
+            const float Max = Prop->GetMetadataNumber<float>("ClampMax").value_or(0.0f);
 
             float Speed = ResolveDragSpeed(Prop, 0.01f);
             const FString UnitFormat = BuildUnitFormat(Prop, "%.3f");
             const char* Format = UnitFormat.empty() ? "%.3f" : UnitFormat.c_str();
-            if (Prop->HasMetadata("NoDrag"))
+            if (Prop->HasEditorFlag(EPropertyEditorFlags::NoDrag))
             {
                 // An UNSCALED base, so the plus and minus buttons step the same amount every press.
                 float Step = ResolveBaseStep(Prop, 0.01f);
@@ -264,31 +240,19 @@ namespace Lumina
 
         ImGui::PushItemWidth(ImGui::GetContentRegionAvail().x);
 
-        if (Prop->HasMetadata("Color"))
+        if (Prop->HasEditorFlag(EPropertyEditorFlags::Color))
         {
             ImGui::ColorEdit4("##", Math::ValuePtr(DisplayValue));
         }
         else
         {
-            TOptional<float> MinOpt;
-            TOptional<float> MaxOpt;
-
-            if (Prop->HasMetadata("ClampMin"))
-            {
-                MinOpt = std::stof(Prop->GetMetadata("ClampMin").c_str());
-            }
-            if (Prop->HasMetadata("ClampMax"))
-            {
-                MaxOpt = std::stof(Prop->GetMetadata("ClampMax").c_str());
-            }
-
-            float Min = MinOpt ? MinOpt.value() : 0.0f;
-            float Max = MaxOpt ? MaxOpt.value() : 0.0f;
+            const float Min = Prop->GetMetadataNumber<float>("ClampMin").value_or(0.0f);
+            const float Max = Prop->GetMetadataNumber<float>("ClampMax").value_or(0.0f);
 
             float Speed = ResolveDragSpeed(Prop, 0.01f);
             const FString UnitFormat = BuildUnitFormat(Prop, "%.3f");
             const char* Format = UnitFormat.empty() ? "%.3f" : UnitFormat.c_str();
-            if (Prop->HasMetadata("NoDrag"))
+            if (Prop->HasEditorFlag(EPropertyEditorFlags::NoDrag))
             {
                 // An UNSCALED base, so the plus and minus buttons step the same amount every press.
                 float Step = ResolveBaseStep(Prop, 0.01f);

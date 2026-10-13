@@ -3,7 +3,6 @@
 #include "Class.h"
 #include "Cast.h"
 
-RUNTIME_API Lumina::CClass* Construct_CClass_Lumina_CEnum();
 
 namespace Lumina
 {
@@ -18,7 +17,7 @@ namespace Lumina
     {
     public:
 
-        DECLARE_CLASS(Lumina, CScriptEnum, CEnum, "/Script/Engine", RUNTIME_API)
+        DECLARE_CLASS(Lumina, CScriptEnum, CEnum, "/Types/Engine", RUNTIME_API)
         DEFINE_CLASS_FACTORY(CScriptEnum)
 
         CScriptEnum() = default;

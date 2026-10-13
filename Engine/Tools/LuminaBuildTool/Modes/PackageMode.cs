@@ -218,6 +218,17 @@ public static class PackageMode
             }
         }
 
+        // Without its manifest a packaged engine has no BuildId and would load any plugin binary unchecked.
+        IEnumerable<string> ManifestPaths = Target.Modules
+            .Where(Module => Module.BinaryType == ModuleBinaryType.SharedLibrary && Module.OutputFile.Length > 0)
+            .Select(Module => ModuleManifest.GetManifestPath(Module.OutputDirectory, Target.Rules.OutputSuffix))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Where(File.Exists);
+        foreach (string ManifestPath in ManifestPaths)
+        {
+            Stager.CopyFile(ManifestPath);
+        }
+
         foreach (RuntimeDependency Dependency in Target.RuntimeDependencies)
         {
             string Staged = Path.Combine(Target.BinariesDirectory, Path.GetFileName(Dependency.SourcePath));

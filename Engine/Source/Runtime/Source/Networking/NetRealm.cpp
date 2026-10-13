@@ -2,7 +2,6 @@
 
 #include "Core/Engine/GameLibrary.h"
 #include "Core/Object/Class.h"
-#include "Core/Object/ScriptClass.h"
 #include "World/World.h"
 
 namespace Lumina::NetRealm
@@ -16,10 +15,6 @@ namespace Lumina::NetRealm
         ENetRealm Realm = ENetRealm::Any;
         for (const CClass* Current = Class; Current != nullptr; Current = Current->GetSuperClass())
         {
-            if (const CScriptClass* Minted = ToScriptClass(Current))
-            {
-                Realm |= static_cast<ENetRealm>(Minted->ScriptNetRealm);
-            }
             if (Current->HasMeta(HostOnlyName))
             {
                 Realm |= ENetRealm::HostOnly;

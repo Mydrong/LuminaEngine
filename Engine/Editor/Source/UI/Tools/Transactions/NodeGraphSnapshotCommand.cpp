@@ -27,7 +27,7 @@ namespace Lumina
 
         FMemoryWriter Writer(Image.Bytes);
         FObjectProxyArchiver Ar(Writer, false);
-        Graph->GetClass()->SerializeTaggedProperties(Ar, Graph);
+        Graph->GetClass()->SerializeProperties(Ar, Graph);
 
         Graph->ContentVersion         = ContentVersion;
         Graph->CompiledContentVersion = CompiledContentVersion;
@@ -48,7 +48,7 @@ namespace Lumina
             Image.Nodes.push_back(Node);
             if (Node.IsValid())
             {
-                Node->GetClass()->SerializeTaggedProperties(Ar, Node.Get());
+                Node->GetClass()->SerializeProperties(Ar, Node.Get());
                 FObjectReferenceVisitor::VisitStruct(Node->GetClass(), Node.Get(), Hold);
             }
         }
@@ -79,14 +79,14 @@ namespace Lumina
 
         FMemoryReader Reader(Bytes);
         FObjectProxyArchiver Ar(Reader, true);
-        Graph->GetClass()->SerializeTaggedProperties(Ar, Graph);
+        Graph->GetClass()->SerializeProperties(Ar, Graph);
 
         // The graph's node list was just read back, and is the order the node properties were written in.
         for (const TStrongObjectPtr<CEdGraphNode>& Node : Nodes)
         {
             if (Node.IsValid())
             {
-                Node->GetClass()->SerializeTaggedProperties(Ar, Node.Get());
+                Node->GetClass()->SerializeProperties(Ar, Node.Get());
             }
         }
 

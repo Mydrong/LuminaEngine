@@ -99,6 +99,12 @@ float CloudDepthError(float PixelRaw, float PixelLinear, float TexelRaw)
     return abs(LinearizeSceneDepth(TexelRaw) - PixelLinear) / PixelLinear;
 }
 
+// One texel of a GatherRed quad, whose components run (0,1), (1,1), (1,0), (0,0).
+float GatherTexel(float4 Quad, int2 Texel)
+{
+    return Texel.y == 0 ? (Texel.x == 0 ? Quad.w : Quad.z) : (Texel.x == 0 ? Quad.x : Quad.y);
+}
+
 // Bilinear over the four nearest half-res texels, weighted toward those marched against this pixel's depth.
 float4 UpsampleClouds(float2 UV, float Depth)
 {
@@ -118,6 +124,15 @@ float4 UpsampleClouds(float2 UV, float Depth)
     float4 Closest    = float4(0.0, 0.0, 0.0, 1.0);
     float  ClosestErr = 3.0e38;
 
+    // Clamp-to-edge gathers cover the 4x4 depths in four fetches and clamp the border exactly like the loads do.
+    const float2 InvSize = 1.0 / float2(Width, Height);
+    float4 DepthQuads[4];
+    [unroll]
+    for (int q = 0; q < 4; ++q)
+    {
+        DepthQuads[q] = Pass().CloudDepth.GatherRed(Samplers::PointClamp, (float2(Base) + float2(q & 1, q >> 1) * 2.0) * InvSize);
+    }
+
     // A tent wider than bilinear, so the march's per-pixel start jitter averages out on thin wisps.
     [unroll]
     for (int i = 0; i < 16; ++i)
@@ -125,7 +140,8 @@ float4 UpsampleClouds(float2 UV, float Depth)
         int2   Offset = int2(i & 3, i >> 2) - 1;
         int2   Texel  = clamp(Base + Offset, int2(0, 0), MaxTexel);
         float4 Cloud  = Pass().CloudScatter.Load(int3(Texel, 0));
-        float  Err    = CloudDepthError(Depth, PixelLinear, Pass().CloudDepth.Load(int3(Texel, 0)).r);
+        int2   InQuad = Offset + 1;
+        float  Err    = CloudDepthError(Depth, PixelLinear, GatherTexel(DepthQuads[(InQuad.y >> 1) * 2 + (InQuad.x >> 1)], InQuad & 1));
 
         float2 Axis   = max(kCloudTentRadius - abs(float2(Offset) - Frac), 0.0);
         float  Weight = Axis.x * Axis.y / (1.0 + Err * kCloudDepthSharpness);
@@ -162,13 +178,15 @@ float4 UpsampleFogShafts(float2 UV, float Depth)
     float4 Closest    = float4(0.0, 0.0, 0.0, 1.0);
     float  ClosestErr = 3.0e38;
 
+    const float4 DepthQuad = Pass().FogShaftDepth.GatherRed(Samplers::PointClamp, (float2(Base) + 1.0) / float2(Width, Height));
+
     [unroll]
     for (int i = 0; i < 4; ++i)
     {
         const int2   Offset = int2(i & 1, i >> 1);
         const int2   Texel  = clamp(Base + Offset, int2(0, 0), MaxTexel);
         const float4 Shaft  = Pass().FogShaft.Load(int3(Texel, 0));
-        const float  Err    = CloudDepthError(Depth, PixelLinear, Pass().FogShaftDepth.Load(int3(Texel, 0)).r);
+        const float  Err    = CloudDepthError(Depth, PixelLinear, GatherTexel(DepthQuad, Offset));
 
         const float2 Axis   = lerp(1.0 - Frac, Frac, float2(Offset));
         const float  Weight = Axis.x * Axis.y / (1.0 + Err * kCloudDepthSharpness);

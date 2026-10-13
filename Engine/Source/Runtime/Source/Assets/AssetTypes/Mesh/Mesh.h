@@ -72,6 +72,7 @@ namespace Lumina
         
         FORCEINLINE const FGeometrySurface& GetSurface(size_t Slot) const { return MeshResources->GeometrySurfaces[Slot]; }
         FORCEINLINE FMeshResource& GetMeshResource() const { return *MeshResources.get(); }
+        FORCEINLINE const FMeshResource* TryGetMeshResource() const { return MeshResources.get(); }
 
         void SetMeshResource(TUniquePtr<FMeshResource>&& NewResource);
 

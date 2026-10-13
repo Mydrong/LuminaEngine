@@ -654,11 +654,6 @@ namespace Lumina
         return true;
     }
 
-    bool FSpirVShaderCompiler::HasPendingRequests() const
-    {
-        return PendingTasks.load(std::memory_order_acquire) > 0;
-    }
-
     void FSpirVShaderCompiler::Flush() const
     {
         FFiberScopeLock Lock(PendingMutex);
@@ -668,15 +663,44 @@ namespace Lumina
         });
     }
 
-    bool FSpirVShaderCompiler::CompileShaderPath(FString ShaderPath, const FShaderCompileOptions& CompileOptions, CompletedFunc OnCompleted)
+    FShaderCompileWaiter::FShaderCompileWaiter()
+        : State(MakeShared<FState>())
+    {
+    }
+
+    IShaderCompiler::FinishedFunc FShaderCompileWaiter::Track()
+    {
+        State->Outstanding.fetch_add(1, std::memory_order_relaxed);
+        return [State = State]
+        {
+            if (State->Outstanding.fetch_sub(1, std::memory_order_acq_rel) == 1)
+            {
+                FFiberScopeLock Lock(State->Mutex);
+                State->Settled.NotifyAll();
+            }
+        };
+    }
+
+    uint32 FShaderCompileWaiter::GetOutstanding() const
+    {
+        return State->Outstanding.load(std::memory_order_acquire);
+    }
+
+    void FShaderCompileWaiter::Wait() const
+    {
+        FFiberScopeLock Lock(State->Mutex);
+        State->Settled.Wait(State->Mutex, [this] { return IsSettled(); });
+    }
+
+    bool FSpirVShaderCompiler::CompileShaderPath(FString ShaderPath, const FShaderCompileOptions& CompileOptions, CompletedFunc OnCompleted, FinishedFunc OnFinished)
     {
         TVector ShaderPaths = { Move(ShaderPath) };
         TVector Options = { CompileOptions };
 
-        return CompileShaderPaths(TSpan<FString>(ShaderPaths), TSpan<FShaderCompileOptions>(Options), Move(OnCompleted));
+        return CompileShaderPaths(TSpan<FString>(ShaderPaths), TSpan<FShaderCompileOptions>(Options), Move(OnCompleted), Move(OnFinished));
     }
 
-    bool FSpirVShaderCompiler::CompileShaderPaths(TSpan<FString> ShaderPaths, TSpan<FShaderCompileOptions> CompileOptions, CompletedFunc OnCompleted)
+    bool FSpirVShaderCompiler::CompileShaderPaths(TSpan<FString> ShaderPaths, TSpan<FShaderCompileOptions> CompileOptions, CompletedFunc OnCompleted, FinishedFunc OnFinished)
     {
         LUMINA_PROFILE_SCOPE();
         LUMINA_MEMORY_SCOPE("Shaders");
@@ -726,6 +750,10 @@ namespace Lumina
         const uint32 NumShaders = (uint32)Paths.size();
         if (NumShaders == 0)
         {
+            if (OnFinished)
+            {
+                OnFinished();
+            }
             return true;
         }
 
@@ -743,7 +771,9 @@ namespace Lumina
             Paths = Move(Paths),
             Options = Move(Options),
             SourceHashes = Move(SourceHashes),
-            Callback = Move(OnCompleted)] (uint32 Start, uint32 End, uint32 Thread) mutable
+            Callback = Move(OnCompleted),
+            Finished = Move(OnFinished),
+            Remaining = MakeShared<TAtomic<uint32>>(NumShaders)] (uint32 Start, uint32 End, uint32 Thread) mutable
         {
             LUMINA_MEMORY_SCOPE("Shaders");
 
@@ -751,6 +781,11 @@ namespace Lumina
 
             DEFER
             {
+                if (Remaining->fetch_sub(Num, std::memory_order_acq_rel) == Num && Finished)
+                {
+                    Finished();
+                }
+
                 bool bLastChunk;
                 {
                     FFiberScopeLock Lock(PendingMutex);
@@ -867,7 +902,7 @@ namespace Lumina
         GSlangSessionPool.TrimIdle(0);
     }
 
-    bool FSpirVShaderCompiler::CompilerShaderRaw(FString ShaderString, const FShaderCompileOptions& CompileOptions, CompletedFunc OnCompleted)
+    bool FSpirVShaderCompiler::CompilerShaderRaw(FString ShaderString, const FShaderCompileOptions& CompileOptions, CompletedFunc OnCompleted, FinishedFunc OnFinished)
     {
         for (size_t Pos = ShaderString.find("#pragma once"); Pos != FString::npos; Pos = ShaderString.find("#pragma once", Pos))
         {
@@ -891,12 +926,18 @@ namespace Lumina
         Task::AsyncTask(1, 1, [this,
             ShaderString = Move(ShaderString),
             CompileOptions = Move(CompileOptions),
-            Callback = Move(OnCompleted)]
+            Callback = Move(OnCompleted),
+            Finished = Move(OnFinished)]
             (uint32, uint32, uint32 Thread)
         {
             // Declared before the cache probe, so a hit still releases the slot after its callback ran.
             DEFER
             {
+                if (Finished)
+                {
+                    Finished();
+                }
+
                 bool bLast;
                 {
                     FFiberScopeLock Lock(PendingMutex);
@@ -913,13 +954,11 @@ namespace Lumina
             // This used to hardcode the engine tree, so a graph could not include a plugin's shader header.
             const TVector<FString> SearchRoots = BuildShaderSearchRoots();
 
-            const bool bMaterialKeyed = CompileOptions.MaterialCacheKey != 0;
-            const FStringView CacheDirectory = bMaterialKeyed ? FShaderCache::kMaterialCacheDirectory : FShaderCache::kCacheDirectory;
-            const uint64 CacheKey = bMaterialKeyed ? CompileOptions.MaterialCacheKey : FShaderCache::ComputeRawSourceHash(
+            const uint64 CacheKey = FShaderCache::ComputeRawSourceHash(
                 ShaderString, CompileOptions.MacroDefinitions, SearchRoots, CompileOptions.TemplateVirtualPath,
                 CompileOptions.EntryPoint);
 
-            if (FShaderHeader Cached; FShaderCache::TryLoadRaw(CacheKey, Cached, CacheDirectory))
+            if (FShaderHeader Cached; FShaderCache::TryLoadRaw(CacheKey, Cached))
             {
                 // A cached binary still has to reach the crash tracker, or it resolves as unknown.
                 RHI::GetCrashTracker().RegisterShader(Cached.Binaries, Cached.DebugName);
@@ -970,12 +1009,12 @@ namespace Lumina
 
             LOG_TRACE("Compiled raw shader '{0}' in {1:.2f} ms (Thread {2})", RawName, DurationMs, Thread);
 
-            FShaderCache::SaveRaw(CacheKey, Shader, CacheDirectory);
+            FShaderCache::SaveRaw(CacheKey, Shader);
 
             RHI::GetCrashTracker().RegisterShader(Shader.Binaries, Shader.DebugName);
 
             Callback(Move(Shader));
-        });
+        }, CompileOptions.Priority);
 
         return true;
     }

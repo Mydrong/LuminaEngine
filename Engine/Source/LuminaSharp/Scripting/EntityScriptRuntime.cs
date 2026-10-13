@@ -33,13 +33,11 @@ internal sealed class EntityScriptRuntime
         LiveHandles.Remove(Handle);
 
         // Every destruction path releases the handle here, so this is where the script's awaits learn it is gone.
-        if (Handle.Target is EntityScript Script)
+        if (Handle.Target is Lumina.CEntityScript Script)
         {
             Script.CancelDestroyToken();
         }
     }
-
-    public IReadOnlyCollection<string> TypeNames => Library.EntityScriptTypeNames;
 
     public byte[]? Schema(string TypeName)
     {
@@ -67,7 +65,7 @@ internal sealed class EntityScriptRuntime
 
             // No OnDetach: the script is not detaching, its load context is being replaced. The native
             // driver delivers OnReloaded once the next generation is live.
-            if (Handle.Target is EntityScript Script)
+            if (Handle.Target is Lumina.CEntityScript Script)
             {
                 Script.CancelDestroyToken();
             }

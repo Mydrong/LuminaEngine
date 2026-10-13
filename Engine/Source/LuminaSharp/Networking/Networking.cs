@@ -228,7 +228,7 @@ public enum ERpcTarget : uint
     Owner = 2,
 }
 
-// Mark a void method on an EntityScript with one of these and calling it routes the call.
+// Mark a void method on an CEntityScript with one of these and calling it routes the call.
 public static class Rpc
 {
     public abstract class RpcAttribute : Attribute

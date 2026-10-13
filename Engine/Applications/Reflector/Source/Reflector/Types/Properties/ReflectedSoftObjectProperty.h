@@ -1,31 +1,18 @@
 #pragma once
+
 #include "ReflectedProperty.h"
-#include "Reflector/Clang/Utils.h"
-#include "Reflector/CodeGeneration/CodeWriter.h"
-#include "Reflector/CodeGeneration/ReflectionNames.h"
 
 namespace Lumina
 {
-    /** Mirror of FReflectedObjectProperty for TSoftObjectPtr<T>/FSoftObjectPath.
-     *  Emits a SoftObjectProperty so the runtime serializer routes through
-     *  FSoftObjectPath::operator<<, which writes (Path, GUID) and registers
-     *  the GUID with the saver for cook-graph Soft edges. */
+    // A TSoftObjectPtr<T> or FSoftObjectPath field, saved as a path and GUID rather than a strong reference.
     class FReflectedSoftObjectProperty : public FReflectedProperty
     {
     public:
 
         const char* GetTypeName() override { return "SoftObject"; }
-        const char* GetPropertyParamType() const override { return "FSoftObjectPropertyParams"; }
-        std::string_view GetLuaType() override;
+        EReflectedLink GetLink() const override { return EReflectedLink::Class; }
 
-        void AppendDefinition(Reflection::FCodeWriter& Writer) const override;
-        bool GenerateLuaBinding(Reflection::FCodeWriter& Writer) override { return true; }
-
-        void DeclareCrossModuleReference(const std::string& API, Reflection::FCodeWriter& Writer) override
-        {
-            const std::string Friendly = ClangUtils::MakeCodeFriendlyNamespace(TypeName);
-            const std::string FnName = "Construct_CClass_" + Friendly;
-            Reflection::Names::EmitGuardedCrossModuleDecl(Writer, API, "CClass", FnName);
-        }
+        // A bare FSoftObjectPath names CObject, an intrinsic class the database does not hold.
+        bool RequiresReflectedType() const override { return false; }
     };
 }

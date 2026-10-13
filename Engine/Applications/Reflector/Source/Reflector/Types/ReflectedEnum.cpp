@@ -25,7 +25,6 @@ namespace Lumina::Reflection
     void FReflectedEnum::DefineInitialHeader(FCodeWriter& Writer, const std::string& /*FileID*/)
     {
         const std::string Api = Names::ProjectApiMacro(Header->Project->Name);
-        const std::string ConstructFn = Names::ConstructFunction("CEnum", Namespace, DisplayName);
 
         // At global scope this would create a second distinct type and any TU seeing both gets C2872.
         const char* Underlying = UnderlyingTypeName(UnderlyingSize, bUnsignedUnderlying);
@@ -40,10 +39,7 @@ namespace Lumina::Reflection
             Writer.Linef("enum class %s : %s;", DisplayName.c_str(), Underlying);
         }
 
-        Writer.Linef("%s Lumina::CEnum* %s();", Api.c_str(), ConstructFn.c_str());
-
-        // Qualified, since this specialization is emitted at global scope where an unqualified name misses.
-        Writer.Linef("template<> Lumina::CEnum* StaticEnum<%s>();", QualifiedName.c_str());
+        Writer.Linef("template<> %s Lumina::CEnum* Lumina::StaticEnum<%s>();", Api.c_str(), QualifiedName.c_str());
         Writer.Line();
     }
 
@@ -54,81 +50,32 @@ namespace Lumina::Reflection
 
     void FReflectedEnum::DeclareImplementation(FCodeWriter& Writer)
     {
-        const std::string RegInfo = Names::RegistrationInfo("CEnum", Namespace, DisplayName);
-        const std::string ConstructFn = Names::ConstructFunction("CEnum", Namespace, DisplayName);
-        const std::string Statics = Names::StaticsStruct("CEnum", Namespace, DisplayName);
         const std::string MetadataSymbol = Names::FriendlyFromQualified(QualifiedName);
 
-        // Translation-unit-local singleton holder.
-        Writer.Linef("static Lumina::FEnumRegistrationInfo %s;", RegInfo.c_str());
-        Writer.Line();
-
-        // Statics struct
-        Writer.Linef("struct %s", Statics.c_str());
+        OpenNamespace(Writer);
+        Writer.Linef("struct %s", TypeInfoName().c_str());
         Writer.BeginBlock();
 
-        EmitMetadataArray(Writer, MetadataSymbol, Metadata);
+        EmitMetadataArray(Writer, MetadataSymbol, Metadata, ESpecifierTarget::Reflect);
 
-        // Enumerator list.
-        Writer.Line("static constexpr Lumina::FEnumeratorParam Enumerators[] = {");
+        Writer.Line("static constexpr Lumina::FEnumeratorDesc Enumerators[] =");
+        Writer.BeginBlock();
         for (const FConstant& Constant : Constants)
         {
-            Writer.Linef("\t{ \"%s::%s\", %u },",
-                DisplayName.c_str(), Constant.Label.c_str(), Constant.Value);
+            Writer.Linef("{ \"%s::%s\", %u },", DisplayName.c_str(), Constant.Label.c_str(), Constant.Value);
         }
-        Writer.Line("};");
-        Writer.Line();
-
-        Writer.Line("static const Lumina::FEnumParams EnumParams;");
         Writer.PopIndent();
         Writer.Line("};");
+        Writer.Line();
 
-        // EnumParams definition.
-        Writer.Linef("const Lumina::FEnumParams %s::EnumParams = {", Statics.c_str());
-        Writer.Linef("\t\"%s\",", DisplayName.c_str());
-        Writer.Line("\tEnumerators,");
-        Writer.Append("\t(uint32)std::size(Enumerators)");
+        Writer.Linef("static constexpr Lumina::FEnumDesc Desc = { .Name = \"%s\", .Enumerators = Enumerators, "
+            ".NumEnumerators = (Lumina::uint32)std::size(Enumerators)%s };",
+            DisplayName.c_str(), MetadataField(MetadataSymbol, Metadata, ESpecifierTarget::Reflect).c_str());
 
-        if (!Metadata.empty())
-        {
-            Writer.Line(",");
-            Writer.Linef("\t(uint32)std::size(%s_Metadata),", MetadataSymbol.c_str());
-            Writer.Linef("\t%s_Metadata", MetadataSymbol.c_str());
-        }
-        else
-        {
-            Writer.Line();
-        }
-
+        Writer.PopIndent();
         Writer.Line("};");
-        Writer.Line();
+        CloseNamespace(Writer);
 
-        // Construct_CEnum_* inner singleton.
-        Writer.Linef("Lumina::CEnum* %s()", ConstructFn.c_str());
-        Writer.BeginBlock();
-        Writer.Linef("if(!%s.InnerSingleton)", RegInfo.c_str());
-        Writer.BeginBlock();
-        Writer.Linef("Lumina::ConstructCEnum(&%s.InnerSingleton, %s::EnumParams);",
-            RegInfo.c_str(), Statics.c_str());
-        Writer.EndBlock();
-        Writer.Linef("return %s.InnerSingleton;", RegInfo.c_str());
-        Writer.EndBlock();
-        Writer.Line();
-
-        // Qualified to match the declaration, or this defines a specialization for a different type.
-        Writer.Linef("template<> Lumina::CEnum* StaticEnum<%s>()", QualifiedName.c_str());
-        Writer.BeginBlock();
-        Writer.Linef("if (!%s.OuterSingleton)", RegInfo.c_str());
-        Writer.BeginBlock();
-        Writer.Linef("%s.OuterSingleton = %s();", RegInfo.c_str(), ConstructFn.c_str());
-        Writer.EndBlock();
-        Writer.Linef("return %s.OuterSingleton;", RegInfo.c_str());
-        Writer.EndBlock();
-    }
-
-    void FReflectedEnum::DeclareStaticRegistration(FCodeWriter& Writer)
-    {
-        const std::string ConstructFn = Names::ConstructFunction("CEnum", Namespace, DisplayName);
-        Writer.Linef("\t{ %s, TEXT(\"%s\") },", ConstructFn.c_str(), DisplayName.c_str());
+        EmitTypeFunctions(Writer);
     }
 }

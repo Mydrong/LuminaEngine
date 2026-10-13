@@ -352,6 +352,10 @@ public static class BuildMode
             List<BuildAction> Outdated = Graph.DetermineOutdatedActions(History, HeaderDependencies);
             Phase("  DetermineOutdatedActions", PhaseTimer);
 
+            // Hashed before anything compiles, so a header edited mid-build cannot be stamped as already built.
+            string EngineBuildId = ModuleManifest.ComputeEngineBuildId(Target.Directories);
+            Phase("  ModuleManifest.ComputeEngineBuildId", PhaseTimer);
+
             Log.Info("{0} of {1} actions are out of date.", Outdated.Count, Graph.Actions.Count);
 
             if (Arguments.HasFlag("DryRun"))
@@ -369,6 +373,9 @@ public static class BuildMode
                 // Loading the cache prunes dead closures; without this the pruning is redone and never kept.
                 HeaderDependencies.Save();
                 Phase("  DependencyCache.Save", PhaseTimer);
+
+                // A header no module here includes still moves the BuildId, and these binaries are unaffected by it.
+                ModuleManifest.Write(Target, EngineBuildId);
 
                 Log.Info("{0} is up to date ({1:F2}s).", Target.Name, Timer.Elapsed.TotalSeconds);
                 return 0;
@@ -411,6 +418,8 @@ public static class BuildMode
                 Result.ActionsExecuted,
                 Result.Elapsed.TotalSeconds,
                 Result.ActionsSkipped > 0 ? $" ({Result.ActionsSkipped} became unnecessary)" : string.Empty);
+
+            ModuleManifest.Write(Target, EngineBuildId);
 
             if (Target.LaunchModule is not null && Target.LaunchModule.OutputFile.Length > 0)
             {

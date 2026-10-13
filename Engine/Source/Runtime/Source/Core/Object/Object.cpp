@@ -1,25 +1,24 @@
-﻿#include "RuntimePCH.h"
+#include "RuntimePCH.h"
 #include "Object.h"
 #include "Class.h"
 #include "Core/Reflection/Type/LuminaTypes.h"
 #include "Core/Serialization/ObjectArchiver.h"
 #include "Package/Package.h"
 
-/** Low level CObject registration. */
-extern Lumina::FClassRegistrationInfo Registration_Info_CClass_Lumina_CObject;
-    
-Lumina::CClass* Construct_CClass_Lumina_CObject()
-{
-    if (!Registration_Info_CClass_Lumina_CObject.OuterSingleton)
-    {
-        Registration_Info_CClass_Lumina_CObject.OuterSingleton = Lumina::CObject::StaticClass();
-        Lumina::CObjectForceRegistration(Registration_Info_CClass_Lumina_CObject.OuterSingleton);
-    }
-    ASSERT(Registration_Info_CClass_Lumina_CObject.OuterSingleton->GetClass() != nullptr);
-    return Registration_Info_CClass_Lumina_CObject.OuterSingleton;
-}
-    
 IMPLEMENT_CLASS(Lumina, CObject)
+
+// The root of every class, so it is finished by hand rather than by IMPLEMENT_INTRINSIC_CLASS, which needs a base.
+template<> RUNTIME_API Lumina::CClass* Lumina::StaticClass<Lumina::CObject>()
+{
+    static Lumina::CClass* Class = nullptr;
+    if (Class == nullptr)
+    {
+        Class = Lumina::CObject::StaticClass();
+        Lumina::FinishRegistration(Class);
+    }
+    ASSERT(Class->GetClass() != nullptr);
+    return Class;
+}
 
 namespace Lumina
 {
@@ -27,7 +26,7 @@ namespace Lumina
     {
         if (CClass* Class = GetClass())
         {
-            Class->SerializeTaggedProperties(Ar, this);
+            Class->SerializeProperties(Ar, this);
         }
     }
 
@@ -35,7 +34,7 @@ namespace Lumina
     {
         if (CClass* Class = GetClass())
         {
-            Class->SerializeTaggedProperties(Record.EnterField("Properties").GetArchiver(), this);
+            Class->SerializeProperties(Record.EnterField("Properties").GetArchiver(), this);
         }
     }
 

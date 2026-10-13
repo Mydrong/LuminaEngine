@@ -2,6 +2,7 @@
 
 #include "Containers/Vector.h"
 #include "Containers/String.h"
+#include "Containers/Span.h"
 #include "Platform/GenericPlatform.h"
 
 namespace Lumina::Shaders
@@ -37,4 +38,7 @@ namespace Lumina::Shaders
      * own plugins appear. Roots are remembered, so the second pass only picks up what is new.
      */
     RUNTIME_API uint32 PrecompileNewRoots();
+
+    // Folds every source file under the directories in path order, so a cache keyed on it misses once any of them changes.
+    RUNTIME_API uint64 HashSourceDirectories(TSpan<const FStringView> Directories);
 }

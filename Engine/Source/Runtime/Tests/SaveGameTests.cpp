@@ -57,7 +57,7 @@ namespace LuminaSaveGameTests
     // Built the same way every time, which is what loading one level file twice amounts to.
     FLevel LoadLevel()
     {
-        ProcessNewlyLoadedCObjects();
+        RegisterPendingTypes();
         FLevel Level;
         // One name for every load, since a save game keys a world's state by its level name.
         Level.World = NewObject<CWorld>(nullptr, FName("SaveGameTestLevel"), FGuid::New(), OF_Transient);

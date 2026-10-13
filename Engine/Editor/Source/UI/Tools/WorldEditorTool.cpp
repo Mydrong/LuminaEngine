@@ -72,6 +72,8 @@
 #include "Log/Log.h"
 #include "Renderer/MeshQuantization.h"
 #include "Containers/StringFormat.h"
+#include "UI/Widgets/EntityScriptPicker.h"
+#include "World/Entity/Systems/SystemAccess.h"
 
 
 namespace Lumina
@@ -2872,21 +2874,17 @@ namespace Lumina
         const bool bHasScript = Registry.HasAll<SEntityScriptComponent>(Entity);
 
         // Always offered, since it either assigns a script or swaps the one already on the entity.
-        TVector<FString> Types;
-        DotNet::GatherEntityScriptTypes(Types);
-
-        ImGui::AlignTextToFramePadding();
-        ImGui::TextUnformatted(bHasScript ? LE_ICON_LANGUAGE_CSHARP " Change Script" : LE_ICON_LANGUAGE_CSHARP " Attach Script");
-        ImGui::SameLine();
-        ImGui::SetNextItemWidth(260.0f);
-        const int32 Picked = ImGuiX::SearchableCombo("##AssignScript", bHasScript ? "Swap to..." : "Select a script...",
-            (int32)Types.size(), Constants::kIndexNone,
-            [&Types](int32 Index) { return FFixedString(Types[Index].c_str(), Types[Index].size()); }, LE_ICON_LANGUAGE_CSHARP);
-
-        if (Picked != Constants::kIndexNone)
+        ScriptAttachPicker.SearchHint = "Search scripts...";
+        ScriptAttachPicker.ItemNoun   = "scripts";
+        ScriptAttachPicker.TrailingCategory = EntityScriptPicker::NativeCategory;
+        if (ImGui::BeginMenu(bHasScript ? LE_ICON_LANGUAGE_CSHARP " Change Script" : LE_ICON_LANGUAGE_CSHARP " Attach Script"))
         {
-            AttachScriptToEntity(Entity, Types[Picked]);
-            ImGui::CloseCurrentPopup();
+            if (const FPickerItem* Picked = ScriptAttachPicker.DrawContents(&EntityScriptPicker::GatherItems))
+            {
+                AttachScriptToEntity(Entity, Picked->Key);
+                ImGui::CloseCurrentPopup();
+            }
+            ImGui::EndMenu();
         }
 
         if (bHasScript)
@@ -4631,112 +4629,106 @@ namespace Lumina
     }
 
     // Lists up to three stages, otherwise a count.
-    static FString SystemStageSummary(const TVector<EUpdateStage>& Stages)
+    namespace
     {
-        if (Stages.empty())
+        struct FSystemStageDesc
         {
-            return FString();
-        }
-        if (Stages.size() > 3)
+            const char* Label;
+            const char* Description;
+        };
+
+        // Indexed by EUpdateStage, and listed in the order a frame runs them, with the editor-only stage last.
+        constexpr FSystemStageDesc kSystemStages[] =
         {
-            return FString(Format("{}", Stages.size()).c_str()) + " stages";
-        }
-        FString Out;
-        for (size_t i = 0; i < Stages.size(); ++i)
+            { "Frame Start",    "Runs first each frame, before physics steps." },
+            { "Pre Physics",    "Runs just before physics steps, which is where movement and forces are written." },
+            { "During Physics", "Runs while the physics step is in flight on its own thread." },
+            { "Post Physics",   "Runs once physics results are in, which is where gameplay reads them back." },
+            { "Frame End",      "Runs last each frame, before the world is handed to the renderer." },
+            { "Paused",         "Runs instead of the gameplay stages while the world is not simulating, which is how systems keep working in the editor." },
+        };
+        static_assert(std::size(kSystemStages) == (size_t)EUpdateStage::Max, "One description per update stage.");
+
+        // How long the panel trusts its list of system classes, since gathering it configures every one of them.
+        constexpr double kSystemListRefreshSeconds = 1.0;
+
+        // "SBlockoutSystem" reads as "Blockout", and a C# "Game.WaveSystem" as "Wave".
+        FString FriendlySystemName(const FString& ClassName)
         {
-            if (i > 0)
+            FStringView Name(ClassName);
+            if (const size_t Dot = Name.find_last_of('.'); Dot != FStringView::npos)
             {
-                Out += "  ";
+                Name = Name.substr(Dot + 1);
             }
-            Out += GUpdateStageNames[(uint8)Stages[i]];
-        }
-        return Out;
-    }
-
-    // Returns true when the row body is clicked, and sets OutTrash when the trash button is.
-    static bool DrawSystemRow(const char* Icon, const ImVec4& Accent, const char* Name, const FString& Stages,
-                              bool bDimmed, bool bShowTrash, const char* Tooltip, bool* OutTrash)
-    {
-        const ImVec4 RowBg       = EditorColors::RowBg();
-        const ImVec4 RowBgHover  = EditorColors::RowBgHovered();
-        const ImVec4 RowBgActive = EditorColors::RowBgActive();
-        const ImVec4 TextPrimary = EditorColors::TextPrimary();
-        const ImVec4 TextDim     = EditorColors::TextDim();
-        const ImVec4 TextMuted   = EditorColors::TextMuted();
-        const ImVec4 Danger      = EditorColors::Danger();
-
-        const float  Scale  = ImGuiX::GetUIScale();
-        const float  Avail  = ImGui::GetContentRegionAvail().x;
-        const float  Height = 30.0f * Scale;
-        const float  TrashW = bShowTrash ? 30.0f * Scale : 0.0f;
-        const float  Round  = 4.0f * Scale;
-        const ImVec2 P0     = ImGui::GetCursorScreenPos();
-        const ImVec2 P1     = ImVec2(P0.x + Avail, P0.y + Height);
-
-        ImGui::SetCursorScreenPos(P0);
-        // Floored, since InvisibleButton asserts on an exactly-zero dimension at a dragged-flat panel.
-        const float RowWidth = Avail - TrashW;
-        const bool bClicked = ImGui::InvisibleButton("##row", ImVec2(RowWidth < 1.0f ? 1.0f : RowWidth, Height));
-        const bool bHovered = ImGui::IsItemHovered();
-        const bool bActive  = ImGui::IsItemActive();
-        if (bHovered)
-        {
-            ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
-            if (Tooltip != nullptr)
+            if (Name.size() > 1 && Name[0] == 'S' && Name[1] >= 'A' && Name[1] <= 'Z')
             {
-                ImGui::SetTooltip("%s", Tooltip);
+                Name.remove_prefix(1);
             }
-        }
-
-        ImDrawList* DL = ImGui::GetWindowDrawList();
-        DL->AddRectFilled(P0, P1, ImGui::ColorConvertFloat4ToU32(bActive ? RowBgActive : bHovered ? RowBgHover : RowBg), Round);
-        DL->AddRectFilled(P0, ImVec2(P0.x + 3.0f * Scale, P1.y), ImGui::ColorConvertFloat4ToU32(Accent), Round);
-
-        const float TextY = P0.y + (Height - ImGui::GetFontSize()) * 0.5f;
-
-        ImGui::SetCursorScreenPos(ImVec2(P0.x + 13.0f * Scale, TextY));
-        ImGui::PushStyleColor(ImGuiCol_Text, Accent);
-        ImGui::TextUnformatted(Icon);
-        ImGui::PopStyleColor();
-
-        ImGui::SetCursorScreenPos(ImVec2(P0.x + 38.0f * Scale, TextY));
-        ImGui::PushStyleColor(ImGuiCol_Text, bDimmed ? TextMuted : TextPrimary);
-        ImGui::TextUnformatted(Name);
-        ImGui::PopStyleColor();
-
-        if (!Stages.empty())
-        {
-            const float StagesW = ImGui::CalcTextSize(Stages.c_str()).x;
-            ImGui::SetCursorScreenPos(ImVec2(P1.x - TrashW - 12.0f * Scale - StagesW, TextY));
-            ImGui::PushStyleColor(ImGuiCol_Text, TextDim);
-            ImGui::TextUnformatted(Stages.c_str());
-            ImGui::PopStyleColor();
-        }
-
-        if (bShowTrash)
-        {
-            const ImVec2 T0 = ImVec2(P1.x - TrashW, P0.y);
-            ImGui::SetCursorScreenPos(T0);
-            const bool bTrash      = ImGui::InvisibleButton("##trash", ImVec2(TrashW, Height));
-            const bool bTrashHover = ImGui::IsItemHovered();
-            if (bTrashHover)
+            if (Name.size() > 6 && Name.ends_with("System"))
             {
-                ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
-                DL->AddRectFilled(T0, P1, ImGui::ColorConvertFloat4ToU32(ImVec4(Danger.x, Danger.y, Danger.z, 0.16f)), Round);
+                Name.remove_suffix(6);
             }
-            const float IconW = ImGui::CalcTextSize(LE_ICON_TRASH_CAN).x;
-            ImGui::SetCursorScreenPos(ImVec2(T0.x + (TrashW - IconW) * 0.5f, TextY));
-            ImGui::PushStyleColor(ImGuiCol_Text, bTrashHover ? Danger : TextDim);
-            ImGui::TextUnformatted(LE_ICON_TRASH_CAN);
-            ImGui::PopStyleColor();
-            if (OutTrash != nullptr && bTrash)
+
+            FString Spaced;
+            for (size_t Index = 0; Index < Name.size(); ++Index)
             {
-                *OutTrash = true;
+                const char Char = Name[Index];
+                const bool bUpper = Char >= 'A' && Char <= 'Z';
+                const bool bAfterLower = Index > 0 && Name[Index - 1] >= 'a' && Name[Index - 1] <= 'z';
+                if (bUpper && bAfterLower)
+                {
+                    Spaced.push_back(' ');
+                }
+                Spaced.push_back(Char);
+            }
+            return Spaced.empty() ? ClassName : Spaced;
+        }
+
+        // A component's access entry without the "S" and "Component" its type name carries.
+        FString FriendlyAccessName(uint32 Id)
+        {
+            FString Name = GetAccessTypeName(Id).ToString();
+            if (Name.size() > 1 && Name[0] == 'S' && Name[1] >= 'A' && Name[1] <= 'Z')
+            {
+                Name.erase(0, 1);
+            }
+            constexpr FStringView Suffix("Component");
+            if (Name.size() > Suffix.size() && FStringView(Name).ends_with(Suffix))
+            {
+                Name.resize(Name.size() - Suffix.size());
+            }
+            return Name;
+        }
+
+        FString SystemPriorityLabel(uint8 Priority)
+        {
+            switch ((EUpdatePriority)Priority)
+            {
+            case EUpdatePriority::Highest: return "Highest priority";
+            case EUpdatePriority::High:    return "High priority";
+            case EUpdatePriority::Medium:  return "Medium priority";
+            case EUpdatePriority::Low:     return "Low priority";
+            default:                       return Format("Priority {}", Priority);
             }
         }
-        
-        ImGui::SetCursorScreenPos(ImVec2(P0.x, P1.y + 3.0f * Scale));
-        return bClicked;
+
+        // A small rounded label, laid out inline and wrapped onto the next line when the row is full.
+        void DrawSystemChip(const FString& Text, const ImVec4& TextColor, const ImVec4& Fill)
+        {
+            const ImVec2 Padding(6.0f, 2.0f);
+            const ImVec2 Size = ImGui::CalcTextSize(Text.c_str()) + Padding * 2.0f;
+            if (ImGui::GetContentRegionAvail().x < Size.x)
+            {
+                ImGui::NewLine();
+            }
+
+            const ImVec2 Min = ImGui::GetCursorScreenPos();
+            ImDrawList* DrawList = ImGui::GetWindowDrawList();
+            DrawList->AddRectFilled(Min, Min + Size, EditorColors::U32(Fill), Size.y * 0.5f);
+            DrawList->AddText(Min + Padding, EditorColors::U32(TextColor), Text.c_str());
+            ImGui::Dummy(Size);
+            ImGui::SameLine(0.0f, 4.0f);
+        }
     }
 
     void FWorldEditorTool::DrawSystemsPanel(bool bFocused)
@@ -4746,102 +4738,324 @@ namespace Lumina
             return;
         }
 
-        const ImVec4 TextDim   = EditorColors::TextDim();
-        const ImVec4 TextMuted = EditorColors::TextMuted();
-        const ImVec4 Section   = EditorColors::SectionHeader();
-        const ImVec4 AccentOn  = EditorColors::Success();    // enabled native system
-        const ImVec4 AccentOff = EditorColors::TextMuted();  // disabled native system
-
-        TVector<CWorld::FSystemInfo> Systems;
-        World->GetAllSystems(Systems);
-        Algo::Sort(Systems, [](const CWorld::FSystemInfo& A, const CWorld::FSystemInfo& B)
+        const double Now = ImGui::GetTime();
+        if (CachedSystemsWorld != World.Get() || CachedSystemInfos.empty() || Now - CachedSystemsTime > kSystemListRefreshSeconds)
         {
-            return strcmp(A.Name.c_str(), B.Name.c_str()) < 0;
-        });
+            World->GetAllSystems(CachedSystemInfos);
+            CachedSystemsWorld = World.Get();
+            CachedSystemsTime  = Now;
+        }
+
+        TVector<FSystemScheduleEntry> Schedule;
+        World->GetSystemSchedule(Schedule);
+
+        auto FindInfo = [this](FName Name) -> const CWorld::FSystemInfo*
+        {
+            for (const CWorld::FSystemInfo& Info : CachedSystemInfos)
+            {
+                if (Info.Name == Name)
+                {
+                    return &Info;
+                }
+            }
+            return nullptr;
+        };
 
         int32 EnabledCount = 0;
-        for (const CWorld::FSystemInfo& Info : Systems)
+        for (const CWorld::FSystemInfo& Info : CachedSystemInfos)
         {
             EnabledCount += Info.bEnabled ? 1 : 0;
         }
 
-        // Pinned search field with a leading magnifier.
-        ImGui::AlignTextToFramePadding();
-        ImGui::PushStyleColor(ImGuiCol_Text, TextDim);
-        ImGui::TextUnformatted(LE_ICON_MAGNIFY);
+        ImGuiX::SearchBar("##SystemSearch", SystemsFilter, LE_ICON_MAGNIFY " Search systems...");
+
+        ImGui::PushStyleColor(ImGuiCol_Text, EditorColors::TextMuted());
+        const int32 DisabledCount = (int32)CachedSystemInfos.size() - EnabledCount;
+        if (DisabledCount > 0)
+        {
+            ImGui::Text("%d systems, %d turned off in this world", (int32)CachedSystemInfos.size(), DisabledCount);
+        }
+        else
+        {
+            ImGui::Text("%d systems, none turned off", (int32)CachedSystemInfos.size());
+        }
         ImGui::PopStyleColor();
         ImGui::SameLine();
-        SystemsFilter.Draw("##SystemSearch", ImGui::GetContentRegionAvail().x);
-        ImGui::Spacing();
+        ImGuiX::HelpMarker("Systems tick in the stages below, top to bottom, in the order listed. Untick one to stop it in this "
+            "world. The change takes effect next frame and saves with the world. Select a system to see what it touches.");
 
-        auto SectionHeader = [&](const char* Icon, const char* Label, const FString& Suffix, const char* Help)
+        const CWorld::FSystemInfo* Selected = SelectedSystem.IsNone() ? nullptr : FindInfo(SelectedSystem);
+        const float DetailHeight = Selected != nullptr ? ImGui::GetContentRegionAvail().y * 0.4f : 0.0f;
+
+        bool bToggled = false;
+        if (ImGui::BeginChild("##SystemsList", ImVec2(0.0f, -DetailHeight), ImGuiChildFlags_None))
         {
-            ImGui::Spacing();
-            ImGuiX::Font::PushFont(ImGuiX::Font::EFont::SmallBold);
-            ImGui::PushStyleColor(ImGuiCol_Text, Section);
-            ImGui::Text("%s  %s", Icon, Label);
-            ImGui::PopStyleColor();
-            ImGuiX::Font::PopFont();
-            if (!Suffix.empty())
+            bool bAnyRow = false;
+            for (uint8 Stage = 0; Stage < (uint8)EUpdateStage::Max; ++Stage)
             {
-                ImGui::SameLine();
-                ImGui::PushStyleColor(ImGuiCol_Text, TextMuted);
-                ImGui::TextUnformatted(Suffix.c_str());
-                ImGui::PopStyleColor();
-            }
-            if (Help != nullptr)
-            {
-                ImGui::SameLine();
-                ImGuiX::HelpMarker(Help);
-            }
-            ImGui::Spacing();
-        };
+                // Scheduled systems in the order they run, then this stage's turned-off systems, which have no slot.
+                struct FStageRow
+                {
+                    const CWorld::FSystemInfo*   Info = nullptr;
+                    const FSystemScheduleEntry*  Entry = nullptr;
+                };
+                TVector<FStageRow> Rows;
+                for (const FSystemScheduleEntry& Entry : Schedule)
+                {
+                    const CWorld::FSystemInfo* Info = Entry.Stage == Stage ? FindInfo(Entry.Name) : nullptr;
+                    if (Info != nullptr && ImGuiX::PassSearchFilter(SystemsFilter, FriendlySystemName(Info->Name.ToString()).c_str()))
+                    {
+                        Rows.push_back({ Info, &Entry });
+                    }
+                }
+                const bool bStageRunning = Algo::AnyOf(Schedule, [Stage](const FSystemScheduleEntry& Entry) { return Entry.Stage == Stage; });
 
-        auto EmptyState = [&](const char* Text)
-        {
-            ImGui::PushStyleColor(ImGuiCol_Text, TextMuted);
-            ImGui::Indent(13.0f);
-            ImGui::TextUnformatted(Text);
-            ImGui::Unindent(13.0f);
-            ImGui::PopStyleColor();
-        };
-
-        if (ImGui::BeginChild("##SystemsList", ImVec2(0, 0), false))
-        {
-            //~ Native systems ---------------------------------------------------------------------------
-            SectionHeader(LE_ICON_CHIP, "NATIVE",
-                FString(Format("{}", EnabledCount).c_str()) + " / " + Format("{}", Systems.size()).c_str() + " enabled",
-                "Engine C++ systems for this world. Click a row to enable/disable it (a disabled system stops ticking "
-                "here -- write your own to replace it). Changes apply next frame and save with the world.");
-
-            bool bAnyNative = false;
-            for (const CWorld::FSystemInfo& Info : Systems)
-            {
-                if (!ImGuiX::PassSearchFilter(SystemsFilter, Info.Name.c_str()))
+                // An editor world only schedules the paused stage, so the gameplay stages list what will run once play starts.
+                const size_t FirstUnscheduled = Rows.size();
+                for (const CWorld::FSystemInfo& Info : CachedSystemInfos)
+                {
+                    const bool bInStage = Algo::Contains(Info.Stages, (EUpdateStage)Stage);
+                    const bool bScheduled = Algo::AnyOf(Rows, [&Info](const FStageRow& Row) { return Row.Info == &Info; });
+                    if (bInStage && !bScheduled && ImGuiX::PassSearchFilter(SystemsFilter, FriendlySystemName(Info.Name.ToString()).c_str()))
+                    {
+                        Rows.push_back({ &Info, nullptr });
+                    }
+                }
+                Algo::Sort(Rows.begin() + FirstUnscheduled, Rows.end(), [](const FStageRow& A, const FStageRow& B)
+                {
+                    return FriendlySystemName(A.Info->Name.ToString()) < FriendlySystemName(B.Info->Name.ToString());
+                });
+                if (Rows.empty())
                 {
                     continue;
                 }
-                bAnyNative = true;
+                bAnyRow = true;
 
-                ImGui::PushID(Info.Name.c_str());
-                const bool bClicked = DrawSystemRow(LE_ICON_CHIP, Info.bEnabled ? AccentOn : AccentOff, Info.Name.c_str(),
-                    SystemStageSummary(Info.Stages), !Info.bEnabled, false,
-                    Info.bEnabled ? "Enabled -- click to disable" : "Disabled -- click to enable", nullptr);
-                if (bClicked)
+                ImGui::PushID(Stage);
+                const float HeaderRight = ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x;
+                ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(ImGui::GetStyle().FramePadding.x, 6.0f));
+                ImGui::PushStyleColor(ImGuiCol_Header, EditorColors::ComponentHeader());
+                ImGui::PushStyleColor(ImGuiCol_HeaderHovered, EditorColors::Lighten(EditorColors::ComponentHeader(), 0.05f));
+                ImGui::PushStyleColor(ImGuiCol_HeaderActive, EditorColors::Lighten(EditorColors::ComponentHeader(), 0.08f));
+                const FString HeaderLabel = Format("{}  {}###Stage", LE_ICON_TIMELINE_CLOCK_OUTLINE, kSystemStages[Stage].Label);
+                const bool bOpen = ImGui::CollapsingHeader(HeaderLabel.c_str(), ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_AllowOverlap);
+                ImGui::PopStyleColor(3);
+                ImGui::PopStyleVar();
+                ImGuiX::TextTooltip("{}", bStageRunning || Stage == (uint8)EUpdateStage::Paused
+                    ? FString(kSystemStages[Stage].Description)
+                    : Format("{} Nothing runs here until the world simulates.", kSystemStages[Stage].Description));
+
+                const FString Count = bStageRunning || Stage == (uint8)EUpdateStage::Paused
+                    ? Format("{}", Rows.size())
+                    : Format("{}  {} play only", Rows.size(), LE_ICON_PLAY);
+                ImGui::SameLine(HeaderRight - ImGui::CalcTextSize(Count.c_str()).x - ImGui::GetStyle().FramePadding.x * 2.0f);
+                ImGui::AlignTextToFramePadding();
+                ImGui::TextColored(EditorColors::TextMuted(), "%s", Count.c_str());
+
+                if (bOpen)
                 {
-                    World->SetSystemEnabled(Info.Name, !Info.bEnabled);
-                    MarkSceneDirty();
+                    for (const FStageRow& Row : Rows)
+                    {
+                        const CWorld::FSystemInfo& Info = *Row.Info;
+                        const FString Friendly = FriendlySystemName(Info.Name.ToString());
+                        const bool bManaged = Row.Entry != nullptr ? Row.Entry->bManaged : Info.Name.ToString().find('.') != FString::npos;
+
+                        ImGui::PushID(Info.Name.c_str());
+                        bool bEnabled = Info.bEnabled;
+                        if (ImGui::Checkbox("##Enabled", &bEnabled))
+                        {
+                            World->SetSystemEnabled(Info.Name, bEnabled);
+                            MarkSceneDirty();
+                            bToggled = true;
+                        }
+                        ImGuiX::TextTooltip("{}", Info.bEnabled
+                            ? Format("Turn {} off in this world.", Friendly)
+                            : Format("Turn {} back on in this world.", Friendly));
+
+                        ImGui::SameLine();
+                        ImGui::AlignTextToFramePadding();
+                        ImGui::TextColored(bManaged ? EditorColors::AccentAlt() : EditorColors::TextDim(), "%s",
+                            bManaged ? LE_ICON_LANGUAGE_CSHARP : LE_ICON_LANGUAGE_CPP);
+                        ImGui::SameLine();
+
+                        // The badge column is measured first, so a long name gives way to it rather than running under it.
+                        FString Badge;
+                        ImVec4 BadgeColor = EditorColors::TextMuted();
+                        const char* BadgeHelp = nullptr;
+                        if (!Info.bEnabled)
+                        {
+                            Badge = "Off";
+                            BadgeHelp = "Turned off in this world, so it does not tick.";
+                        }
+                        else if (Row.Entry != nullptr && Row.Entry->BatchSize > 1)
+                        {
+                            Badge = Format("{} Parallel", LE_ICON_SOURCE_BRANCH);
+                            BadgeColor = EditorColors::Success();
+                            BadgeHelp = "Runs at the same time as the other systems in its batch, since none of them touch what it writes.";
+                        }
+                        else if (Row.Entry != nullptr && Row.Entry->bExclusive)
+                        {
+                            Badge = Format("{} Exclusive", LE_ICON_LOCK);
+                            BadgeHelp = "Declares no component access, so it runs alone. Declaring reads and writes in Configure lets it run alongside others.";
+                        }
+
+                        const float BadgeWidth = Badge.empty() ? 0.0f : ImGui::CalcTextSize(Badge.c_str()).x + ImGui::GetStyle().ItemSpacing.x * 2.0f;
+                        const float NameWidth = Math::Max(ImGui::GetContentRegionAvail().x - BadgeWidth, 1.0f);
+                        ImGui::PushStyleColor(ImGuiCol_Text, Info.bEnabled ? EditorColors::TextPrimary() : EditorColors::TextMuted());
+                        if (ImGui::Selectable(Friendly.c_str(), SelectedSystem == Info.Name, ImGuiSelectableFlags_AllowOverlap,
+                            ImVec2(NameWidth, ImGui::GetFrameHeight())))
+                        {
+                            SelectedSystem = SelectedSystem == Info.Name ? FName() : Info.Name;
+                        }
+                        ImGui::PopStyleColor();
+                        ImGuiX::TextTooltip("{}", Info.Name.ToString());
+
+                        if (!Badge.empty())
+                        {
+                            ImGui::SameLine();
+                            ImGui::AlignTextToFramePadding();
+                            ImGui::TextColored(BadgeColor, "%s", Badge.c_str());
+                            ImGuiX::TextTooltip("{}", BadgeHelp);
+                        }
+                        ImGui::PopID();
+                    }
+                    ImGui::Spacing();
                 }
                 ImGui::PopID();
             }
-            if (!bAnyNative)
+
+            if (!bAnyRow)
             {
-                EmptyState("No systems match the filter.");
+                ImGui::Spacing();
+                ImGui::TextColored(EditorColors::TextMuted(), "%s", CachedSystemInfos.empty() ? "This world has no systems." : "No systems match the search.");
+            }
+        }
+        ImGui::EndChild();
+
+        if (bToggled)
+        {
+            World->GetAllSystems(CachedSystemInfos);
+            CachedSystemsTime = Now;
+        }
+
+        if (Selected != nullptr)
+        {
+            DrawSelectedSystemDetails(*Selected, Schedule);
+        }
+    }
+
+    void FWorldEditorTool::DrawSelectedSystemDetails(const CWorld::FSystemInfo& Info, const TVector<FSystemScheduleEntry>& Schedule)
+    {
+        if (!ImGui::BeginChild("##SystemDetails", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders))
+        {
+            ImGui::EndChild();
+            return;
+        }
+
+        const CClass* Class = FindObject<CClass>(Info.Name);
+        const bool bManaged = Info.Name.ToString().find('.') != FString::npos;
+
+        ImGuiX::Font::PushFont(ImGuiX::Font::EFont::MediumBold);
+        ImGui::TextUnformatted(FriendlySystemName(Info.Name.ToString()).c_str());
+        ImGuiX::Font::PopFont();
+        ImGui::TextColored(EditorColors::TextMuted(), "%s  %s", bManaged ? "C# system" : "C++ system", Info.Name.c_str());
+
+        if (Class != nullptr && Class->HasMeta("ToolTip"))
+        {
+            ImGui::Spacing();
+            ImGui::PushTextWrapPos(0.0f);
+            ImGui::TextColored(EditorColors::TextDim(), "%s", Class->GetMeta("ToolTip").c_str());
+            ImGui::PopTextWrapPos();
+        }
+
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        auto Field = [](const char* Label)
+        {
+            ImGui::TextColored(EditorColors::TextMuted(), "%s", Label);
+        };
+
+        Field("Runs in");
+        if (!Info.bEnabled)
+        {
+            ImGui::TextColored(EditorColors::Warning(), "Turned off in this world");
+        }
+        ImGui::PushTextWrapPos(0.0f);
+        for (size_t StageIndex = 0; StageIndex < Info.Stages.size(); ++StageIndex)
+        {
+            const EUpdateStage Stage = Info.Stages[StageIndex];
+            const FSystemScheduleEntry* Entry = nullptr;
+            for (const FSystemScheduleEntry& Candidate : Schedule)
+            {
+                if (Candidate.Name == Info.Name && Candidate.Stage == (uint8)Stage)
+                {
+                    Entry = &Candidate;
+                    break;
+                }
             }
 
-            // A real zero-size item as the LAST op clears IsSetPos before EndChild checks bounds.
-            ImGui::Dummy(ImVec2(0.0f, 0.0f));
+            FString Line = kSystemStages[(uint8)Stage].Label;
+            if (StageIndex < Info.Priorities.size())
+            {
+                Line += Format(", {}", SystemPriorityLabel(Info.Priorities[StageIndex]));
+            }
+            if (Entry != nullptr)
+            {
+                Line += Entry->BatchSize > 1
+                    ? Format(", batch {} alongside {} other{}", Entry->Batch + 1, Entry->BatchSize - 1, Entry->BatchSize == 2 ? "" : "s")
+                    : Format(", batch {} on its own", Entry->Batch + 1);
+            }
+            ImGui::Bullet();
+            ImGui::TextWrapped("%s", Line.c_str());
         }
+        ImGui::PopTextWrapPos();
+
+        const FSystemScheduleEntry* Any = nullptr;
+        for (const FSystemScheduleEntry& Candidate : Schedule)
+        {
+            if (Candidate.Name == Info.Name)
+            {
+                Any = &Candidate;
+                break;
+            }
+        }
+
+        ImGui::Spacing();
+        Field("Writes");
+        if (Any == nullptr)
+        {
+            ImGui::TextColored(EditorColors::TextMuted(), "Shown once the system is running.");
+        }
+        else if (Any->bExclusive)
+        {
+            ImGui::TextColored(EditorColors::TextDim(), "Everything. It declares no access, so it runs alone.");
+        }
+        else
+        {
+            for (uint32 Id : Any->Writes)
+            {
+                DrawSystemChip(FriendlyAccessName(Id), EditorColors::TextPrimary(), EditorColors::WithAlpha(EditorColors::Warning(), 0.25f));
+            }
+            if (Any->Writes.empty())
+            {
+                ImGui::TextColored(EditorColors::TextMuted(), "Nothing");
+            }
+            ImGui::NewLine();
+
+            Field("Reads");
+            for (uint32 Id : Any->Reads)
+            {
+                DrawSystemChip(FriendlyAccessName(Id), EditorColors::TextPrimary(), EditorColors::WithAlpha(EditorColors::Accent(), 0.25f));
+            }
+            if (Any->Reads.empty())
+            {
+                ImGui::TextColored(EditorColors::TextMuted(), "Nothing");
+            }
+            ImGui::NewLine();
+        }
+
         ImGui::EndChild();
     }
 

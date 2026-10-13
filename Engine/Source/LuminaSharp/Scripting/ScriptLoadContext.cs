@@ -9,7 +9,7 @@ namespace LuminaSharp;
 /// Collectible load context for one generation of user scripts; only compiled script assemblies live here (so Unload reclaims the generation), referenced framework/engine assemblies defer to Default. Cross-unit references resolve in-ALC.
 internal sealed class ScriptLoadContext : AssemblyLoadContext
 {
-    // hostfxr loads LuminaSharp into its own context (NOT Default), so a script referencing EntityScript must be pointed at that exact assembly.
+    // hostfxr loads LuminaSharp into its own context (NOT Default), so a script referencing CEntityScript must be pointed at that exact assembly.
     private static readonly Assembly EngineAssembly = typeof(Host).Assembly;
     private static readonly string EngineAssemblyName = EngineAssembly.GetName().Name!;
 

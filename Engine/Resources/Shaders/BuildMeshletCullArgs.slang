@@ -31,7 +31,8 @@ struct FBuildMeshletCullArgsArgs
     uint  SubDrawsPerSlice;
     // 0 keeps every block in front for both phases, as the block build does when splitting is off.
     uint  bSplitPhases;
-    uint  _Pad1;
+    // 1 keeps near cascades out of this phase, 2 lays out only them for the dispatch that culls against the receiver mask.
+    uint  bDeferCascades;
 
     GPUSpan<FRenderBucket>                   Buckets;
     // One workgroup per written block, Y-folded exactly as BuildDrawPrefix folds the block dispatch.
@@ -45,6 +46,12 @@ FBuildMeshletCullArgsArgs* Pass() { return GetPassArgs<FBuildMeshletCullArgsArgs
 uint PhaseBlocks(FRenderBucket* Bucket, uint ViewIndex, bool bLate, bool bSplitPhases)
 {
     const uint Front = min(Bucket.BlockCursor, Bucket.BlockCapacity);
+    const bool bDeferred = Pass().bDeferCascades != 0u && CullViewHasFlag(ViewIndex, CULL_VIEW_FLAG_CASCADE)
+                        && !CullViewHasFlag(ViewIndex, CULL_VIEW_FLAG_FAR_CASCADE);
+    if (Pass().bDeferCascades == 2u || bDeferred)
+    {
+        return (Pass().bDeferCascades == 2u && bDeferred) ? Front : 0u;
+    }
     if (!bLate)
     {
         return Front;

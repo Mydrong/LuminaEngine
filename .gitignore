@@ -42,6 +42,7 @@ compile_commands.json
 imgui.ini
 Engine/Editor/Config/EditorSettings.json
 Engine/Editor/Config/EditorPreferences.json
+Engine/Editor/Config/EditorLayout.ini
 
 # Compiler and linker intermediates
 *.d

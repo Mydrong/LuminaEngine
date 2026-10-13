@@ -1,4 +1,4 @@
-﻿#include "ParticleParamCustomization.h"
+#include "ParticleParamCustomization.h"
 
 #include <imgui.h>
 #include <string>
@@ -71,7 +71,7 @@ namespace Lumina
         // The Color tag distinguishes a color from any other float4, as it does for a plain FVector4.
         EParticleParameterType ResolveInputType(const SParticleParam& Value, const FProperty* Property)
         {
-            if (Value.Type == EParticleParameterType::Vec4 && Property != nullptr && Property->HasMetadata("Color"))
+            if (Value.Type == EParticleParameterType::Vec4 && Property != nullptr && Property->HasEditorFlag(EPropertyEditorFlags::Color))
             {
                 return EParticleParameterType::Color;
             }
@@ -104,16 +104,8 @@ namespace Lumina
         FProperty* Prop = Property->Property;
         const EParticleParameterType InputType = ResolveInputType(Value, Prop);
 
-        float Min = 0.0f;
-        float Max = 0.0f;
-        if (Prop != nullptr && Prop->HasMetadata("ClampMin"))
-        {
-            Min = std::stof(Prop->GetMetadata("ClampMin").c_str());
-        }
-        if (Prop != nullptr && Prop->HasMetadata("ClampMax"))
-        {
-            Max = std::stof(Prop->GetMetadata("ClampMax").c_str());
-        }
+        const float Min = Prop != nullptr ? Prop->GetMetadataNumber<float>("ClampMin").value_or(0.0f) : 0.0f;
+        const float Max = Prop != nullptr ? Prop->GetMetadataNumber<float>("ClampMax").value_or(0.0f) : 0.0f;
 
         EPropertyChangeOp Result = EPropertyChangeOp::None;
 

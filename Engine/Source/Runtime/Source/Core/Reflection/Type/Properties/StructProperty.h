@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include "Core/Object/Class.h"
 #include "Core/Object/ObjectCore.h"
 #include "Core/Reflection/Type/LuminaTypes.h"
@@ -8,13 +8,10 @@ namespace Lumina
     class FStructProperty : public FProperty
     {
     public:
-        DECLARE_FPROPERTY(EPropertyTypeFlags::Struct)
-
-        explicit FStructProperty(const FPropertyParams* Params)
-            : FProperty(Params)
+        explicit FStructProperty(const FPropertyDesc& Desc)
+            : FProperty(Desc)
         {
-            auto* StructParams = (const FStructPropertyParams*)Params;
-            CStruct* InternalStruct = StructParams->StructFunc();
+            CStruct* InternalStruct = Desc.Type->GetStruct();
             ASSERT(InternalStruct);
             SetStruct(InternalStruct);
             SetElementSize(Struct->GetAlignedSize());

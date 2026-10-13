@@ -66,7 +66,17 @@ namespace Lumina
 
     void CEdGraphNode::NotifyValueEdited()
     {
-        if (OwningGraph != nullptr)
+        if (OwningGraph == nullptr)
+        {
+            return;
+        }
+
+        // A comment changes nothing the graph compiles, so its edit is recorded without asking for a recompile.
+        if (IsCommentNode())
+        {
+            OwningGraph->NotifyCosmeticChange();
+        }
+        else
         {
             OwningGraph->NotifyContentChanged();
         }

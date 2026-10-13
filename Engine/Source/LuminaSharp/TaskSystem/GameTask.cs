@@ -9,7 +9,7 @@ namespace LuminaSharp;
 /// <summary>
 /// Game-thread <c>await</c> helpers (s&amp;box-style). These complete from game-thread callbacks (the world
 /// timer / async asset load), so the continuation resumes on the game thread with the ambient world restored
-///, it is safe to touch the world after the await. Pass an <c>EntityScript.DestroyToken</c> so a pending
+///, it is safe to touch the world after the await. Pass an <c>CEntityScript.DestroyToken</c> so a pending
 /// await cancels when the script is destroyed. Do NOT use these from a worker Task body.
 /// </summary>
 public static class GameTask

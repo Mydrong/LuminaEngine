@@ -1,4 +1,4 @@
-﻿#include "PropertyTable.h"
+#include "PropertyTable.h"
 
 #include <cstdlib>
 
@@ -34,6 +34,7 @@ namespace Lumina
     static constexpr float      ChildIndentStep = 14.0f;
     static constexpr uint32     ArrayControlSeed = 428768833;
     static constexpr float      ResetColumnWidth = 22.0f;
+    static constexpr float      MaxHeaderColumnShare = 0.45f;
     static ImU32 ModifiedMarkerColor() { return EditorColors::U32(EditorColors::Warning()); }
 
     // Inside a session only Finished commits, since a lifecycle-free widget sends a lone Updated.
@@ -109,6 +110,28 @@ namespace Lumina
         default:
             return MakeUnique<FPropertyPropertyRow>(InPropHandle, InParentRow, InCallbacks);
         }
+    }
+
+    // "Outer|Inner" as one name per nesting level, skipping empty segments.
+    static TVector<FName> SplitCategoryPath(FStringView Path)
+    {
+        TVector<FName> Segments;
+        size_t Start = 0;
+        while (Start <= Path.size())
+        {
+            size_t Sep = Path.find('|', Start);
+            if (Sep == FStringView::npos)
+            {
+                Sep = Path.size();
+            }
+            if (Sep > Start)
+            {
+                // Through FStringView, since FName(const char*, uint32) is a base plus a number, not a length.
+                Segments.push_back(FName(Path.substr(Start, Sep - Start)));
+            }
+            Start = Sep + 1;
+        }
+        return Segments;
     }
 
     static FStringView TrimWhitespace(FStringView In)
@@ -326,7 +349,7 @@ namespace Lumina
             Terms.push_back(std::move(Term));
         }
 
-        bHides = Source->HasMetadata("EditConditionHides");
+        bHides = Source->HasEditorFlag(EPropertyEditorFlags::EditConditionHides);
     }
 
     bool FPropertyEditCondition::Evaluate(void* ContainerPtr) const
@@ -374,6 +397,73 @@ namespace Lumina
             return nullptr;
         }
         return PropertyHandle->ContainerPtr;
+    }
+
+    bool FPropertyRow::IsTopLevel() const
+    {
+        if (ParentRow == nullptr || !ParentRow->IsCategory())
+        {
+            return false;
+        }
+        for (const FPropertyRow* Row = ParentRow; Row != nullptr; Row = Row->ParentRow)
+        {
+            if (!Row->IsCategory())
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    FCategoryPropertyRow* FPropertyRow::FindOrCreateCategoryChild(const FName& InCategory, void* OwnerObject)
+    {
+        for (const TUniquePtr<FPropertyRow>& Child : Children)
+        {
+            if (Child->IsCategory())
+            {
+                FCategoryPropertyRow* AsCategory = static_cast<FCategoryPropertyRow*>(Child.get());
+                if (AsCategory->GetCategoryName() == InCategory)
+                {
+                    return AsCategory;
+                }
+            }
+        }
+
+        TUniquePtr<FCategoryPropertyRow> NewRow = MakeUnique<FCategoryPropertyRow>(OwnerObject, InCategory, Callbacks);
+        NewRow->ParentRow = this;
+        FCategoryPropertyRow* RawPtr = NewRow.get();
+        Children.emplace_back(Move(NewRow));
+        return RawPtr;
+    }
+
+    void FPropertyRow::BuildMemberRows(CStruct* Type, void* Instance, void* DefaultInstance)
+    {
+        DestroyChildren();
+        if (Type == nullptr || Instance == nullptr)
+        {
+            return;
+        }
+
+        for (FProperty* Member : Type->GetProperties())
+        {
+            if (!Member->IsVisible())
+            {
+                continue;
+            }
+
+            FPropertyRow* Target = this;
+            if (Member->HasMetadata("Category"))
+            {
+                const FCStringView Path = Member->GetMetadata("Category");
+                for (const FName& Segment : SplitCategoryPath(FStringView(Path.c_str(), Path.size())))
+                {
+                    Target = Target->FindOrCreateCategoryChild(Segment, Instance);
+                }
+            }
+
+            TSharedPtr<FPropertyHandle> Handle = MakeShared<FPropertyHandle>(Instance, DefaultInstance, Member);
+            Target->Children.push_back(CreatePropertyRow(Handle, Target, Target->Callbacks));
+        }
     }
 
     bool FPropertyRow::IsVisible() const
@@ -644,7 +734,7 @@ namespace Lumina
         ImGui::TableNextRow();
 
         const bool bIsCategory = IsCategory();
-        const bool bTopLevel = ParentRow && ParentRow->IsCategory();
+        const bool bTopLevel = IsTopLevel();
         const bool bMultipleValues = bTopLevel && PropertyHandle && PropertyHandle->Property
             && Callbacks.IsMultiValueFn && Callbacks.IsMultiValueFn(PropertyHandle->Property);
 
@@ -710,8 +800,7 @@ namespace Lumina
 
             // Gated to top-level rows so nested members do not inherit it from shared callbacks.
             const bool bHasTrailing = Callbacks.RowTrailingControlFn
-                && PropertyHandle && PropertyHandle->Property
-                && ParentRow != nullptr && ParentRow->IsCategory();
+                && PropertyHandle && PropertyHandle->Property && bTopLevel;
             const float TrailingWidth = Callbacks.RowTrailingControlWidth > 0.0f ? Callbacks.RowTrailingControlWidth : 24.0f;
 
             const int ColumnCount = 2 + (bHasExtras ? 1 : 0) + (bHasTrailing ? 1 : 0);
@@ -864,19 +953,57 @@ namespace Lumina
         return PropertyHandle->Property->IsReadOnly();
     }
 
-    static void DrawPropertyTooltip(const FProperty* Property)
+    // A clipped label leads its tooltip with the full name, since the cell no longer shows it.
+    static void DrawPropertyTooltip(const FProperty* Property, bool bLabelClipped = false)
     {
         if (!ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
         {
             return;
         }
 
-        FStringView Tooltip = Property->GetMetadata("ToolTip");
+        const FCStringView Name = Property->GetPropertyDisplayName();
+        const FStringView Tooltip = Property->GetMetadata("ToolTip");
         if (Tooltip.empty())
         {
-            Tooltip = Property->GetPropertyDisplayName();
+            ImGuiX::WrappedTooltip_Internal(FStringView(Name.c_str(), Name.size()));
+            return;
+        }
+        if (bLabelClipped)
+        {
+            const FString Both = FString(Name.c_str()) + "\n\n" + FString(Tooltip.data(), Tooltip.size());
+            ImGuiX::WrappedTooltip_Internal(FStringView(Both.c_str(), Both.size()));
+            return;
         }
         ImGuiX::WrappedTooltip_Internal(Tooltip);
+    }
+
+    // A label too long for its cell ends in an ellipsis rather than being cut mid-letter, and reports that it did.
+    static bool DrawHeaderLabel(const char* Label)
+    {
+        const bool bClipped = ImGui::CalcTextSize(Label).x > ImGui::GetContentRegionAvail().x;
+        ImGui::TextAligned(0.0f, -FLT_MIN, "%s", Label);
+        return bClipped;
+    }
+
+    // The foldout version of DrawHeaderLabel, drawing the text itself over a header whose own label is hidden.
+    static bool CollapsingHeaderEllipsis(const char* Label, ImGuiTreeNodeFlags Flags, bool& bOutClipped)
+    {
+        ImGui::PushID(Label);
+        const bool bOpen = ImGui::CollapsingHeader("##Header", Flags);
+        ImGui::PopID();
+
+        const ImGuiStyle& Style = ImGui::GetStyle();
+        const ImVec2 Min = ImGui::GetItemRectMin();
+        const ImVec2 Max = ImGui::GetItemRectMax();
+        const bool bLeaf = (Flags & ImGuiTreeNodeFlags_Leaf) != 0;
+        const float ArrowWidth = bLeaf ? Style.FramePadding.x : ImGui::GetFontSize() + Style.FramePadding.x * 3.0f;
+        const ImVec2 TextSize = ImGui::CalcTextSize(Label);
+        const ImVec2 TextMin(Min.x + ArrowWidth, Min.y + Style.FramePadding.y);
+        const ImVec2 TextMax(Max.x - Style.FramePadding.x, Max.y);
+
+        bOutClipped = TextMin.x + TextSize.x > TextMax.x;
+        ImGui::RenderTextEllipsis(ImGui::GetWindowDrawList(), TextMin, TextMax, TextMax.x, Label, nullptr, &TextSize);
+        return bOpen;
     }
 
     // Shared by the leaf row and the map-entry editors, returning null for struct and array types.
@@ -936,16 +1063,17 @@ namespace Lumina
         ImGui::Dummy(ImVec2(Offset, 0));
         ImGui::SameLine();
 
+        bool bClipped = false;
         if (IsArrayElementProperty())
         {
             ImGui::Text("%lld", static_cast<long long>(PropertyHandle->Index));
         }
         else
         {
-            ImGui::TextUnformatted(PropertyHandle->Property->GetPropertyDisplayName().c_str());
+            bClipped = DrawHeaderLabel(PropertyHandle->Property->GetPropertyDisplayName().c_str());
         }
 
-        DrawPropertyTooltip(PropertyHandle->Property);
+        DrawPropertyTooltip(PropertyHandle->Property, bClipped);
     }
 
     void FPropertyPropertyRow::DrawEditor(const FPropertyDrawArgs& Args)
@@ -1094,10 +1222,11 @@ namespace Lumina
         ImGui::PushStyleColor(ImGuiCol_HeaderActive, 0);
         ImGui::PushStyleColor(ImGuiCol_HeaderHovered, 0);
         const ImGuiTreeNodeFlags Flags = ElementCount ? 0 : ImGuiTreeNodeFlags_Leaf;
-        bExpanded = ImGui::CollapsingHeader(ArrayProperty->GetPropertyDisplayName().c_str(), Flags);
+        bool bClipped = false;
+        bExpanded = CollapsingHeaderEllipsis(ArrayProperty->GetPropertyDisplayName().c_str(), Flags, bClipped);
         ImGui::PopStyleColor(3);
 
-        DrawPropertyTooltip(ArrayProperty);
+        DrawPropertyTooltip(ArrayProperty, bClipped);
     }
 
     void FArrayPropertyRow::DrawEditor(const FPropertyDrawArgs& Args)
@@ -1205,12 +1334,12 @@ namespace Lumina
     bool FArrayPropertyRow::AllowResize() const
     {
         // Disabling only the value widgets left the add and trash buttons live, a bigger edit than refused.
-        return !bDrawReadOnly && (ArrayProperty == nullptr || !ArrayProperty->HasMetadata("NoResize"));
+        return !bDrawReadOnly && (ArrayProperty == nullptr || !ArrayProperty->HasEditorFlag(EPropertyEditorFlags::NoResize));
     }
 
     bool FArrayPropertyRow::AllowReorder() const
     {
-        return !bDrawReadOnly && (ArrayProperty == nullptr || !ArrayProperty->HasMetadata("NoReorder"));
+        return !bDrawReadOnly && (ArrayProperty == nullptr || !ArrayProperty->HasEditorFlag(EPropertyEditorFlags::NoReorder));
     }
 
     bool FArrayPropertyRow::HasExtraControls() const
@@ -1303,10 +1432,11 @@ namespace Lumina
         ImGui::PushStyleColor(ImGuiCol_HeaderActive, 0);
         ImGui::PushStyleColor(ImGuiCol_HeaderHovered, 0);
         const ImGuiTreeNodeFlags Flags = Count ? 0 : ImGuiTreeNodeFlags_Leaf;
-        bExpanded = ImGui::CollapsingHeader(MapProperty->GetPropertyDisplayName().c_str(), Flags);
+        bool bClipped = false;
+        bExpanded = CollapsingHeaderEllipsis(MapProperty->GetPropertyDisplayName().c_str(), Flags, bClipped);
         ImGui::PopStyleColor(3);
 
-        DrawPropertyTooltip(MapProperty);
+        DrawPropertyTooltip(MapProperty, bClipped);
     }
 
     void FMapPropertyRow::DrawEditor(const FPropertyDrawArgs& Args)
@@ -1340,7 +1470,7 @@ namespace Lumina
 
     bool FMapPropertyRow::AllowResize() const
     {
-        return !bDrawReadOnly && (MapProperty == nullptr || !MapProperty->HasMetadata("NoResize"));
+        return !bDrawReadOnly && (MapProperty == nullptr || !MapProperty->HasEditorFlag(EPropertyEditorFlags::NoResize));
     }
 
     bool FMapPropertyRow::HasExtraControls() const
@@ -1614,7 +1744,7 @@ namespace Lumina
         FPropertyCustomizationRegistry* Registry = GEngine->GetDevelopmentToolsUI()->GetPropertyCustomizationRegistry();
         Customization = Registry->GetPropertyCustomizationForType(StructProperty->GetStruct()->GetName());
         
-        if (StructProperty->HasMetadata("DefaultCollapsed"))
+        if (StructProperty->HasEditorFlag(EPropertyEditorFlags::DefaultCollapsed))
         {
             bExpanded = false;
         }
@@ -1639,15 +1769,16 @@ namespace Lumina
         // A customization draws the whole value in one row, so there is nothing for an arrow to fold.
         if (Customization)
         {
+            bool bLabelClipped = false;
             if (IsArrayElementProperty())
             {
                 ImGui::Text("%lld", static_cast<long long>(PropertyHandle->Index));
             }
             else
             {
-                ImGui::TextUnformatted(StructProperty->GetPropertyDisplayName().c_str());
+                bLabelClipped = DrawHeaderLabel(StructProperty->GetPropertyDisplayName().c_str());
             }
-            DrawPropertyTooltip(StructProperty);
+            DrawPropertyTooltip(StructProperty, bLabelClipped);
             return;
         }
 
@@ -1655,10 +1786,11 @@ namespace Lumina
         ImGui::PushStyleColor(ImGuiCol_Header, 0);
         ImGui::PushStyleColor(ImGuiCol_HeaderActive, 0);
         ImGui::PushStyleColor(ImGuiCol_HeaderHovered, 0);
-        bExpanded = ImGui::CollapsingHeader(StructProperty->GetPropertyDisplayName().c_str());
+        bool bClipped = false;
+        bExpanded = CollapsingHeaderEllipsis(StructProperty->GetPropertyDisplayName().c_str(), 0, bClipped);
         ImGui::PopStyleColor(3);
 
-        DrawPropertyTooltip(StructProperty);
+        DrawPropertyTooltip(StructProperty, bClipped);
     }
 
     void FStructPropertyRow::DrawEditor(const FPropertyDrawArgs& Args)
@@ -1674,10 +1806,6 @@ namespace Lumina
         {
             ChangeOp = Customization->UpdateAndDraw(PropertyHandle, Args);
         }
-        else if (PropertyTable)
-        {
-            PropertyTable->DrawTree(Args);
-        }
 
         ImGui::EndDisabled();
     }
@@ -1690,14 +1818,7 @@ namespace Lumina
 
     void FStructPropertyRow::RebuildChildren()
     {
-        void* InstancePtr = PropertyHandle->GetValuePtr();
-        void* DefaultInstancePtr = PropertyHandle->GetDefaultValuePtr();
-        PropertyTable = MakeUnique<FPropertyTable>(InstancePtr, StructProperty->GetStruct(), DefaultInstancePtr);
-        // A nested table, since the owning table's search box already covers these properties.
-        PropertyTable->SetShowSearchBar(false);
-        // Forwarded so a nested-struct member edit notifies save and undo like a top-level one.
-        PropertyTable->ChangeEventCallbacks = Callbacks;
-        PropertyTable->RebuildTree();
+        BuildMemberRows(StructProperty->GetStruct(), PropertyHandle->GetValuePtr(), PropertyHandle->GetDefaultValuePtr());
     }
 
     // The C# type name from ScriptTypeName when present, otherwise the struct's own name.
@@ -1767,7 +1888,7 @@ namespace Lumina
         : FPropertyRow(InPropHandle, InParentRow, InCallbacks)
         , InstancedStructProperty(static_cast<FInstancedStructProperty*>(InPropHandle->Property))
     {
-        if (InstancedStructProperty->HasMetadata("DefaultCollapsed"))
+        if (InstancedStructProperty->HasEditorFlag(EPropertyEditorFlags::DefaultCollapsed))
         {
             bExpanded = false;
         }
@@ -1797,10 +1918,11 @@ namespace Lumina
         ImGui::PushStyleColor(ImGuiCol_Header, 0);
         ImGui::PushStyleColor(ImGuiCol_HeaderActive, 0);
         ImGui::PushStyleColor(ImGuiCol_HeaderHovered, 0);
-        bExpanded = ImGui::CollapsingHeader(InstancedStructProperty->GetPropertyDisplayName().c_str());
+        bool bClipped = false;
+        bExpanded = CollapsingHeaderEllipsis(InstancedStructProperty->GetPropertyDisplayName().c_str(), 0, bClipped);
         ImGui::PopStyleColor(3);
 
-        DrawPropertyTooltip(InstancedStructProperty);
+        DrawPropertyTooltip(InstancedStructProperty, bClipped);
     }
 
     void FInstancedStructPropertyRow::DrawEditor(const FPropertyDrawArgs& Args)
@@ -1829,14 +1951,6 @@ namespace Lumina
         }
 
         ImGui::EndDisabled();
-
-        // Inline editor for the chosen instance's own properties.
-        if (bExpanded && PropertyTable && Instance->IsValid())
-        {
-            ImGui::BeginDisabled(IsReadOnly());
-            PropertyTable->DrawTree(Args);
-            ImGui::EndDisabled();
-        }
     }
 
     float FInstancedStructPropertyRow::GetMeasuredHeaderTextWidth() const
@@ -1852,16 +1966,12 @@ namespace Lumina
 
         if (Instance == nullptr || Type == nullptr)
         {
-            PropertyTable.reset();
+            DestroyChildren();
             return;
         }
 
         // Diff/reset of the instance's own fields compares against that struct's default instance.
-        PropertyTable = MakeUnique<FPropertyTable>(Instance->GetMutableMemory(), Type, Type->GetDefaultInstance());
-        // A nested table, since the owning table's search box already covers these properties.
-        PropertyTable->SetShowSearchBar(false);
-        PropertyTable->ChangeEventCallbacks = Callbacks;
-        PropertyTable->RebuildTree();
+        BuildMemberRows(Type, Instance->GetMutableMemory(), Type->GetDefaultInstance());
     }
 
     FOptionalPropertyRow::FOptionalPropertyRow(const TSharedPtr<FPropertyHandle>& InPropHandle, FPropertyRow* InParentRow, const FPropertyChangedEventCallbacks& InCallbacks)
@@ -1890,8 +2000,8 @@ namespace Lumina
     {
         ImGui::Dummy(ImVec2(Offset, 0));
         ImGui::SameLine();
-        ImGui::TextUnformatted(OptionalProperty->GetPropertyDisplayName().c_str());
-        DrawPropertyTooltip(OptionalProperty);
+        const bool bClipped = DrawHeaderLabel(OptionalProperty->GetPropertyDisplayName().c_str());
+        DrawPropertyTooltip(OptionalProperty, bClipped);
     }
 
     void FOptionalPropertyRow::DrawEditor(const FPropertyDrawArgs& Args)
@@ -1982,22 +2092,7 @@ namespace Lumina
 
     FCategoryPropertyRow* FCategoryPropertyRow::FindOrCreateChildCategory(const FName& InCategory)
     {
-        for (const TUniquePtr<FPropertyRow>& Child : Children)
-        {
-            if (Child->IsCategory())
-            {
-                FCategoryPropertyRow* AsCategory = static_cast<FCategoryPropertyRow*>(Child.get());
-                if (AsCategory->GetCategoryName() == InCategory)
-                {
-                    return AsCategory;
-                }
-            }
-        }
-
-        TUniquePtr<FCategoryPropertyRow> NewRow = MakeUnique<FCategoryPropertyRow>(OwnerObject, InCategory, Callbacks);
-        FCategoryPropertyRow* RawPtr = NewRow.get();
-        Children.emplace_back(Move(NewRow));
-        return RawPtr;
+        return FindOrCreateCategoryChild(InCategory, OwnerObject);
     }
 
     FStringView FCategoryPropertyRow::GetFilterLabel() const
@@ -2019,8 +2114,14 @@ namespace Lumina
         ImGui::PushStyleColor(ImGuiCol_HeaderActive, EditorColors::U32(EditorColors::RowBgActive()));
         ImGui::PushStyleColor(ImGuiCol_HeaderHovered, EditorColors::U32(EditorColors::RowBgHovered()));
         ImGui::PushStyleColor(ImGuiCol_Text, EditorColors::TextPrimary());
-        bExpanded = ImGui::CollapsingHeader(Category.c_str(), ImGuiTreeNodeFlags_DefaultOpen);
+        bool bClipped = false;
+        bExpanded = CollapsingHeaderEllipsis(Category.c_str(), ImGuiTreeNodeFlags_DefaultOpen, bClipped);
         ImGui::PopStyleColor(4);
+
+        if (bClipped && ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
+        {
+            ImGuiX::WrappedTooltip_Internal(FStringView(Category.c_str()));
+        }
     }
 
     float FCategoryPropertyRow::GetMeasuredHeaderTextWidth() const
@@ -2094,29 +2195,11 @@ namespace Lumina
                 }
                 
                 FCategoryPropertyRow* TargetRow = nullptr;
-                size_t SegmentStart = 0;
-                while (SegmentStart <= CategoryPath.length())
+                for (const FName& SegmentName : SplitCategoryPath(FStringView(CategoryPath.data(), CategoryPath.size())))
                 {
-                    size_t Sep = CategoryPath.find('|', SegmentStart);
-                    if (Sep == FString::npos)
-                    {
-                        Sep = CategoryPath.length();
-                    }
-
-                    if (Sep > SegmentStart)
-                    {
-                        // Through FStringView, since FName(const char*, uint32) is base plus NUMBER, not a length.
-                        FName SegmentName(FStringView(CategoryPath.data() + SegmentStart, Sep - SegmentStart));
-                        TargetRow = (TargetRow == nullptr)
-                            ? FindOrCreateCategoryRow(SegmentName)
-                            : TargetRow->FindOrCreateChildCategory(SegmentName);
-                    }
-
-                    if (Sep == CategoryPath.length())
-                    {
-                        break;
-                    }
-                    SegmentStart = Sep + 1;
+                    TargetRow = (TargetRow == nullptr)
+                        ? FindOrCreateCategoryRow(SegmentName)
+                        : TargetRow->FindOrCreateChildCategory(SegmentName);
                 }
                 
                 if (TargetRow == nullptr)
@@ -2244,6 +2327,9 @@ namespace Lumina
             HeaderColumnWidth = Math::Max(HeaderColumnWidth, Row->ComputeRequiredHeaderWidth(0.0f));
         }
         HeaderColumnWidth += 18.0f;
+
+        // Long or deeply nested labels clip and keep their hover tooltip, rather than squeezing the values out.
+        HeaderColumnWidth = Math::Min(HeaderColumnWidth, Math::Max(ImGui::GetContentRegionAvail().x * MaxHeaderColumnShare, 80.0f));
 
         if (ImGui::BeginTable("GridTable", 2, Flags))
         {

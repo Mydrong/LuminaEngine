@@ -81,6 +81,34 @@ namespace Lumina
             return Classes;
         }
 
+        // Parents mint first, so a class without its own UpdatePhase finds its parent's already set.
+        EScriptUpdatePhase UpdatePhaseInChain(const CClass* Class)
+        {
+            static const FName UpdatePhaseName("UpdatePhase");
+            for (const CClass* Current = Class; Current != nullptr; Current = Current->GetSuperClass())
+            {
+                if (Current->HasMeta(UpdatePhaseName))
+                {
+                    return Current->GetMeta(UpdatePhaseName) == "PostPhysics" ? EScriptUpdatePhase::PostPhysics : EScriptUpdatePhase::PrePhysics;
+                }
+            }
+            return EScriptUpdatePhase::PrePhysics;
+        }
+
+        // Ancestors first, the order the generator numbers a shim's slots in, since a shim forwards its Scriptable ancestors' events too.
+        void AppendEventThunks(const CClass* NativeClass, TVector<FScriptableEventThunk>& Out)
+        {
+            if (NativeClass == nullptr)
+            {
+                return;
+            }
+            AppendEventThunks(NativeClass->GetSuperClass(), Out);
+            if (const auto It = GNativeInfos().find(FString(NativeClass->GetName().c_str())); It != GNativeInfos().end())
+            {
+                Out.insert(Out.end(), It->second.EventThunks.begin(), It->second.EventThunks.end());
+            }
+        }
+
         // Names rather than pointers, so a redirect can be registered before its target is minted.
         THashMap<FName, FName>& GClassRedirects()
         {
@@ -170,14 +198,14 @@ namespace Lumina
             return;
         }
 
-        // The thunks are registered against the native base the shim was generated for, which is where the
-        // typed dispatch for each event lives.
-        const FScriptableNativeInfo* Info = nullptr;
-        if (const auto It = GNativeInfos().find(FString(Base->GetName().c_str())); It != GNativeInfos().end())
+        const CClass* NativeBase = Minted->GetSuperClass();
+        while (NativeBase != nullptr && ToScriptClass(NativeBase) != nullptr)
         {
-            Info = &It->second;
-            Minted->ScriptOverrideSlots.assign((Info->EventThunks.size() + 63) / 64, 0ull);
+            NativeBase = NativeBase->GetSuperClass();
         }
+        TVector<FScriptableEventThunk> Thunks;
+        AppendEventThunks(NativeBase, Thunks);
+        Minted->ScriptOverrideSlots.assign((Thunks.size() + 63) / 64, 0ull);
 
         for (const FString& Event : OverriddenEvents)
         {
@@ -193,17 +221,13 @@ namespace Lumina
             // Thunks register in the order the generator numbered the shim's events, so the index is the slot.
             FFunction::FNativeFuncPtr Thunk = nullptr;
             size_t Slot = 0;
-            if (Info != nullptr)
+            for (size_t i = 0; i < Thunks.size(); ++i)
             {
-                for (size_t i = 0; i < Info->EventThunks.size(); ++i)
+                if (Thunks[i].Name != nullptr && EventName == FName(Thunks[i].Name))
                 {
-                    const FScriptableEventThunk& Candidate = Info->EventThunks[i];
-                    if (Candidate.Name != nullptr && EventName == FName(Candidate.Name))
-                    {
-                        Thunk = Candidate.Thunk;
-                        Slot  = i;
-                        break;
-                    }
+                    Thunk = Thunks[i].Thunk;
+                    Slot  = i;
+                    break;
                 }
             }
 
@@ -469,9 +493,6 @@ namespace Lumina
                 // Minted classes are REUSED by name, so an added or removed override must update the mask.
                 ApplyScriptOverrides(Minted, Desc->OverriddenEvents);
                 Minted->bAbstract = Desc->bAbstract;
-                Minted->ScriptUpdatePhase = Desc->UpdatePhase;
-                Minted->bScriptParallelUpdate = Desc->bParallelUpdate;
-                Minted->ScriptNetRealm = Desc->NetRealm;
                 for (const FName& Key : Minted->ScriptClassMetaKeys)
                 {
                     Minted->Metadata.RemoveValue(Key);
@@ -483,6 +504,7 @@ namespace Lumina
                     Minted->Metadata.SetValue(Key, Pair.second);
                     Minted->ScriptClassMetaKeys.push_back(Key);
                 }
+                Minted->ScriptUpdatePhase = static_cast<uint8>(UpdatePhaseInChain(Minted));
 
                 // Re-appending would duplicate properties, so a changed schema tears the block down and rebuilds.
                 const Scripting::FScriptExportSchema& Schema = Desc->Schema;
@@ -522,7 +544,7 @@ namespace Lumina
         // Finalize registration + create CDOs so FindObject<CClass>(name) / NewObject(class) work.
         if (bMintedAny)
         {
-            ProcessNewlyLoadedCObjects();
+            RegisterPendingTypes();
         }
 
         // It runs on the managed side because an initializer is an arbitrary C# expression.

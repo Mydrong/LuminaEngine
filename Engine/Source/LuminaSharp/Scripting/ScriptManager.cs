@@ -74,9 +74,6 @@ internal sealed class ScriptManager
     /// <summary>Total managed types in the current generation's assembly (for editor diagnostics).</summary>
     public int LoadedTypeCount { get; private set; }
 
-    // EntitySystem subclasses in the current generation, for editor diagnostics.
-    public int EntitySystemCount { get; private set; }
-
     // Roslyn's cached references and the on-disk compile keys are shared, so two builds must never overlap.
     private static readonly object BuildLock = new();
 
@@ -219,14 +216,13 @@ internal sealed class ScriptManager
 
         LoadedTypeCount = AllTypes.Count;
         var Library = new TypeLibrary(AllTypes);
-        EntitySystemCount = Library.EntitySystemCount;
         EntityScripts = new EntityScriptRuntime(Library);
         Scriptables = new ScriptableRuntime(Library, EntityScripts);
         DataStructs = new ScriptDataStructRuntime(Library);
 
         Native.Log(ELogLevel.Info,
             $"Loaded C# scripts [generation {Generation}]: {Pending.Count} assembl(ies), {AllTypes.Count} type(s), " +
-            $"{Library.EntityScriptTypeNames.Count} EntityScript(s), {Library.EntitySystemCount} EntitySystem(s).");
+            $"{Library.ScriptableTypeNames.Count} script class(es).");
         return true;
     }
 

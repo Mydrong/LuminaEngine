@@ -2,6 +2,7 @@
 
 #include "Core/UpdateContext.h"
 #include "Core/Delegates/Delegate.h"
+#include "Core/ArtifactCache/ArtifactCache.h"
 #include "Core/Engine/EngineURL.h"
 #include "Memory/SmartPtr.h"
 #include "Core/Object/ObjectHandleTyped.h"
@@ -91,6 +92,7 @@ namespace Lumina
         
         RUNTIME_API NODISCARD FStringView GetProjectName() const { return ProjectName; }
         RUNTIME_API NODISCARD FStringView GetProjectPath() const { return ProjectPath; }
+        RUNTIME_API NODISCARD FArtifactCache& GetArtifactCache() { return ArtifactCache; }
         RUNTIME_API NODISCARD FFixedString GetProjectContentDirectory() const;
         RUNTIME_API NODISCARD FFixedString GetProjectScriptsDirectory() const;
         RUNTIME_API NODISCARD FFixedString GetProjectShadersDirectory() const;
@@ -229,6 +231,7 @@ namespace Lumina
         
         FString                     ProjectName;
         FFixedString                ProjectPath;
+        FArtifactCache              ArtifactCache;
         TStrongObjectPtr<CGameInstance> GameInstance;
 
         // Read by MountProject, applied by StartProject once project settings are writable.

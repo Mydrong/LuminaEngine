@@ -2,8 +2,15 @@
 #include "Memory/MemoryTracking.h"
 #include "ParticleSystem.h"
 #include "Assets/AssetTypes/Material/Material.h"
+#include "Core/ArtifactCache/ArtifactCache.h"
+#include "Core/Engine/Engine.h"
+#include "Core/Math/Hash/Hash.h"
 #include "Core/Object/Package/Package.h"
+#include "Renderer/RenderManager.h"
 #include "Renderer/ShaderLibrary.h"
+#include "Renderer/ShaderPaths.h"
+#include "Renderer/SpirvStrip.h"
+#include "Log/Log.h"
 #include "World/Entity/Components/ParticleSystemComponent.h"
 #include "Containers/StringFormat.h"
 
@@ -44,29 +51,131 @@ namespace Lumina
         return ResolveParticleSpriteMaterial(Material.Get());
     }
 
+    void CParticleEmitter::Serialize(FArchive& Ar)
+    {
+        LUMINA_MEMORY_SCOPE("Particles");
+        if (!Ar.IsWriting())
+        {
+            CObject::Serialize(Ar);
+            return;
+        }
+
+        // An editor asset keeps its binaries in the artifact cache, and a cook embeds them since a game has no compiler.
+        TVector<uint32> EditorBinaries = Move(ComputeShaderBinaries);
+        ComputeShaderBinaries.clear();
+        if (Ar.IsCooking())
+        {
+            ComputeShaderBinaries = EditorBinaries;
+            Spirv::StripDebugInfo(ComputeShaderBinaries);
+        }
+        CObject::Serialize(Ar);
+        ComputeShaderBinaries = Move(EditorBinaries);
+    }
+
     void CParticleEmitter::PostLoad()
     {
         LUMINA_MEMORY_SCOPE("Particles");
-        if (!ComputeShaderBinaries.empty())
+        if (ShaderMode != EParticleShaderMode::Custom)
         {
-            // The GUID keeps the key unique, and the readable prefix is what pipeline and crash logs print.
-            FString ShaderKey = GetPackage() != nullptr ? GetPackage()->GetName().ToString() + "." : FString();
-            ShaderKey += EmitterName + "_" + GetGUID().ToString() + "_CS";
-
-            // Commit adds a reference every call, so the one held for the previous compile is given back, even when it is the same entry.
-            const FShaderH Previous = ComputeShader;
-            ComputeShader = FShaderLibrary::Commit(FName(ShaderKey), ERHIShaderType::Compute,
-                TSpan<const uint32>(ComputeShaderBinaries.data(), ComputeShaderBinaries.size()));
-            if (Previous != nullptr)
-            {
-                FShaderLibrary::Release(Previous);
-            }
+            return;
         }
+
+#if USING(WITH_EDITOR)
+        // Binaries embedded in an editor asset predate the artifact cache or were built against other templates.
+        bool bCurrent = !ComputeShaderBinaries.empty() && CompiledTemplateHash == GetSimulationTemplateHash();
+#else
+        // A cooked game ships the binaries it was built with and has no compiler to replace them.
+        bool bCurrent = !ComputeShaderBinaries.empty();
+#endif
+        if (!bCurrent)
+        {
+            bLoadedEmbeddedBinaries |= !ComputeShaderBinaries.empty();
+            ComputeShaderBinaries.clear();
+            bCurrent = LoadShaderFromArtifactCache();
+        }
+
+        if (bCurrent)
+        {
+            CommitComputeShader();
+            return;
+        }
+
+        // A shader built for other templates reads arguments laid out differently, so the emitter waits for a recompile instead.
+        ReleaseComputeShader();
+#if !USING(WITH_EDITOR)
+        LOG_ERROR("Particle emitter '{}' in '{}' has no simulation shader for the current templates. Open the project in the editor once so it compiles into the artifact cache, or cook the content.",
+                  EmitterName.c_str(), GetPackage() != nullptr ? GetPackage()->GetPackagePath().c_str() : "");
+#endif
     }
 
     void CParticleEmitter::OnDestroy()
     {
         CObject::OnDestroy();
+        ReleaseComputeShader();
+    }
+
+    uint64 CParticleEmitter::GetSimulationTemplateHash()
+    {
+        // Computed once per run, since the sources only change between runs.
+        static const uint64 CachedHash = []() -> uint64
+        {
+            constexpr FStringView Directories[] = { "/Engine/Resources/Shaders/Particles", "/Engine/Resources/Shaders/Includes", "/Engine/Resources/Shaders/Shared" };
+            return Shaders::HashSourceDirectories(Directories);
+        }();
+        return CachedHash;
+    }
+
+    uint64 CParticleEmitter::MakeArtifactKey() const
+    {
+        constexpr uint64 kParticleArtifactVersion = 1;
+        const uint64 Parts[] = { CompiledCodeHash, GetSimulationTemplateHash(), kParticleArtifactVersion };
+        return Hash::GetHash64(Parts, sizeof(Parts), 0x50415254534D4C41ull);
+    }
+
+    bool CParticleEmitter::LoadShaderFromArtifactCache()
+    {
+        // Test hosts run without an engine, and a stack that never compiled has no key.
+        TVector<uint8> Bytes;
+        if (CompiledCodeHash == 0 || GEngine == nullptr || !GEngine->GetArtifactCache().Load(MakeArtifactKey(), Bytes) || Bytes.empty() || Bytes.size() % sizeof(uint32) != 0)
+        {
+            return false;
+        }
+
+        ComputeShaderBinaries.resize(Bytes.size() / sizeof(uint32));
+        Memory::Memcpy(ComputeShaderBinaries.data(), Bytes.data(), Bytes.size());
+        CompiledTemplateHash = GetSimulationTemplateHash();
+        return true;
+    }
+
+    void CParticleEmitter::StoreShaderInArtifactCache() const
+    {
+        if (CompiledCodeHash == 0 || ComputeShaderBinaries.empty() || GEngine == nullptr)
+        {
+            return;
+        }
+
+        const TSpan<const uint8> Bytes(reinterpret_cast<const uint8*>(ComputeShaderBinaries.data()), ComputeShaderBinaries.size() * sizeof(uint32));
+        GEngine->GetArtifactCache().Store(MakeArtifactKey(), Bytes);
+    }
+
+    void CParticleEmitter::CommitComputeShader()
+    {
+        // The GUID keeps the key unique, and the readable prefix is what pipeline and crash logs print.
+        FString ShaderKey = GetPackage() != nullptr ? GetPackage()->GetName().ToString() + "." : FString();
+        ShaderKey += EmitterName + "_" + GetGUID().ToString() + "_CS";
+
+        // Commit adds a reference every call, so the one held for the previous compile is given back, even when it is the same entry.
+        const FShaderH Previous = ComputeShader;
+        ComputeShader = FShaderLibrary::Commit(FName(ShaderKey), ERHIShaderType::Compute,
+            TSpan<const uint32>(ComputeShaderBinaries.data(), ComputeShaderBinaries.size()));
+        if (Previous != nullptr)
+        {
+            FShaderLibrary::Release(Previous);
+        }
+    }
+
+    void CParticleEmitter::ReleaseComputeShader()
+    {
         if (ComputeShader != nullptr)
         {
             FShaderLibrary::Release(ComputeShader);
@@ -90,13 +199,24 @@ namespace Lumina
         }
 
         // PostLoad commits their shader binaries, and a nested export gets none from the outer load.
+        bool bNeedsCompile = false;
         for (const TStrongObjectPtr<CParticleEmitter>& Emitter : Emitters)
         {
             if (Emitter.IsValid())
             {
                 Emitter->PostLoad();
+                bNeedsCompile |= Emitter->NeedsShaderCompile();
             }
         }
+
+#if USING(WITH_EDITOR)
+        // A tool or test host without a renderer compiles nothing, so the emitters simply stay idle.
+        FRenderManager* Renderer = TryRender();
+        if (bNeedsCompile && Renderer != nullptr && GetPackage() != nullptr)
+        {
+            Renderer->GetParticleCompileQueue().QueueRecompile(this);
+        }
+#endif
     }
 
     CParticleEmitter* CParticleSystem::AddEmitter()
@@ -291,86 +411,126 @@ namespace Lumina
         return !GetPropertyBinding(PropertyName).IsNone();
     }
 
-    static float ResolveBoundFloat(const CParticleSystem& Asset, const SParticleSystemComponent& Comp, FName PropName, float Literal)
+    // Interned once per run, since building a name takes the name table's lock and every emitter resolves these each frame.
+    struct FBindablePropertyNames
     {
-        const FName ParamName = Asset.GetPropertyBinding(PropName);
-        return ParamName.IsNone() ? Literal : Comp.GetFloat(ParamName, Literal);
+        FName SpawnRate              = "SpawnRate";
+        FName BurstCount             = "BurstCount";
+        FName Duration               = "Duration";
+        FName bLooping               = "bLooping";
+        FName ShapeSize              = "ShapeSize";
+        FName ShapeAngle             = "ShapeAngle";
+        FName VelocityMin            = "VelocityMin";
+        FName VelocityMax            = "VelocityMax";
+        FName SpeedRange             = "SpeedRange";
+        FName LifetimeRange          = "LifetimeRange";
+        FName Gravity                = "Gravity";
+        FName Drag                   = "Drag";
+        FName InheritEmitterVelocity = "InheritEmitterVelocity";
+        FName StartColor             = "StartColor";
+        FName EndColor               = "EndColor";
+        FName StartSizeRange         = "StartSizeRange";
+        FName EndSizeRange           = "EndSizeRange";
+        FName RotationRange          = "RotationRange";
+        FName RotationSpeedRange     = "RotationSpeedRange";
+        FName NoiseStrength          = "NoiseStrength";
+        FName NoiseScale             = "NoiseScale";
+        FName NoiseSpeed             = "NoiseSpeed";
+        FName bWriteDepth            = "bWriteDepth";
+    };
+
+    // A bound property searches the component once, and an asset with no bindings skips even that.
+    static const FParticleParameter* FindBoundParameter(const CParticleSystem& Asset, const SParticleSystemComponent& Comp, const FName& PropName)
+    {
+        return Asset.PropertyBindings.empty() ? nullptr : Comp.FindParameter(Asset.GetPropertyBinding(PropName));
     }
 
-    static int32 ResolveBoundInt(const CParticleSystem& Asset, const SParticleSystemComponent& Comp, FName PropName, int32 Literal)
+    static float ResolveBoundFloat(const CParticleSystem& Asset, const SParticleSystemComponent& Comp, const FName& PropName, float Literal)
     {
-        const FName ParamName = Asset.GetPropertyBinding(PropName);
-        return ParamName.IsNone() ? Literal : Comp.GetInt(ParamName, Literal);
+        const FParticleParameter* Param = FindBoundParameter(Asset, Comp, PropName);
+        return (Param != nullptr && Param->Type == EParticleParameterType::Float) ? Param->Scalar : Literal;
     }
 
-    static bool ResolveBoundBool(const CParticleSystem& Asset, const SParticleSystemComponent& Comp, FName PropName, bool Literal)
+    static int32 ResolveBoundInt(const CParticleSystem& Asset, const SParticleSystemComponent& Comp, const FName& PropName, int32 Literal)
     {
-        const FName ParamName = Asset.GetPropertyBinding(PropName);
-        return ParamName.IsNone() ? Literal : Comp.GetBool(ParamName, Literal);
+        const FParticleParameter* Param = FindBoundParameter(Asset, Comp, PropName);
+        return (Param != nullptr && Param->Type == EParticleParameterType::Int) ? Param->Integer : Literal;
     }
 
-    static FVector2 ResolveBoundVec2(const CParticleSystem& Asset, const SParticleSystemComponent& Comp, FName PropName, FVector2 Literal)
+    static bool ResolveBoundBool(const CParticleSystem& Asset, const SParticleSystemComponent& Comp, const FName& PropName, bool Literal)
     {
-        const FName ParamName = Asset.GetPropertyBinding(PropName);
-        return (ParamName.IsNone() || !Comp.HasParameter(ParamName)) ? Literal : Comp.GetVec2(ParamName);
+        const FParticleParameter* Param = FindBoundParameter(Asset, Comp, PropName);
+        return (Param != nullptr && Param->Type == EParticleParameterType::Bool) ? Param->Boolean : Literal;
     }
 
-    static FVector3 ResolveBoundVec3(const CParticleSystem& Asset, const SParticleSystemComponent& Comp, FName PropName, FVector3 Literal)
+    static FVector2 ResolveBoundVec2(const CParticleSystem& Asset, const SParticleSystemComponent& Comp, const FName& PropName, FVector2 Literal)
     {
-        const FName ParamName = Asset.GetPropertyBinding(PropName);
-        return (ParamName.IsNone() || !Comp.HasParameter(ParamName)) ? Literal : Comp.GetVec3(ParamName);
+        const FParticleParameter* Param = FindBoundParameter(Asset, Comp, PropName);
+        if (Param == nullptr)
+        {
+            return Literal;
+        }
+        return Param->Type == EParticleParameterType::Vec2 ? FVector2(Param->Vector) : FVector2(0.0f);
     }
 
-    static FVector4 ResolveBoundVec4(const CParticleSystem& Asset, const SParticleSystemComponent& Comp, FName PropName, FVector4 Literal)
+    static FVector3 ResolveBoundVec3(const CParticleSystem& Asset, const SParticleSystemComponent& Comp, const FName& PropName, FVector3 Literal)
     {
-        const FName ParamName = Asset.GetPropertyBinding(PropName);
-        if (ParamName.IsNone())
+        const FParticleParameter* Param = FindBoundParameter(Asset, Comp, PropName);
+        if (Param == nullptr)
+        {
+            return Literal;
+        }
+        return Param->Type == EParticleParameterType::Vec3 ? FVector3(Param->Vector) : FVector3(0.0f);
+    }
+
+    static FVector4 ResolveBoundVec4(const CParticleSystem& Asset, const SParticleSystemComponent& Comp, const FName& PropName, FVector4 Literal)
+    {
+        const FParticleParameter* Param = FindBoundParameter(Asset, Comp, PropName);
+        if (Param == nullptr)
         {
             return Literal;
         }
 
-        // Color and Vec4 share storage; either can drive a vec4 property.
-        if (Comp.HasParameter(ParamName))
-        {
-            return Comp.GetColor(ParamName) + Comp.GetVec4(ParamName);
-        }
-        return Literal;
+        // Color and Vec4 share storage, so either can drive a vec4 property.
+        const bool bVectorLike = Param->Type == EParticleParameterType::Color || Param->Type == EParticleParameterType::Vec4;
+        return bVectorLike ? Param->Vector : FVector4(0.0f);
     }
 
     FResolvedParticleParams ResolveParticleParams(const CParticleSystem& Asset, const CParticleEmitter& Emitter, const SParticleSystemComponent& Component)
     {
+        static const FBindablePropertyNames Names;
         FResolvedParticleParams R;
 
         R.MaxParticles            = Math::Clamp(Emitter.MaxParticles, 0, ParticleEmitterMaxCapacity);
-        R.SpawnRate               = ResolveBoundFloat(Asset, Component, "SpawnRate",              Emitter.SpawnRate);
-        R.BurstCount              = ResolveBoundInt  (Asset, Component, "BurstCount",             Emitter.BurstCount);
-        R.Duration                = ResolveBoundFloat(Asset, Component, "Duration",               Emitter.Duration);
-        R.bLooping                = ResolveBoundBool (Asset, Component, "bLooping",               Emitter.bLooping);
+        R.SpawnRate               = ResolveBoundFloat(Asset, Component, Names.SpawnRate,             Emitter.SpawnRate);
+        R.BurstCount              = ResolveBoundInt  (Asset, Component, Names.BurstCount,            Emitter.BurstCount);
+        R.Duration                = ResolveBoundFloat(Asset, Component, Names.Duration,              Emitter.Duration);
+        R.bLooping                = ResolveBoundBool (Asset, Component, Names.bLooping,              Emitter.bLooping);
 
         R.Shape                   = Emitter.Shape;
-        R.ShapeSize               = ResolveBoundVec3 (Asset, Component, "ShapeSize",              Emitter.ShapeSize);
-        R.ShapeAngle              = ResolveBoundFloat(Asset, Component, "ShapeAngle",             Emitter.ShapeAngle);
+        R.ShapeSize               = ResolveBoundVec3 (Asset, Component, Names.ShapeSize,             Emitter.ShapeSize);
+        R.ShapeAngle              = ResolveBoundFloat(Asset, Component, Names.ShapeAngle,            Emitter.ShapeAngle);
 
         R.VelocityMode            = Emitter.VelocityMode;
-        R.VelocityMin             = ResolveBoundVec3 (Asset, Component, "VelocityMin",            Emitter.VelocityMin);
-        R.VelocityMax             = ResolveBoundVec3 (Asset, Component, "VelocityMax",            Emitter.VelocityMax);
-        R.SpeedRange              = ResolveBoundVec2 (Asset, Component, "SpeedRange",             Emitter.SpeedRange);
-        R.LifetimeRange           = ResolveBoundVec2 (Asset, Component, "LifetimeRange",          Emitter.LifetimeRange);
+        R.VelocityMin             = ResolveBoundVec3 (Asset, Component, Names.VelocityMin,           Emitter.VelocityMin);
+        R.VelocityMax             = ResolveBoundVec3 (Asset, Component, Names.VelocityMax,           Emitter.VelocityMax);
+        R.SpeedRange              = ResolveBoundVec2 (Asset, Component, Names.SpeedRange,            Emitter.SpeedRange);
+        R.LifetimeRange           = ResolveBoundVec2 (Asset, Component, Names.LifetimeRange,         Emitter.LifetimeRange);
 
-        R.Gravity                 = ResolveBoundVec3 (Asset, Component, "Gravity",                Emitter.Gravity);
-        R.Drag                    = ResolveBoundFloat(Asset, Component, "Drag",                   Emitter.Drag);
-        R.InheritEmitterVelocity  = ResolveBoundFloat(Asset, Component, "InheritEmitterVelocity", Emitter.InheritEmitterVelocity);
+        R.Gravity                 = ResolveBoundVec3 (Asset, Component, Names.Gravity,               Emitter.Gravity);
+        R.Drag                    = ResolveBoundFloat(Asset, Component, Names.Drag,                  Emitter.Drag);
+        R.InheritEmitterVelocity  = ResolveBoundFloat(Asset, Component, Names.InheritEmitterVelocity, Emitter.InheritEmitterVelocity);
 
-        R.StartColor              = ResolveBoundVec4 (Asset, Component, "StartColor",             Emitter.StartColor);
-        R.EndColor                = ResolveBoundVec4 (Asset, Component, "EndColor",               Emitter.EndColor);
-        R.StartSizeRange          = ResolveBoundVec2 (Asset, Component, "StartSizeRange",         Emitter.StartSizeRange);
-        R.EndSizeRange            = ResolveBoundVec2 (Asset, Component, "EndSizeRange",           Emitter.EndSizeRange);
-        R.RotationRange           = ResolveBoundVec2 (Asset, Component, "RotationRange",          Emitter.RotationRange);
-        R.RotationSpeedRange      = ResolveBoundVec2 (Asset, Component, "RotationSpeedRange",     Emitter.RotationSpeedRange);
+        R.StartColor              = ResolveBoundVec4 (Asset, Component, Names.StartColor,            Emitter.StartColor);
+        R.EndColor                = ResolveBoundVec4 (Asset, Component, Names.EndColor,              Emitter.EndColor);
+        R.StartSizeRange          = ResolveBoundVec2 (Asset, Component, Names.StartSizeRange,        Emitter.StartSizeRange);
+        R.EndSizeRange            = ResolveBoundVec2 (Asset, Component, Names.EndSizeRange,          Emitter.EndSizeRange);
+        R.RotationRange           = ResolveBoundVec2 (Asset, Component, Names.RotationRange,         Emitter.RotationRange);
+        R.RotationSpeedRange      = ResolveBoundVec2 (Asset, Component, Names.RotationSpeedRange,    Emitter.RotationSpeedRange);
 
-        R.NoiseStrength           = ResolveBoundVec3 (Asset, Component, "NoiseStrength",          Emitter.NoiseStrength);
-        R.NoiseScale              = ResolveBoundFloat(Asset, Component, "NoiseScale",             Emitter.NoiseScale);
-        R.NoiseSpeed              = ResolveBoundFloat(Asset, Component, "NoiseSpeed",             Emitter.NoiseSpeed);
+        R.NoiseStrength           = ResolveBoundVec3 (Asset, Component, Names.NoiseStrength,         Emitter.NoiseStrength);
+        R.NoiseScale              = ResolveBoundFloat(Asset, Component, Names.NoiseScale,            Emitter.NoiseScale);
+        R.NoiseSpeed              = ResolveBoundFloat(Asset, Component, Names.NoiseSpeed,            Emitter.NoiseSpeed);
 
         R.BlendMode               = Emitter.BlendMode;
         // An asset saved before FacingMode existed carries its intent in the bool, so the bool still decides.
@@ -380,7 +540,7 @@ namespace Lumina
         R.VelocityStretch         = Emitter.VelocityStretch;
         R.SubUVColumns            = Math::Max(Emitter.SubUVColumns, 1);
         R.SubUVRows               = Math::Max(Emitter.SubUVRows, 1);
-        R.bWriteDepth             = ResolveBoundBool (Asset, Component, "bWriteDepth",            Emitter.bWriteDepth);
+        R.bWriteDepth             = ResolveBoundBool (Asset, Component, Names.bWriteDepth,           Emitter.bWriteDepth);
         R.SoftFadeDistance        = Emitter.SoftFadeDistance;
         R.CameraFadeDistance      = Emitter.CameraFadeDistance;
         R.bLit                    = Emitter.bLit;

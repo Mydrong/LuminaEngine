@@ -90,8 +90,7 @@ enum class ELuminaEngineVersion : uint32
 	// FAnimationResource names the notify track whose entries are its sync markers.
 	ANIM_SYNC_TRACK,
 
-	// Packages carry a name table, and every FName in the stream is a slot in it rather than inline text.
-	// FPropertyTag's type is the 1-byte EPropertyTypeFlags and its dead Offset field is gone.
+	// Packages carry a name table, and a property header spells its kind in one byte with no dead offset.
 	PACKAGE_NAME_TABLE,
 
 	// FTextureResource::FDescription carries the swizzle a single-channel format is sampled through.

@@ -200,13 +200,13 @@ public readonly unsafe partial struct EntityRegistry
     }
 
     /// Attach a script of the given class to the entity and return the live instance (null on failure).
-    public EntityScript? AddScript(Entity Entity, Lumina.TSubclassOf<Lumina.CEntityScript> ScriptClass)
+    public Lumina.CEntityScript? AddScript(Entity Entity, Lumina.TSubclassOf<Lumina.CEntityScript> ScriptClass)
     {
-        return Lumina.CEntityScriptLibrary.AddScript(World, Entity, ScriptClass) as EntityScript;
+        return Lumina.CEntityScriptLibrary.AddScript(World, Entity, ScriptClass) as Lumina.CEntityScript;
     }
 
     /// Attach a script of the named class to the entity and return the live instance (null on failure).
-    public EntityScript? AddScript(Entity Entity, string ClassName)
+    public Lumina.CEntityScript? AddScript(Entity Entity, string ClassName)
     {
         return AddScript(Entity, Lumina.TSubclassOf<Lumina.CEntityScript>.FromName(ClassName));
     }

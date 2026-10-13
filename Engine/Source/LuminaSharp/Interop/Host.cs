@@ -6,7 +6,7 @@ using System.Runtime.Loader;
 
 namespace LuminaSharp;
 
-/// Managed entry surface for FDotNetHost. Entry method names are a name-based ABI contract and must not be renamed. Per-instance entries take an IntPtr that IS a strong GCHandle to the managed EntityScript.
+/// Managed entry surface for FDotNetHost. Entry method names are a name-based ABI contract and must not be renamed. Per-instance entries take an IntPtr that IS a strong GCHandle to the managed CEntityScript.
 public static unsafe partial class Host
 {
     // Must equal Lumina::DotNet::GAbiVersion. Bump on ABI breaks.
@@ -223,8 +223,6 @@ public static unsafe partial class Host
             Diag.PinnedObjects       = (int)Info.PinnedObjectsCount;
 
             Diag.Generation        = Scripts?.Generation ?? 0;
-            Diag.EntityScriptCount = Scripts?.EntityScripts?.TypeNames.Count ?? 0;
-            Diag.EntitySystemCount = Scripts?.EntitySystemCount ?? 0;
             Diag.LoadedTypeCount   = Scripts?.LoadedTypeCount ?? 0;
             Diag.ScriptsOnline     = Scripts?.EntityScripts != null ? 1 : 0;
 
@@ -320,40 +318,6 @@ public static unsafe partial class Host
             Action<IntPtr>? Trampoline = Handle.Target as Action<IntPtr>;
             Handle.Free();
             Trampoline?.Invoke(Object);
-        }
-        catch (Exception Exception)
-        {
-            Interop.LogException(Exception);
-        }
-    }
-
-    /// Reports every loaded EntityScript type's full name to a native sink (once per type), for the editor's script picker.
-    [ManagedExport]
-    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
-    public static void EnumerateEntityScripts(IntPtr Sink, IntPtr Context)
-    {
-        try
-        {
-            EntityScriptRuntime? Runtime = Scripts?.EntityScripts;
-            if (Runtime == null || Sink == IntPtr.Zero)
-            {
-                return;
-            }
-
-            var Add = (delegate* unmanaged[Stdcall]<IntPtr, byte*, int, void>)Sink;
-            Span<byte> Scratch = stackalloc byte[256];
-            foreach (string Name in Runtime.TypeNames)
-            {
-                Interop.FInteropString Encoded = new(Name, Scratch);
-                try
-                {
-                    Add(Context, Encoded.Pointer, Encoded.Length);
-                }
-                finally
-                {
-                    Encoded.Free();
-                }
-            }
         }
         catch (Exception Exception)
         {

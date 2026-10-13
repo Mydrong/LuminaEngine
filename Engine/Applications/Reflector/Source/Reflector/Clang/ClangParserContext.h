@@ -19,7 +19,7 @@ namespace Lumina::Reflection
         FReflectedHeader* Header = nullptr;
     };
 
-    // Every reflection macro seen in one header, indexed by the line its invocation closes on.
+    // The REFLECT macros seen in one header, indexed by the line each invocation closes on.
     class FMacroPool
     {
     public:
@@ -67,8 +67,7 @@ namespace Lumina::Reflection
         void AddReflectedMacro(FReflectionMacro&& Macro);
         void AddGeneratedBodyMacro(FReflectionMacro&& Macro);
 
-        // bConsume=false leaves the macro in the pool: several aliases can reflect one shared template.
-        bool TryFindMacroForCursor(const FReflectedHeader* Header, const CXCursor& Cursor, FReflectionMacro& Macro, bool bConsume = true);
+        bool TryFindMacroForCursor(const FReflectedHeader* Header, const CXCursor& Cursor, FReflectionMacro& Macro);
 
         bool TryFindGeneratedBodyMacro(const FReflectedHeader* Header, const CXCursor& Cursor, FReflectionMacro& Macro);
 
@@ -100,11 +99,6 @@ namespace Lumina::Reflection
 
         // Canonical spelling of an instantiation a REFLECT'd alias named, to { qualified, display }.
         std::unordered_map<FStringHash, std::pair<std::string, std::string>> AliasedInstantiations;
-
-        // Header the walked alias target's PROPERTY macros were recorded under, null when it is unreflected.
-        const FReflectedHeader*                                     AliasTargetMacroHeader = nullptr;
-        // Distinguishes an unreflected alias target from not walking an alias target at all.
-        bool                                                        bWalkingAliasTarget = false;
 
         // Anonymous union members overlap rather than hide state, so they leave the type fully reflected.
         bool                                                        bInAnonymousRecord = false;

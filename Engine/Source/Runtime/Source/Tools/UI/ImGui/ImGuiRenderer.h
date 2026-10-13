@@ -52,5 +52,8 @@ namespace Lumina
 
         ImGuiContext* Context = nullptr;
         ImPlotContext* PlotContext = nullptr;
+
+        // ImGui keeps only a pointer to the layout path, so the renderer owns the string.
+        FString LayoutFilePath;
     };
 }

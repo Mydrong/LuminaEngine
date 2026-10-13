@@ -139,9 +139,9 @@ void RaiseContinuousEvents(FGPUParticle P, float DeltaTime)
 
 [shader("compute")]
 [numthreads(64, 1, 1)]
-void ComputeMain(uint3 DispatchThreadID : SV_DispatchThreadID)
+void ComputeMain(uint3 GroupId : SV_GroupID, uint Lane : SV_GroupIndex)
 {
-    uint Index = DispatchThreadID.x;
+    uint Index = BeginParticleSimGroup(GroupId.x, Lane);
     if (Index >= SimParams().Counts.x) return;
 
     FGPUParticle P = Particles().Get(Index);

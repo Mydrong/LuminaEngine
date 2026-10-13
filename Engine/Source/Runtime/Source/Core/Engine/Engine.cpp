@@ -265,7 +265,7 @@ namespace Lumina
             FObjectReferenceProviders::Register(GConfig);
         }
 
-        // Must run before renderer/Lua so Earliest/Core-phase plugins can wedge in ahead.
+        // Must run before the renderer so Earliest/Core-phase plugins can wedge in ahead.
         FPluginManager::Get().DiscoverEnginePlugins();
         BootMark("DiscoverEnginePlugins");
 
@@ -401,12 +401,12 @@ namespace Lumina
         DotNetThread.Join();
         BootMark("Join parallel init");
 
-        ProcessNewlyLoadedCObjects();
-        BootMark("ProcessNewlyLoadedCObjects");
+        RegisterPendingTypes();
+        BootMark("RegisterPendingTypes");
 
         // Post-reflection so module initializers do not null-deref, and pre WorldManager for what they spawn.
         FPluginManager::Get().LoadModulesForPhase(EPluginLoadingPhase::PreEngineInit);
-        ProcessNewlyLoadedCObjects();
+        RegisterPendingTypes();
         BootMark("Phase PreEngineInit");
 
         // Built-in primitive meshes must exist before any world deserializes.
@@ -423,7 +423,7 @@ namespace Lumina
         BootMark("WorldManager");
 
         FPluginManager::Get().LoadModulesForPhase(EPluginLoadingPhase::EngineInit);
-        ProcessNewlyLoadedCObjects();
+        RegisterPendingTypes();
         BootMark("Phase EngineInit");
 
         if (bStartupProjectMounted)
@@ -448,7 +448,7 @@ namespace Lumina
         BootMark("DeveloperToolUI");
 
         FPluginManager::Get().LoadModulesForPhase(EPluginLoadingPhase::EditorInit);
-        ProcessNewlyLoadedCObjects();
+        RegisterPendingTypes();
         BootMark("Phase EditorInit");
         #endif
 
@@ -459,7 +459,7 @@ namespace Lumina
         }
 
         FPluginManager::Get().LoadModulesForPhase(EPluginLoadingPhase::PostEngineInit);
-        ProcessNewlyLoadedCObjects();
+        RegisterPendingTypes();
 
         FCoreDelegates::OnPostEngineInit.BroadcastAndClear();
         BootMark("Phase PostEngineInit");
@@ -973,15 +973,10 @@ namespace Lumina
         CrashReporting::ClearAttachments();
         CrashReporting::AddAttachment(Paths::Combine(LogsDir, "Lumina.log"));
         
-        const FFixedString ProjectIntermediatesDir = Paths::Combine(ProjectPath, "Intermediates");
-        Filesystem::MakeDirectoryTree(ProjectIntermediatesDir);
-
         VFS::Unmount("/Game");
         VFS::Unmount("/Config");
-        VFS::Unmount("/ProjectIntermediates");
         VFS::Mount<VFS::FNativeFileSystem>("/Game", GameRootDir);
         VFS::Mount<VFS::FNativeFileSystem>("/Config", ConfigDir);
-        VFS::Mount<VFS::FNativeFileSystem>("/ProjectIntermediates", ProjectIntermediatesDir);
 
         GConfig->LoadPath("/Config");
 
@@ -1061,7 +1056,7 @@ namespace Lumina
         {
             if (FModuleManager::Get().LoadModule(DLLPath) != nullptr)
             {
-                ProcessNewlyLoadedCObjects();
+                RegisterPendingTypes();
             }
             else
             {
@@ -1084,7 +1079,7 @@ namespace Lumina
 
         // Project DLL is now in; plugin modules that wire up to project types load here.
         FPluginManager::Get().LoadModulesForPhase(EPluginLoadingPhase::PostProjectLoad);
-        ProcessNewlyLoadedCObjects();
+        RegisterPendingTypes();
 
         // The compiler's Initialize ran before any project, so these roots compile here rather than stalling.
         Shaders::PrecompileNewRoots();
@@ -1690,7 +1685,7 @@ namespace Lumina
             {
                 if (FModuleManager::Get().LoadModule(DLLPath))
                 {
-                    ProcessNewlyLoadedCObjects();
+                    RegisterPendingTypes();
                 }
             }
             else

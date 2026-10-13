@@ -22,6 +22,8 @@ namespace Lumina::Reflection
         ConflictingSpecifiers   = 1008, // PROPERTY carries two specifiers that contradict each other.
         UnknownSpecifier        = 1009, // a macro carries a specifier absent from ReflectionSpecifiers.h.
         ScriptOnlyPropertyType  = 1010, // PROPERTY names a CSharpValueMirror type that reflects no members.
+        SpecifierForm           = 1011, // a specifier written with a value it does not take, or without one it needs.
+        EditConditionUnknown    = 1012, // an EditCondition names a property its struct does not have.
 
         MissingGeneratedHeader = 2000,  // header has REFLECT/GENERATED_BODY/PROPERTY/FUNCTION but doesn't #include its <stem>.generated.h
         GeneratedHeaderNotLast = 2001,  // <stem>.generated.h is included but other includes follow it.
@@ -62,7 +64,6 @@ namespace Lumina::Reflection
         void Warningf(const FDiagLocation& Loc, EDiagId Id, const char* Fmt, ...);
 
         uint32_t GetErrorCount()   const { return ErrorCount; }
-        uint32_t GetWarningCount() const { return WarningCount; }
 
         // Print a one-line summary like "[LRT] 3 error(s), 1 warning(s)".
         // No-op if both counters are zero.

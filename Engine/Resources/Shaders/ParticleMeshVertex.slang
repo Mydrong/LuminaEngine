@@ -25,8 +25,9 @@ float3 AlignUpTo(float3 V, float3 Dir)
 }
 
 [shader("vertex")]
-FParticleVertexOutput VertexMain(uint VertexIndex : SV_VulkanVertexID)
+FParticleVertexOutput VertexMain(uint VertexIndex : SV_VulkanVertexID, uint DrawIndex : SV_DrawIndex)
 {
+    BeginParticleDraw(DrawIndex);
     FGPUParticle P = Pass().Particles.Get(ParticleSlotForVertex(VertexIndex));
     const uint HeaderSlot = Pass().MeshletHeaderSlot;
     if (!IsParticleAlive(P) || HeaderSlot == 0u || HeaderSlot >= MeshletHeaders().Count)
@@ -81,6 +82,7 @@ FParticleVertexOutput VertexMain(uint VertexIndex : SV_VulkanVertexID)
     Out.UV           = Vertex.UV;
     Out.Color        = P.Color * Vertex.Color * float4(Pass().Tint.rgb * Pass().Tint.w, 1.0);
     Out.TextureIndex = Pass().TextureIndex;
+    Out.DrawIndex    = DrawIndex;
     Out.Position     = ParticleToClip(P.Position + Offset);
     Out.Normal       = Normal;
     LightParticleVertex(Out, P.Position, P.Size);

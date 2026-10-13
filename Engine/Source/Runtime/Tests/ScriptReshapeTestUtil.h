@@ -26,7 +26,7 @@ namespace ScriptTest
         }
 
         Scripting::AppendScriptPropertiesToClass(New, Schema);
-        ProcessNewlyLoadedCObjects();
+        RegisterPendingTypes();
         New->GetDefaultObject();
 
         FObjectReinstancer Reinstancer;

@@ -49,6 +49,7 @@
 #include "Assets/AssetTypes/Mesh/StaticMesh/StaticMesh.h"
 #include "World/Entity/Components/DecalComponent.h"
 #include "World/Entity/Components/WaterComponent.h"
+#include "World/Entity/Components/FollowerPoseComponent.h"
 #include "World/Entity/Components/SkeletalMeshComponent.h"
 #include "World/Entity/Components/EnvironmentComponent.h"
 #include "World/Entity/Components/SkyLightComponent.h"

@@ -1,16 +1,16 @@
-using Lumina;
+using LuminaSharp;
 
-namespace LuminaSharp;
+namespace Lumina;
 
 // One stage scheduled worker over a world's component store, instanced once per world.
-public abstract class EntitySystem : Lumina.CEntitySystem
+public partial class CEntitySystem
 {
     // Valid from Configure onwards, read from the native object that owns the value for both languages.
-    public Lumina.CWorld World => GetWorld();
+    public CWorld World => GetWorld();
 
     public EntityRegistry Registry => World.Registry;
 
-    // The tick context for the stage currently running, only meaningful inside the callbacks below.
+    // The tick context for the stage currently running, only meaningful inside the callbacks.
     public SystemContext Context => new(Native.WorldGetSystemContext(World.WorldHandle));
 
     // Schedules this system in Stage at the default priority.
@@ -24,6 +24,4 @@ public abstract class EntitySystem : Lumina.CEntitySystem
 
     // Declares that this system only reads T, so it runs concurrently with any other reader of T.
     protected void Reads<T>() => DeclareRead(typeof(T).Name);
-
-    // Configure, OnStartup, OnUpdate and OnTeardown are inherited [ScriptEvent] virtuals.
 }

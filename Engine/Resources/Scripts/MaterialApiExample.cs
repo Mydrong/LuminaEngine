@@ -5,7 +5,7 @@ using Lumina;
 namespace LuminaExamples;
 
 // Drives a dynamic material instance and a parameter collection from gameplay.
-public class MaterialApiExample : EntityScript
+public class MaterialApiExample : CEntityScript
 {
     [Property(Category = "Flash", Tooltip = "Vector parameter on the mesh material to drive.")]
     public string ColorParameter = "BaseColor";

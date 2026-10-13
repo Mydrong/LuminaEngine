@@ -367,7 +367,7 @@ namespace Lumina::ECS::Utils
                     if (Struct == STagComponent::StaticStruct())
                     {
                         STagComponent NewTagComponent;
-                        Struct->SerializeTaggedProperties(Ar, &NewTagComponent);
+                        Struct->SerializeProperties(Ar, &NewTagComponent);
                         const ECS::TComponentStorage<STagComponent> TagStorage =
                             Registry.NamedStorage<STagComponent>(NewTagComponent.Tag);
 
@@ -446,7 +446,7 @@ namespace Lumina::ECS::Utils
 
             {
                 LUMINA_PROFILE_SECTION_NAMED(Name.c_str());
-                Entry.Struct->SerializeTaggedProperties(Ar, Entry.Set->GetRaw(Entity));
+                Entry.Struct->SerializeProperties(Ar, Entry.Set->GetRaw(Entity));
             }
 
             int64 EndOfComponentData = Ar.Tell();

@@ -33,6 +33,9 @@ namespace Lumina
         void Refresh(bool bForceCollect);
 
         DotNet::FScriptDiagnostics Snapshot;     // last sampled values (held stable while frozen)
+
+        // Minted C# classes counted under the native class each one extends, refreshed with the snapshot.
+        FString MintedClassSummary;
         bool   bAvailable   = false;             // false until the first successful sample
         bool   bFrozen      = false;
         uint32 DrawTicks    = 0;

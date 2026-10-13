@@ -19,7 +19,7 @@ TEST(Scriptable, MintInstantiateAndNativeDefaultDispatch)
 
     CScriptClass* Sub = FScriptableRegistry::Mint("ScriptableTest_GTestSub", "CScriptableTest");
     ASSERT_NE(Sub, nullptr) << "minting failed (is the CScriptableTest shim registered?)";
-    ProcessNewlyLoadedCObjects(); // finalize registration + CDO so FindObject/NewObject work
+    RegisterPendingTypes(); // finalize registration + CDO so FindObject/NewObject work
 
     EXPECT_TRUE(Sub->IsChildOf(Base));
     EXPECT_EQ(FindObject<CClass>(FName("ScriptableTest_GTestSub")), Sub);
@@ -46,7 +46,7 @@ TEST(Scriptable, MintBuildsFunctionsForTheDeclaredOverrides)
 
     CScriptClass* Sub = FScriptableRegistry::Mint("ScriptableTest_GTestMask", "CScriptableTest", Overridden);
     ASSERT_NE(Sub, nullptr);
-    ProcessNewlyLoadedCObjects();
+    RegisterPendingTypes();
     Sub->GetDefaultObject();
 
     const FFunction* Overridden0 = FindScriptOverride(Sub, FName("OnTest"));
@@ -74,7 +74,7 @@ TEST(Scriptable, ReapplyingOverridesDropsTheOnesNoLongerDeclared)
 
     CScriptClass* Sub = FScriptableRegistry::Mint("ScriptableTest_GTestReapply", "CScriptableTest", Both);
     ASSERT_NE(Sub, nullptr);
-    ProcessNewlyLoadedCObjects();
+    RegisterPendingTypes();
     Sub->GetDefaultObject();
 
     ASSERT_NE(FindScriptOverride(Sub, FName("OnTest")), nullptr);
@@ -100,7 +100,7 @@ TEST(Scriptable, OverrideSlotsAgreeWithTheMintedFunctions)
 
     CScriptClass* Sub = FScriptableRegistry::Mint("ScriptableTest_GTestSlots", "CScriptableTest", Overridden);
     ASSERT_NE(Sub, nullptr);
-    ProcessNewlyLoadedCObjects();
+    RegisterPendingTypes();
     Sub->GetDefaultObject();
 
     EXPECT_FALSE(Sub->HasScriptOverrideSlot(0));
@@ -123,7 +123,7 @@ TEST(Scriptable, SlotQueryRejectsIndicesOutsideTheDeclaredRange)
 
     CScriptClass* Sub = FScriptableRegistry::Mint("ScriptableTest_GTestSlotRange", "CScriptableTest", Overridden);
     ASSERT_NE(Sub, nullptr);
-    ProcessNewlyLoadedCObjects();
+    RegisterPendingTypes();
     Sub->GetDefaultObject();
 
     EXPECT_FALSE(Sub->HasScriptOverrideSlot(64));
@@ -136,7 +136,7 @@ TEST(Scriptable, UnoverriddenSlotResolvesNoManagedInstance)
 {
     CScriptClass* Sub = FScriptableRegistry::Mint("ScriptableTest_GTestGate", "CScriptableTest");
     ASSERT_NE(Sub, nullptr);
-    ProcessNewlyLoadedCObjects();
+    RegisterPendingTypes();
     Sub->GetDefaultObject();
 
     CObject* Object = NewObject(Sub, nullptr, NAME_None, FGuid::New(), OF_Transient);
@@ -160,7 +160,7 @@ TEST(Scriptable, DispatchFallsBackToNativeWhenNoManagedInstanceExists)
 
     CScriptClass* Sub = FScriptableRegistry::Mint("ScriptableTest_GTestDispatch", "CScriptableTest", Overridden);
     ASSERT_NE(Sub, nullptr);
-    ProcessNewlyLoadedCObjects();
+    RegisterPendingTypes();
     Sub->GetDefaultObject();
     ASSERT_NE(FindScriptOverride(Sub, FName("OnTest")), nullptr);
 
@@ -188,7 +188,7 @@ TEST(Scriptable, DefaultObjectNeverGetsAManagedInstance)
 
     CScriptClass* Sub = FScriptableRegistry::Mint("ScriptableTest_GTestCdo", "CScriptableTest", Overridden);
     ASSERT_NE(Sub, nullptr);
-    ProcessNewlyLoadedCObjects();
+    RegisterPendingTypes();
 
     CObject* Cdo = Sub->GetDefaultObject();
     ASSERT_NE(Cdo, nullptr);

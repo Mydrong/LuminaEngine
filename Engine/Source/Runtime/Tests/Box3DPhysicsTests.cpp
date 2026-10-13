@@ -321,6 +321,8 @@ namespace
         int32               Count = 0;
         b3Vec3              Origin{};
         b3BodyId            IgnoreBody{};
+        float               CosMaxSlope = 0.0f;
+        bool                bUprightSteepFaces = true;
     };
 
     bool ProbeGatherPlanes(b3ShapeId ShapeId, const b3PlaneResult* Results, int32 PlaneCount, void* Context)
@@ -333,7 +335,16 @@ namespace
 
         for (int32 i = 0; i < PlaneCount && Out.Count < FMoverProbe::Capacity; ++i)
         {
-            Out.Planes[Out.Count] = b3CollisionPlane{ Results[i].plane, FLT_MAX, 0.0f, true };
+            b3Plane Plane = Results[i].plane;
+
+            // A face too steep to walk collides as a vertical wall, matching Box3DCharacter.cpp.
+            if (Out.bUprightSteepFaces && Plane.normal.y > 0.02f && Plane.normal.y < Out.CosMaxSlope)
+            {
+                const float Horizontal = b3Length(b3Vec3{ Plane.normal.x, 0.0f, Plane.normal.z });
+                Plane = b3Plane{ b3MulSV(1.0f / Horizontal, b3Vec3{ Plane.normal.x, 0.0f, Plane.normal.z }), Plane.offset / Horizontal };
+            }
+
+            Out.Planes[Out.Count] = b3CollisionPlane{ Plane, FLT_MAX, 0.0f, true };
             Out.Points[Out.Count] = b3Add(Out.Origin, Results[i].point);
             Out.Shapes[Out.Count] = ShapeId;
             ++Out.Count;
@@ -356,7 +367,8 @@ namespace
     };
 
     // The documented order is cast, move, gather at the new pose, solve the remainder, apply and clip.
-    void StepMover(b3WorldId WorldId, FMoverState& State, const b3Capsule& Mover, float Dt, float CosMaxSlope)
+    void StepMover(b3WorldId WorldId, FMoverState& State, const b3Capsule& Mover, float Dt, float CosMaxSlope,
+                   bool bUprightSteepFaces = true)
     {
         constexpr float Gravity = -9.81f;
 
@@ -370,6 +382,8 @@ namespace
         }
 
         FMoverProbe Probe;
+        Probe.CosMaxSlope = CosMaxSlope;
+        Probe.bUprightSteepFaces = bUprightSteepFaces;
 
         b3Vec3 Desired = b3MulSV(Dt, State.Velocity);
 
@@ -586,6 +600,76 @@ TEST(Box3DCharacter, MoverKeepsHeadingAndSpeedRunningUpASlope)
     EXPECT_NEAR(CarriedSpeed, Speed, 0.25f) << "the slope clipped horizontal velocity away";
 
     b3DestroyHull(RampHull);
+}
+
+// Pushing into a face steeper than the walk limit slid the move up it, which colliding with it as a wall stops.
+TEST(Box3DCharacter, MoverCannotWalkUpAFaceTooSteepToWalk)
+{
+    FTestWorld World;
+
+    b3HullData* GroundHull = MakeBoxHull(50.0f, 1.0f, 50.0f);
+    b3HullData* CliffHull  = MakeBoxHull(20.0f, 1.0f, 20.0f);
+    ASSERT_NE(GroundHull, nullptr);
+    ASSERT_NE(CliffHull, nullptr);
+
+    b3BodyDef GroundDef = b3DefaultBodyDef();
+    GroundDef.type = b3_staticBody;
+    b3ShapeDef ShapeDef = b3DefaultShapeDef();
+    b3CreateHullShape(b3CreateBody(World.WorldId, &GroundDef), &ShapeDef, GroundHull);
+
+    // A 60 degree face rising toward +X that meets the ground top at x = 3.
+    const float Angle = Math::Radians(60.0f);
+    const b3Vec3 FaceNormal{ -Math::Sin(Angle), Math::Cos(Angle), 0.0f };
+    b3BodyDef CliffDef = b3DefaultBodyDef();
+    CliffDef.type = b3_staticBody;
+    CliffDef.position = b3Vec3{ 3.0f - FaceNormal.x, 1.0f - FaceNormal.y, 0.0f };
+    CliffDef.rotation = b3Quat{ b3Vec3{ 0.0f, 0.0f, Math::Sin(Angle * 0.5f) }, Math::Cos(Angle * 0.5f) };
+    b3CreateHullShape(b3CreateBody(World.WorldId, &CliffDef), &ShapeDef, CliffHull);
+
+    b3World_Step(World.WorldId, 1.0f / 60.0f, 4);
+
+    constexpr float Radius = 0.5f;
+    constexpr float HalfHeight = 0.9f;
+    const b3Capsule Mover{ b3Vec3{ 0.0f, -HalfHeight, 0.0f }, b3Vec3{ 0.0f, HalfHeight, 0.0f }, Radius };
+    const float CosMaxSlope = Math::Cos(Math::Radians(45.0f));
+
+    auto Climb = [&](bool bUprightSteepFaces)
+    {
+        FMoverState State;
+        State.Position = b3Vec3{ 0.0f, 1.0f + HalfHeight + Radius + 0.05f, 0.0f };
+        for (int32 i = 0; i < 60; ++i)
+        {
+            StepMover(World.WorldId, State, Mover, 1.0f / 60.0f, CosMaxSlope, bUprightSteepFaces);
+        }
+        const float StartY = State.Position.y;
+
+        // Input sets the horizontal velocity every step, the way the movement component does.
+        float HighestY = StartY;
+        for (int32 i = 0; i < 240; ++i)
+        {
+            State.Velocity.x = 6.0f;
+            State.Velocity.z = 0.0f;
+            StepMover(World.WorldId, State, Mover, 1.0f / 60.0f, CosMaxSlope, bUprightSteepFaces);
+            HighestY = Math::Max(HighestY, State.Position.y);
+        }
+        return HighestY - StartY;
+    };
+
+    EXPECT_GT(Climb(false), 1.0f) << "colliding with the true face should climb, or this scene does not reproduce the bug";
+    EXPECT_LT(Climb(true), 0.3f) << "the mover climbed a face steeper than its walk limit";
+
+    // A mover dropped onto the face slides down it rather than perching where it landed.
+    FMoverState Dropped;
+    Dropped.Position = b3Vec3{ 5.0f, 6.5f, 0.0f };
+    for (int32 i = 0; i < 240; ++i)
+    {
+        StepMover(World.WorldId, Dropped, Mover, 1.0f / 60.0f, CosMaxSlope);
+    }
+    EXPECT_LT(Dropped.Position.y, 3.0f) << "a mover that landed on the face stayed up on it";
+    EXPECT_TRUE(Dropped.bGrounded) << "the mover should come to rest on the ground below the face";
+
+    b3DestroyHull(GroundHull);
+    b3DestroyHull(CliffHull);
 }
 
 TEST(Box3DCharacter, MoverQueryFilterAcceptsTypicalGroundProfiles)

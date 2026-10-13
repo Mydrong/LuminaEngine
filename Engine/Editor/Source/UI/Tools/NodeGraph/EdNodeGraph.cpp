@@ -1,6 +1,7 @@
 ﻿#include "EdNodeGraph.h"
 
 #include "EdGraphNode.h"
+#include "EdNode_Comment.h"
 #include "EdNode_Reroute.h"
 #include "GraphAlgorithms.h"
 #include "GraphNodeRegistry.h"
@@ -14,6 +15,7 @@
 #include "Core/Profiler/Profile.h"
 #include "imgui-node-editor/imgui_node_editor_internal.h"
 #include "Tools/UI/ImGui/ImGuiDesignIcons.h"
+#include "Tools/UI/ImGui/ImGuiFonts.h"
 #include "Tools/UI/ImGui/ImGuiX.h"
 #include "Containers/StringFormat.h"
 #include "Core/Templates/IntegerCompare.h"
@@ -239,6 +241,94 @@ namespace Lumina
 
         ImGui::Spring(0);
         ImGui::TextColored(ImVec4(0.45f, 0.9f, 1.0f, 1.0f), "%s", It->second.c_str());
+    }
+
+    namespace
+    {
+        constexpr float kCommentHeaderHeight = 34.0f;
+        constexpr float kCommentRounding     = 8.0f;
+        constexpr float kCommentPadding      = 12.0f;
+        constexpr float kCommentMinWidth     = 160.0f;
+        constexpr float kCommentMinHeight    = 60.0f;
+        constexpr float kCommentWrapMargin   = 32.0f;
+
+        ImU32 ScaleCommentAlpha(ImU32 Color, float Scale)
+        {
+            const uint32 Alpha = (uint32)Math::Clamp((float)((Color >> IM_COL32_A_SHIFT) & 0xFF) * Scale, 0.0f, 255.0f);
+            return (Color & ~IM_COL32_A_MASK) | (Alpha << IM_COL32_A_SHIFT);
+        }
+
+        // Breaks at spaces and at the text's own newlines, and splits a word only when it is wider than a whole line.
+        void WrapWords(ImFont* Font, float FontSize, const FString& Text, float MaxWidth, TVector<FString>& OutLines)
+        {
+            OutLines.clear();
+            auto Measure = [Font, FontSize](const FString& Line)
+            {
+                return Font->CalcTextSizeA(FontSize, FLT_MAX, 0.0f, Line.c_str(), Line.c_str() + Line.size()).x;
+            };
+
+            size_t ParagraphStart = 0;
+            while (ParagraphStart <= Text.size())
+            {
+                size_t ParagraphEnd = Text.find('\n', ParagraphStart);
+                if (ParagraphEnd == FString::npos)
+                {
+                    ParagraphEnd = Text.size();
+                }
+
+                FString Line;
+                size_t WordStart = ParagraphStart;
+                while (WordStart < ParagraphEnd)
+                {
+                    size_t WordEnd = Text.find(' ', WordStart);
+                    if (WordEnd == FString::npos || WordEnd > ParagraphEnd)
+                    {
+                        WordEnd = ParagraphEnd;
+                    }
+                    const FString Word = Text.substr(WordStart, WordEnd - WordStart);
+                    const FString Candidate = Line.empty() ? Word : Line + " " + Word;
+                    if (Line.empty() || Measure(Candidate) <= MaxWidth)
+                    {
+                        Line = Candidate;
+                    }
+                    else
+                    {
+                        OutLines.push_back(Line);
+                        Line = Word;
+                    }
+                    WordStart = WordEnd + 1;
+                }
+                OutLines.push_back(Line);
+                ParagraphStart = ParagraphEnd + 1;
+            }
+        }
+
+        // Cuts a line that does not fit at a whole character and ends it with an ellipsis.
+        void AddTextEllipsized(ImDrawList* DrawList, ImFont* Font, float FontSize, ImVec2 Position, ImU32 Color, const FString& Text, float MaxWidth)
+        {
+            const char* Begin = Text.c_str();
+            const char* End   = Begin + Text.size();
+            if (Font->CalcTextSizeA(FontSize, FLT_MAX, 0.0f, Begin, End).x <= MaxWidth)
+            {
+                DrawList->AddText(Font, FontSize, Position, Color, Begin, End);
+                return;
+            }
+
+            constexpr const char* Ellipsis = "...";
+            const float EllipsisWidth = Font->CalcTextSizeA(FontSize, FLT_MAX, 0.0f, Ellipsis).x;
+            while (End > Begin && Font->CalcTextSizeA(FontSize, FLT_MAX, 0.0f, Begin, End).x + EllipsisWidth > MaxWidth)
+            {
+                do
+                {
+                    --End;
+                }
+                while (End > Begin && (*End & 0xC0) == 0x80);
+            }
+
+            FString Shown(Begin, (size_t)(End - Begin));
+            Shown += Ellipsis;
+            DrawList->AddText(Font, FontSize, Position, Color, Shown.c_str(), Shown.c_str() + Shown.size());
+        }
     }
 
     void CEdNodeGraph::DrawRerouteNode(CEdGraphNode* Node)
@@ -652,7 +742,17 @@ namespace Lumina
         Entries.reserve(Count);
         for (int32 i = 0; i < Count; ++i)
         {
+            // A comment frames other nodes, so lining it up with them would only pull it off what it describes.
+            const CEdGraphNode* Node = FindNode((int64)Selected[i].Get());
+            if (Node != nullptr && Node->IsCommentNode())
+            {
+                continue;
+            }
             Entries.push_back(FEntry{ Selected[i], NodeEditor::GetNodePosition(Selected[i]), NodeEditor::GetNodeSize(Selected[i]) });
+        }
+        if (Entries.size() < 2)
+        {
+            return;
         }
 
         float MinLeft = FLT_MAX, MaxRight = -FLT_MAX, MinTop = FLT_MAX, MaxBottom = -FLT_MAX;
@@ -753,7 +853,7 @@ namespace Lumina
         for (const auto& NodeRef : Nodes)
         {
             CEdGraphNode* Node = NodeRef.Get();
-            if (Node != nullptr && Contributing.find(Node) == Contributing.end())
+            if (Node != nullptr && !Node->IsCommentNode() && Contributing.find(Node) == Contributing.end())
             {
                 OutDead.push_back(Node);
             }
@@ -1039,8 +1139,7 @@ namespace Lumina
         {
             for (const auto& NodeRef : Nodes)
             {
-                CEdGraphNode* Node = NodeRef.Get();
-                NodeEditor::SetNodePosition(Node->GetNodeID(), ImVec2(Node->GridX, Node->GridY));
+                ApplyNodeLayoutToCanvas(NodeRef.Get());
             }
         }
 
@@ -1049,7 +1148,7 @@ namespace Lumina
         {
             for (const auto& NodeRef : Nodes)
             {
-                NodeEditor::SetNodePosition(NodeRef->GetNodeID(), ImVec2(NodeRef->GridX, NodeRef->GridY));
+                ApplyNodeLayoutToCanvas(NodeRef.Get());
             }
         }
         else
@@ -1058,7 +1157,7 @@ namespace Lumina
             {
                 if (CEdGraphNode* SyncNode = FindNode(SyncID))
                 {
-                    NodeEditor::SetNodePosition(SyncID, ImVec2(SyncNode->GridX, SyncNode->GridY));
+                    ApplyNodeLayoutToCanvas(SyncNode);
                 }
             }
         }
@@ -1138,6 +1237,12 @@ namespace Lumina
                 bLayoutChangedSinceImage |= !bFirstDraw;
                 Node->GridX = Position.x;
                 Node->GridY = Position.y;
+            }
+
+            if (Node->IsCommentNode())
+            {
+                DrawCommentNode(static_cast<CEdNode_Comment*>(Node));
+                continue;
             }
 
             // This node reaches no output, so the compiler never emits it, and it costs nothing when connected.
@@ -1316,6 +1421,8 @@ namespace Lumina
             }
         }
     
+        DrawCommentHints();
+
         NodeEditor::Suspend();
         {
             const NodeEditor::PinId HoveredPinID = bHostWindowHovered ? NodeEditor::GetHoveredPin() : NodeEditor::PinId();
@@ -1450,6 +1557,7 @@ namespace Lumina
             }
 
             HandleRenameShortcut();
+            HandleCommentShortcut();
         
             if (NodeEditor::BeginShortcut())
             {
@@ -1562,20 +1670,17 @@ namespace Lumina
             }
         }
 
-        // Double-clicking a node descends into its sub-graph (if it has one).
-        if (NodeDoubleClickedCallback)
+        // Double-clicking a comment edits its title, and any other node descends into its sub-graph if it has one.
+        if (NodeEditor::NodeId DoubleClickedNode = NodeEditor::GetDoubleClickedNode())
         {
-            if (NodeEditor::NodeId DoubleClickedNode = NodeEditor::GetDoubleClickedNode())
+            CEdGraphNode* Node = FindNode((int64)DoubleClickedNode.Get());
+            if (Node != nullptr && Node->IsCommentNode())
             {
-                for (const auto& NodeRef : Nodes)
-                {
-                    CEdGraphNode* Node = NodeRef.Get();
-                    if (Cmp::Equal(Node->GetNodeID(), DoubleClickedNode.Get()))
-                    {
-                        NodeDoubleClickedCallback(Node);
-                        break;
-                    }
-                }
+                BeginRenameNode(Node);
+            }
+            else if (Node != nullptr && NodeDoubleClickedCallback)
+            {
+                NodeDoubleClickedCallback(Node);
             }
         }
 
@@ -1833,6 +1938,16 @@ namespace Lumina
             ImGui::Separator();
 
             Node->DrawContextMenu();
+
+            if (Node->IsCommentNode() && ImGui::MenuItem(LE_ICON_RENAME " Rename", "F2"))
+            {
+                BeginRenameNode(Node);
+            }
+        }
+
+        if (ImGui::MenuItem(LE_ICON_COMMENT_TEXT_OUTLINE " Comment Selection", "C"))
+        {
+            WrapSelectionInComment();
         }
 
         if (ImGui::BeginMenu("Alignment"))
@@ -1899,17 +2014,7 @@ namespace Lumina
             NodeEditor::NodeId Selection[2];
             if (NodeEditor::GetSelectedNodes(Selection, 2) == 1)
             {
-                CEdGraphNode* Node = FindNode((int64)Selection[0].Get());
-
-                FString Current;
-                if (Node != nullptr && Node->GetRenameText(Current))
-                {
-                    RenameNodeID = Node->GetNodeID();
-                    const size_t Count = Math::Min(Current.size(), sizeof(RenameBuffer) - 1);
-                    Memory::Memcpy(RenameBuffer, Current.data(), Count);
-                    RenameBuffer[Count] = '\0';
-                    bOpenRenamePopup = true;
-                }
+                BeginRenameNode(FindNode((int64)Selection[0].Get()));
             }
         }
 
@@ -1945,6 +2050,258 @@ namespace Lumina
         }
 
         ImGui::EndPopup();
+    }
+
+    void CEdNodeGraph::BeginRenameNode(CEdGraphNode* Node)
+    {
+        FString Current;
+        if (Node == nullptr || !Node->GetRenameText(Current))
+        {
+            return;
+        }
+
+        RenameNodeID = Node->GetNodeID();
+        const size_t Count = Math::Min(Current.size(), sizeof(RenameBuffer) - 1);
+        Memory::Memcpy(RenameBuffer, Current.data(), Count);
+        RenameBuffer[Count] = '\0';
+        bOpenRenamePopup = true;
+    }
+
+    void CEdNodeGraph::HandleCommentShortcut()
+    {
+        const ImGuiIO& IO = ImGui::GetIO();
+        const bool bCanTakeKey = !ImGui::IsAnyItemActive() && ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)
+            && !IO.KeyCtrl && !IO.KeyShift && !IO.KeyAlt;
+
+        if (bCanTakeKey && ImGui::IsKeyPressed(ImGuiKey_C, false) && ax::NodeEditor::GetSelectedObjectCount() > 0)
+        {
+            bCommentKeyArmed = true;
+        }
+
+        if (bCommentKeyArmed && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+        {
+            bCommentKeyArmed = false;
+        }
+
+        if (bCommentKeyArmed && ImGui::IsKeyReleased(ImGuiKey_C))
+        {
+            bCommentKeyArmed = false;
+            if (bCanTakeKey)
+            {
+                WrapSelectionInComment();
+            }
+        }
+    }
+
+    CEdNode_Comment* CEdNodeGraph::WrapSelectionInComment()
+    {
+        using namespace ax;
+
+        const int32 SelectionBound = NodeEditor::GetSelectedObjectCount();
+        TVector<NodeEditor::NodeId> Selected;
+        Selected.resize((size_t)Math::Max(SelectionBound, 0));
+        const int32 Count = SelectionBound > 0 ? NodeEditor::GetSelectedNodes(Selected.data(), SelectionBound) : 0;
+
+        ImVec2 BoundsMin(FLT_MAX, FLT_MAX);
+        ImVec2 BoundsMax(-FLT_MAX, -FLT_MAX);
+        for (int32 Index = 0; Index < Count; ++Index)
+        {
+            if (FindNode((int64)Selected[Index].Get()) == nullptr)
+            {
+                continue;
+            }
+            const ImVec2 Min = NodeEditor::GetNodePosition(Selected[Index]);
+            const ImVec2 Max = Min + NodeEditor::GetNodeSize(Selected[Index]);
+            BoundsMin = ImVec2(Math::Min(BoundsMin.x, Min.x), Math::Min(BoundsMin.y, Min.y));
+            BoundsMax = ImVec2(Math::Max(BoundsMax.x, Max.x), Math::Max(BoundsMax.y, Max.y));
+        }
+
+        const CEdNode_Comment* Defaults = CEdNode_Comment::StaticClass()->GetDefaultObject<CEdNode_Comment>();
+        ImVec2 Position = NodeEditor::ScreenToCanvas(ImGui::GetMousePos());
+        ImVec2 Size(Defaults->Width, Defaults->Height);
+        if (BoundsMin.x <= BoundsMax.x)
+        {
+            Position = ImVec2(BoundsMin.x - kCommentWrapMargin, BoundsMin.y - kCommentWrapMargin - kCommentHeaderHeight);
+            Size     = BoundsMax - BoundsMin + ImVec2(kCommentWrapMargin * 2.0f, kCommentWrapMargin * 2.0f);
+        }
+
+        SetPendingEditLabel("Add Comment");
+        CEdNode_Comment* Comment = Cast<CEdNode_Comment>(SpawnNode(CEdNode_Comment::StaticClass(), Position.x, Position.y));
+        if (Comment == nullptr)
+        {
+            return nullptr;
+        }
+
+        Comment->Width  = Math::Max(Size.x, kCommentMinWidth);
+        Comment->Height = Math::Max(Size.y, kCommentMinHeight);
+
+        // Named straight away, since a comment's whole point is its text.
+        BeginRenameNode(Comment);
+        return Comment;
+    }
+
+    void CEdNodeGraph::ApplyNodeLayoutToCanvas(CEdGraphNode* Node)
+    {
+        using namespace ax;
+
+        NodeEditor::SetNodePosition(Node->GetNodeID(), ImVec2(Node->GridX, Node->GridY));
+        if (Node->IsCommentNode())
+        {
+            const CEdNode_Comment* Comment = static_cast<const CEdNode_Comment*>(Node);
+            NodeEditor::SetGroupSize(Node->GetNodeID(), ImVec2(Comment->Width, Comment->Height));
+        }
+    }
+
+    void CEdNodeGraph::DrawCommentNode(CEdNode_Comment* Comment)
+    {
+        using namespace ax;
+        using namespace ImGuiX::Font;
+
+        const int64 ID = Comment->GetNodeID();
+
+        // The canvas owns the size during a resize, and the node mirrors it so undo and saves carry the change.
+        const ImVec2 LiveSize = NodeEditor::GetGroupSize(ID);
+        if (LiveSize.x > 0.0f && (LiveSize.x != Comment->Width || LiveSize.y != Comment->Height))
+        {
+            bLayoutChangedSinceImage |= !bFirstDraw;
+            Comment->Width  = LiveSize.x;
+            Comment->Height = LiveSize.y;
+        }
+        const ImVec2 BodySize(Math::Max(Comment->Width, kCommentMinWidth), Math::Max(Comment->Height, kCommentMinHeight));
+
+        // The description lives in the title bar, which grows to fit it, so the nodes inside never cover it.
+        TVector<FString> DescriptionLines;
+        float DescriptionLineHeight = 0.0f;
+        float HeaderHeight = kCommentHeaderHeight;
+        if (!Comment->Description.empty())
+        {
+            PushFont(EFont::Small);
+            DescriptionLineHeight = ImGui::GetTextLineHeight();
+            WrapWords(ImGui::GetFont(), ImGui::GetFontSize(), Comment->Description, BodySize.x - kCommentPadding * 2.0f, DescriptionLines);
+            PopFont();
+            HeaderHeight += DescriptionLineHeight * (float)DescriptionLines.size() + kCommentPadding * 0.5f;
+        }
+
+        // Every built-in fill is cleared, so the box below is the only thing drawn and the selection outline follows its corners.
+        NodeEditor::PushStyleVar(NodeEditor::StyleVar_NodePadding,      ImVec4(0, 0, 0, 0));
+        NodeEditor::PushStyleVar(NodeEditor::StyleVar_NodeRounding,     kCommentRounding);
+        NodeEditor::PushStyleVar(NodeEditor::StyleVar_NodeBorderWidth,  0.0f);
+        NodeEditor::PushStyleVar(NodeEditor::StyleVar_GroupRounding,    kCommentRounding);
+        NodeEditor::PushStyleVar(NodeEditor::StyleVar_GroupBorderWidth, 0.0f);
+        NodeEditor::PushStyleColor(NodeEditor::StyleColor_NodeBg,      ImColor(0, 0, 0, 0));
+        NodeEditor::PushStyleColor(NodeEditor::StyleColor_NodeBorder,  ImColor(0, 0, 0, 0));
+        NodeEditor::PushStyleColor(NodeEditor::StyleColor_GroupBg,     ImColor(0, 0, 0, 0));
+        NodeEditor::PushStyleColor(NodeEditor::StyleColor_GroupBorder, ImColor(0, 0, 0, 0));
+
+        NodeEditor::BeginNode(ID);
+        ImGui::PushID(Comment);
+        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0.0f, 0.0f));
+
+        // The strip above the group is the drag handle, and the group below it is the resizable body.
+        const ImVec2 Min = ImGui::GetCursorScreenPos();
+        ImGui::Dummy(ImVec2(BodySize.x, HeaderHeight));
+        NodeEditor::Group(BodySize);
+
+        ImGui::PopStyleVar();
+        ImGui::PopID();
+        NodeEditor::EndNode();
+
+        NodeEditor::PopStyleColor(4);
+        NodeEditor::PopStyleVar(5);
+
+        ImDrawList* DrawList = NodeEditor::GetNodeBackgroundDrawList(ID);
+        if (DrawList == nullptr)
+        {
+            return;
+        }
+
+        const ImVec2 Max       = Min + ImVec2(BodySize.x, HeaderHeight + BodySize.y);
+        const ImVec2 HeaderMax = ImVec2(Max.x, Min.y + HeaderHeight);
+        const bool   bSelected = NodeEditor::IsNodeSelected(ID);
+        const bool   bHovered  = NodeEditor::GetHoveredNode() == NodeEditor::NodeId(ID);
+
+        DrawList->AddRectFilled(Min + ImVec2(0.0f, 3.0f), Max + ImVec2(0.0f, 6.0f), IM_COL32(0, 0, 0, 38), kCommentRounding + 2.0f);
+        DrawList->AddRectFilled(Min, Max, Comment->GetTint(bSelected ? 0.20f : 0.13f), kCommentRounding);
+        DrawList->AddRectFilled(Min, HeaderMax, Comment->GetTint(0.95f), kCommentRounding, ImDrawFlags_RoundCornersTop);
+        DrawList->AddRectFilled(Min, ImVec2(HeaderMax.x, Min.y + kCommentHeaderHeight * 0.5f), IM_COL32(255, 255, 255, 22), kCommentRounding, ImDrawFlags_RoundCornersTop);
+        DrawList->AddLine(ImVec2(Min.x + 1.0f, HeaderMax.y), ImVec2(HeaderMax.x - 1.0f, HeaderMax.y), IM_COL32(0, 0, 0, 80), 1.0f);
+        DrawList->AddRect(Min, Max, Comment->GetTint(bHovered || bSelected ? 1.0f : 0.7f), kCommentRounding, 1.5f);
+
+        const ImU32 TitleColor = Comment->GetTitleTextColor();
+        DrawList->PushClipRect(Min, HeaderMax, true);
+        {
+            PushFont(EFont::MediumBold);
+            const float  FontSize = ImGui::GetFontSize();
+            const float  TextY    = Min.y + (kCommentHeaderHeight - FontSize) * 0.5f;
+            const ImVec2 IconPos(Min.x + kCommentPadding, TextY);
+            DrawList->AddText(ImGui::GetFont(), FontSize, IconPos, ScaleCommentAlpha(TitleColor, 0.85f), LE_ICON_COMMENT_TEXT_OUTLINE);
+            const float TitleX = IconPos.x + ImGui::CalcTextSize(LE_ICON_COMMENT_TEXT_OUTLINE).x + 8.0f;
+            AddTextEllipsized(DrawList, ImGui::GetFont(), FontSize, ImVec2(TitleX, TextY), TitleColor, Comment->Title, Max.x - kCommentPadding - TitleX);
+            PopFont();
+
+            if (!DescriptionLines.empty())
+            {
+                PushFont(EFont::Small);
+                const ImU32 DescriptionColor = ScaleCommentAlpha(TitleColor, 0.78f);
+                ImVec2 LinePos(Min.x + kCommentPadding, Min.y + kCommentHeaderHeight - 6.0f);
+                for (const FString& Line : DescriptionLines)
+                {
+                    DrawList->AddText(ImGui::GetFont(), ImGui::GetFontSize(), LinePos, DescriptionColor, Line.c_str(), Line.c_str() + Line.size());
+                    LinePos.y += DescriptionLineHeight;
+                }
+                PopFont();
+            }
+        }
+        DrawList->PopClipRect();
+
+        // Three short strokes in the corner say the box resizes from there.
+        const ImU32 GripColor = Comment->GetTint(bHovered ? 1.0f : 0.6f);
+        for (int32 Stroke = 1; Stroke <= 3; ++Stroke)
+        {
+            const float Offset = 4.0f * (float)Stroke;
+            DrawList->AddLine(ImVec2(Max.x - 4.0f - Offset, Max.y - 4.0f), ImVec2(Max.x - 4.0f, Max.y - 4.0f - Offset), GripColor, 1.5f);
+        }
+    }
+
+    void CEdNodeGraph::DrawCommentHints()
+    {
+        using namespace ax;
+        using namespace ImGuiX::Font;
+
+        for (const TStrongObjectPtr<CEdGraphNode>& NodeRef : Nodes)
+        {
+            if (!NodeRef.IsValid() || !NodeRef->IsCommentNode())
+            {
+                continue;
+            }
+            const CEdNode_Comment* Comment = static_cast<const CEdNode_Comment*>(NodeRef.Get());
+
+            if (NodeEditor::BeginGroupHint(Comment->GetNodeID()))
+            {
+                // The hint fades in as the canvas zooms out, and raw draw calls have to apply that fade themselves.
+                const float  Fade       = ImGui::GetStyle().Alpha;
+                const ImVec2 Min        = NodeEditor::GetGroupMin();
+                const ImVec2 Max        = NodeEditor::GetGroupMax();
+                ImDrawList*  Background = NodeEditor::GetHintBackgroundDrawList();
+                ImDrawList*  Foreground = NodeEditor::GetHintForegroundDrawList();
+
+                Background->AddRect(Min, Max, Comment->GetTint(0.9f * Fade), 4.0f, 2.0f);
+
+                PushFont(EFont::LargeBold);
+                const FString& Title = Comment->Title;
+                const ImVec2 TextSize = ImGui::CalcTextSize(Title.c_str(), Title.c_str() + Title.size());
+
+                // Laid over the comment's own title bar, so it can never land on a neighboring comment.
+                const ImVec2 BarMax(Max.x, Min.y + TextSize.y + 12.0f);
+                Background->AddRectFilled(Min, BarMax, Comment->GetTint(Fade), 4.0f, ImDrawFlags_RoundCornersTop);
+                Foreground->PushClipRect(Min, BarMax, true);
+                Foreground->AddText(ImVec2(Min.x + 12.0f, Min.y + 6.0f), ScaleCommentAlpha(Comment->GetTitleTextColor(), Fade),
+                    Title.c_str(), Title.c_str() + Title.size());
+                Foreground->PopClipRect();
+                PopFont();
+            }
+            NodeEditor::EndGroupHint();
+        }
     }
 
     CEdGraphNode* CEdNodeGraph::FindNode(int64 InNodeID) const

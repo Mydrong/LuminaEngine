@@ -1,6 +1,7 @@
 #pragma once
 
 #include <imgui.h>
+#include <imgui_internal.h>
 #include <implot.h>
 #include "ImGuiAllocator.h"
 
@@ -23,5 +24,6 @@
         ImGui::SetCurrentContext(static_cast<ImGuiContext*>(InImGui));                           \
         ImPlot::SetCurrentContext(static_cast<ImPlotContext*>(InImPlot));                        \
         ::Lumina::ImGuiX::InstallImGuiAllocator();                                               \
+        ImTextInitClassifiers();                                                                 \
     }                                                                                            \
     static_assert(true, "LUMINA_MODULE_IMGUI consumes the semicolon at the call site")

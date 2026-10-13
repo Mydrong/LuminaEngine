@@ -23,8 +23,6 @@ internal struct FScriptDiagnostics
     public int    Gen2Collections;
     public int    PinnedObjects;        // GCMemoryInfo.PinnedObjectsCount
     public int    Generation;           // current script generation
-    public int    EntityScriptCount;
-    public int    EntitySystemCount;
     public int    LoadedTypeCount;
     public int    AliveScriptAlcCount;  // collectible GameScripts.Gen* contexts still loaded (1 == healthy)
     public int    OldestAliveGeneration;// lowest still-resident generation (0 if none)

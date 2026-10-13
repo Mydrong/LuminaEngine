@@ -1,4 +1,4 @@
-﻿#include <gtest/gtest.h>
+#include <gtest/gtest.h>
 
 #include "Containers/String.h"
 #include "Containers/ContainerOps.h"
@@ -9,6 +9,7 @@
 #include "Core/Object/ObjectBase.h"
 #include "Core/Object/ObjectCore.h"
 #include "Core/Object/ObjectHandleTyped.h"
+#include "Core/Reflection/PropertyTypeTraits.h"
 #include "Core/Reflection/Type/Function.h"
 #include "Scripting/ScriptableTest.h"
 #include "Core/Reflection/Type/LuminaTypes.h"
@@ -124,13 +125,11 @@ namespace
         P.ReturnValue = ((FSubject*)Context)->Total(P.Values);
     }
 
-    const FVectorOps* TotalValuesOps() { return GetVectorOpsFor<TVector<int32>>(); }
-
     // An object parameter is held as a handle, matching the storage FObjectProperty describes.
     struct FEcho_Parms
     {
-        TStrongObjectPtr<CObject> In;
-        TStrongObjectPtr<CObject> ReturnValue;
+        TFrameObject<CScriptableTest> In;
+        TFrameObject<CScriptableTest> ReturnValue;
     };
 
     void Thunk_Echo(const FFunction&, void* Context, void* Frame)
@@ -138,35 +137,6 @@ namespace
         FEcho_Parms& P = *(FEcho_Parms*)Frame;
         P.ReturnValue = (CObject*)(((FSubject*)Context)->Echo((CObject*)P.In.Get()));
     }
-
-    const FNumericPropertyParams GDoubleX = { "X", EPropertyFlags::None, EPropertyTypeFlags::Int32, nullptr, nullptr, offsetof(FDouble_Parms, X) };
-    const FNumericPropertyParams GDoubleRet = { "ReturnValue", EPropertyFlags::None, EPropertyTypeFlags::Int32, nullptr, nullptr, offsetof(FDouble_Parms, ReturnValue) };
-    const FPropertyParams* const GDoubleParams[] = { (const FPropertyParams*)&GDoubleX, (const FPropertyParams*)&GDoubleRet };
-
-    const FStringPropertyParams GGreetName = { "Name", EPropertyFlags::None, EPropertyTypeFlags::String, nullptr, nullptr, offsetof(FGreet_Parms, Name) };
-    const FNumericPropertyParams GGreetTimes = { "Times", EPropertyFlags::None, EPropertyTypeFlags::Int32, nullptr, nullptr, offsetof(FGreet_Parms, Times) };
-    const FPropertyParams* const GGreetParams[] = { (const FPropertyParams*)&GGreetName, (const FPropertyParams*)&GGreetTimes };
-
-    const FNumericPropertyParams GSumA = { "A", EPropertyFlags::None, EPropertyTypeFlags::Int32, nullptr, nullptr, offsetof(FSum_Parms, A) };
-    const FNumericPropertyParams GSumB = { "B", EPropertyFlags::None, EPropertyTypeFlags::Int32, nullptr, nullptr, offsetof(FSum_Parms, B) };
-    const FNumericPropertyParams GSumRet = { "ReturnValue", EPropertyFlags::None, EPropertyTypeFlags::Int32, nullptr, nullptr, offsetof(FSum_Parms, ReturnValue) };
-    const FPropertyParams* const GSumParams[] = { (const FPropertyParams*)&GSumA, (const FPropertyParams*)&GSumB, (const FPropertyParams*)&GSumRet };
-
-    const FFunctionParams GDoubleFn = { "Double", EFunctionFlags::None, GDoubleParams, 2, 1, sizeof(FDouble_Parms), &Thunk_Double };
-    const FFunctionParams GGreetFn  = { "Greet",  EFunctionFlags::None, GGreetParams,  2, -1, sizeof(FGreet_Parms),  &Thunk_Greet  };
-    const FFunctionParams GSumFn    = { "Sum",    EFunctionFlags::Static, GSumParams,  3,  2, sizeof(FSum_Parms),    &Thunk_Sum    };
-
-    // A container parameter, whose element is described by an inner sitting before it exactly as a member's is.
-    const FNumericPropertyParams GTotalInner = { "Values_Inner", EPropertyFlags::SubField, EPropertyTypeFlags::Int32, nullptr, nullptr, 0 };
-    const FArrayPropertyParams GTotalValues = { { "Values", EPropertyFlags::None, EPropertyTypeFlags::Vector, nullptr, nullptr, offsetof(FTotal_Parms, Values) }, &TotalValuesOps };
-    const FNumericPropertyParams GTotalRet = { "ReturnValue", EPropertyFlags::None, EPropertyTypeFlags::Int32, nullptr, nullptr, offsetof(FTotal_Parms, ReturnValue) };
-    const FPropertyParams* const GTotalParams[] = {
-        (const FPropertyParams*)&GTotalInner,
-        (const FPropertyParams*)&GTotalValues,
-        (const FPropertyParams*)&GTotalRet,
-    };
-
-    const FFunctionParams GTotalFn = { "Total", EFunctionFlags::None, GTotalParams, 3, 1, sizeof(FTotal_Parms), &Thunk_Total };
 
     struct FLookup_Parms
     {
@@ -181,8 +151,6 @@ namespace
         P.ReturnValue = ((FSubject*)Context)->Lookup(P.Table, P.Key);
     }
 
-    const FMapOps* LookupTableOps() { return GetMapOpsFor<THashMap<FName, int32>>(); }
-
     struct FConsume_Parms
     {
         FString Moved;
@@ -194,36 +162,65 @@ namespace
         ((FSubject*)Context)->Consume(std::move(P.Moved));
     }
 
-    // The emitter orders a map's entries [Value, Key, Map], which the runtime's backward walk relies on.
-    const FNumericPropertyParams GLookupValueInner = { "Table_Value", EPropertyFlags::SubField, EPropertyTypeFlags::Int32, nullptr, nullptr, 0 };
-    const FNamePropertyParams GLookupKeyInner = { "Table_Key", EPropertyFlags::SubField, EPropertyTypeFlags::Name, nullptr, nullptr, 0 };
-    const FMapPropertyParams GLookupTable = { { "Table", EPropertyFlags::None, EPropertyTypeFlags::Map, nullptr, nullptr, offsetof(FLookup_Parms, Table) }, &LookupTableOps };
-    const FNamePropertyParams GLookupKey = { "Key", EPropertyFlags::None, EPropertyTypeFlags::Name, nullptr, nullptr, offsetof(FLookup_Parms, Key) };
-    const FNumericPropertyParams GLookupRet = { "ReturnValue", EPropertyFlags::None, EPropertyTypeFlags::Int32, nullptr, nullptr, offsetof(FLookup_Parms, ReturnValue) };
-    const FPropertyParams* const GLookupParams[] = {
-        (const FPropertyParams*)&GLookupValueInner,
-        (const FPropertyParams*)&GLookupKeyInner,
-        (const FPropertyParams*)&GLookupTable,
-        (const FPropertyParams*)&GLookupKey,
-        (const FPropertyParams*)&GLookupRet,
+    template<typename T>
+    constexpr FPropertyDesc Param(const char* Name, uint32 Offset)
+    {
+        return FPropertyDesc{ .Name = Name, .Offset = Offset, .Type = PropertyTypeOf<T> };
+    }
+
+    constexpr FPropertyDesc GDoubleParams[] =
+    {
+        Param<int32>("X", offsetof(FDouble_Parms, X)),
+        Param<int32>("ReturnValue", offsetof(FDouble_Parms, ReturnValue)),
     };
 
-    const FStringPropertyParams GConsumeMoved = { "Moved", EPropertyFlags::None, EPropertyTypeFlags::String, nullptr, nullptr, offsetof(FConsume_Parms, Moved) };
-    const FPropertyParams* const GConsumeParams[] = { (const FPropertyParams*)&GConsumeMoved };
-
-    const FFunctionParams GLookupFn  = { "Lookup",  EFunctionFlags::None, GLookupParams, 5, 2, sizeof(FLookup_Parms), &Thunk_Lookup };
-    const FFunctionParams GConsumeFn = { "Consume", EFunctionFlags::None, GConsumeParams, 1, -1, sizeof(FConsume_Parms), &Thunk_Consume };
-
-    const FObjectPropertyParams GEchoIn = { { "In", EPropertyFlags::None, EPropertyTypeFlags::Object, nullptr, nullptr, offsetof(FEcho_Parms, In) }, &CScriptableTest::StaticClass };
-    const FObjectPropertyParams GEchoRet = { { "ReturnValue", EPropertyFlags::None, EPropertyTypeFlags::Object, nullptr, nullptr, offsetof(FEcho_Parms, ReturnValue) }, &CScriptableTest::StaticClass };
-    const FPropertyParams* const GEchoParams[] = {
-        (const FPropertyParams*)&GEchoIn,
-        (const FPropertyParams*)&GEchoRet,
+    constexpr FPropertyDesc GGreetParams[] =
+    {
+        Param<FString>("Name", offsetof(FGreet_Parms, Name)),
+        Param<int32>("Times", offsetof(FGreet_Parms, Times)),
     };
 
-    const FFunctionParams GEchoFn = { "Echo", EFunctionFlags::None, GEchoParams, 2, 1, sizeof(FEcho_Parms), &Thunk_Echo };
+    constexpr FPropertyDesc GSumParams[] =
+    {
+        Param<int32>("A", offsetof(FSum_Parms, A)),
+        Param<int32>("B", offsetof(FSum_Parms, B)),
+        Param<int32>("ReturnValue", offsetof(FSum_Parms, ReturnValue)),
+    };
 
-    const FFunctionParams* const GAllFunctions[] = { &GDoubleFn, &GGreetFn, &GSumFn, &GTotalFn, &GEchoFn, &GLookupFn, &GConsumeFn };
+    constexpr FPropertyDesc GTotalParams[] =
+    {
+        Param<TVector<int32>>("Values", offsetof(FTotal_Parms, Values)),
+        Param<int32>("ReturnValue", offsetof(FTotal_Parms, ReturnValue)),
+    };
+
+    constexpr FPropertyDesc GLookupParams[] =
+    {
+        Param<THashMap<FName, int32>>("Table", offsetof(FLookup_Parms, Table)),
+        Param<FName>("Key", offsetof(FLookup_Parms, Key)),
+        Param<int32>("ReturnValue", offsetof(FLookup_Parms, ReturnValue)),
+    };
+
+    constexpr FPropertyDesc GConsumeParams[] =
+    {
+        Param<FString>("Moved", offsetof(FConsume_Parms, Moved)),
+    };
+
+    constexpr FPropertyDesc GEchoParams[] =
+    {
+        Param<TFrameObject<CScriptableTest>>("In", offsetof(FEcho_Parms, In)),
+        Param<TFrameObject<CScriptableTest>>("ReturnValue", offsetof(FEcho_Parms, ReturnValue)),
+    };
+
+    constexpr FFunctionDesc GAllFunctions[] =
+    {
+        { .Name = "Double",  .Params = GDoubleParams,  .NumParams = 2, .ReturnIndex = 1,  .FrameSize = sizeof(FDouble_Parms),  .Thunk = &Thunk_Double },
+        { .Name = "Greet",   .Params = GGreetParams,   .NumParams = 2, .ReturnIndex = -1, .FrameSize = sizeof(FGreet_Parms),   .Thunk = &Thunk_Greet },
+        { .Name = "Sum",     .Flags = EFunctionFlags::Static, .Params = GSumParams, .NumParams = 3, .ReturnIndex = 2, .FrameSize = sizeof(FSum_Parms), .Thunk = &Thunk_Sum },
+        { .Name = "Total",   .Params = GTotalParams,   .NumParams = 2, .ReturnIndex = 1,  .FrameSize = sizeof(FTotal_Parms),   .Thunk = &Thunk_Total },
+        { .Name = "Echo",    .Params = GEchoParams,    .NumParams = 2, .ReturnIndex = 1,  .FrameSize = sizeof(FEcho_Parms),    .Thunk = &Thunk_Echo },
+        { .Name = "Lookup",  .Params = GLookupParams,  .NumParams = 3, .ReturnIndex = 2,  .FrameSize = sizeof(FLookup_Parms),  .Thunk = &Thunk_Lookup },
+        { .Name = "Consume", .Params = GConsumeParams, .NumParams = 1, .ReturnIndex = -1, .FrameSize = sizeof(FConsume_Parms), .Thunk = &Thunk_Consume },
+    };
 
     // One struct carrying the three, built once so every test reads the same linked type.
     CStruct& SubjectStruct()

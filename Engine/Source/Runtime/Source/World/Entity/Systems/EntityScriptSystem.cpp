@@ -88,7 +88,7 @@ namespace Lumina
                 DispatchFixedUpdates(Registry, (float)Context.GetDeltaTime());
             }
 
-            // After the step, so an [UpdatePhase(PostPhysics)] script reads settled transforms.
+            // After the step, so an [Reflect(UpdatePhase = PostPhysics)] script reads settled transforms.
             EntityScripts::Tick(Registry, (float)Context.GetDeltaTime(), EScriptUpdatePhase::PostPhysics);
         }
     }

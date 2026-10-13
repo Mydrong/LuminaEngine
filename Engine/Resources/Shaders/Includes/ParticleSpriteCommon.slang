@@ -67,7 +67,21 @@ struct FParticlePushConstants
     float  CameraFadeDistance;     // meters from the camera inside which a sprite fades away; 0 disables it
     float  Pad0;
 };
-FParticlePushConstants* Pass() { return GetPassArgs<FParticlePushConstants>(); }
+// One multi-draw covers consecutive emitters on a pipeline, and each draw reads its own entry by draw index.
+struct FParticleDrawBatch
+{
+    GPUSpan<FParticlePushConstants> Draws;
+};
+
+static FParticlePushConstants* gParticleDraw;
+
+FParticlePushConstants* Pass() { return gParticleDraw; }
+
+// Every particle stage calls this first, the vertex stage with SV_DrawIndex and the pixel stage with the index it was handed.
+void BeginParticleDraw(uint DrawIndex)
+{
+    gParticleDraw = GetPassArgs<FParticleDrawBatch>().Draws.At(DrawIndex);
+}
 
 // The draw covers VertsPerParticle vertices per particle, and a sorted draw only the live ones in order.
 uint ParticleSlotForVertex(uint VertexIndex)
@@ -396,6 +410,7 @@ struct FParticleMaterialVertexOutput
     float3 Velocity      : PARTICLE_VELOCITY;
     float3 Center        : PARTICLE_CENTER;   // the particle itself, not the expanded corner
     float4 SizeLifeRand  : PARTICLE_LIFE;     // xy extent, z relative time, w per-particle random
+    nointerpolation uint DrawIndex : PARTICLE_DRAW;
     float4 Position      : SV_Position;
 };
 

@@ -13,6 +13,11 @@ namespace Lumina
     {
         FMutex GUpscalerMutex;
 
+        TConsoleVar<bool> CVarDisableUpscaler(
+            "r.Upscaler.Disable",
+            false,
+            "Renders without the project's upscaler, so its anti-aliasing setting takes over, without touching the saved settings.");
+
         TConsoleVar<float> CVarScreenPercentage(
             "r.ScreenPercentage",
             0.0f,
@@ -86,7 +91,7 @@ namespace Lumina
     IUpscaler* FUpscalerRegistry::GetActive()
     {
         const CRendererSettings* Settings = GetDefault<CRendererSettings>();
-        if (Settings == nullptr)
+        if (Settings == nullptr || CVarDisableUpscaler.GetValue())
         {
             return nullptr;
         }

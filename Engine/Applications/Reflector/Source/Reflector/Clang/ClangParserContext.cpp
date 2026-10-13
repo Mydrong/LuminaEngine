@@ -75,7 +75,7 @@ namespace Lumina::Reflection
         return ResolveHeaderForFile(File);
     }
 
-    bool FClangParserContext::TryFindMacroForCursor(const FReflectedHeader* Header, const CXCursor& Cursor, FReflectionMacro& Macro, bool bConsume)
+    bool FClangParserContext::TryFindMacroForCursor(const FReflectedHeader* Header, const CXCursor& Cursor, FReflectionMacro& Macro)
     {
         const auto HeaderIter = ReflectionMacros.find(Header);
         if (HeaderIter == ReflectionMacros.end())
@@ -112,10 +112,7 @@ namespace Lumina::Reflection
         }
 
         Macro = *Best;
-        if (bConsume)
-        {
-            Best->bConsumed = true;
-        }
+        Best->bConsumed = true;
         return true;
     }
 

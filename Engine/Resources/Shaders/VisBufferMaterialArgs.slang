@@ -5,7 +5,6 @@
 // Turns each slot's dense tile and sparse pixel counts into list runs and Y-folded dispatch triples, since 4K overruns one dispatch axis.
 
 #define MATERIAL_ARGS_GROUP 1024u
-#define MATERIAL_ARGS_SLOTS_PER_THREAD ((MATERIAL_MAX_SLOTS + MATERIAL_ARGS_GROUP - 1u) / MATERIAL_ARGS_GROUP)
 
 struct FMaterialArgsArgs
 {
@@ -33,11 +32,14 @@ void WriteDispatch(uint Triple, uint Groups)
 void ComputeMain(uint ThreadIndex : SV_GroupIndex)
 {
     const uint NumSlots = min(Pass().Counts.Count / 2u, MATERIAL_MAX_SLOTS);
-    const uint First    = ThreadIndex * MATERIAL_ARGS_SLOTS_PER_THREAD;
+
+    // Contiguous chunks keep the scan in slot order, and a chunk grows only with the slots this frame binned.
+    const uint PerThread = (NumSlots + MATERIAL_ARGS_GROUP - 1u) / MATERIAL_ARGS_GROUP;
+    const uint First     = ThreadIndex * PerThread;
 
     uint2 Local = uint2(0u, 0u);
-    [unroll]
-    for (uint i = 0u; i < MATERIAL_ARGS_SLOTS_PER_THREAD; ++i)
+    [loop]
+    for (uint i = 0u; i < PerThread; ++i)
     {
         const uint Slot = First + i;
         const uint2 Work = Slot < NumSlots ? uint2(Pass().Counts.Get(Slot), Pass().Counts.Get(NumSlots + Slot)) : uint2(0u, 0u);
@@ -53,8 +55,8 @@ void ComputeMain(uint ThreadIndex : SV_GroupIndex)
         WriteDispatch(NumSlots * 2u, (Pass().NumTiles + OverflowPairs + 63u) / 64u);
     }
 
-    [unroll]
-    for (uint i = 0u; i < MATERIAL_ARGS_SLOTS_PER_THREAD; ++i)
+    [loop]
+    for (uint i = 0u; i < PerThread; ++i)
     {
         const uint Slot = First + i;
         if (Slot >= NumSlots)

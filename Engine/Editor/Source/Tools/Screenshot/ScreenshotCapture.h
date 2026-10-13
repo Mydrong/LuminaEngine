@@ -43,6 +43,9 @@ namespace Lumina::Screenshot
     // The render scene the capture functions pick, a playing world's before the editor's.
     EDITOR_API IRenderScene* FindActiveRenderScene();
 
+    // Writes a window capture from FRenderManager::TakeWindowCapture as a PNG; empty OutputPath means a timestamped default.
+    EDITOR_API FCaptureResult SaveWindowCapture(const TVector<uint8>& BGRA, uint32 Width, uint32 Height, const FString& OutputPath = {});
+
     // Reads Scene's final picture back as tightly packed RGBA8, top row first, waiting on the GPU to do it.
     EDITOR_API bool ReadDisplayPixels(IRenderScene* Scene, TVector<uint8>& OutRGBA, uint32& OutWidth, uint32& OutHeight, FString& OutError);
 }

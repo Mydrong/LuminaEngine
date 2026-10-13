@@ -16,8 +16,10 @@
 #include "Memory/Memory.h"
 #include "Tools/UI/ImGui/Widgets/TreeListView.h"
 #include "UI/Properties/PropertyTable.h"
+#include "UI/Widgets/CategorizedPicker.h"
 #include "World/Entity/Components/NameComponent.h"
 #include "World/Entity/Systems/EntitySystem.h"
+#include "World/World.h"
 #include "World/WorldContext.h"
 #include "Events/MouseCodes.h"
 #include "Input/InputMode.h"
@@ -264,6 +266,7 @@ namespace Lumina
 
         void DrawWorldSettings(bool bFocused);
         void DrawSystemsPanel(bool bFocused);
+        void DrawSelectedSystemDetails(const CWorld::FSystemInfo& Info, const TVector<FSystemScheduleEntry>& Schedule);
         void DrawEntityActionButtons(ECS::FEntity Entity);
         void DrawTagList(ECS::FEntity Entity);
 
@@ -349,6 +352,15 @@ namespace Lumina
 
         // Name filter for the Systems panel.
         ImGuiTextFilter                         SystemsFilter;
+
+        // The Systems panel's list of system classes, refreshed on a timer since gathering it configures every one.
+        TVector<CWorld::FSystemInfo>            CachedSystemInfos;
+        const CWorld*                           CachedSystemsWorld = nullptr;
+        double                                  CachedSystemsTime = 0.0;
+        FName                                   SelectedSystem;
+
+        // The outliner's Attach Script submenu, which keeps its open categories between uses.
+        FCategorizedPicker                      ScriptAttachPicker;
 
         TVector<TUniquePtr<IWorldEditorMode>>   EditorModes;
         int32                                   ActiveModeIndex = 0;

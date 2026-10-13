@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include "Core/Reflection/Type/LuminaTypes.h"
 #include "Memory/Construct.h"
 
@@ -8,8 +8,8 @@ namespace Lumina
     {
     public:
 
-        explicit FStringProperty(const FPropertyParams* Params)
-            : FProperty(Params)
+        explicit FStringProperty(const FPropertyDesc& Desc)
+            : FProperty(Desc)
         {
             SetElementSize(sizeof(FString));
         }
@@ -32,8 +32,8 @@ namespace Lumina
     {
     public:
         
-        explicit FNameProperty(const FPropertyParams* Params)
-            : FProperty(Params)
+        explicit FNameProperty(const FPropertyDesc& Desc)
+            : FProperty(Desc)
         {
             SetElementSize(sizeof(FName));
         }

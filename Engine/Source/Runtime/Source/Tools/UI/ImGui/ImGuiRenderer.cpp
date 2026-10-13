@@ -13,6 +13,7 @@
 
 #include "implot.h"
 #include "Paths/Paths.h"
+#include "Platform/Filesystem/PlatformFilesystem.h"
 #include "Tools/UI/ImGui/ImGuiAllocator.h"
 #include "Config/Config.h"
 #include "Config/EngineSettings.h"
@@ -312,7 +313,7 @@ namespace Lumina
     	CreateFontFromFile(FontFile_Regular, size24, size24, ImGuiX::Font::EFont::Large, ImVec2(0, 2));
     	CreateFontFromFile(FontFile_Bold, size24, size24, ImGuiX::Font::EFont::LargeBold, ImVec2(0, 2));
 
-    	// Monospace pair for code editors (Lua / RML / shaders).
+    	// Monospace pair for code editors (RML / shaders).
     	CreateFontFromFile(FontFile_Mono, size16, size18, ImGuiX::Font::EFont::Mono, ImVec2(0, 2));
     	CreateFontFromFile(FontFile_MonoBold, size16, size18, ImGuiX::Font::EFont::MonoBold, ImVec2(0, 2));
 
@@ -337,6 +338,19 @@ namespace Lumina
     	io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;         // Enable Docking
     	io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;       // Enable Multi-Viewport / Platform Windows
     	io.BackendFlags |= ImGuiBackendFlags_PlatformHasViewports;
+
+#if USING(WITH_EDITOR)
+    	// One layout for the whole editor, rather than an imgui.ini in whatever directory the editor was launched from.
+    	LayoutFilePath = Paths::GetEngineDirectory() + "/Editor/Config/EditorLayout.ini";
+    	Filesystem::MakeParentDirectoryTree(LayoutFilePath);
+    	if (!Filesystem::Exists(LayoutFilePath) && Filesystem::Exists("imgui.ini"))
+    	{
+    		Filesystem::Copy("imgui.ini", LayoutFilePath, false);
+    	}
+    	io.IniFilename = LayoutFilePath.c_str();
+#else
+    	io.IniFilename = nullptr;
+#endif
 
         ImGui::StyleColorsDark();
         ImGuiStyle& Style = ImGui::GetStyle();

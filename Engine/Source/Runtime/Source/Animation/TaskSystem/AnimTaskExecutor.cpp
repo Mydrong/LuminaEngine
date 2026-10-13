@@ -659,13 +659,26 @@ namespace Lumina
             }
         }
 
+        // Task bones are asset indices, and the pose may be laid out in bone LOD order instead.
+        const auto PoseBone = [&List, NumBones](int32 AssetBone)
+        {
+            return (List.AssetToPose != nullptr && AssetBone >= 0 && AssetBone < NumBones) ? List.AssetToPose[AssetBone] : AssetBone;
+        };
+
+        // Callers index the result by asset bone, so a pose in bone LOD order writes each matrix to its asset slot.
+        const int32* PoseToAsset = List.PoseToAsset;
+        const auto WriteSkinningMatrices = [&](const FPose& Pose, int32 Active)
+        {
+            AnimPose::ToSkinningMatrices(Pose, Skeleton, OutMatrices, Active, PoseToAsset);
+        };
+
         // Empty/invalid recipe resolves to the bind pose (same fallback the old inline VM had).
         if (List.OutputTask < 0 || List.OutputTask >= NumTasks)
         {
             const int16 Buf = Pool.Acquire();
             FPose& Bind = Pool.Get(Buf);
             Bind.ResetToBindPose(Skeleton);
-            AnimPose::ToSkinningMatrices(Bind, Skeleton, OutMatrices);
+            WriteSkinningMatrices(Bind, NumBones);
             Pool.Release(Buf);
             List.Reset();
             return true;
@@ -813,7 +826,20 @@ namespace Lumina
                 const FPose& B = Pool.Get(BufB);
                 if (Task.Type == EAnimTaskType::BlendMasked && Task.MaskWeights != nullptr)
                 {
-                    AnimPose::BlendMasked(A, B, Task.Alpha, *Task.MaskWeights, Pool.Get(Dst), ActiveBones);
+                    // Masks are authored per asset bone, so a pose in bone LOD order reads them through the same mapping.
+                    const TVector<float>* Weights = Task.MaskWeights;
+                    thread_local TVector<float> PoseOrderWeights;
+                    if (PoseToAsset != nullptr)
+                    {
+                        PoseOrderWeights.resize(NumBones);
+                        for (int32 Bone = 0; Bone < NumBones; ++Bone)
+                        {
+                            const int32 AssetBone = PoseToAsset[Bone];
+                            PoseOrderWeights[Bone] = AssetBone < (int32)Weights->size() ? (*Weights)[AssetBone] : 1.0f;
+                        }
+                        Weights = &PoseOrderWeights;
+                    }
+                    AnimPose::BlendMasked(A, B, Task.Alpha, *Weights, Pool.Get(Dst), ActiveBones);
                 }
                 else
                 {
@@ -1035,33 +1061,33 @@ namespace Lumina
                 switch (Task.Type)
                 {
                 case EAnimTaskType::BoneTransform:
-                    AnimPose::ApplyBoneTransform(Pool.Get(Dst), Skeleton, (int32)Task.BoneA,
+                    AnimPose::ApplyBoneTransform(Pool.Get(Dst), Skeleton, PoseBone(Task.BoneA),
                                                  (AnimPose::EBoneSpace)Task.Space,
                                                  (AnimPose::EBoneApplyMode)Task.Mode,
                                                  Task.T, Task.R, Task.S, Task.Alpha);
                     break;
 
                 case EAnimTaskType::FABRIK:
-                    AnimPose::FABRIK(Pool.Get(Dst), Skeleton, (int32)Task.BoneA, (int32)Task.BoneB,
+                    AnimPose::FABRIK(Pool.Get(Dst), Skeleton, PoseBone(Task.BoneA), PoseBone(Task.BoneB),
                                      Task.T, (int32)Task.BoneC, Task.Alpha);
                     break;
 
                 case EAnimTaskType::LookAt:
-                    AnimPose::LookAt(Pool.Get(Dst), Skeleton, (int32)Task.BoneA, Task.T, Task.S, Task.Time, Task.Alpha);
+                    AnimPose::LookAt(Pool.Get(Dst), Skeleton, PoseBone(Task.BoneA), Task.T, Task.S, Task.Time, Task.Alpha);
                     break;
 
                 case EAnimTaskType::FootIK:
-                    AnimPose::FootIK(Pool.Get(Dst), Skeleton, (int32)Task.BoneA, (int32)Task.BoneB, (int32)Task.BoneC,
+                    AnimPose::FootIK(Pool.Get(Dst), Skeleton, PoseBone(Task.BoneA), PoseBone(Task.BoneB), PoseBone(Task.BoneC),
                                      Task.T, FVector3(Task.R.x, Task.R.y, Task.R.z), Task.S, Task.Time, Task.Alpha);
                     break;
 
                 case EAnimTaskType::TranslateBone:
-                    AnimPose::TranslateBoneComponentSpace(Pool.Get(Dst), Skeleton, (int32)Task.BoneA, Task.T, Task.Alpha);
+                    AnimPose::TranslateBoneComponentSpace(Pool.Get(Dst), Skeleton, PoseBone(Task.BoneA), Task.T, Task.Alpha);
                     break;
 
                 default:
                     AnimPose::TwoBoneIK(Pool.Get(Dst), Skeleton,
-                                        (int32)Task.BoneA, (int32)Task.BoneB, (int32)Task.BoneC,
+                                        PoseBone(Task.BoneA), PoseBone(Task.BoneB), PoseBone(Task.BoneC),
                                         Task.T, Task.S, Task.Alpha);
                     break;
                 }
@@ -1105,10 +1131,10 @@ namespace Lumina
                 Pool.Release(FinalBuf);
                 FinalBuf = Pinned;
             }
-            RootMotion::PinRootToBindPose(Pool.Get(FinalBuf), Skeleton, List.RootBoneIndex);
+            RootMotion::PinRootToBindPose(Pool.Get(FinalBuf), Skeleton, PoseBone(List.RootBoneIndex));
         }
 
-        AnimPose::ToSkinningMatrices(Pool.Get(FinalBuf), Skeleton, OutMatrices);
+        WriteSkinningMatrices(Pool.Get(FinalBuf), ActiveBones);
         Pool.Release(FinalBuf);
         List.Reset();
         return true;

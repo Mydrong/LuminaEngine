@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include "Core/Reflection/PropertyTypeTraits.h"
 
 #include "Agent/AgentToolSchema.h"
 #include "Assets/AssetTypes/Animation/Montage/AnimationMontage.h"
@@ -166,11 +167,8 @@ TEST(AgentToolSchema, TheSameStructGeneratesTheSameSchemaTwice)
 
 namespace
 {
-    CClass* SchemaWorldClass() { return CWorld::StaticClass(); }
-    const FSoftObjectPropertyParams GSchemaStartupMap = { { "GameStartupMap", EPropertyFlags::None, EPropertyTypeFlags::SoftObject, nullptr, nullptr, 0 }, &SchemaWorldClass };
-
-    CClass* SchemaGameInstanceClass() { return CGameInstance::StaticClass(); }
-    const FClassPropertyParams GSchemaGameInstance = { { "GameInstanceClass", EPropertyFlags::None, EPropertyTypeFlags::Class, nullptr, nullptr, 0 }, &SchemaGameInstanceClass };
+    constexpr FPropertyDesc GSchemaStartupMap{ .Name = "GameStartupMap", .Type = PropertyTypeOf<TSoftObjectPtr<CWorld>> };
+    constexpr FPropertyDesc GSchemaGameInstance{ .Name = "GameInstanceClass", .Type = PropertyTypeOf<TSubclassOf<CGameInstance>> };
 }
 
 TEST(AgentToolSchema, ASoftObjectIsAStringNamingItsClass)
@@ -179,7 +177,7 @@ TEST(AgentToolSchema, ASoftObjectIsAStringNamingItsClass)
     TVector<FProperty*> Collected;
     const FPropertyOwner Owner{ &Arena, nullptr, nullptr, &Collected };
 
-    const FSchemaResult Result = GeneratePropertySchema(Owner.Build<FSoftObjectProperty>(&GSchemaStartupMap));
+    const FSchemaResult Result = GeneratePropertySchema(Owner.Build<FSoftObjectProperty>(GSchemaStartupMap));
 
     ASSERT_TRUE(Result.IsValid()) << Result.Error.c_str();
     EXPECT_EQ(Result.Schema["type"], "string");
@@ -192,7 +190,7 @@ TEST(AgentToolSchema, AClassIsAStringNamingItsBase)
     TVector<FProperty*> Collected;
     const FPropertyOwner Owner{ &Arena, nullptr, nullptr, &Collected };
 
-    const FSchemaResult Result = GeneratePropertySchema(Owner.Build<FClassProperty>(&GSchemaGameInstance));
+    const FSchemaResult Result = GeneratePropertySchema(Owner.Build<FClassProperty>(GSchemaGameInstance));
 
     ASSERT_TRUE(Result.IsValid()) << Result.Error.c_str();
     EXPECT_EQ(Result.Schema["type"], "string");

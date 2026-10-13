@@ -54,7 +54,7 @@ namespace Lumina
 
 	using FAssetDataMap = THashSet<TUniquePtr<FAssetData>, FAssetDataPtrHash, FAssetDataPtrEqual>;
 
-	// Lightweight identity record for a loose text asset (.luau/.rml/.rcss). Lives in a map entirely
+	// Lightweight identity record for a loose text asset (.rml/.rcss). Lives in a map entirely
 	// separate from FAssetData / the .lasset cook dependency graph. GUID sourced from the file's sidecar.
 	struct FTextAssetData
 	{
@@ -105,7 +105,7 @@ namespace Lumina
 		void GetAssetsByPath(TSpan<const FStringView> Paths, TSpan<const FAssetData*> OutAssets) const;
 		TVector<FAssetData*> FindByPredicate(const TFunction<bool(const FAssetData&)>& Predicate) const;
 
-		// --- Text assets (.luau/.rml/.rcss): GUID identity sourced from hidden .lmeta sidecars. ---
+		// --- Text assets (.rml/.rcss): GUID identity sourced from hidden .lmeta sidecars. ---
 
 		// Editor-only: walk content roots, read-or-mint a sidecar GUID per text file, rebuild the map.
 		// Not called in cooked runtime (the shipped registry already carries the table).

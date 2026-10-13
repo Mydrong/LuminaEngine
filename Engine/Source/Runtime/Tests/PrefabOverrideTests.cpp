@@ -19,7 +19,7 @@ namespace
 {
     CStruct* DerivedLayout()
     {
-        ProcessNewlyLoadedCObjects();
+        RegisterPendingTypes();
         return SPrefabLeafTestDerived::StaticStruct();
     }
 }
@@ -79,7 +79,7 @@ TEST(PrefabOverrideDiff, AnInheritedLeafInheritsAndOverridesCorrectly)
 // The color lives in a packed word, and a diff that saw only the type would drop every recolor.
 TEST(PrefabOverrideDiff, ACustomPrimitiveColorChangeIsAnOverride)
 {
-    ProcessNewlyLoadedCObjects();
+    RegisterPendingTypes();
     CStruct* Layout = SStaticMeshComponent::StaticStruct();
     ASSERT_NE(Layout, nullptr);
 
@@ -107,7 +107,7 @@ namespace
 {
     CPrefab* MakePrefab()
     {
-        ProcessNewlyLoadedCObjects();
+        RegisterPendingTypes();
         return NewObject<CPrefab>(nullptr, NAME_None, FGuid::New(), OF_Transient);
     }
 
@@ -207,7 +207,7 @@ namespace
 {
     CWorld* MakeWorld()
     {
-        ProcessNewlyLoadedCObjects();
+        RegisterPendingTypes();
         return NewObject<CWorld>(nullptr, NAME_None, FGuid::New(), OF_Transient);
     }
 

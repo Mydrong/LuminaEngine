@@ -6,6 +6,7 @@
 #include "Core/Object/ObjectHandleTyped.h"
 #include "Memory/SmartPtr.h"
 #include "Renderer/SkeletonResource.h"
+#include <atomic>
 #include "Skeleton.generated.h"
 
 namespace Lumina
@@ -21,6 +22,7 @@ namespace Lumina
 
     public:
         void Serialize(FArchive& Ar) override;
+        void PostPropertyChange(FProperty* ChangedProperty) override;
 
         bool IsAsset() const override { return true; }
 
@@ -35,18 +37,13 @@ namespace Lumina
         /** Bone index the named socket rides on; Constants::kIndexNone when the socket or its bone doesn't exist. */
         int32 FindSocketBoneIndex(const FName& SocketName) const;
 
+        // Bumped whenever the sockets or the bones change, so anything built around the socket bones knows to rebuild.
+        uint32 GetSocketGeneration() const { return SocketGeneration.load(std::memory_order_relaxed); }
+
+        void CollectSocketBones(TVector<int32>& OutBones) const;
+
         PROPERTY(Editable, Category = "Preview")
         TStrongObjectPtr<CSkeletalMesh> PreviewMesh;
-
-        /**
-         * Bones animated when a mesh is far away (skeleton LOD). Bones are stored parents-first, so
-         * the first N form a valid partial hierarchy; the rest hold their bind-pose local transform
-         * (attachments still follow their animated ancestors). 0 (default) disables the cut and
-         * animates every bone; author a count only after checking the skeleton's bone order puts
-         * detail bones (fingers, twists, face) last.
-         */
-        PROPERTY(Editable, Category = "LOD")
-        int32 LowDetailBoneCount = 0;
 
         /** Named attach points riding skeleton bones. */
         PROPERTY(Editable, Category = "Sockets")
@@ -54,6 +51,10 @@ namespace Lumina
 
     private:
 
+        void BumpSocketGeneration() { SocketGeneration.fetch_add(1, std::memory_order_relaxed); }
+
         TUniquePtr<FSkeletonResource> SkeletonResource;
+
+        std::atomic<uint32> SocketGeneration{ 1 };
     };
 }

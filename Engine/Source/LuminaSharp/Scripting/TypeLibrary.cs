@@ -7,11 +7,9 @@ using LuminaSharp.ScriptProperties;
 
 namespace LuminaSharp;
 
-// The managed reflection registry for one loaded script generation: indexes EntityScript types and resolves
-// any type to a cached TypeDescription. Rebuilt wholesale each (re)load, so there is no per-entry invalidation.
+// The managed reflection registry for one loaded script generation, resolving any type to a cached TypeDescription. Rebuilt on every load.
 internal sealed class TypeLibrary
 {
-    private readonly Dictionary<string, TypeDescription> EntityScripts = new();
     // C# subclasses of REFLECT(Scriptable) native CObjects, keyed by full name; the host mints a CClass per one.
     private readonly Dictionary<string, Type> Scriptables = new();
     // Types carrying a ScriptStructBase marker, keyed by StableId (the simple type name). The host mints a
@@ -36,26 +34,10 @@ internal sealed class TypeLibrary
             {
                 continue;
             }
-            string FullName = NativeTypeName.Of(Type);
-            if (!Type.IsAbstract && typeof(EntityScript).IsAssignableFrom(Type))
-            {
-                EntityScripts[FullName] = Describe(Type);
-            }
-            else if (!Type.IsAbstract && typeof(EntitySystem).IsAssignableFrom(Type))
-            {
-                ++EntitySystemCount;
-            }
-
-            // NOT an "else": the roles above describe what a type is FOR, and being a Scriptable is a
-            // separate fact about how it EXISTS -- as a CObject of a minted CClass deriving the native base.
-            // An EntityScript is both, and has been since it became a Lumina.CEntityScript: it is the mint
-            // that gives it a class to instantiate and the trailing block its [Property] members live in. As
-            // an exclusive chain this silently published no EntityScript to the minter, so no script class
-            // existed and no script property was ever appended.
             // Abstract ones too, since a subclass is minted under its C# parent and needs that class to exist.
             if (IsScriptableSubclass(Type))
             {
-                Scriptables[FullName] = Type;
+                Scriptables[NativeTypeName.Of(Type)] = Type;
             }
         }
 
@@ -89,20 +71,14 @@ internal sealed class TypeLibrary
             DataStructs[StableId] = new DataStructEntry(Describe(Type), Marker.NativeBase);
         }
 
-        // Build the alias map after all current names are known, so an alias never shadows a live type.
-        //
-        // Over every Scriptable, not just EntityScripts: the map is what tells native where a renamed script
-        // CLASS went, and any Scriptable can be minted and attached. An EntityScript is a Scriptable too, so
-        // this is a superset of what it used to walk.
+        // Built once every current name is known, so an alias never shadows a live type.
         foreach (Type Scriptable in Scriptables.Values)
         {
             string Current = NativeTypeName.Of(Scriptable);
             // Not inherited, since a subclass is not the class that used to have the name.
             foreach (AliasAttribute Alias in Scriptable.GetCustomAttributes<AliasAttribute>(inherit: false))
             {
-                if (string.IsNullOrEmpty(Alias.Name)
-                    || EntityScripts.ContainsKey(Alias.Name)
-                    || Scriptables.ContainsKey(Alias.Name))
+                if (string.IsNullOrEmpty(Alias.Name) || Scriptables.ContainsKey(Alias.Name))
                 {
                     continue;
                 }
@@ -120,9 +96,6 @@ internal sealed class TypeLibrary
     /// script classes. Native mirrors this into its class-redirect registry so a renamed class still resolves
     /// from a saved scene and so a hot reload can move live instances onto the new class.</summary>
     public IEnumerable<KeyValuePair<string, string>> ClassAliases => ScriptAliases;
-
-    /// <summary>Full type names of every EntityScript (for the editor's script-picker dropdown).</summary>
-    public IReadOnlyCollection<string> EntityScriptTypeNames => EntityScripts.Keys;
 
     /// <summary>Full type names of every discovered Scriptable C# subclass.</summary>
     public IReadOnlyCollection<string> ScriptableTypeNames => Scriptables.Keys;
@@ -153,12 +126,25 @@ internal sealed class TypeLibrary
     {
         for (Type? Base = Type.BaseType; Base != null; Base = Base.BaseType)
         {
-            if (Scriptables.ContainsKey(NativeTypeName.Of(Base)) && Scriptables[NativeTypeName.Of(Base)] == Base)
+            if (IsMinted(Base))
             {
                 return Base;
             }
         }
         return null;
+    }
+
+    private bool IsMinted(Type Type) => Scriptables.TryGetValue(NativeTypeName.Of(Type), out Type? Minted) && Minted == Type;
+
+    // Type and the engine C# classes above it that native never mints, whose declarations the minted class carries for them.
+    public IEnumerable<Type> ChainUpToMintedParent(Type Type)
+    {
+        yield return Type;
+        for (Type? Base = Type.BaseType; Base != null && !IsMinted(Base) && !Base.IsDefined(typeof(NativeTypeAttribute), inherit: false);
+             Base = Base.BaseType)
+        {
+            yield return Base;
+        }
     }
 
     // A generated wrapper of a native class, a game module's included, names that class and is never minted.
@@ -178,30 +164,9 @@ internal sealed class TypeLibrary
         return false;
     }
 
-    // Discovery is the native class walk, so this only feeds the scripting diagnostics report.
-    public int EntitySystemCount { get; private set; }
-
-    /// <summary>The description for an EntityScript by full name, falling back through class aliases.</summary>
-    public TypeDescription? GetEntityScript(string FullName)
-    {
-        if (EntityScripts.TryGetValue(FullName, out TypeDescription? Description))
-        {
-            return Description;
-        }
-        if (ScriptAliases.TryGetValue(FullName, out string? Current))
-        {
-            return EntityScripts.TryGetValue(Current, out Description) ? Description : null;
-        }
-        return null;
-    }
-
-    // Any minted class's description, not only an EntityScript's, so a C# save game or subsystem gets its properties too.
+    // Any minted class's description, through class aliases, so a renamed script still finds its properties.
     public TypeDescription? GetMintedClass(string FullName)
     {
-        if (GetEntityScript(FullName) is { } Script)
-        {
-            return Script;
-        }
         string Name = ScriptAliases.TryGetValue(FullName, out string? Current) ? Current : FullName;
         return GetScriptable(Name) is { } Type ? Describe(Type) : null;
     }
@@ -947,7 +912,7 @@ internal sealed class TypeDescription
     /// <summary>Gives a script that declares input bindings the component that feeds them, so declaring an
     /// SInputAction field is enough on its own. Idempotent, so a script
     /// that also calls EnableInput() is unaffected.</summary>
-    public void EnsureInputComponent(EntityScript Script)
+    public void EnsureInputComponent(Lumina.CEntityScript Script)
     {
         if (InputBindings.Count > 0)
         {
@@ -956,7 +921,7 @@ internal sealed class TypeDescription
     }
 
     /// <summary>Hands one action's state to each of the instance's bindings that listens to it.</summary>
-    public void DispatchAction(EntityScript Script, Lumina.FName Action, in Lumina.FInputActionState State)
+    public void DispatchAction(Lumina.CEntityScript Script, Lumina.FName Action, in Lumina.FInputActionState State)
     {
         foreach (ScriptProperty Property in InputBindings)
         {

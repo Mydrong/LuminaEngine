@@ -16,7 +16,7 @@ internal struct UIArg
     public int Len;
 }
 
-// Binds a ViewModel's or UIScript's [Bind] members to a named RmlUi data model, comparing them once a frame so plain assignments reach the view.
+// Binds a ViewModel's or CUIScript's [Bind] members to a named RmlUi data model, comparing them once a frame so plain assignments reach the view.
 public sealed unsafe class UIDataModel : IDisposable
 {
     // Game-thread only, so a plain dictionary is fine. Lets World.UI.GetModel re-fetch a model by name.
@@ -77,7 +77,7 @@ public sealed unsafe class UIDataModel : IDisposable
 
     public string Name => _name;
 
-    // The view-model this binding drives, or null when the target is a UIScript.
+    // The view-model this binding drives, or null when the target is a CUIScript.
     public ViewModel? ViewModel => _target as ViewModel;
 
     public object Target => _target;
@@ -330,15 +330,15 @@ public sealed unsafe class UIDataModel : IDisposable
         }
     }
 
-    // A UIScript's handlers run inside its own script context, the same as its other callbacks.
+    // A CUIScript's handlers run inside its own script context, the same as its other callbacks.
     private Engine.Scope EnterTarget()
     {
-        return _target is EntityScript Script && !Script.Entity.IsNull ? Engine.Push(Script.World, Script.Entity, Script) : Engine.Snapshot();
+        return _target is Lumina.CEntityScript Script && !Script.Entity.IsNull ? Engine.Push(Script.World, Script.Entity, Script) : Engine.Snapshot();
     }
 
     private void Report(string Member, Exception Exception)
     {
-        if (_target is EntityScript)
+        if (_target is Lumina.CEntityScript)
         {
             NativeBindings.ScriptEventException(_target, Member, Exception);
         }

@@ -18,7 +18,7 @@ namespace Lumina
         void BuildNode() override;
         void GenerateBytecode(FAnimationGraphCompiler& Compiler) override;
 
-        /** Name of the parameter to read; must match the name set from Lua / the editor. */
+        /** Name of the parameter to read; must match the name set from a script or the editor. */
         PROPERTY(Editable, Category = "Parameter", Picker = "Parameter")
         FName ParameterName;
 

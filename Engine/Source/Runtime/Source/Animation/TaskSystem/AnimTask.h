@@ -209,6 +209,10 @@ namespace Lumina
         // at bind-pose locals; FK still runs the full hierarchy so skinning and attachments stay valid.
         int32 ActiveBoneCount = 0;
 
+        // Set when poses evaluate in a bone LOD order other than the asset's; task bones and RootBoneIndex stay asset indices.
+        const int32* PoseToAsset = nullptr;
+        const int32* AssetToPose = nullptr;
+
         bool HasWork() const { return OutputTask != FAnimTask::NoTask; }
 
         int16 Add(const FAnimTask& Task)
@@ -225,6 +229,8 @@ namespace Lumina
             bLockRoot       = false;
             RootBoneIndex   = Constants::kIndexNone;
             ActiveBoneCount = 0;
+            PoseToAsset     = nullptr;
+            AssetToPose     = nullptr;
         }
     };
 

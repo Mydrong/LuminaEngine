@@ -57,6 +57,9 @@ namespace Lumina
         // the update-rate interval. 0 (never rendered) evaluates at full rate. Transient.
         float LastDistanceOverRadius = 0.0f;
 
+        // Mesh-local error the camera tolerates at this mesh, stamped by the render gather; 0 animates every bone. Transient.
+        float LastBoneLODTolerance = 0.0f;
+
         // Animation time accrued while update-rate optimization skipped evaluation; consumed as one
         // larger step on the next evaluated frame. Transient.
         float PendingAnimTime = 0.0f;
@@ -69,6 +72,9 @@ namespace Lumina
         // World time the render gather last kept this mesh through culling; animation systems read it
         // to gate off-screen pose evaluation. -1 until first rendered. Transient, never serialized.
         double LastRenderedTime = -1.0;
+
+        // Latest LastRenderedTime among the meshes following this one, so a hidden leader still animates them. Transient.
+        double FollowerRenderedTime = -1.0;
         
         /** Mirrors SStaticMeshComponent::SetStaticMesh. Assigning the field directly skips
          *  InvalidateRenderResolve, and the retained render scene only re-reads primitives that report a

@@ -1,4 +1,4 @@
-﻿#include <clang/AST/Type.h>
+#include <clang/AST/Type.h>
 #include <clang-c/CXString.h>
 #include <clang-c/Index.h>
 #include <optional>
@@ -115,6 +115,7 @@ namespace Lumina::Reflection::Visitor
 		Property->TypeName = Alias->find("::") == std::string::npos
 			? std::string("Lumina::") + *Alias
 			: *Alias;
+		Property->ReflectedAsType = Property->TypeName;
 	}
 
 	static void EnsureTemplateInstantiationReflected(FClangParserContext* Context, const FReflectedTemplate& Template,
@@ -247,16 +248,6 @@ namespace Lumina::Reflection::Visitor
 			default: break;
 		}
 		
-		if (clang_isPODType(FieldType))
-		{
-			Info.PropertyFlags |= EPropertyFlags::Trivial;
-		}
-		
-		if (FieldType.kind >= CXType_FirstBuiltin && FieldType.kind <= CXType_LastBuiltin)
-		{
-			Info.PropertyFlags |= EPropertyFlags::Builtin;
-		}
-		
 		Info.Flags			= PropFlags;
 		Info.Type			= FieldType;
 		Info.OwningCursor	= Cursor;
@@ -332,16 +323,6 @@ namespace Lumina::Reflection::Visitor
 			Info.PropertyFlags |= EPropertyFlags::Const;
 		}
 		
-		if (clang_isPODType(FieldType))
-		{
-			Info.PropertyFlags |= EPropertyFlags::Trivial;
-		}
-		
-		if (FieldType.kind >= CXType_FirstBuiltin && FieldType.kind <= CXType_LastBuiltin)
-		{
-			Info.PropertyFlags |= EPropertyFlags::Builtin;
-		}
-		
 		Info.Flags			= PropFlags;
 		Info.Type			= FieldType;
 		Info.Name			= "None";
@@ -393,16 +374,6 @@ namespace Lumina::Reflection::Visitor
 		if (clang_isConstQualifiedType(FieldType))
 		{
 			Info.PropertyFlags |= EPropertyFlags::Const;
-		}
-		
-		if (clang_isPODType(FieldType))
-		{
-			Info.PropertyFlags |= EPropertyFlags::Trivial;
-		}
-		
-		if (FieldType.kind >= CXType_FirstBuiltin && FieldType.kind <= CXType_LastBuiltin)
-		{
-			Info.PropertyFlags |= EPropertyFlags::Builtin;
 		}
 		
 		Info.Flags			= PropFlags;
@@ -521,7 +492,6 @@ namespace Lumina::Reflection::Visitor
 				}
 
 				SubType->Name = FieldInfo.Name + "_Inner";
-				SubType->PropertyFlags |= EPropertyFlags::SubField;
 
 				FReflectedProperty* FieldProperty;
 				CreatePropertyForType(Context, Struct, FieldProperty, SubType.value());
@@ -552,7 +522,7 @@ namespace Lumina::Reflection::Visitor
 		break;
 		case EPropertyTypeFlags::Class:
 		{
-			// Reflect against the base-class filter T so the emitted Construct_CClass_<T>() symbol resolves.
+			// The base-class filter T is what the property links against.
 			const CXType ArgType = clang_Type_getTemplateArgumentAsType(FieldInfo.Type, 0);
 			std::optional<FFieldInfo> ParamFieldInfo;
 			if (ArgType.kind != CXType_Invalid)
@@ -572,7 +542,7 @@ namespace Lumina::Reflection::Visitor
 		break;
 		case EPropertyTypeFlags::SubStruct:
 		{
-			// TSubStructOf<T> reflects against the base-struct filter T for Construct_CStruct_<T>().
+			// TSubStructOf<T> links against its base-struct filter T.
 			const CXType ArgType = clang_Type_getTemplateArgumentAsType(FieldInfo.Type, 0);
 			std::optional<FFieldInfo> ParamFieldInfo;
 			if (ArgType.kind != CXType_Invalid)
@@ -605,8 +575,6 @@ namespace Lumina::Reflection::Visitor
 			}
 
 			ParamFieldInfo->Name = FieldInfo.Name;
-			// FInstancedStruct owns heap memory, so its POD-ness must never leak onto the owning property.
-			ParamFieldInfo->PropertyFlags &= ~EPropertyFlags::Trivial;
 
 			NewProperty = CreateProperty<FReflectedInstancedStructProperty>(ParamFieldInfo.value());
 		}
@@ -622,7 +590,7 @@ namespace Lumina::Reflection::Visitor
 			}
 			if (!ParamFieldInfo.has_value())
 			{
-				// Reflect a bare FSoftObjectPath against CObject so the emitted Construct_CClass_<T>() resolves.
+				// A bare FSoftObjectPath links against CObject.
 				ParamFieldInfo = FieldInfo;
 				ParamFieldInfo->TypeName = "Lumina::CObject";
 			}
@@ -644,7 +612,6 @@ namespace Lumina::Reflection::Visitor
 			}
 
 			ParamFieldInfo->Name = FieldInfo.Name + "_Inner";
-			ParamFieldInfo->PropertyFlags |= EPropertyFlags::SubField;
 
 			FReflectedProperty* FieldProperty;
 			CreatePropertyForType(Context, Struct, FieldProperty, ParamFieldInfo.value());
@@ -685,11 +652,8 @@ namespace Lumina::Reflection::Visitor
 			}
 
 			KeyInfo->Name = FieldInfo.Name + "_KeyInner";
-			KeyInfo->PropertyFlags |= EPropertyFlags::SubField;
 			ValueInfo->Name = FieldInfo.Name + "_ValueInner";
-			ValueInfo->PropertyFlags |= EPropertyFlags::SubField;
 
-			// Value inner first so Props ends up [Value, Key, Map], matching how the runtime walks it backward.
 			FReflectedProperty* ValueProperty = nullptr;
 			CreatePropertyForType(Context, Struct, ValueProperty, ValueInfo.value());
 			FReflectedProperty* KeyProperty = nullptr;
@@ -723,7 +687,6 @@ namespace Lumina::Reflection::Visitor
 			}
 
 			ParamFieldInfo->Name = FieldInfo.Name + "_Inner";
-			ParamFieldInfo->PropertyFlags |= EPropertyFlags::SubField;
 
 			FReflectedProperty* FieldProperty;
 			CreatePropertyForType(Context, Struct, FieldProperty, ParamFieldInfo.value());
@@ -763,31 +726,15 @@ namespace Lumina::Reflection::Visitor
 				}
 
 				ArgFieldInfo->Name = FieldInfo.Name + "_Arg" + std::to_string(ArgFields.size());
-				ArgFieldInfo->PropertyFlags |= EPropertyFlags::SubField;
 				ArgFields.push_back(std::move(ArgFieldInfo.value()));
 			}
 
-			// Spelled from the resolved field types, so the generated file sees fully qualified names.
-			std::string PackType = "Lumina::TArgPack<";
-			for (size_t Index = 0; Index < ArgFields.size(); ++Index)
-			{
-				PackType += (Index == 0 ? "" : ", ") + ArgFields[Index].TypeName;
-			}
-			PackType += ">";
-
 			auto DelegateProperty = CreateProperty<FReflectedDelegateProperty>(FieldInfo);
-			DelegateProperty->NumArgs = (uint16_t)ArgFields.size();
-			for (const FFieldInfo& Arg : ArgFields)
+			for (size_t ArgIndex = 0; ArgIndex < ArgFields.size(); ++ArgIndex)
 			{
-				DelegateProperty->ArgTypeNames.push_back(Arg.TypeName);
-			}
+				DelegateProperty->ArgTypeNames.push_back(ArgFields[ArgIndex].TypeName);
 
-			// Pushed in reverse, because ConstructProperties walks the emitted array backwards from the
-			// delegate and must reach the arguments in declaration order.
-			for (size_t Reverse = ArgFields.size(); Reverse > 0; --Reverse)
-			{
-				const size_t ArgIndex = Reverse - 1;
-
+				// Built only to prove the argument is reflectable, since the delegate's trait describes it.
 				FReflectedProperty* ArgProperty;
 				if (!CreatePropertyForType(Context, Struct, ArgProperty, ArgFields[ArgIndex]) || ArgProperty == nullptr)
 				{
@@ -798,8 +745,6 @@ namespace Lumina::Reflection::Visitor
 				}
 
 				ArgProperty->bInner = true;
-				// A constant on the pack, because offsetof is a macro and the pack spelling contains commas.
-				ArgProperty->OffsetExpr = "(Lumina::uint16)" + PackType + "::Off" + std::to_string(ArgIndex) + "()";
 			}
 
 			NewProperty = std::move(DelegateProperty);
@@ -934,6 +879,12 @@ namespace Lumina::Reflection::Visitor
 			const CXTypeKind Kind = clang_getCanonicalType(Info.Type).kind;
 			const bool bIsRvalueReference = (Kind == CXType_RValueReference);
 
+			// A raw pointer to anything but an object is a buffer, which no property can describe.
+			if (Kind == CXType_Pointer && Info.Flags != EPropertyTypeFlags::Object)
+			{
+				return false;
+			}
+
 			const CXType Stored = clang_getUnqualifiedType(clang_getNonReferenceType(Info.Type));
 			std::string StorageType = ClangUtils::GetSafeTypeAsString(Stored);
 			if (StorageType.empty() || ClangUtils::IsLibclangPlaceholderName(StorageType))
@@ -941,10 +892,7 @@ namespace Lumina::Reflection::Visitor
 				return false;
 			}
 
-			// FObjectProperty sizes itself as TStrongObjectPtr<CObject> and its copy and teardown go through the
-			// handle to keep the refcount straight, so the frame has to hold one too. Spelled against
-			// CObject rather than the declared class, whose definition a generated file need not have, and
-			// the thunk casts on the way out. The handle also keeps the object alive across the call.
+			// A handle keeps the object alive across the call, and TFrameObject keeps the class for the trait without needing its definition.
 			std::string ObjectCastType;
 			if (Info.Flags == EPropertyTypeFlags::Object)
 			{
@@ -955,7 +903,7 @@ namespace Lumina::Reflection::Visitor
 				}
 
 				ObjectCastType = StorageType;
-				StorageType = "Lumina::TStrongObjectPtr<Lumina::CObject>";
+				StorageType = "Lumina::TFrameObject<" + ClangUtils::GetSafeTypeAsString(clang_getUnqualifiedType(Pointee)) + ">";
 			}
 
 			// Described as what the frame stores, not as the signature spelled it. A TVector<float> reaches
@@ -988,17 +936,6 @@ namespace Lumina::Reflection::Visitor
 			// a frame member; an inner is described by its owner and emits offset 0.
 			Taken.back()->Name  = MemberName;
 			Taken.back()->Outer = ParmsStruct;
-
-			// A container's accessor wrappers are members of the owning type for a member property. A
-			// parameter has no type to be scoped by, so they become free functions beside the frame and take
-			// their uniqueness from the function and the position rather than from the parameter's name.
-			Taken.back()->AccessorBaseName = Names::FunctionParamsStatic(Function.Name) + "_P"
-				+ std::to_string(Function.TopLevelParams.size());
-
-			// Defined beside the frame, so inside the type's namespace, and referenced from the property
-			// definitions at file scope, so named through it there.
-			Taken.back()->AccessorScope = Struct->Namespace.empty() ? std::string() : (Struct->Namespace + "::");
-			Taken.back()->AccessorDefinitionScope.clear();
 
 			FReflectedProperty* TopLevel = Taken.back().get();
 			for (auto& Entry : Taken)
@@ -1101,11 +1038,10 @@ namespace Lumina::Reflection::Visitor
 		return NewFunction != nullptr;
 	}
 
-	static void ReflectField(FClangParserContext* Context, FReflectedStruct* Struct, const CXCursor& Cursor,
-	                         const FReflectedHeader* MacroHeader, bool bConsumeMacro)
+	static void ReflectField(FClangParserContext* Context, FReflectedStruct* Struct, const CXCursor& Cursor)
 	{
-		FReflectionMacro Macro;
-		if (!Context->TryFindMacroForCursor(MacroHeader, Cursor, Macro, bConsumeMacro))
+		std::string Specifiers;
+		if (!ClangUtils::TryGetAnnotation(Cursor, "lumina.property:", Specifiers))
 		{
 			// Data the reflector cannot see, so the C# emitter must not mirror this type by value.
 			Struct->bHasUnreflectedFields |= !Context->bInAnonymousRecord;
@@ -1124,7 +1060,7 @@ namespace Lumina::Reflection::Visitor
 			return;
 		}
 
-		NewProperty->GenerateMetadata(Macro.MacroContents);
+		NewProperty->GenerateMetadata(Specifiers);
 		ValidateSpecifiers(Cursor, ESpecifierTarget::Property, NewProperty->Metadata);
 		ApplyReflectAsOverride(Context, Struct, NewProperty, Cursor);
 
@@ -1155,8 +1091,7 @@ namespace Lumina::Reflection::Visitor
 			return CXVisit_Continue;
 		}
 
-		ReflectField(Context, Context->GetParentReflectedType<FReflectedStruct>(), Cursor,
-			Context->AliasTargetMacroHeader, false);
+		ReflectField(Context, Context->GetParentReflectedType<FReflectedStruct>(), Cursor);
 
 		return CXVisit_Continue;
 	}
@@ -1183,20 +1118,14 @@ namespace Lumina::Reflection::Visitor
 		Context->ReflectionDatabase.AddReflectedType(ReflectedStruct);
 
 		FReflectedType* PreviousType = Context->ParentReflectedType;
-		const FReflectedHeader* PreviousMacroHeader = Context->AliasTargetMacroHeader;
-		const bool bWasWalkingAliasTarget = Context->bWalkingAliasTarget;
 		const bool bWasInAnonymousRecord = Context->bInAnonymousRecord;
 
 		Context->ParentReflectedType = ReflectedStruct;
-		Context->AliasTargetMacroHeader = Template.Header;
-		Context->bWalkingAliasTarget = true;
 		Context->bInAnonymousRecord = false;
 
 		clang_Type_visitFields(Instantiation, VisitAliasField, Context);
 
 		Context->bInAnonymousRecord = bWasInAnonymousRecord;
-		Context->bWalkingAliasTarget = bWasWalkingAliasTarget;
-		Context->AliasTargetMacroHeader = PreviousMacroHeader;
 		Context->ParentReflectedType = PreviousType;
 	}
 
@@ -1206,11 +1135,6 @@ namespace Lumina::Reflection::Visitor
 		FClangParserContext* Context = (FClangParserContext*)pClientData;
 		CXCursorKind Kind = clang_getCursorKind(Cursor);
 		TVisitType* Type = Context->GetParentReflectedType<TVisitType>();
-
-		const bool bWalkingAliasTarget = Context->bWalkingAliasTarget;
-		const FReflectedHeader* MacroHeader = bWalkingAliasTarget
-			? Context->AliasTargetMacroHeader
-			: Context->ReflectedHeader;
 
 		switch (Kind)
 		{
@@ -1239,20 +1163,20 @@ namespace Lumina::Reflection::Visitor
 		break;
 		case(CXCursor_FieldDecl):
 		{
-			ReflectField(Context, Type, Cursor, MacroHeader, !bWalkingAliasTarget);
+			ReflectField(Context, Type, Cursor);
 		}
 		break;
 		case(CXCursor_CXXMethod):
 		{
-			FReflectionMacro Macro;
-			if (!Context->TryFindMacroForCursor(MacroHeader, Cursor, Macro, !bWalkingAliasTarget))
+			std::string Specifiers;
+			if (!ClangUtils::TryGetAnnotation(Cursor, "lumina.function:", Specifiers))
 			{
 				return CXChildVisit_Continue;
 			}
 
 			FReflectedFunction* NewFunction;
 			CreateFunctionForType(Cursor, Context, Type, NewFunction);
-			NewFunction->GenerateMetadata(Macro.MacroContents);
+			NewFunction->GenerateMetadata(Specifiers);
 			ValidateSpecifiers(Cursor, ESpecifierTarget::Function, NewFunction->Metadata);
 
 			std::string Comment = GetCursorComment(Cursor);
@@ -1395,13 +1319,9 @@ namespace Lumina::Reflection::Visitor
 		FReflectedType* PreviousType = Context->ParentReflectedType;
 		Context->ParentReflectedType = ReflectedStruct;
 		Context->LastReflectedType = ReflectedStruct;
-		Context->AliasTargetMacroHeader = Context->ResolveHeaderForFile(TargetFile);
-		Context->bWalkingAliasTarget = true;
 
 		clang_Type_visitFields(Target, VisitAliasField, Context);
 
-		Context->bWalkingAliasTarget = false;
-		Context->AliasTargetMacroHeader = nullptr;
 		Context->ParentReflectedType = PreviousType;
 
 		// A hand-written C# mirror is marshalled by value and never walked, so it needs no member list.
@@ -1499,15 +1419,9 @@ namespace Lumina::Reflection::Visitor
 	// A namespace-scope SCRIPT_EXPORT free function, registered under the header with no owning type.
 	CXChildVisitResult VisitFunction(CXCursor Cursor, CXCursor Parent, FClangParserContext* Context)
 	{
-		FReflectionMacro Macro;
-		if (!Context->TryFindMacroForCursor(Context->ReflectedHeader, Cursor, Macro))
+		std::string Specifiers;
+		if (!ClangUtils::TryGetAnnotation(Cursor, "lumina.export:", Specifiers))
 		{
-			return CXChildVisit_Continue;
-		}
-		if (Macro.Type != EReflectionMacro::ScriptExport)
-		{
-			// Not ours (a stray REFLECT/FUNCTION above an unrelated free function); put it back for its owner.
-			Context->AddReflectedMacro(std::move(Macro));
 			return CXChildVisit_Continue;
 		}
 
@@ -1525,7 +1439,7 @@ namespace Lumina::Reflection::Visitor
 		}
 		NewFunction->QualifiedName = Qualified;
 
-		NewFunction->GenerateMetadata(Macro.MacroContents);
+		NewFunction->GenerateMetadata(Specifiers);
 		ValidateSpecifiers(Cursor, ESpecifierTarget::ScriptExport, NewFunction->Metadata);
 		for (const FMetadataPair& Meta : NewFunction->Metadata)
 		{

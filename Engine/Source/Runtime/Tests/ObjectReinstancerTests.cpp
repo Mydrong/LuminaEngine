@@ -38,7 +38,7 @@ namespace
             return nullptr;
         }
         Scripting::AppendScriptPropertiesToClass(Minted, Schema);
-        ProcessNewlyLoadedCObjects();
+        RegisterPendingTypes();
         Minted->GetDefaultObject();
         return Minted;
     }

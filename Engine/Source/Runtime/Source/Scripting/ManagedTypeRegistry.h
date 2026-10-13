@@ -37,9 +37,6 @@ namespace Lumina::Scripting
         FString             NativeBaseName;
         bool                bAbstract = false;
         TVector<FString>    OverriddenEvents;
-        uint8               UpdatePhase = 0;
-        bool                bParallelUpdate = false;
-        uint8               NetRealm = 0;
         TVector<std::pair<FString, FString>> ClassMeta;
     };
 

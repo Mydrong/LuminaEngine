@@ -1,4 +1,4 @@
-﻿#include "EditorPCH.h"
+#include "EditorPCH.h"
 #include "EditorAssetActions.h"
 
 #include "EditorToolContext.h"
@@ -151,7 +151,7 @@ namespace Lumina
                 {
                     for (FProperty* Current : Class->GetProperties())
                     {
-                        if (Current->HasMetadata("DuplicateTransient"))
+                        if (Current->IsDuplicateTransient())
                         {
                             Current->CopyCompleteValue_InContainer(Copy, Defaults);
                         }

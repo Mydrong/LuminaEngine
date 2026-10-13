@@ -367,7 +367,7 @@ namespace Lumina
 
     void CAnimationGraphNodeGraph::CompileGraph(FAnimationGraphCompiler& Compiler)
     {
-        // Collect parameters before topo-sort; unconnected Get Parameter nodes would otherwise be invisible to Lua SetFloat().
+        // Collect parameters before topo-sort; unconnected Get Parameter nodes would otherwise be invisible to SetFloat().
         CollectAllParameters(Compiler);
 
         uint16 ResultRegister = 0;

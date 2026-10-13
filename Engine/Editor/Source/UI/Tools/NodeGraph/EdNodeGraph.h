@@ -16,6 +16,7 @@
 namespace Lumina
 {
     class CEdGraphNode;
+    class CEdNode_Comment;
     class CPackage;
     class FTransactionManager;
 }
@@ -87,6 +88,12 @@ namespace Lumina
 
         // A load rebuilds every node through AddNode, which is not a content change.
         void NotifyContentChanged() { if (!bIsPostLoading) { ++ContentVersion; } }
+
+        // An edit worth an undo step that leaves the compiled result alone, such as recoloring a comment.
+        void NotifyCosmeticChange() { bLayoutChangedSinceImage = true; }
+
+        // Spawns a comment around the selected nodes, or at the mouse with nothing selected. Must run inside DrawGraph.
+        CEdNode_Comment* WrapSelectionInComment();
 
         // Sums this graph with every sub-graph under it, so an edit inside a state's blend tree counts.
         NODISCARD uint64 GetTreeContentVersion() const;
@@ -280,6 +287,21 @@ namespace Lumina
         // Compact reroute renderer (single dot, no header).
         void DrawRerouteNode(CEdGraphNode* Node);
 
+        // A comment is a node editor group, so it draws behind the graph and its title bar drags what it contains.
+        void DrawCommentNode(CEdNode_Comment* Comment);
+
+        // Restates each comment's title in screen space once the canvas is zoomed out too far to read it.
+        void DrawCommentHints();
+
+        // Pushes a node's stored position, and a comment's stored size, into the canvas.
+        void ApplyNodeLayoutToCanvas(CEdGraphNode* Node);
+
+        // C wraps the selection in a comment. Must run inside DrawGraph's suspended region.
+        void HandleCommentShortcut();
+
+        // Opens the rename box for Node on the next frame, when it has a renamable name.
+        void BeginRenameNode(CEdGraphNode* Node);
+
         // Draws a pin's live debug value inline in the pin row when the debug context supplies one.
         void DrawPinDebugValue(CEdNodeGraphPin* Pin);
 
@@ -335,6 +357,9 @@ namespace Lumina
 
         // Set while PostLoad rebuilds, so AddNode does not reconcile against links that are not back yet.
         bool           bIsPostLoading = false;
+
+        // Set when C goes down over a selection and cleared by a click, so C plus a click stays a quick-place.
+        bool           bCommentKeyArmed = false;
 
         // F2 rename box, opened a frame after the key since the popup lives in the suspended region.
         bool           bOpenRenamePopup = false;

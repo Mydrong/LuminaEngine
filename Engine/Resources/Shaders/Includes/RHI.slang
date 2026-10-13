@@ -14,6 +14,7 @@ module RHI;
 [[vk::binding(1, 0)]] internal TextureCubeArray                        TextureCubeArrayHeap[];
 
 [[vk::binding(2, 0)]] internal RWTexture2D<float4>                     RWTexture2DHeap[];
+[[vk::binding(2, 0)]] internal RWTexture2D<uint>                       RWTexture2DUIntHeap[];
 [[vk::binding(2, 0)]] internal globallycoherent RWTexture2D<float4>    RWTexture2DCoherentHeap[];
 [[vk::binding(2, 0)]] internal RWTexture3D<float4>                     RWTexture3DHeap[];
 // Cube storage views are illegal in Vulkan, so cube targets are registered as 2D arrays and written by face.
@@ -244,6 +245,20 @@ public struct FRWTexture2D
     }
 
     public void GetDimensions(out uint Width, out uint Height) { RWTexture2DHeap[NonUniformResourceIndex(Index)].GetDimensions(Width, Height); }
+}
+
+// An integer view of the storage heap, for R16_UINT and R32_UINT targets.
+public struct FRWTexture2DUInt
+{
+    public uint Index;
+    public __init(uint InIndex) { Index = InIndex; }
+    public bool IsValid() { return Index != kInvalidResourceIndex; }
+
+    public __subscript(uint2 Texel) -> uint
+    {
+        get { return RWTexture2DUIntHeap[NonUniformResourceIndex(Index)][Texel]; }
+        [nonmutating] set { RWTexture2DUIntHeap[NonUniformResourceIndex(Index)][Texel] = newValue; }
+    }
 }
 
 // Coherent across workgroups, for single-pass reductions that hand results from one group to the next.

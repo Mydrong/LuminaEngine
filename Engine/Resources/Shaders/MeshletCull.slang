@@ -1,6 +1,7 @@
 #include "Includes/AppendBuffer.slang"
 #include "Includes/MeshletCullCore.slang"
 #include "Includes/MeshletGeometry.slang"
+#include "Includes/ShadowReceiver.slang"
 
 // The early phase replays last frame's visible meshlets and the late phase tests the rest against this frame's pyramid.
 
@@ -14,7 +15,10 @@ struct FMeshletCullArgs
     uint            VisibilityTag;
     // Matches the block build, so the late phase reads the back region only when the build put blocks there.
     uint            bSplitPhases;
-    uint            _Pad0;
+    // 1 keeps near cascades out of this dispatch, 2 culls only them, against ReceiverMask once the frame's depth is final.
+    uint            bDeferCascades;
+    uint            ReceiverMaskDim;
+    int             SunShadowDataIndex;
 
     GPUSpan<FRenderBucket> Buckets;
     GPUSpan<FMeshletBlock> BlockList;
@@ -24,6 +28,7 @@ struct FMeshletCullArgs
     GPUSpan<uint>          OutVisibility;
     // One word per block of an instance's camera LOD. Both phases read it, and only the late phase replaces it.
     GPUSpan<uint>          MeshletVisibility;
+    GPUSpan<uint>          ReceiverMask;
 };
 FMeshletCullArgs* Pass() { return GetPassArgs<FMeshletCullArgs>(); }
 
@@ -49,6 +54,12 @@ uint FindBucketForWork(uint WorkIndex, uint NumBuckets)
         }
     }
     return Lo;
+}
+
+// The receiver test against this pass's mask, which only the cascade phase binds.
+bool IsShadowUnreceived(uint CascadeIndex, float3 Center, float Radius)
+{
+    return IsShadowUnreceived(Pass().ReceiverMask, Pass().ReceiverMaskDim, Pass().SunShadowDataIndex, CascadeIndex, Center, Radius);
 }
 
 [shader("compute")]
@@ -90,8 +101,10 @@ void ComputeMain(uint3 GroupID : SV_GroupID, uint ThreadID : SV_GroupIndex)
     const FCullView View  = CullViews().GetAligned((ArgIdx / NumDraws));
     const bool bTwoPhase  = View.HasFlag(CULL_VIEW_FLAG_MESHLET_HIZ);
 
-    // Single-phase views belong to the early dispatch, and both dispatches share the bucket, so the late one skips them.
-    const bool bHasWork = bBlockInRange && (!bLate || bTwoPhase);
+    // Single-phase views belong to the early dispatch, except near cascades waiting on this frame's receiver mask.
+    const bool bDeferredCascade = Pass().bDeferCascades != 0u && View.HasFlag(CULL_VIEW_FLAG_CASCADE) && !View.HasFlag(CULL_VIEW_FLAG_FAR_CASCADE);
+    const bool bCascadePhase    = Pass().bDeferCascades == 2u;
+    const bool bHasWork = bBlockInRange && (bCascadePhase ? bDeferredCascade : (!bDeferredCascade && (!bLate || bTwoPhase)));
 
     // Workgroup-uniform branch, so blocks the builder never filled are never read.
     const FMeshletBlock Block = bHasWork ? Pass().BlockList.Get(BlockIdx) : (FMeshletBlock)0;
@@ -100,6 +113,7 @@ void ComputeMain(uint3 GroupID : SV_GroupID, uint ThreadID : SV_GroupIndex)
 
     // TestMeshletAgainstView bounds every read by the header's own count.
     FGPUInstance* Inst = Instances() + InstanceID;
+
 
     // Workgroup-uniform once the block is loaded, so both the load and the branches below are uniform.
     uint RetainedSlot = 0u;
@@ -156,7 +170,11 @@ void ComputeMain(uint3 GroupID : SV_GroupID, uint ThreadID : SV_GroupIndex)
         FMeshletBoundsCache Cache     = MakeMeshletBoundsCache();
 
         // No Hi-Z in the early replay, since the late phase never re-emits what the early phase drew.
-        const bool bVisible = TestMeshletAgainstView(Ctx, View, MeshletIdx, Cache, bLate);
+        bool bVisible = TestMeshletAgainstView(Ctx, View, MeshletIdx, Cache, bLate);
+        if (bVisible && bDeferredCascade && Ctx.bPosedBounds)
+        {
+            bVisible = !IsShadowUnreceived(View.CascadeIndex, Cache.WorldCenter, Cache.WorldRadius);
+        }
 
         bKeep = bKeep && bVisible;
         bLaneVisible = bVisible;

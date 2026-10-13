@@ -211,7 +211,7 @@ internal static class ScriptCompiler
     }
 
     // CS0234 names the missing member, never the shadowing namespace that actually caused it.
-    // An [Element] field is filled when its UIScript's document loads, so "never assigned" is wrong about it.
+    // An [Element] field is filled when its CUIScript's document loads, so "never assigned" is wrong about it.
     private static bool IsAssignedByEngine(Diagnostic Diagnostic)
     {
         if (Diagnostic.Id != "CS0649" || Diagnostic.Location.SourceTree is not { } Tree)

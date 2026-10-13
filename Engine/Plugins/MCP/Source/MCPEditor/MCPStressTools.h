@@ -67,6 +67,14 @@ namespace Lumina
         PROPERTY()
         int32 Movers = 0;
 
+        // Particle system entities, each taking the next asset from ParticleSystems in turn.
+        PROPERTY()
+        int32 Particles = 0;
+
+        // Particle system asset GUIDs or paths separated by commas.
+        PROPERTY()
+        FString ParticleSystems;
+
         // The same seed places everything the same way, so a before and after compare the same scene.
         PROPERTY()
         int32 Seed = 1;
@@ -106,6 +114,9 @@ namespace Lumina
 
         PROPERTY()
         int32 Movers = 0;
+
+        PROPERTY()
+        int32 Particles = 0;
 
         // Every stress entity now in that world, including ones from earlier calls.
         PROPERTY()

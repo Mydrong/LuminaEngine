@@ -1,4 +1,4 @@
-﻿#include "RuntimePCH.h"
+#include "RuntimePCH.h"
 #include "Containers/Algorithm.h"
 
 #include <atomic>
@@ -79,10 +79,7 @@ namespace Lumina
             return;
         }
 
-        for (FProperty* Property : Properties)
-        {
-            Property->CopyCompleteValue_InContainer(Object, Template);
-        }
+        Params.Class->CopyProperties(Object, Template);
     }
 
     CObject* StaticAllocateObject(const FConstructCObjectParams& Params)
@@ -409,79 +406,94 @@ namespace Lumina
         }
     }
 
-    // The emitter's table is a static constexpr array that outlives the binary, so it is pointed at, not copied.
-    static void ConstructPropertyMetadata(FPropertyArena& Arena, FProperty* NewProperty, uint16 NumMetadata, const FMetaDataPairParam* ParamArray)
-    {
-        NewProperty->SetMetadata(ParamArray, NumMetadata);
-        NewProperty->OnMetadataFinalized(Arena);
-    }
-
     // Sized from the widest property, so one type's whole set lands in a single block; an undershoot only
     // costs another block, never a move, so nothing that already points into the arena is disturbed.
     static constexpr size_t kArenaBytesPerProperty = 192;
 
-    // The function itself plus the pointer array for its parameters; the parameters are properties and
-    // already counted through the reservation above.
+    // The function itself plus the pointer array for its parameters, which are counted as properties above.
     static constexpr size_t kArenaBytesPerFunction = 128;
 
-    void ConstructProperties(const FPropertyOwner& Owner, const FPropertyParams* const*& Properties, uint32& NumProperties)
+    namespace
     {
-        const FPropertyParams* Param = *--Properties;
-        const FPropertyKindOps& Ops = GetPropertyKindOps(Param->TypeFlags);
-
-        FProperty* NewProperty = nullptr;
-        if (!Ops.IsValid())
+        const char* InnerSuffix(EPropertyTypeFlags Kind, uint8 Index)
         {
-            LOG_CRITICAL("Unsupported property type found while creating: {}", Param->Name);
-        }
-        else
-        {
-            NewProperty = Ops.Construct(Owner, Param);
-
-            uint16 NumMetaData = 0;
-            const FMetaDataPairParam* MetaDataArray = nullptr;
-            Ops.GetMetadata(Param, NumMetaData, MetaDataArray);
-            if (NumMetaData != 0)
+            constexpr const char* DelegateArgs[] = { "_Arg0", "_Arg1", "_Arg2", "_Arg3", "_Arg4", "_Arg5" };
+            switch (Kind)
             {
-                ConstructPropertyMetadata(*Owner.Arena, NewProperty, NumMetaData, MetaDataArray);
+            case EPropertyTypeFlags::Map:      return Index == 0 ? "_KeyInner" : "_ValueInner";
+            case EPropertyTypeFlags::Delegate: return DelegateArgs[Index];
+            default:                           return "_Inner";
             }
         }
 
-        --NumProperties;
-
-        // An inner is the next params entry, and the kind is what says how many of them to expect.
-        for (uint8 Remaining = Ops.CountInnerParams(Param); Remaining != 0 && NewProperty != nullptr; --Remaining)
+        // An inner shares its owner's storage, except a delegate argument, which sits in the broadcast pack.
+        const FPropertyDesc& MakeInnerDesc(FPropertyArena& Arena, const FPropertyDesc& Owner, uint8 Index)
         {
-            ConstructProperties(Owner.Inner(NewProperty), Properties, NumProperties);
+            const FPropertyType& OwnerType = *Owner.Type;
+
+            FString Name(Owner.Name);
+            Name += InnerSuffix(OwnerType.Kind, Index);
+
+            FPropertyDesc* Inner = Arena.EmplaceData<FPropertyDesc>();
+            Inner->Name   = Arena.CopyString(Name);
+            Inner->Offset = OwnerType.InnerOffsets != nullptr ? OwnerType.InnerOffsets[Index] : 0;
+            Inner->Flags  = EPropertyFlags::SubField;
+            Inner->Type   = OwnerType.Inner[Index];
+            return *Inner;
+        }
+    }
+
+    FProperty* ConstructProperty(const FPropertyOwner& Owner, const FPropertyDesc& Desc)
+    {
+        const FPropertyKindOps& Ops = GetPropertyKindOps(Desc.Type->Kind);
+        if (!Ops.IsValid())
+        {
+            LOG_CRITICAL("Unsupported property type found while creating: {}", Desc.Name);
+            return nullptr;
         }
 
-        // The inner only gets its own size after it has already been attached to the enum property.
-        if (Param->TypeFlags == EPropertyTypeFlags::Enum && NewProperty != nullptr)
+        FProperty* Property = Ops.Construct(Owner, Desc);
+
+#if USING(WITH_EDITOR)
+        // Only the editor labels a property, and an inner is drawn under its owner's label.
+        if (!EnumHasAnyFlags(Desc.Flags, EPropertyFlags::SubField))
         {
-            FEnumProperty* EnumProperty = static_cast<FEnumProperty*>(NewProperty);
+            Property->OnMetadataFinalized(*Owner.Arena);
+        }
+#endif
+
+        for (uint8 Index = 0; Index < Desc.Type->NumInner; ++Index)
+        {
+            ConstructProperty(Owner.Inner(Property), MakeInnerDesc(*Owner.Arena, Desc, Index));
+        }
+
+        // The enum only learns its width from the integer inner, which is attached after it.
+        if (Desc.Type->Kind == EPropertyTypeFlags::Enum)
+        {
+            FEnumProperty* EnumProperty = static_cast<FEnumProperty*>(Property);
             if (const FNumericProperty* Inner = EnumProperty->GetInnerProperty())
             {
                 EnumProperty->SetElementSize(Inner->GetElementSize());
             }
         }
+
+        return Property;
     }
 
-    void InitializeAndCreateFProperties(CStruct* Outer, const FPropertyParams* const* PropertyArray, uint32 NumProperties)
+    void InitializeAndCreateFProperties(CStruct* Outer, const FPropertyDesc* Properties, uint32 NumProperties)
     {
         FPropertyArena& Arena = Outer->GetPropertyArena();
         Arena.Reserve(NumProperties * kArenaBytesPerProperty);
 
+        // Last to first, the order a struct's properties have always had and the order its packages were written in.
         const FPropertyOwner Owner{ &Arena, Outer, nullptr };
-
-        // Iterates backwards.
-        PropertyArray += NumProperties;
-        while (NumProperties)
+        for (uint32 Index = NumProperties; Index != 0; --Index)
         {
-            ConstructProperties(Owner, PropertyArray, NumProperties);
+            ConstructProperty(Owner, Properties[Index - 1]);
         }
     }
 
-    void InitializeAndCreateFFunctions(CStruct* Outer, const FFunctionParams* const* FunctionArray, uint32 NumFunctions)
+    void InitializeAndCreateFFunctions(CStruct* Outer, const FFunctionDesc* Functions, uint32 NumFunctions)
     {
         if (NumFunctions == 0)
         {
@@ -491,41 +503,19 @@ namespace Lumina
         FPropertyArena& Arena = Outer->GetPropertyArena();
         Arena.Reserve(NumFunctions * kArenaBytesPerFunction);
 
-        TVector<FProperty*> Collected;
-        TVector<FProperty*> Ordered;
-
-        for (uint32 Index = 0; Index < NumFunctions; ++Index)
+        TVector<FProperty*> Params;
+        for (uint32 FunctionIndex = 0; FunctionIndex < NumFunctions; ++FunctionIndex)
         {
-            const FFunctionParams& Params = *FunctionArray[Index];
+            const FFunctionDesc& Desc = Functions[FunctionIndex];
 
-            Ordered.clear();
-
-            // One call consumes exactly one top-level parameter plus its inners, and only the top-level one
-            // reaches the collector, so taking them one at a time is what makes the argument order exact
-            // rather than inferred from where inners happen to sit.
-            const FPropertyParams* const* Walk = Params.Params + Params.NumParamEntries;
-            uint32 Remaining = Params.NumParamEntries;
-            while (Remaining != 0)
+            Params.clear();
+            const FPropertyOwner Owner{ &Arena, nullptr, nullptr, &Params };
+            for (uint16 ParamIndex = 0; ParamIndex < Desc.NumParams; ++ParamIndex)
             {
-                Collected.clear();
-                const FPropertyOwner Owner{ &Arena, nullptr, nullptr, &Collected };
-                ConstructProperties(Owner, Walk, Remaining);
-
-                if (Collected.size() != 1)
-                {
-                    LOG_CRITICAL("Reflected function '{}' produced {} top-level parameters from one entry",
-                        Params.Name, Collected.size());
-                    continue;
-                }
-
-                Ordered.push_back(Collected[0]);
+                ConstructProperty(Owner, Desc.Params[ParamIndex]);
             }
 
-            // The walk runs from the end of the array, so reversing lands declaration order.
-            Algo::Reverse(Ordered);
-
-            FFunction* Function = FFunctionBuilder::Build(Arena, Outer, Params, Ordered);
-            if (Function != nullptr)
+            if (FFunction* Function = FFunctionBuilder::Build(Arena, Outer, Desc, Params))
             {
                 Outer->AddFunction(Function);
             }
@@ -547,97 +537,84 @@ namespace Lumina
         return Package;
     }
     
-    void ConstructCClass(CClass** OutClass, const FClassParams& Params)
+    namespace
+    {
+        void AddTypeMetadata(CField* Type, const FMetadataEntry* Entries, uint16 Count)
+        {
+            for (uint16 Index = 0; Index < Count; ++Index)
+            {
+                Type->Metadata.AddValue(Entries[Index].Key, Entries[Index].Value);
+            }
+        }
+    }
+
+    void ConstructCClass(CClass** OutClass, const FClassDesc& Desc)
     {
         CClass*& FinalClass = *OutClass;
         if (FinalClass != nullptr)
         {
             return;
         }
-        
-        FinalClass = Params.RegisterFunc();
 
-        InitializeAndCreateFProperties(FinalClass, Params.Params, Params.NumProperties);
-        InitializeAndCreateFFunctions(FinalClass, Params.Functions, Params.NumFunctions);
+        FinalClass = Desc.StaticClass();
 
-        for (uint16 i = 0; i < Params.NumMetaData; ++i)
-        {
-            const FMetaDataPairParam& Param = Params.MetaDataArray[i];
-            FinalClass->Metadata.AddValue(Param.NameUTF8, Param.ValueUTF8);
-        }
+        InitializeAndCreateFProperties(FinalClass, Desc.Properties, Desc.NumProperties);
+        InitializeAndCreateFFunctions(FinalClass, Desc.Functions, Desc.NumFunctions);
+        AddTypeMetadata(FinalClass, Desc.Metadata, Desc.NumMetadata);
 
         // Last, so a walk of the object array never reaches a class whose properties are still arriving.
-        CObjectForceRegistration(FinalClass);
+        FinishRegistration(FinalClass);
     }
 
-    void ConstructCEnum(CEnum** OutEnum, const FEnumParams& Params)
+    void ConstructCEnum(CEnum** OutEnum, const FEnumDesc& Desc)
     {
         FConstructCObjectParams ObjectParms(CEnum::StaticClass());
-        ObjectParms.Name        = Params.Name;
+        ObjectParms.Name        = Desc.Name;
         ObjectParms.Flags       = OF_None;
         ObjectParms.Package     = FindOrCreatePackage(CEnum::StaticPackage());
         ObjectParms.Guid        = FGuid::New();
 
-        
         CEnum* NewEnum = (CEnum*)StaticAllocateObject(ObjectParms);
-        
         *OutEnum = NewEnum;
-        
-        for (uint16 i = 0; i < Params.NumMetaData; ++i)
+
+        AddTypeMetadata(NewEnum, Desc.Metadata, Desc.NumMetadata);
+        for (uint32 Index = 0; Index < Desc.NumEnumerators; ++Index)
         {
-            const FMetaDataPairParam& Param = Params.MetaDataArray[i];
-            NewEnum->Metadata.AddValue(Param.NameUTF8, Param.ValueUTF8);
-        }
-        
-        for (int16 i = 0; i < Params.NumParams; i++)
-        {
-            const FEnumeratorParam* Param = &Params.Params[i];
-            NewEnum->AddEnum(Param->NameUTF8, Param->Value);
+            NewEnum->AddEnum(Desc.Enumerators[Index].Name, Desc.Enumerators[Index].Value);
         }
 
         NewEnum->AddToRoot();
     }
-    
-    void ConstructCStruct(CStruct** OutStruct, const FStructParams& Params)
+
+    void ConstructCStruct(CStruct** OutStruct, const FStructDesc& Desc)
     {
         FConstructCObjectParams ObjectParms(CStruct::StaticClass());
-        ObjectParms.Name        = Params.Name;
+        ObjectParms.Name        = Desc.Name;
         ObjectParms.Flags       = OF_None;
         ObjectParms.Package     = FindOrCreatePackage(CStruct::StaticPackage());
         ObjectParms.Guid        = FGuid::New();
-        
-        CStruct* FinalClass = (CStruct*)StaticAllocateObject(ObjectParms);
-        FinalClass->Size = Params.SizeOf;
-        FinalClass->Alignment = Params.AlignOf;
-        FinalClass->StructOps.reset(Params.StructOpsFn());
-        if (FinalClass->StructOps == nullptr)
-        {
-            FinalClass->StructOps.reset(Memory::New<FStructOps>());
-        }
-        
-        
-        *OutStruct = FinalClass;
-        
-        CObjectForceRegistration(FinalClass);
-        
-        InitializeAndCreateFProperties(FinalClass, Params.Params, Params.NumProperties);
-        InitializeAndCreateFFunctions(FinalClass, Params.Functions, Params.NumFunctions);
 
-        for (uint16 i = 0; i < Params.NumMetaData; ++i)
+        CStruct* FinalStruct = (CStruct*)StaticAllocateObject(ObjectParms);
+        FinalStruct->Size = Desc.Size;
+        FinalStruct->Alignment = Desc.Alignment;
+        FinalStruct->StructOps.reset(Desc.MakeOps());
+        if (FinalStruct->StructOps == nullptr)
         {
-            const FMetaDataPairParam& Param = Params.MetaDataArray[i];
-            FinalClass->Metadata.AddValue(Param.NameUTF8, Param.ValueUTF8);
+            FinalStruct->StructOps.reset(Memory::New<FStructOps>());
         }
 
-        if (Params.SuperFunc)
-        {
-            CStruct* SuperStruct = Params.SuperFunc();
-            FinalClass->SetSuperStruct(SuperStruct);
-        }
-        
-        FinalClass->Link();
+        *OutStruct = FinalStruct;
 
-        FinalClass->AddToRoot();
+        InitializeAndCreateFProperties(FinalStruct, Desc.Properties, Desc.NumProperties);
+        InitializeAndCreateFFunctions(FinalStruct, Desc.Functions, Desc.NumFunctions);
+        AddTypeMetadata(FinalStruct, Desc.Metadata, Desc.NumMetadata);
+
+        if (Desc.Super != nullptr)
+        {
+            FinalStruct->SetSuperStruct(Desc.Super());
+        }
+
+        FinalStruct->Link();
+        FinalStruct->AddToRoot();
     }
-    
 }

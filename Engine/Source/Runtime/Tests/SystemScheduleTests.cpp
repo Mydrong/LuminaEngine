@@ -20,7 +20,7 @@ namespace
     {
         FScheduleSystems()
         {
-            ProcessNewlyLoadedCObjects();
+            RegisterPendingTypes();
             CEntitySystemTest::bAllowCreation = true;
 
             THashSet<FName> Disabled;

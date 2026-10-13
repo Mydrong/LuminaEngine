@@ -74,8 +74,9 @@ float Fog_PhaseCornetteShanks(float CosTheta, float G)
 {
     float G2  = G * G;
     float Num = 3.0 * (1.0 - G2) * (1.0 + CosTheta * CosTheta);
-    float Den = 8.0 * PI * (2.0 + G2) * pow(max(1.0 + G2 - 2.0 * G * CosTheta, 1e-4), 1.5);
-    return Num / Den;
+    // The cube of rsqrt is the inverse 1.5 power, one transcendental where pow takes a log and an exp.
+    float InvR = rsqrt(max(1.0 + G2 - 2.0 * G * CosTheta, 1e-4));
+    return Num * InvR * InvR * InvR / (8.0 * PI * (2.0 + G2));
 }
 
 // Blends Cornette-Shanks with an isotropic floor so side-on shafts stay visible off-axis.

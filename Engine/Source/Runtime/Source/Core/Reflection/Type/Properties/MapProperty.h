@@ -11,16 +11,14 @@ namespace Lumina
     class LUMINA_VISIBLE_TYPE FMapProperty : public FProperty
     {
     public:
-        explicit FMapProperty(const FMapPropertyParams* Params)
-            : FProperty(Params)
+        explicit FMapProperty(const FPropertyDesc& Desc)
+            : FProperty(Desc)
         {
-            Ops = Params->GetOpsFn ? Params->GetOpsFn() : nullptr;
+            Ops = Desc.Type->GetMapOps();
             SetElementSize(Ops != nullptr ? Ops->ContainerSize : 0);
         }
 
-        // Called by ConstructProperties for the two inners in a fixed order: the KEY first, then the VALUE (the
-        // codegen emits PropPointers as [Value, Key, Map] and the backward ReadMore=2 walk consumes Key then
-        // Value). Do NOT reorder these assignments -- the order is the ABI contract with the emitter.
+        // ConstructProperty attaches the key before the value, in the order the map's type lists its inners.
         void AddProperty(FProperty* Property) override
         {
             if (!KeyProperty) { KeyProperty = Property; }
@@ -58,7 +56,6 @@ namespace Lumina
         void   Reserve(void* InContainer, size_t Count) const { Ops->Reserve(InContainer, Count); }
 
         uint32 GetKeySize()   const { return Ops->KeySize; }
-        uint32 GetValueSize() const { return Ops->ValueSize; }
 
         // Index-based access into the mutation-stable iteration order, re-resolved each call, so an editor can
         // address entries across container reallocations.

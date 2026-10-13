@@ -28,6 +28,8 @@ static const float INV_PI = 0.31830988618;
 #define CULL_VIEW_FLAG_FAR_CASCADE      BIT(8)
 // LOD error projects to the same size at any distance, as it does for a cascade.
 #define CULL_VIEW_FLAG_ORTHOGRAPHIC_LOD BIT(9)
+// Grass and painted foliage drop out, so they neither roof the ground under them nor shelter it.
+#define CULL_VIEW_FLAG_NO_FOLIAGE       BIT(10)
 
 
 #define BIT(X) (1u << (X))
@@ -71,6 +73,7 @@ enum EInstanceFlags
     NoContactShadows = BIT(12),
     CastFarShadow   = BIT(13),  // also drawn into the sun's far cascade, which every other caster skips
     HasDistanceField = BIT(14),
+    Foliage         = BIT(15),
 }
 
 // Mirror of Lumina::FMeshVertexAttributes, a static vertex minus its position.
@@ -1008,6 +1011,28 @@ static const uint FOG_MAX_VOLUMES = 32;
 // Repeated here so a malformed upload cannot run the octave loop unbounded in the per-light path.
 static const int FOG_MAX_MULTISCATTER_OCTAVES = 4;
 
+struct FWeatherData
+{
+    float4x4   RainViewProjection;
+    float4x4   RainInverseViewProjection;
+    float4     RainFall;
+    float4     RainWind;
+    float4     RainDrops;
+    float4     RainLook;
+    float4     RainTint;
+    float4     Surface;
+    float4     Surface2;
+    float4     Motion;
+    FTexture2D RainOcclusion;
+    float      OcclusionDepthRange;
+    float      OcclusionTexelWorld;
+    uint       NumDrops;
+    uint       DebugMode;
+    uint       _Pad0;
+    uint       _Pad1;
+    uint       _Pad2;
+};
+
 struct FSceneGlobalData
 {
     FCameraView       CameraView;
@@ -1057,6 +1082,8 @@ struct FSceneGlobalData
     float             FogCloudShadowExtent;
     // The additive emission layer decals write, ~0u when no decal rendered.
     FTexture2D              DBufferD;
+
+    GPUSpan<FWeatherData>   Weather;
 };
 
 // Matches Lumina::PackTangent, and the bitangent is cross(N, tangent) * sign.

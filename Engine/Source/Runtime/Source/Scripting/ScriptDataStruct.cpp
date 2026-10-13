@@ -115,7 +115,7 @@ namespace Lumina
                 continue;
             }
 
-            CObjectForceRegistration(Minted.Get());
+            FinishRegistration(Minted.Get());
 
             if (!Minted->BuildFromSchema(Schema, &Defaults))
             {

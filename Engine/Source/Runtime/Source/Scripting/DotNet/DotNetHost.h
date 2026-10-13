@@ -54,6 +54,18 @@ namespace Lumina::DotNet
      *  Empty when nothing matches, which is the case for a C++ script or a type sharing a file. */
     RUNTIME_API FString FindScriptSourceFile(FStringView TypeName);
 
+    // One script file, by the stem a script class is named after and the folder it sits in under its script root.
+    struct FScriptSourceFolder
+    {
+        FString Stem;
+        // Slash separated and relative to the script root, led by the unit's name when more than one unit has scripts.
+        FString Folder;
+        FString Path;
+    };
+
+    // Every script file in one pass over the script roots, which is what a picker filing scripts into folders needs.
+    RUNTIME_API void GatherScriptSourceFolders(TVector<FScriptSourceFolder>& Out);
+
     /**
      * Reports that a file under a watched source tree changed, and latches a reload if it was one of ours.
      *
@@ -87,6 +99,9 @@ namespace Lumina::DotNet
     // Recompiles scripts (so every unit's DLL is freshly emitted) and returns the unit graph for the packager
     // to stage under DotNet/Scripts/ + scripts.manifest.json. Editor-side; no-op if scripting is disabled.
     RUNTIME_API void GatherScriptUnitsForPackaging(TVector<FPackagedScriptUnit>& Out);
+
+    // Disk paths of every .cs the script units compile, listed without reading them.
+    RUNTIME_API void GatherScriptSourceFiles(TVector<FString>& OutPaths);
 
     RUNTIME_API bool IsInitialized();
 
@@ -154,8 +169,6 @@ namespace Lumina::DotNet
         int32  Gen2Collections = 0;
         int32  PinnedObjects = 0;          // GCMemoryInfo.PinnedObjectsCount
         int32  Generation = 0;             // current script generation
-        int32  EntityScriptCount = 0;
-        int32  EntitySystemCount = 0;
         int32  LoadedTypeCount = 0;
         int32  AliveScriptAlcCount = 0;    // collectible GameScripts.Gen* contexts still loaded (1 == healthy)
         int32  OldestAliveGeneration = 0;  // lowest still-resident generation (0 if none)
@@ -169,8 +182,6 @@ namespace Lumina::DotNet
     
     // Entity-script lifecycle and ticking are NOT here: a C# script is a CEntityScript CObject dispatched
     // through the Reflector's ScriptEvent virtuals, so the managed side no longer owns any of it.
-
-    RUNTIME_API void GatherEntityScriptTypes(TVector<FString>& OutTypeNames);
 
     //~ Scriptable CObjects: a C# subclass of a REFLECT(Scriptable) native CObject. The Reflector mints a CClass
     //  per discovered C# subclass; native creates the CObject (a minted CClass) and binds the managed instance.
@@ -186,16 +197,7 @@ namespace Lumina::DotNet
         /** Names of the ScriptEvents this type overrides. A list rather than a mask: an override is found
          *  by name like any other function, so there is no index to agree on and no ceiling to hit. */
         TVector<FString> OverriddenEvents;
-        // EScriptUpdatePhase from the class's [UpdatePhase]; type-uniform, so it rides on the minted CClass.
-        uint8   UpdatePhase = 0;
-
-        // The class carries [ParallelUpdate].
-        bool    bParallelUpdate = false;
-
-        // ENetRealm from the class's [HostOnly], [ClientOnly] and [Cosmetic].
-        uint8   NetRealm = 0;
-
-        // Class metadata a C++ REFLECT(...) would write, such as DataModel or UIDocument, as key and value.
+        // The class's REFLECT specifiers from its C# [Reflect], as key and value.
         TVector<std::pair<FString, FString>> ClassMeta;
     };
 

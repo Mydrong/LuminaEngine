@@ -74,7 +74,7 @@ namespace Lumina
         }
         else
         {
-            Obj->GetClass()->SerializeTaggedProperties(Ar, Obj);
+            Obj->GetClass()->SerializeProperties(Ar, Obj);
         }
     }
 
@@ -94,7 +94,7 @@ namespace Lumina
         }
         else
         {
-            Obj->GetClass()->SerializeTaggedProperties(Ar, Obj);
+            Obj->GetClass()->SerializeProperties(Ar, Obj);
         }
 
         Obj->PostPropertyChange(nullptr);

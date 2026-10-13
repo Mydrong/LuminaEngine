@@ -465,7 +465,7 @@ namespace Lumina
             Out.clear();
             FMemoryWriter Writer(Out);
             FObjectProxyArchiver Ar(Writer, false);
-            Type->SerializeTaggedProperties(Ar, Data);
+            Type->SerializeProperties(Ar, Data);
         }
 
         // Reflected fields only, so the runtime state a component keeps beside them survives.
@@ -473,7 +473,7 @@ namespace Lumina
         {
             FMemoryReader Reader(In);
             FObjectProxyArchiver Ar(Reader, true);
-            Type->SerializeTaggedProperties(Ar, Data);
+            Type->SerializeProperties(Ar, Data);
         }
     }
 

@@ -18,6 +18,8 @@ namespace LuminaSharp;
 /// </summary>
 internal sealed class ScriptableRuntime
 {
+    private const byte AbstractFlag = 1;
+
     private readonly TypeLibrary Library;
 
     // EntityScripts are created here but resolved and destroyed through EntityScriptRuntime's handle set.
@@ -46,7 +48,7 @@ internal sealed class ScriptableRuntime
             return;
         }
 
-        var Add = (delegate* unmanaged[Stdcall]<IntPtr, byte*, int, byte*, int, byte*, int, byte, byte, byte*, int, void>)Sink;
+        var Add = (delegate* unmanaged[Stdcall]<IntPtr, byte*, int, byte*, int, byte*, int, byte, byte*, int, void>)Sink;
         Span<byte> NameScratch = stackalloc byte[256];
         Span<byte> BaseScratch = stackalloc byte[256];
         Span<byte> OverrideScratch = stackalloc byte[1024];
@@ -69,12 +71,7 @@ internal sealed class ScriptableRuntime
             try
             {
                 Add(Context, Name.Pointer, Name.Length, Base.Pointer, Base.Length,
-                    Overrides.Pointer, Overrides.Length, GetUpdatePhase(Type),
-                    (byte)((Type.IsDefined(typeof(ParallelUpdateAttribute), inherit: true) ? 1 : 0)
-                         | (Type.IsDefined(typeof(HostOnlyAttribute), inherit: true) ? 2 : 0)
-                         | (Type.IsDefined(typeof(ClientOnlyAttribute), inherit: true) ? 4 : 0)
-                         | (Type.IsDefined(typeof(CosmeticAttribute), inherit: true) ? 8 : 0)
-                         | (Type.IsAbstract ? 16 : 0)),
+                    Overrides.Pointer, Overrides.Length, (byte)(Type.IsAbstract ? AbstractFlag : 0),
                     Meta.Pointer, Meta.Length);
             }
             finally
@@ -144,7 +141,7 @@ internal sealed class ScriptableRuntime
         GCHandle Allocated = GCHandle.Alloc(Instance);
 
         // The one point every script instance passes through, and it runs before the dispatch that created it.
-        if (Instance is EntityScript Script)
+        if (Instance is Lumina.CEntityScript Script)
         {
             PrepareEntityScript(Script, TypeName, Type);
             EntityScripts.Adopt(Allocated);
@@ -153,9 +150,9 @@ internal sealed class ScriptableRuntime
     }
 
     // Description must be set before any dispatch: OnAction and the profiler labels both read it.
-    private void PrepareEntityScript(EntityScript Script, string TypeName, Type Type)
+    private void PrepareEntityScript(Lumina.CEntityScript Script, string TypeName, Type Type)
     {
-        Script.Description = Library.GetEntityScript(TypeName) ?? Library.Describe(Type);
+        Script.Description = Library.Describe(Type);
 
         // Defensive: the driver always SetOwner's before the first dispatch that creates this instance.
         if (Script.Entity.IsNull)
@@ -169,7 +166,7 @@ internal sealed class ScriptableRuntime
         }
         catch (Exception Exception)
         {
-            Native.Log(ELogLevel.Error, $"EntityScript component injection threw: {Exception}");
+            Native.Log(ELogLevel.Error, $"CEntityScript component injection threw: {Exception}");
         }
     }
 
@@ -220,21 +217,34 @@ internal sealed class ScriptableRuntime
         }
     }
 
-    // The class metadata a C++ REFLECT(...) would carry, as lines of key, tab, value.
-    private static string GetClassMeta(Type Type)
+    // The REFLECT specifiers for the minted class as lines of key, tab, value, nearest declaration first.
+    private string GetClassMeta(Type Type)
     {
-        if (!typeof(UIScript).IsAssignableFrom(Type))
-        {
-            return "";
-        }
         var Lines = new System.Text.StringBuilder();
-        Lines.Append("UIScript\t\n");
-        Lines.Append("DataModel\t").Append(DataModelAttribute.NameOf(Type)).Append('\n');
-        if (Type.GetCustomAttribute<UIDocumentAttribute>(inherit: true) is { } Document)
+        var Written = new HashSet<string>();
+        foreach (Type Declaring in Library.ChainUpToMintedParent(Type))
         {
-            Lines.Append("UIDocument\t").Append(Document.Path).Append('\n');
+            if (Declaring.GetCustomAttribute<ReflectAttribute>(inherit: false) is { } Reflect)
+            {
+                foreach (KeyValuePair<string, string> Specifier in Reflect.Specifiers())
+                {
+                    AppendMeta(Lines, Written, Specifier.Key, Specifier.Value);
+                }
+            }
+            foreach (ClassMetaAttribute Meta in Declaring.GetCustomAttributes<ClassMetaAttribute>(inherit: false))
+            {
+                AppendMeta(Lines, Written, Meta.Key, Meta.Value);
+            }
         }
         return Lines.ToString();
+    }
+
+    private static void AppendMeta(System.Text.StringBuilder Lines, HashSet<string> Written, string Key, string Value)
+    {
+        if (Written.Add(Key))
+        {
+            Lines.Append(Key).Append('\t').Append(Value.Replace('\n', ' ').Replace('\t', ' ')).Append('\n');
+        }
     }
 
     // An override moves the method's DeclaringType out of LuminaSharp.dll, which is what identifies one.
@@ -250,17 +260,11 @@ internal sealed class ScriptableRuntime
         foreach (MethodInfo Method in Type.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
         {
             if (Method.GetCustomAttribute<ScriptEventAttribute>(inherit: true) != null
-                && Method.DeclaringType is { } Decl && Decl.Assembly != Engine
-                && !Names.Contains(Method.Name))
+                && Method.DeclaringType is { } Decl && !Names.Contains(Method.Name)
+                && (Decl.Assembly != Engine || EngineOverrideNeedsDispatch(Method, Type)))
             {
                 Names.Add(Method.Name);
             }
-        }
-
-        if (typeof(EntityScript).IsAssignableFrom(Type) && Library.Describe(Type).HasInputBindings
-            && !Names.Contains(nameof(EntityScript.OnAction)))
-        {
-            Names.Add(nameof(EntityScript.OnAction));
         }
 
         string Joined = string.Join(';', Names);
@@ -268,11 +272,17 @@ internal sealed class ScriptableRuntime
         return Joined;
     }
 
-    // Which physics phase this class's OnUpdate runs in, from [UpdatePhase]; PrePhysics when unmarked.
-    private static byte GetUpdatePhase(Type Type)
+    // An event the script leaves alone still dispatches when its declaring class names it in a [DispatchWhen] that accepts the script.
+    private bool EngineOverrideNeedsDispatch(MethodInfo Method, Type ScriptType)
     {
-        UpdatePhaseAttribute? Marker = Type.GetCustomAttribute<UpdatePhaseAttribute>(inherit: true);
-        return (byte)(Marker?.Phase ?? EScriptPhase.PrePhysics);
+        if (Method.DeclaringType is not { } Declaring
+            || Declaring.GetCustomAttributes<DispatchWhenAttribute>(inherit: false).FirstOrDefault(When => When.Event == Method.Name) is not { } When)
+        {
+            return false;
+        }
+        MethodInfo? Predicate = Declaring.GetMethod(When.Predicate, BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic,
+            new[] { typeof(TypeLibrary), typeof(Type) });
+        return Predicate != null && Predicate.Invoke(null, new object[] { Library, ScriptType }) is true;
     }
 
     private static int Depth(Type Type)

@@ -524,6 +524,16 @@ namespace Lumina::Platform
         return Core < 0 ? 0u : static_cast<uint32>(Core);
     }
 
+    FString GetRuntimeModulePath()
+    {
+        Dl_info Info{};
+        if (::dladdr(reinterpret_cast<const void*>(&GetRuntimeModulePath), &Info) == 0 || Info.dli_fname == nullptr)
+        {
+            return FString();
+        }
+        return FString(Info.dli_fname);
+    }
+
     FString GetCurrentProcessPath()
     {
         char Buffer[PATH_MAX];

@@ -544,7 +544,7 @@ namespace Lumina::SaveGame
                                 }
                                 FName Name = Entry.Struct->GetName();
                                 Ar << Name;
-                                WriteSized(Ar, [&] { Entry.Struct->SerializeTaggedProperties(Ar, Entry.Set->GetRaw(Entity)); });
+                                WriteSized(Ar, [&] { Entry.Struct->SerializeProperties(Ar, Entry.Set->GetRaw(Entity)); });
                                 ++Count;
                             }
                             return Count;

@@ -17,8 +17,8 @@ namespace Lumina
     class FFunction;
     class FProperty;
 
-    // An entity script that is its own screen UI. It shows Document with its PROPERTY(Bind) values and FUNCTION(Bind) commands as the data model, the C++ twin of LuminaSharp.UIScript.
-    REFLECT()
+    // An entity script that is its own screen UI, showing Document with its PROPERTY(Bind) values and FUNCTION(Bind) commands as the data model.
+    REFLECT(Scriptable)
     class RUNTIME_API CUIScript : public CEntityScript
     {
         GENERATED_BODY()
@@ -53,6 +53,7 @@ namespace Lumina
         FUIDocument GetDocument() const;
 
         // Runs after every load, including a reload from an edited .rml, once PROPERTY(Element) members point at the new elements.
+        FUNCTION()
         virtual void OnDocumentLoaded() {}
     };
 
@@ -91,7 +92,7 @@ namespace Lumina
         RUNTIME_API const FProperty* ResolvePath(CObject* Object, FStringView Path, void*& OutContainer);
     }
 
-    // Drives every script that shows a UI, C++ CUIScript subclasses and LuminaSharp.UIScript subclasses alike.
+    // Drives every CUIScript, written in C++ or C#.
     namespace UIScripts
     {
         RUNTIME_API bool IsUIScript(const CClass* Class);

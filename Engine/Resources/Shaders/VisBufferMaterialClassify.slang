@@ -10,9 +10,9 @@ struct FMaterialClassifyArgs
     GPUSpan<uint>  SlotByMaterial;   // global MaterialIndex -> dense slot (~0u = no deferred draw)
     GPUSpan<uint>  OverflowCount;    // zeroed with Counts, then the pairs appended to Overflow
     GPUSpan<uint>  TileSlots;        // MATERIAL_TILE_RECORD entries per tile, a slot word and two pixel mask words per inline pair
-    GPUSpan<uint>  Overflow;         // pairs past a tile's inline entries, tile index above the slot bits
+    GPUSpan<uint>  Overflow;         // pairs past a tile's inline entries, a tile index then a slot each
     FTexture2DUInt VisBuffer;
-    FRWTexture2D   SlotImage;             // slot + 1 per pixel, 0 where no deferred material shades it
+    FRWTexture2DUInt SlotImage;           // slot + 1 per pixel, 0 where no deferred material shades it
     uint           ScreenW;
     uint           ScreenH;
     uint           DrawListCount;
@@ -22,7 +22,7 @@ struct FMaterialClassifyArgs
 };
 FMaterialClassifyArgs* Pass() { return GetPassArgs<FMaterialClassifyArgs>(); }
 
-groupshared uint gsTileSlotMask[MATERIAL_MAX_SLOTS / 32u];
+groupshared uint gsTileClaims[MATERIAL_TILE_CLAIM_BUCKETS];
 groupshared uint gsTilePairCount;
 groupshared uint gsTileSlots[MATERIAL_TILE_SLOTS];
 groupshared uint gsTileSlotPixels[MATERIAL_TILE_SLOTS * 2u];
@@ -30,12 +30,22 @@ groupshared uint gsTileSlotPixels[MATERIAL_TILE_SLOTS * 2u];
 // The first wave of the tile to claim its slot records the pair, so each (tile, slot) pair is counted once.
 void ClaimTileSlot(uint Slot, uint TileIndex)
 {
-    const uint Bit = 1u << (Slot & 31u);
-    uint Previous;
-    InterlockedOr(gsTileSlotMask[Slot >> 5u], Bit, Previous);
-    if ((Previous & Bit) != 0u)
+    // A bucket holds slot + 1 once taken, and a tile holds at most 64 distinct slots, so every probe ends.
+    uint Bucket = Slot & (MATERIAL_TILE_CLAIM_BUCKETS - 1u);
+    [loop]
+    while (true)
     {
-        return;
+        uint Previous;
+        InterlockedCompareExchange(gsTileClaims[Bucket], 0u, Slot + 1u, Previous);
+        if (Previous == Slot + 1u)
+        {
+            return;
+        }
+        if (Previous == 0u)
+        {
+            break;
+        }
+        Bucket = (Bucket + 1u) & (MATERIAL_TILE_CLAIM_BUCKETS - 1u);
     }
 
     uint Local;
@@ -51,9 +61,11 @@ void ClaimTileSlot(uint Slot, uint TileIndex)
 
     uint OverflowIndex;
     InterlockedAdd(Pass().OverflowCount.At(0u)[0], 1u, OverflowIndex);
-    if (OverflowIndex < Pass().Overflow.Count)
+    const uint First = OverflowIndex * MATERIAL_OVERFLOW_PAIR_WORDS;
+    if (First + 1u < Pass().Overflow.Count)
     {
-        Pass().Overflow.Set(OverflowIndex, (TileIndex << MATERIAL_PAIR_SLOT_BITS) | Slot);
+        Pass().Overflow.Set(First, TileIndex);
+        Pass().Overflow.Set(First + 1u, Slot);
     }
 }
 
@@ -64,9 +76,9 @@ void ComputeMain(uint3 DTid : SV_DispatchThreadID, uint3 GroupID : SV_GroupID, u
     const uint NumSlots  = min(Pass().Counts.Count / 2u, MATERIAL_MAX_SLOTS);
     const uint TilesX    = (Pass().ScreenW + MATERIAL_CLASSIFY_TILE - 1u) / MATERIAL_CLASSIFY_TILE;
     const uint TileIndex = GroupID.y * TilesX + GroupID.x;
-    for (uint Word = ThreadIndex; Word < (NumSlots + 31u) / 32u; Word += MATERIAL_CLASSIFY_TILE * MATERIAL_CLASSIFY_TILE)
+    for (uint Bucket = ThreadIndex; Bucket < MATERIAL_TILE_CLAIM_BUCKETS; Bucket += MATERIAL_CLASSIFY_TILE * MATERIAL_CLASSIFY_TILE)
     {
-        gsTileSlotMask[Word] = 0u;
+        gsTileClaims[Bucket] = 0u;
     }
     if (ThreadIndex < MATERIAL_TILE_SLOTS * 2u)
     {
@@ -86,7 +98,7 @@ void ComputeMain(uint3 DTid : SV_DispatchThreadID, uint3 GroupID : SV_GroupID, u
         Slot    = ResolveVisMaterialSlot(Raw, Pass().DrawListCount, Pass().SlotByMaterial);
         bShaded = Slot < NumSlots;
 
-        Pass().SlotImage[int2(DTid.xy)] = float4(bShaded ? float(Slot + 1u) : 0.0, 0.0, 0.0, 0.0);
+        Pass().SlotImage[DTid.xy] = bShaded ? Slot + 1u : 0u;
 
         // One lane per slot claims it, and lanes exit together since a per-lane exit lets AMD's compiler claim once per wave.
         bool bPending = bShaded;

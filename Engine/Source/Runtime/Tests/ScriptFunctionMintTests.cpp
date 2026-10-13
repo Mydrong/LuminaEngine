@@ -86,9 +86,8 @@ namespace
     {
         FMinted Result;
 
-        // Reflected properties are built by the deferred registration pass. Minting before it runs would link
-        // the base with an empty property list, and Link is idempotent, so it would stay empty for good.
-        static const bool bReflectionReady = [] { ProcessNewlyLoadedCObjects(); return true; }();
+        // Minting before the types register would link the base with no properties, and Link never runs twice.
+        static const bool bReflectionReady = [] { RegisterPendingTypes(); return true; }();
         (void)bReflectionReady;
 
         Result.Class = FScriptableRegistry::Mint(ClassName, "CScriptableTest");
@@ -203,7 +202,7 @@ TEST(ScriptFunctionMint, CallingItReachesTheThunkThroughAFrame)
 // type got no layout record and therefore no functions either.
 TEST(ScriptFunctionMint, ATypeWithFunctionsAndNoPropertiesStillGetsThem)
 {
-    static const bool bReflectionReady = [] { ProcessNewlyLoadedCObjects(); return true; }();
+    static const bool bReflectionReady = [] { RegisterPendingTypes(); return true; }();
     (void)bReflectionReady;
 
     CScriptClass* Class = FScriptableRegistry::Mint("ScriptFn_BehaviourOnly", "CScriptableTest");

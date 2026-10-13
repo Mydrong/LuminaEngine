@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include <string>
 #include "imgui.h"
 #include "Core/Math/Transform.h"
@@ -60,22 +60,16 @@ namespace Lumina
      */
     inline float ResolveBaseStep(const FProperty* Prop, float FallbackSpeed)
     {
-        if (Prop != nullptr && Prop->HasMetadata("Delta"))
-        {
-            return std::stof(Prop->GetMetadata("Delta").c_str());
-        }
-        return FallbackSpeed;
+        const TOptional<float> Delta = Prop != nullptr ? Prop->GetMetadataNumber<float>("Delta") : TOptional<float>();
+        return Delta ? *Delta : FallbackSpeed;
     }
 
     // Step for a click-drag: the base, scaled by cursor speed unless the property authored a Delta.
     // Single place so every numeric widget agrees on the rule.
     inline float ResolveDragSpeed(const FProperty* Prop, float FallbackSpeed)
     {
-        if (Prop != nullptr && Prop->HasMetadata("Delta"))
-        {
-            return std::stof(Prop->GetMetadata("Delta").c_str());
-        }
-        return FallbackSpeed * MouseAdaptiveDragScale();
+        const TOptional<float> Delta = Prop != nullptr ? Prop->GetMetadataNumber<float>("Delta") : TOptional<float>();
+        return Delta ? *Delta : FallbackSpeed * MouseAdaptiveDragScale();
     }
 
     // Default printf format ImGui uses for each scalar type, so we can append a
@@ -139,17 +133,8 @@ namespace Lumina
             FProperty* Prop = Property->Property;
             float Speed = ResolveDragSpeed(Prop, IsFloatType(DT) ? 0.01f : 1.0f);
             
-            TOptional<ValueType> MinOpt;
-            TOptional<ValueType> MaxOpt;
-
-            if (Prop->HasMetadata("ClampMin"))
-            {
-                MinOpt = static_cast<ValueType>(std::stod(Prop->GetMetadata("ClampMin").c_str()));
-            }
-            if (Prop->HasMetadata("ClampMax"))
-            {
-                MaxOpt = static_cast<ValueType>(std::stod(Prop->GetMetadata("ClampMax").c_str()));
-            }
+            TOptional<ValueType> MinOpt = Prop->GetMetadataNumber<ValueType>("ClampMin");
+            TOptional<ValueType> MaxOpt = Prop->GetMetadataNumber<ValueType>("ClampMax");
 
             const ValueType* Min = MinOpt ? &MinOpt.value() : nullptr;
             const ValueType* Max = MaxOpt ? &MaxOpt.value() : nullptr;
@@ -158,7 +143,7 @@ namespace Lumina
             const char* Format = UnitFormat.empty() ? nullptr : UnitFormat.c_str();
 
             ImGui::PushItemWidth(ImGui::GetContentRegionAvail().x);
-            if (Prop->HasMetadata("NoDrag"))
+            if (Prop->HasEditorFlag(EPropertyEditorFlags::NoDrag))
             {
                 // Type-only entry; +/- buttons step by Delta, no click-drag scrubbing. The UNSCALED base:
                 // a button press must step by the same amount every time.

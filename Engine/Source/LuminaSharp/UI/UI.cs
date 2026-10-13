@@ -41,13 +41,13 @@ public readonly unsafe partial struct UI
     /// bind to it declaratively (<c>data-model="Name"</c> + <c>{{ Prop }}</c> / <c>data-event-*</c>). Call this
     /// BEFORE <see cref="LoadDocument"/> for the document that references the model, RmlUi resolves data bindings
     /// at load time. Keep the returned <see cref="UIDataModel"/> and <see cref="UIDataModel.Dispose">dispose</see>
-    /// it when done (e.g. in <see cref="EntityScript.OnDetach"/>). Returns an invalid model on failure (e.g. a
+    /// it when done (e.g. in <see cref="CEntityScript.OnDetach"/>). Returns an invalid model on failure (e.g. a
     /// duplicate name); check <see cref="UIDataModel.IsValid"/>.
     /// </summary>
     public UIDataModel AddModel(string Name, ViewModel Model) => new(Handle, Name, Model);
 
-    // Registers the model under its [DataModel] name, or its class name, which is what the .rml's data-model names.
-    public UIDataModel AddModel(ViewModel Model) => new(Handle, DataModelAttribute.NameOf(Model.GetType()), Model);
+    // Registers the model under its [Reflect(DataModel)] name, or its class name, which is what the .rml's data-model names.
+    public UIDataModel AddModel(ViewModel Model) => new(Handle, ReflectAttribute.DataModelOf(Model.GetType()), Model);
 
     /// <summary>
     /// Re-fetch a data model registered on this world by <see cref="AddModel"/>, so another script can push to

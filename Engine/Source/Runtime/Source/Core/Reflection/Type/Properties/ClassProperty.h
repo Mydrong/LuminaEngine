@@ -12,12 +12,10 @@ namespace Lumina
     class LUMINA_VISIBLE_TYPE FClassProperty : public FProperty
     {
     public:
-        DECLARE_FPROPERTY(EPropertyTypeFlags::Class)
-
-        explicit FClassProperty(const FClassPropertyParams* Params)
-            : FProperty(Params)
+        explicit FClassProperty(const FPropertyDesc& Desc)
+            : FProperty(Desc)
         {
-            MetaClass = Params->ClassFunc();
+            MetaClass = Desc.Type->GetClass();
             SetElementSize(sizeof(void*));
         }
 

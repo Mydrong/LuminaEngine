@@ -102,9 +102,6 @@ namespace Lumina
         /** When false, the mover passes through the capsules of other characters instead of being blocked. */
         PROPERTY(Editable, Category = "Physics")
         bool bCollideWithCharacters = true;
-
-        FUNCTION()
-
     };
 
     REFLECT(Component, Category = "Character")

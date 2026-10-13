@@ -25,7 +25,7 @@ namespace
 
     TVector<CStruct*> AllReflectedStructs()
     {
-        ProcessNewlyLoadedCObjects();
+        RegisterPendingTypes();
 
         TVector<CStruct*> Structs;
         GObjectArray.ForEachObject([&Structs](CObjectBase* Object, int32)

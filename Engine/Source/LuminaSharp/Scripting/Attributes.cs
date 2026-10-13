@@ -1,6 +1,176 @@
 ﻿using System;
+using System.Collections.Generic;
+using System.Reflection;
 
 namespace LuminaSharp;
+
+// Which side of the physics step a script's OnUpdate runs on, mirroring EScriptUpdatePhase.
+public enum EScriptPhase
+{
+    PrePhysics,
+    PostPhysics,
+}
+
+// The C# spelling of a C++ REFLECT(...), carrying the same class specifiers to the class native mints. A class needs none of it to be discovered.
+[AttributeUsage(AttributeTargets.Class, AllowMultiple = false, Inherited = false)]
+public sealed class ReflectAttribute : Attribute
+{
+    private EScriptPhase UpdatePhaseValue;
+    private bool InteractiveValue;
+    private bool ShowOnStartValue = true;
+
+    public string? DisplayName { get; set; }
+
+    public string? Category { get; set; }
+
+    public string? ToolTip { get; set; }
+
+    // The name an .rml's data-model attribute uses for this class. The class name when no class in the chain sets one.
+    public string? DataModel { get; set; }
+
+    // The .rml a UI script shows when the entity leaves its Document property empty.
+    public string? UIDocument { get; set; }
+
+    // OnUpdate and OnFixedUpdate touch only this entity and change no structure, so the driver runs it in parallel.
+    public bool ParallelUpdate { get; set; }
+
+    // Runs only on the host, a dedicated server or a standalone game. Every realm set must hold.
+    public bool HostOnly { get; set; }
+
+    // Runs only on a client joined to a host, never on the host or in a standalone game.
+    public bool ClientOnly { get; set; }
+
+    // Runs only where something is drawn or played, never on a dedicated server, a bot or a headless process.
+    public bool Cosmetic { get; set; }
+
+    public EScriptPhase UpdatePhase
+    {
+        get => UpdatePhaseValue;
+        set
+        {
+            UpdatePhaseValue = value;
+            HasUpdatePhase = true;
+        }
+    }
+
+    // A UI script's starting Interactive value, which a C++ subclass would set in its constructor.
+    public bool Interactive
+    {
+        get => InteractiveValue;
+        set
+        {
+            InteractiveValue = value;
+            HasInteractive = true;
+        }
+    }
+
+    // A UI script's starting ShowOnStart value, which a C++ subclass would set in its constructor.
+    public bool ShowOnStart
+    {
+        get => ShowOnStartValue;
+        set
+        {
+            ShowOnStartValue = value;
+            HasShowOnStart = true;
+        }
+    }
+
+    internal bool HasUpdatePhase { get; private set; }
+
+    internal bool HasInteractive { get; private set; }
+
+    internal bool HasShowOnStart { get; private set; }
+
+    // The nearest [Reflect] up Type's chain that sets what Picks reads, mirroring how native reads class metadata.
+    internal static ReflectAttribute? Nearest(Type? Type, Func<ReflectAttribute, bool> Picks)
+    {
+        for (Type? Current = Type; Current != null; Current = Current.BaseType)
+        {
+            if (Current.GetCustomAttribute<ReflectAttribute>(inherit: false) is { } Reflect && Picks(Reflect))
+            {
+                return Reflect;
+            }
+        }
+        return null;
+    }
+
+    internal static string DataModelOf(Type Type) => Nearest(Type, Reflect => Reflect.DataModel != null)?.DataModel ?? Type.Name;
+
+    // Specifier name and value as C++ REFLECT spells them, with an empty value for a flag.
+    internal IEnumerable<KeyValuePair<string, string>> Specifiers()
+    {
+        if (DisplayName != null)
+        {
+            yield return new(nameof(DisplayName), DisplayName);
+        }
+        if (Category != null)
+        {
+            yield return new(nameof(Category), Category);
+        }
+        if (ToolTip != null)
+        {
+            yield return new(nameof(ToolTip), ToolTip);
+        }
+        if (DataModel != null)
+        {
+            yield return new(nameof(DataModel), DataModel);
+        }
+        if (UIDocument != null)
+        {
+            yield return new(nameof(UIDocument), UIDocument);
+        }
+        if (ParallelUpdate)
+        {
+            yield return new(nameof(ParallelUpdate), "");
+        }
+        if (HostOnly)
+        {
+            yield return new(nameof(HostOnly), "");
+        }
+        if (ClientOnly)
+        {
+            yield return new(nameof(ClientOnly), "");
+        }
+        if (Cosmetic)
+        {
+            yield return new(nameof(Cosmetic), "");
+        }
+        if (HasUpdatePhase)
+        {
+            yield return new(nameof(UpdatePhase), UpdatePhase.ToString());
+        }
+    }
+}
+
+// Class metadata an engine C# base hands to every script class minted beneath it, for a key no REFLECT specifier spells.
+[AttributeUsage(AttributeTargets.Class, AllowMultiple = true, Inherited = false)]
+internal sealed class ClassMetaAttribute : Attribute
+{
+    public ClassMetaAttribute(string Key, string Value = "")
+    {
+        this.Key = Key;
+        this.Value = Value;
+    }
+
+    public string Key { get; }
+
+    public string Value { get; }
+}
+
+// Dispatches Event to a script type that does not override it when the static bool(TypeLibrary, Type) Predicate on this class accepts the type, for engine work in a pre-event hook.
+[AttributeUsage(AttributeTargets.Class, AllowMultiple = true, Inherited = false)]
+internal sealed class DispatchWhenAttribute : Attribute
+{
+    public DispatchWhenAttribute(string Event, string Predicate)
+    {
+        this.Event = Event;
+        this.Predicate = Predicate;
+    }
+
+    public string Event { get; }
+
+    public string Predicate { get; }
+}
 
 /// <summary>Declares a prior name this element was serialized under, so saved data survives a rename. Repeatable.</summary>
 [AttributeUsage(AttributeTargets.Class | AttributeTargets.Field | AttributeTargets.Property, AllowMultiple = true, Inherited = false)]

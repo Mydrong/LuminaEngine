@@ -1,7 +1,9 @@
-﻿#pragma once
+#pragma once
 
 #include "ConstructObjectParams.h"
 #include "ObjectFlags.h"
+#include "PropertyFlags.h"
+#include "Core/Reflection/ReflectionDesc.h"
 #include "Containers/Vector.h"
 #include "Containers/Function.h"
 #include "Core/LuminaMacros.h"
@@ -19,6 +21,8 @@ namespace Lumina
     class CEnum;
     class CObject;
     class CClass;
+    class FProperty;
+    struct FPropertyOwner;
 }
 
 namespace Lumina
@@ -137,332 +141,22 @@ namespace Lumina
         return T::StaticClass()->template GetDefaultObject<T>();
     }
     
-    /** Single-sourced from EPropertyFlags.inl so the enum, its names and the C# mirror cannot drift. */
-    enum class EPropertyFlags : uint32
-    {
-        None = 0,
-#define LE_PROPERTY_FLAG(Name, Bit) Name = BIT(Bit),
-#include "EPropertyFlags.inl"
-#undef LE_PROPERTY_FLAG
-    };
 
-    ENUM_CLASS_FLAGS(EPropertyFlags);
-
-    //~ Parallel name/value tables, for the bootstrap check against LuminaSharp.EPropertyFlags.
-    inline constexpr const char* PropertyFlagNames[] =
-    {
-#define LE_PROPERTY_FLAG(Name, Bit) #Name,
-#include "EPropertyFlags.inl"
-#undef LE_PROPERTY_FLAG
-    };
-
-    inline constexpr uint32 PropertyFlagValues[] =
-    {
-#define LE_PROPERTY_FLAG(Name, Bit) (1u << (Bit)),
-#include "EPropertyFlags.inl"
-#undef LE_PROPERTY_FLAG
-    };
-
-    static_assert(std::size(PropertyFlagNames) == std::size(PropertyFlagValues));
-
-    /** The reflected property-type taxonomy. Single-sourced from EPropertyTypeFlags.inl so the enum and its
-     *  name tables can never drift. Also mirrored by LuminaSharp.EPropertyType (validated at bootstrap) and by
-     *  the Reflector's isolated copy in ReflectedType.h/PropertyFlags.h. */
-    enum class EPropertyTypeFlags : uint8
-    {
-        None = 0,
-#define LE_PROPERTY_TYPE(Name) Name,
-#include "EPropertyTypeFlags.inl"
-#undef LE_PROPERTY_TYPE
-        Count,
-    };
-
-    ENUM_CLASS_FLAGS(EPropertyTypeFlags);
-
-    inline constexpr const char* PropertyTypeFlagNames[] =
-    {
-        "None",
-#define LE_PROPERTY_TYPE(Name) #Name "Property",
-#include "EPropertyTypeFlags.inl"
-#undef LE_PROPERTY_TYPE
-    };
-
-    // Plain enum-member names ("Int8", "Struct", ...), parallel to the enum, for the C#/C++ interop validation
-    // (LuminaSharp.EPropertyType checks each name -> value against the native side at bootstrap).
-    inline constexpr const char* PropertyTypePlainNames[] =
-    {
-        "None",
-#define LE_PROPERTY_TYPE(Name) #Name,
-#include "EPropertyTypeFlags.inl"
-#undef LE_PROPERTY_TYPE
-    };
-
-    static_assert(std::size(PropertyTypeFlagNames) == (size_t)EPropertyTypeFlags::Count, "PropertyTypeFlagNames must match number of flags in EPropertyTypeFlags");
-    static_assert(std::size(PropertyTypePlainNames) == (size_t)EPropertyTypeFlags::Count, "PropertyTypePlainNames must match number of flags in EPropertyTypeFlags");
-    
-    inline const char* PropertyTypeToString(EPropertyTypeFlags Flag)
-    {
-        // A tag read from a corrupt package can carry any kind byte.
-        const uint16 Index = static_cast<uint16>(Flag);
-        return Index < (uint16)EPropertyTypeFlags::Count ? PropertyTypeFlagNames[Index] : "Invalid";
-    }
-    
-    RUNTIME_API EPropertyTypeFlags PropertyStringToType(FName String);
-    
-    // the kind a name spells, for a file that stored types as text, None if it spells nothing
-    /** Builds Outer's reflected functions in its property arena, parameters included. */
-    RUNTIME_API void InitializeAndCreateFFunctions(CStruct* Outer, const FFunctionParams* const* FunctionArray, uint32 NumFunctions);
-
+    // The kind a name spells, for a file that stored types as text, None if it spells nothing.
     RUNTIME_API EPropertyTypeFlags PropertyTypeFromName(const FName& TypeName);
 
-    // whether Value survives a conversion into Type, which is what gates a numeric property's migration
+    // Whether Value survives a conversion into Type, which is what gates a numeric property's migration.
     RUNTIME_API bool IsValueValidForType(double Value, EPropertyTypeFlags Type);
     RUNTIME_API bool IsPropertyNumeric(EPropertyTypeFlags Type);
-    
-    template <typename T>
-    struct TRegistrationInfo
-    {
-        using TType = T;
-        
-        /** Allocates the class memory in stage 1. */
-        TType* InnerSingleton = nullptr;
 
-        /** Stage 2: holds property/function reflection initialization. */
-        TType* OuterSingleton = nullptr;
+    // Builds the property and every inner its type describes, attached wherever Owner says.
+    RUNTIME_API FProperty* ConstructProperty(const FPropertyOwner& Owner, const FPropertyDesc& Desc);
 
-    };
+    RUNTIME_API void InitializeAndCreateFProperties(CStruct* Outer, const FPropertyDesc* Properties, uint32 NumProperties);
+    RUNTIME_API void InitializeAndCreateFFunctions(CStruct* Outer, const FFunctionDesc* Functions, uint32 NumFunctions);
 
-    using FStructRegistrationInfo   = TRegistrationInfo<CStruct>;
-    using FClassRegistrationInfo    = TRegistrationInfo<CClass>;
-    using FEnumRegistrationInfo     = TRegistrationInfo<CEnum>;
-
-    struct FMetaDataPairParam
-    {
-        const char* NameUTF8;
-        const char* ValueUTF8;
-    };
-
-    typedef void (*SetterFuncPtr)(void* InContainer, const void* InValue);
-    typedef void (*GetterFuncPtr)(const void* InContainer, void* OutValue);
-
-    // The full operation set for a reflected TVector<T> is now a single shared ops table (Containers/
-    // ContainerOps.h, also used by C# TVector<T>) rather than per-property hand-rolled fn-ptrs.
-    struct FVectorOps;
-    struct FMapOps;
-
-    typedef bool (*OptionalHasValuePtr)(const void* InContainer);
-    /** Only valid when HasValue returned true. */
-    typedef void* (*OptionalGetValuePtr)(void* InContainer);
-    /** Engages the optional; copies InValue if non-null, else default-constructs. */
-    typedef void (*OptionalSetValuePtr)(void* InContainer, const void* InValue);
-    typedef void (*OptionalResetPtr)(void* InContainer);
-
-
-    struct FPropertyParams
-    {
-        const char*         Name;
-        EPropertyFlags      PropertyFlags;
-        EPropertyTypeFlags  TypeFlags;
-        SetterFuncPtr       SetterFunc;
-        GetterFuncPtr       GetterFunc;
-        uint16              Offset;
-    };
-
-    struct FNumericPropertyParams : FPropertyParams
-    {
-        uint16                      NumMetaData;
-        const FMetaDataPairParam*   MetaDataArray;
-    };
-
-    struct FStringPropertyParams : FPropertyParams
-    {
-        uint16                      NumMetaData;
-        const FMetaDataPairParam*   MetaDataArray;
-    };
-
-    struct FNamePropertyParams : FPropertyParams
-    {
-        uint16                      NumMetaData;
-        const FMetaDataPairParam*   MetaDataArray;
-    };
-
-    struct FObjectPropertyParams : FPropertyParams
-    {
-        CClass*                     (*ClassFunc)();
-
-        uint16                      NumMetaData;
-        const FMetaDataPairParam*   MetaDataArray;
-    };
-
-    // Soft equivalent of FObjectPropertyParams; ClassFunc returns the target class
-    // (T from TSoftObjectPtr<T>, or CObject::StaticClass for bare FSoftObjectPath).
-    struct FSoftObjectPropertyParams : FPropertyParams
-    {
-        CClass*                     (*ClassFunc)();
-
-        uint16                      NumMetaData;
-        const FMetaDataPairParam*   MetaDataArray;
-    };
-
-    struct FClassPropertyParams : FPropertyParams
-    {
-        CClass*                     (*ClassFunc)();
-
-        uint16                      NumMetaData;
-        const FMetaDataPairParam*   MetaDataArray;
-    };
-
-    struct FStructPropertyParams : FPropertyParams
-    {
-        CStruct*            (*StructFunc)();
-
-        uint16 NumMetaData;
-        const FMetaDataPairParam* MetaDataArray;
-    };
-
-    // TSubStructOf<T>: StructFunc returns the base struct T every assignable value must derive from.
-    struct FSubStructPropertyParams : FPropertyParams
-    {
-        CStruct*            (*StructFunc)();
-
-        uint16 NumMetaData;
-        const FMetaDataPairParam* MetaDataArray;
-    };
-
-    // TInstancedStruct<T>. StructFunc returns the base struct every owned instance must derive from.
-    struct FInstancedStructPropertyParams : FPropertyParams
-    {
-        CStruct*            (*StructFunc)();
-
-        uint16 NumMetaData;
-        const FMetaDataPairParam* MetaDataArray;
-    };
-
-    // TScriptDelegate<T> event; PayloadStructFunc returns the payload struct (null when no payload).
-    struct FDelegatePropertyParams : FPropertyParams
-    {
-        // Argument params follow this one, one per delegate argument, in declaration order.
-        uint16 NumArgs;
-
-        uint16 NumMetaData;
-        const FMetaDataPairParam* MetaDataArray;
-    };
-
-    struct FEnumPropertyParams : FPropertyParams
-    {
-        CEnum*              (*EnumFunc)();
-
-        uint16 NumMetaData;
-        const FMetaDataPairParam* MetaDataArray;
-    };
-
-    struct FArrayPropertyParams : FPropertyParams
-    {
-        // Returns the shared element-type ops table (GetVectorOps<T>). One forwarder per array property.
-        const FVectorOps* (*GetOpsFn)();
-
-        uint16 NumMetaData;
-        const FMetaDataPairParam* MetaDataArray;
-    };
-
-    struct FMapPropertyParams : FPropertyParams
-    {
-        // Returns the shared key/value ops table (GetMapOps<K,V>). One forwarder per map property.
-        const FMapOps* (*GetOpsFn)();
-
-        uint16 NumMetaData;
-        const FMetaDataPairParam* MetaDataArray;
-    };
-
-    struct FOptionalPropertyParams : FPropertyParams
-    {
-        OptionalHasValuePtr HasValueFn;
-        OptionalGetValuePtr GetValueFn;
-        OptionalSetValuePtr SetValueFn;
-        OptionalResetPtr    ResetFn;
-
-        uint16 NumMetaData;
-        const FMetaDataPairParam* MetaDataArray;
-
-        // Null for a compile-time TOptional<T>, whose owner constructs it; a script optional owns heap storage.
-        void (*ConstructContainerFn)(void* InContainer, const void* Context);
-        void (*DestructContainerFn)(void* InContainer, const void* Context);
-        const void* ContainerContext;
-    };
-    
-    /**
-     * One reflected function as the generated code declares it.
-     *
-     * Params are ordinary FPropertyParams whose Offset is an offsetof into the generated parameter struct,
-     * so the compiler lays the frame out and the same construction path builds them as builds a member.
-     */
-    struct FFunctionParams
-    {
-        const char*                     Name;
-        EFunctionFlags                  Flags;
-        const FPropertyParams* const*   Params;
-        /** Length of Params, container inners included, exactly as a type's property array counts them. */
-        uint16                          NumParamEntries;
-        /** Index among the TOP-LEVEL parameters of the return value, or -1 for a void function. */
-        int16                           ReturnIndex;
-        /** sizeof the generated parameter struct, which is the frame a call needs. */
-        uint16                          ParmsSize;
-        FFunction::FNativeFuncPtr       Thunk;
-    };
-
-    struct FClassParams
-    {
-        CClass*                         (*RegisterFunc)();
-
-        const FPropertyParams* const*   Params;
-        uint32                          NumProperties;
-
-        uint16                          NumMetaData;
-        const FMetaDataPairParam*       MetaDataArray;
-
-        // Last so a generated file that predates functions still initializes, leaving a type with none.
-        const FFunctionParams* const*   Functions = nullptr;
-        uint32                          NumFunctions = 0;
-    };
-
-    struct FStructParams
-    {
-        CStruct*                        (*SuperFunc)();
-        FStructOps*                     (*StructOpsFn)();
-        const char*                     Name;
-        const FPropertyParams* const*   Params;
-        uint32                          NumProperties;
-        uint16                          SizeOf;
-        uint16                          AlignOf;
-
-        uint16 NumMetaData;
-        const FMetaDataPairParam* MetaDataArray;
-
-        const FFunctionParams* const*   Functions = nullptr;
-        uint32                          NumFunctions = 0;
-    };
-    
-    struct FEnumeratorParam
-    {
-        const char*               NameUTF8;
-        int64                     Value;
-    };
-    
-    struct FEnumParams
-    {
-        const char*                 Name;
-        const FEnumeratorParam*     Params;
-        int16                       NumParams;
-        
-        uint16                      NumMetaData;
-        const FMetaDataPairParam*   MetaDataArray;
-    };
-    
-
-    
-
-    RUNTIME_API void ConstructCClass(CClass** OutClass, const FClassParams& Params);
-    RUNTIME_API void ConstructCEnum(CEnum** OutEnum, const FEnumParams& Params);
-    RUNTIME_API void ConstructCStruct(CStruct** OutStruct, const FStructParams& Params);
+    RUNTIME_API void ConstructCClass(CClass** OutClass, const FClassDesc& Desc);
+    RUNTIME_API void ConstructCEnum(CEnum** OutEnum, const FEnumDesc& Desc);
+    RUNTIME_API void ConstructCStruct(CStruct** OutStruct, const FStructDesc& Desc);
     
 }

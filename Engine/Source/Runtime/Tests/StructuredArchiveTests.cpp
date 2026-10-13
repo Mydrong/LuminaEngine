@@ -115,7 +115,7 @@ TEST(StructuredArchive, ArrayOfStructsWithNestedArraysStaysNested)
         {
             FArchiveSlot Element = Array.EnterElement();
             FArchiveRecord Record = Element.EnterRecord();
-            SInputAction::StaticStruct()->SerializeTaggedProperties(Record, &Action);
+            SInputAction::StaticStruct()->SerializeProperties(Record, &Action);
         }
     }
 
@@ -138,7 +138,7 @@ TEST(StructuredArchive, ArrayOfStructsWithNestedArraysStaysNested)
         {
             FArchiveSlot Element = Array.EnterElement();
             FArchiveRecord Record = Element.EnterRecord();
-            SInputAction::StaticStruct()->SerializeTaggedProperties(Record, &Action);
+            SInputAction::StaticStruct()->SerializeProperties(Record, &Action);
         }
     }
 

@@ -1,7 +1,5 @@
 #pragma once
 
+// The public include for StaticStruct, StaticClass and StaticEnum in hand-written code.
 #include "Core/Object/ObjectMacros.h"
-
-namespace Lumina { class CEnum; }
-
-template<typename EnumType> Lumina::CEnum* StaticEnum();
+#include "Core/Reflection/ReflectionDesc.h"

@@ -12,7 +12,7 @@ struct FSSRResolveArgs
     FGBufferTargets  GBuffer;
 
     FTexture2D Depth;
-    FTexture2D SlotImage;   // slot + 1 per pixel from the classify count, 0 where nothing deferred shades it
+    FTexture2DUInt SlotImage;   // slot + 1 per pixel from the classify count, 0 where nothing deferred shades it
     FTexture2D Pyramid;     // mip 0 is the depth each trace texel stood on
     FTexture2D Surface;     // the normal and roughness that went with it
 
@@ -75,7 +75,7 @@ void ComputeMain(uint3 DTid : SV_DispatchThreadID)
     }
 
     // Only pixels with a GBuffer, since forward-shaded surfaces leave stale texels behind them.
-    if (Pass().SlotImage.Load(Pixel).r < 0.5)
+    if (Pass().SlotImage.Load(Pixel) == 0u)
     {
         return;
     }

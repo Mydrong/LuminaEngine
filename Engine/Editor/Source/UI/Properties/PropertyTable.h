@@ -19,6 +19,7 @@ namespace Lumina
     class FArrayProperty;
     class FMapProperty;
     class FMapPropertyRow;
+    class FCategoryPropertyRow;
     class FOptionalProperty;
     class FInstancedStructProperty;
     class FProperty;
@@ -130,6 +131,9 @@ namespace Lumina
         void SetIsArrayElement(bool bTrue) { bArrayElement = bTrue; }
         bool IsArrayElementProperty() const { return bArrayElement; }
 
+        // A row directly under the table's own categories, which is what multi-value display and trailing controls are scoped to.
+        bool IsTopLevel() const;
+
         // True only for FCategoryPropertyRow; lets category rows find existing
         // nested-category children when fanning out a `Foo|Bar|Baz` path.
         virtual bool IsCategory() const { return false; }
@@ -164,6 +168,11 @@ namespace Lumina
 
         // Null for a category row, an array element or a map entry, none of which can carry an EditCondition.
         void* GetEditConditionContainer() const;
+
+        // Replaces Children with a row per visible member of Type, grouped under its categories, so members share the owning table's columns.
+        void BuildMemberRows(CStruct* Type, void* Instance, void* DefaultInstance);
+
+        FCategoryPropertyRow* FindOrCreateCategoryChild(const FName& InCategory, void* OwnerObject);
 
 
         FPropertyChangedEventCallbacks          Callbacks;
@@ -334,11 +343,9 @@ namespace Lumina
     private:
 
         FStructProperty*            StructProperty = nullptr;
-        TUniquePtr<FPropertyTable>  PropertyTable;
     };
 
-    // Editor row for TInstancedStruct<T>. A type-picker combo (T or derived) plus an inline nested
-    // table editing the chosen instance.
+    // Editor row for TInstancedStruct<T>, a type picker in the value cell with the chosen instance's members as child rows.
     class FInstancedStructPropertyRow : public FPropertyRow
     {
     public:
@@ -352,14 +359,13 @@ namespace Lumina
         float GetMeasuredHeaderTextWidth() const override;
         void OnValueResetToDefault() override { RebuildChildren(); }
 
-        // Rebuilds the nested table over the currently-stored instance (after a type change or reset).
+        // Rebuilds the member rows over the currently stored instance, after a type change or reset.
         void RebuildChildren();
 
     private:
 
         FInstancedStructProperty*   InstancedStructProperty = nullptr;
         CStruct*                    CachedType = nullptr;
-        TUniquePtr<FPropertyTable>  PropertyTable;
     };
 
     // Editor row for TOptional<T>: a "Set" checkbox; when engaged, the inner T
@@ -415,9 +421,6 @@ namespace Lumina
     
     class EDITOR_API FPropertyTable
     {
-        friend class FStructPropertyRow;
-        friend class FInstancedStructPropertyRow;
-
     public:
 
         FPropertyTable() = default;
@@ -428,8 +431,7 @@ namespace Lumina
         // "modified" indicator and reset-to-default for CObject-rooted details panels.
         explicit FPropertyTable(CObject* InObject);
 
-        // Explicit default-object form, for callers that have a hand-built
-        // default to compare against (e.g. nested struct rebuild paths).
+        // For callers holding a hand-built default to compare against.
         FPropertyTable(void* InObject, CStruct* InType, void* InDefaultObject);
 
         FPropertyTable(const FPropertyTable&) = delete;
@@ -453,9 +455,7 @@ namespace Lumina
         // Borrowed for as long as the table draws. Providers own the storage.
         void SetContext(const FPropertyEditContext* InContext) { Context = InContext; }
 
-        // Search box filtering the tree by property/category name. On by default so every tool's details
-        // panel gets one; nested tables (a struct or instanced-struct row hosting its own table) turn it
-        // off, since a search box per nested row is noise rather than a feature.
+        // On by default, and off for a panel that drives one search box across several tables.
         void SetShowSearchBar(bool bShow) { bShowSearchBar = bShow; }
 
         // Clears the search text and restores every row's pre-filter collapse state.

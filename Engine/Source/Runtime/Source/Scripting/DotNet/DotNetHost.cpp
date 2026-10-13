@@ -195,7 +195,6 @@ namespace Lumina::DotNet
         typedef int32 (CORECLR_DELEGATE_CALLTYPE* GetGenerationFn)();
         typedef void  (CORECLR_DELEGATE_CALLTYPE* OnWorldTeardownFn)(uint64);
         typedef int32 (CORECLR_DELEGATE_CALLTYPE* GetRuntimeDiagnosticsFn)(void*, int32);
-        typedef void  (CORECLR_DELEGATE_CALLTYPE* EnumerateEntityScriptsFn)(void*, void*);
         typedef void* (CORECLR_DELEGATE_CALLTYPE* CreateScriptableFn)(const char*, int32, uint64);
         typedef void  (CORECLR_DELEGATE_CALLTYPE* EnumerateScriptablesFn)(void*, void*);
         typedef void  (CORECLR_DELEGATE_CALLTYPE* EnumerateScriptableAliasesFn)(void*, void*);
@@ -214,7 +213,6 @@ namespace Lumina::DotNet
         // where it uses them (TManagedExport) rather than adding a field, a typedef and a resolve line here.
         struct FManagedExports
         {
-            EnumerateEntityScriptsFn    EnumerateEntityScripts;
             CreateScriptableFn          CreateScriptable;
             EnumerateScriptablesFn      EnumerateScriptables;
             EnumerateScriptableAliasesFn EnumerateScriptableAliases;
@@ -264,16 +262,6 @@ namespace Lumina::DotNet
 
         // Reflection layouts for each C# script type, cleared on reload/shutdown.
 
-        // Sink the managed EnumerateEntityScripts calls once per script type; Ctx is the out vector.
-        void LmScriptNameSink(void* Ctx, const char* Name, int Len)
-        {
-            auto* Out = static_cast<TVector<FString>*>(Ctx);
-            if (Out != nullptr && Name != nullptr && Len > 0)
-            {
-                Out->emplace_back(FString(Name, static_cast<size_t>(Len)));
-            }
-        }
-
         // Sink one (prior name, current name) pair; Ctx is the out pair vector.
         void LmScriptableAliasSink(void* Ctx, const char* Old, int OldLen, const char* New, int NewLen)
         {
@@ -290,7 +278,7 @@ namespace Lumina::DotNet
 
         // Sink the managed EnumerateScriptables calls once per Scriptable C# type; Ctx is the out desc vector.
         void LmScriptableSink(void* Ctx, const char* Name, int NameLen, const char* Base, int BaseLen,
-            const char* Overrides, int OverridesLen, uint8 UpdatePhase, uint8 ParallelUpdate, const char* Meta, int MetaLen)
+            const char* Overrides, int OverridesLen, uint8 Flags, const char* Meta, int MetaLen)
         {
             auto* Out = static_cast<TVector<FScriptableTypeDesc>*>(Ctx);
             if (Out == nullptr || Name == nullptr || NameLen <= 0)
@@ -323,10 +311,8 @@ namespace Lumina::DotNet
                 }
             }
 
-            Desc.UpdatePhase     = UpdatePhase;
-            Desc.bParallelUpdate = (ParallelUpdate & 1) != 0;
-            Desc.NetRealm        = static_cast<uint8>((ParallelUpdate >> 1) & 0x7);
-            Desc.bAbstract       = (ParallelUpdate & 16) != 0;
+            constexpr uint8 AbstractFlag = 1;
+            Desc.bAbstract = (Flags & AbstractFlag) != 0;
 
             // Lines of key, a tab, then value.
             if (Meta != nullptr && MetaLen > 0)
@@ -378,19 +364,15 @@ namespace Lumina::DotNet
         };
 
         // Scripts are source rather than VFS content, so a code-only plugin still gets its scripts compiled.
-        void GatherSourcesUnder(const FString& DiskDir, TVector<FGatheredSource>& Out)
+        template<typename TVisit>
+        void ForEachScriptSource(const FString& DiskDir, TVisit&& Visit)
         {
-            if (DiskDir.empty())
+            if (DiskDir.empty() || !Filesystem::IsDirectory(DiskDir))
             {
                 return;
             }
 
-            if (!Filesystem::IsDirectory(DiskDir))
-            {
-                return;
-            }
-
-            Filesystem::IterateDirectoryRecursive(DiskDir, [&Out](const Filesystem::FDirectoryEntry& Entry)
+            Filesystem::IterateDirectoryRecursive(DiskDir, [&Visit](const Filesystem::FDirectoryEntry& Entry)
             {
                 if (Entry.IsDirectory() || Entry.GetExtension() != FStringView(".cs"))
                 {
@@ -402,7 +384,14 @@ namespace Lumina::DotNet
                 {
                     return;
                 }
+                Visit(P);
+            });
+        }
 
+        void GatherSourcesUnder(const FString& DiskDir, TVector<FGatheredSource>& Out)
+        {
+            ForEachScriptSource(DiskDir, [&Out](FStringView P)
+            {
                 FGatheredSource Src;
                 if (!Filesystem::ReadFile(Src.Text, P))
                 {
@@ -1077,7 +1066,6 @@ namespace Lumina::DotNet
         }
 
         #define LM_RESOLVE(Field, Type) GManaged.Field = (Type)GResolveManagedExport(#Field, (int32)std::strlen(#Field))
-        LM_RESOLVE(EnumerateEntityScripts, EnumerateEntityScriptsFn);
         LM_RESOLVE(CreateScriptable,       CreateScriptableFn);      // optional, only when scripts ship Scriptables
         LM_RESOLVE(EnumerateScriptables,   EnumerateScriptablesFn);
         LM_RESOLVE(EnumerateScriptableAliases, EnumerateScriptableAliasesFn);   // optional, only with an alias
@@ -1605,6 +1593,75 @@ namespace Lumina::DotNet
         return Found;
     }
 
+    void GatherScriptSourceFolders(TVector<FScriptSourceFolder>& Out)
+    {
+        Out.clear();
+
+        TVector<FScriptUnit> Units;
+        for (FScriptUnit& Unit : BuildScriptUnits())
+        {
+            if (!Unit.DiskDir.empty() && Filesystem::Exists(Unit.DiskDir))
+            {
+                Units.push_back(Move(Unit));
+            }
+        }
+
+        auto ToForwardSlashes = [](FString Path)
+        {
+            for (char& Character : Path)
+            {
+                Character = Character == '\\' ? '/' : Character;
+            }
+            return Path;
+        };
+
+        // Collected per unit first, since the unit name only earns a folder level when more than one unit has scripts.
+        TVector<TVector<FScriptSourceFolder>> PerUnit(Units.size());
+        uint32 UnitsWithScripts = 0;
+        for (size_t UnitIndex = 0; UnitIndex < Units.size(); ++UnitIndex)
+        {
+            const FString Root = ToForwardSlashes(Units[UnitIndex].DiskDir);
+            Filesystem::IterateDirectoryRecursive(Units[UnitIndex].DiskDir, [&](const Filesystem::FDirectoryEntry& Entry)
+            {
+                const FStringView Name(Entry.Name);
+                if (Entry.IsDirectory() || Name.size() <= 3 || !EqualsIgnoreCase(Name.substr(Name.size() - 3), FStringView(".cs")))
+                {
+                    return true;
+                }
+
+                FString Relative = ToForwardSlashes(FString(Entry.FullPath.data(), Entry.FullPath.size()));
+                if (Relative.size() > Root.size() && Relative.compare(0, Root.size(), Root) == 0)
+                {
+                    Relative.erase(0, Root.size());
+                }
+                while (!Relative.empty() && Relative.front() == '/')
+                {
+                    Relative.erase(0, 1);
+                }
+
+                const size_t LastSlash = Relative.find_last_of('/');
+                FScriptSourceFolder& Found = PerUnit[UnitIndex].emplace_back();
+                Found.Stem   = FString(Name.substr(0, Name.size() - 3));
+                Found.Folder = LastSlash == FString::npos ? FString() : Relative.substr(0, LastSlash);
+                Found.Path   = FString(Entry.FullPath.data(), Entry.FullPath.size());
+                return true;
+            });
+            UnitsWithScripts += PerUnit[UnitIndex].empty() ? 0u : 1u;
+        }
+
+        for (size_t UnitIndex = 0; UnitIndex < Units.size(); ++UnitIndex)
+        {
+            for (FScriptSourceFolder& Found : PerUnit[UnitIndex])
+            {
+                if (UnitsWithScripts > 1)
+                {
+                    Found.Folder = Found.Folder.empty() ? Units[UnitIndex].Name : Units[UnitIndex].Name + "/" + Found.Folder;
+                }
+                Out.push_back(Move(Found));
+            }
+        }
+    }
+
     void RequestScriptReload()
     {
         GScriptReloadRequested.store(true, Atomic::MemoryOrderRelease);
@@ -1666,6 +1723,32 @@ namespace Lumina::DotNet
             return;
         }
         LoadScriptUnitsCore(Units, /*bEditorFollowups*/false);
+    }
+
+    void GatherScriptSourceFiles(TVector<FString>& OutPaths)
+    {
+        OutPaths.clear();
+
+        // The same roots BuildScriptUnits compiles, minus the reference resolution that can restore packages.
+        TVector<FString> Roots;
+        for (const FPlugin* Plugin : FPluginManager::Get().GetAllPlugins())
+        {
+            if (Plugin != nullptr && Plugin->IsEnabled())
+            {
+                Roots.push_back(FString(Plugin->GetDirectory().data(), Plugin->GetDirectory().size()) + "/Scripts");
+            }
+        }
+        if (GEngine != nullptr)
+        {
+            const FFixedString ScriptsDir = GEngine->GetProjectScriptsDirectory();
+            Roots.emplace_back(ScriptsDir.data(), ScriptsDir.size());
+        }
+        Roots.push_back(Paths::GetEngineResourceDirectory() + "/Scripts");
+
+        for (const FString& Root : Roots)
+        {
+            ForEachScriptSource(Root, [&OutPaths](FStringView P) { OutPaths.emplace_back(P.data(), P.size()); });
+        }
     }
 
     void GatherScriptUnitsForPackaging(TVector<FPackagedScriptUnit>& Out)
@@ -1758,15 +1841,6 @@ namespace Lumina::DotNet
         return GManaged.GetRuntimeDiagnostics(&OutDiagnostics, bForceCollect ? 1 : 0) != 0;
     }
 
-    void GatherEntityScriptTypes(TVector<FString>& OutTypeNames)
-    {
-        OutTypeNames.clear();
-        if (bInitialized && GManaged.EnumerateEntityScripts)
-        {
-            GManaged.EnumerateEntityScripts(reinterpret_cast<void*>(&LmScriptNameSink), &OutTypeNames);
-        }
-    }
-
     void GatherScriptableTypes(TVector<FScriptableTypeDesc>& Out)
     {
         Out.clear();
@@ -1835,10 +1909,7 @@ namespace Lumina::DotNet
             Definition.TypeName       = FName(Desc.TypeName.c_str());
             Definition.NativeBaseName = Desc.NativeBaseName;
             Definition.OverriddenEvents = Desc.OverriddenEvents;
-            Definition.UpdatePhase    = Desc.UpdatePhase;
-            Definition.bParallelUpdate = Desc.bParallelUpdate;
             Definition.bAbstract       = Desc.bAbstract;
-            Definition.NetRealm        = Desc.NetRealm;
             Definition.ClassMeta       = Desc.ClassMeta;
 
             // The one crossing for this type's schema. Consumers read it from here.

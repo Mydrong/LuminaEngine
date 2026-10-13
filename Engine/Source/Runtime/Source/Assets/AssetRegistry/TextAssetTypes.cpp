@@ -25,7 +25,6 @@ namespace Lumina::TextAsset
         // Accept with or without the leading dot.
         if (!Ext.empty() && Ext[0] == '.') Ext = Ext.substr(1);
 
-        if (IEquals(Ext, "luau")) return ETextAssetKind::LuaScript;
         if (IEquals(Ext, "rml"))  return ETextAssetKind::RmlDocument;
         if (IEquals(Ext, "rcss")) return ETextAssetKind::RmlStyleSheet;
         return ETextAssetKind::None;
@@ -40,7 +39,6 @@ namespace Lumina::TextAsset
     {
         switch (Kind)
         {
-        case ETextAssetKind::LuaScript:     return ".luau";
         case ETextAssetKind::RmlDocument:   return ".rml";
         case ETextAssetKind::RmlStyleSheet: return ".rcss";
         default:                            return {};
@@ -51,7 +49,6 @@ namespace Lumina::TextAsset
     {
         switch (Kind)
         {
-        case ETextAssetKind::LuaScript:     return "Lua Script";
         case ETextAssetKind::RmlDocument:   return "RML Document";
         case ETextAssetKind::RmlStyleSheet: return "RML Stylesheet";
         default:                            return "None";
@@ -89,7 +86,6 @@ namespace Lumina::TextAsset
             if (IEquals(Token, "any") || IEquals(Token, "*"))
             {
                 Out.clear();
-                AddUnique(ETextAssetKind::LuaScript);
                 AddUnique(ETextAssetKind::RmlDocument);
                 AddUnique(ETextAssetKind::RmlStyleSheet);
                 return Out;
@@ -99,8 +95,7 @@ namespace Lumina::TextAsset
             ETextAssetKind K = KindFromExtension(Token);
             if (K == ETextAssetKind::None)
             {
-                if (IEquals(Token, "script") || IEquals(Token, "lua")) K = ETextAssetKind::LuaScript;
-                else if (IEquals(Token, "document")) K = ETextAssetKind::RmlDocument;
+                if (IEquals(Token, "document")) K = ETextAssetKind::RmlDocument;
                 else if (IEquals(Token, "stylesheet") || IEquals(Token, "css")) K = ETextAssetKind::RmlStyleSheet;
             }
             AddUnique(K);
@@ -109,7 +104,6 @@ namespace Lumina::TextAsset
         // Empty meta == accept everything.
         if (Out.empty())
         {
-            AddUnique(ETextAssetKind::LuaScript);
             AddUnique(ETextAssetKind::RmlDocument);
             AddUnique(ETextAssetKind::RmlStyleSheet);
         }

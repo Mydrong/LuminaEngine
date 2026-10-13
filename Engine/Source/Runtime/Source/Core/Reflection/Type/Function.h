@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "Containers/Name.h"
 #include "Containers/Span.h"
@@ -103,7 +103,6 @@ namespace Lumina
         NODISCARD bool IsStatic() const         { return EnumHasAnyFlags(Flags, EFunctionFlags::Static); }
         NODISCARD bool IsConst() const          { return EnumHasAnyFlags(Flags, EFunctionFlags::Const); }
         NODISCARD bool IsVirtual() const        { return EnumHasAnyFlags(Flags, EFunctionFlags::Virtual); }
-        NODISCARD bool IsScriptable() const     { return EnumHasAnyFlags(Flags, EFunctionFlags::Scriptable); }
         NODISCARD bool IsScriptCallable() const { return EnumHasAnyFlags(Flags, EFunctionFlags::ScriptCallable); }
         NODISCARD bool HasReturn() const        { return EnumHasAnyFlags(Flags, EFunctionFlags::HasReturn); }
         NODISCARD bool IsScriptImplemented() const { return EnumHasAnyFlags(Flags, EFunctionFlags::ScriptImplemented); }
@@ -149,7 +148,7 @@ namespace Lumina
         mutable const int32*  ManagedOffsets = nullptr;
     };
 
-    struct FFunctionParams;
+    struct FFunctionDesc;
 
     /** Assembles an FFunction in a struct's property arena. The one writer of FFunction's members. */
     class FFunctionBuilder
@@ -157,7 +156,7 @@ namespace Lumina
     public:
 
         /** Null when the declaration is inconsistent, which is reported rather than half-built. */
-        RUNTIME_API static FFunction* Build(FPropertyArena& Arena, CStruct* Owner, const FFunctionParams& Params,
+        RUNTIME_API static FFunction* Build(FPropertyArena& Arena, CStruct* Owner, const FFunctionDesc& Desc,
                                             TSpan<FProperty* const> OrderedParams);
 
         /**

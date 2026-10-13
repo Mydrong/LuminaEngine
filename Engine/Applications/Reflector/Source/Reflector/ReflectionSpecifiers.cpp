@@ -1,6 +1,7 @@
 #include "ReflectionSpecifiers.h"
 
 #include <algorithm>
+#include <charconv>
 #include <array>
 #include <ranges>
 #include "Reflector/Diagnostics/LRTDiagnostics.h"
@@ -36,6 +37,28 @@ namespace Lumina::Reflection
         static_assert(std::ranges::adjacent_find(GPropertySpecifiers, {}, &FSpecifierInfo::Name) == GPropertySpecifiers.end());
         static_assert(std::ranges::adjacent_find(GFunctionSpecifiers, {}, &FSpecifierInfo::Name) == GFunctionSpecifiers.end());
         static_assert(std::ranges::adjacent_find(GScriptExportSpecifiers, {}, &FSpecifierInfo::Name) == GScriptExportSpecifiers.end());
+
+        struct FPropertyFlagSpecifier
+        {
+            std::string_view Name;
+            EPropertyFlags   Flag;
+        };
+
+        constexpr FPropertyFlagSpecifier GPropertyFlagSpecifiers[] =
+        {
+            { "Editable",           EPropertyFlags::Editable },
+            { "ReadOnly",           EPropertyFlags::ReadOnly },
+            { "NoSerialize",        EPropertyFlags::NoSerialize },
+            { "EditorOnly",         EPropertyFlags::EditorOnly },
+            { "Replicated",         EPropertyFlags::Replicated },
+            { "Sync",               EPropertyFlags::Replicated },
+            { "DuplicateTransient", EPropertyFlags::DuplicateTransient },
+            { "SaveGame",           EPropertyFlags::SaveGame },
+            { "ScriptReadOnly",     EPropertyFlags::ScriptReadOnly },
+            { "ScriptWritable",     EPropertyFlags::ScriptWritable },
+            { "ScriptHidden",       EPropertyFlags::ScriptHidden },
+            { "NotScriptable",      EPropertyFlags::ScriptHidden },
+        };
 
         constexpr size_t kMaxSpecifierLength = 64;
 
@@ -124,14 +147,93 @@ namespace Lumina::Reflection
         return BestDistance <= MaxDistance ? Best : nullptr;
     }
 
+    bool ParseSpecifierNumber(std::string_view Text, double& OutValue)
+    {
+        if (!Text.empty() && Text.front() == '+')
+        {
+            Text.remove_prefix(1);
+        }
+        if (!Text.empty() && (Text.back() == 'f' || Text.back() == 'F'))
+        {
+            Text.remove_suffix(1);
+        }
+
+        const auto [End, Error] = std::from_chars(Text.data(), Text.data() + Text.size(), OutValue);
+        return !Text.empty() && Error == std::errc() && End == Text.data() + Text.size();
+    }
+
+    EPropertyFlags PropertyFlagForSpecifier(std::string_view Key)
+    {
+        for (const FPropertyFlagSpecifier& Entry : GPropertyFlagSpecifiers)
+        {
+            if (Entry.Name == Key)
+            {
+                return Entry.Flag;
+            }
+        }
+        return EPropertyFlags::None;
+    }
+
+    ESpecifierStorage GetSpecifierStorage(ESpecifierTarget Target, std::string_view Key)
+    {
+        const FSpecifierInfo* Info = FindSpecifier(Target, Key);
+        if (Info == nullptr)
+        {
+            return ESpecifierStorage::Metadata;
+        }
+
+        if (Info->Consumer == ESpecifierConsumer::Reflector || Info->Consumer == ESpecifierConsumer::Script)
+        {
+            return ESpecifierStorage::None;
+        }
+
+        // A bare flag is all the bit says, while Sync = FromOwner still needs its value at runtime.
+        const bool bBareFlag = Info->Form == ESpecifierForm::Flag;
+        if (Target == ESpecifierTarget::Property && bBareFlag && PropertyFlagForSpecifier(Key) != EPropertyFlags::None)
+        {
+            return ESpecifierStorage::None;
+        }
+
+        if (Info->Consumer == ESpecifierConsumer::Editor)
+        {
+            return Target == ESpecifierTarget::Property && bBareFlag ? ESpecifierStorage::EditorFlag : ESpecifierStorage::EditorMetadata;
+        }
+
+        return ESpecifierStorage::Metadata;
+    }
+
     void ValidateSpecifiers(const CXCursor& Cursor, ESpecifierTarget Target, const std::vector<FMetadataPair>& Metadata)
     {
         const char* MacroName = SpecifierTargetToString(Target);
 
         for (const FMetadataPair& Pair : Metadata)
         {
-            if (Pair.Key.empty() || FindSpecifier(Target, Pair.Key) != nullptr)
+            if (Pair.Key.empty())
             {
+                continue;
+            }
+
+            if (const FSpecifierInfo* Info = FindSpecifier(Target, Pair.Key))
+            {
+                double Number = 0.0;
+                if (Info->Form == ESpecifierForm::Flag && !Pair.Value.empty())
+                {
+                    LRT_WARNING(Cursor, EDiagId::SpecifierForm,
+                        "%s specifier '%s' takes no value, so '%s' is ignored. Write it as a bare '%s'.",
+                        MacroName, Pair.Key.c_str(), Pair.Value.c_str(), Pair.Key.c_str());
+                }
+                else if ((Info->Form == ESpecifierForm::Value || Info->Form == ESpecifierForm::Number) && Pair.Value.empty())
+                {
+                    LRT_WARNING(Cursor, EDiagId::SpecifierForm,
+                        "%s specifier '%s' needs a value, as in '%s = ...', and does nothing without one.",
+                        MacroName, Pair.Key.c_str(), Pair.Key.c_str());
+                }
+                else if (Info->Form == ESpecifierForm::Number && !ParseSpecifierNumber(Pair.Value, Number))
+                {
+                    LRT_ERROR(Cursor, EDiagId::SpecifierForm,
+                        "%s specifier '%s' must be a number, but '%s' is not one.",
+                        MacroName, Pair.Key.c_str(), Pair.Value.c_str());
+                }
                 continue;
             }
 

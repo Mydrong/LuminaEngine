@@ -8,7 +8,7 @@
 
 namespace Lumina
 {
-    // each distinct name once per package, so one on every property tag interns once, not per occurrence
+    // each distinct name once per package, so one on every property header interns once, not per occurrence
     class RUNTIME_API FPackageNameMap
     {
     public:

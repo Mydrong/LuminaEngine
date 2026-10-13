@@ -298,7 +298,12 @@ namespace Lumina
         SkinnedMeshletBoundsBuffer.Release();
         SkinnedMeshletConeBuffer.Release();
         SurfaceDescBuffer.Release();
-        BoneArenaBuffer.Release();
+        for (FSceneBuffer& Arena : BoneArenaRing)
+        {
+            Arena.Release();
+        }
+        BoneArenaSyncedSerial = {};
+        LastBoneUploadRanges.clear();
         SkinnedFrameDataBuffer.Release();
         SkinnedSlotListBuffer.Release();
         InstanceVisibilityBuffers[0].Release();
@@ -377,6 +382,10 @@ namespace Lumina
         }
         ParticleBufferPool.clear();
         ParticlePoolBytes = 0;
+        FreeBuffer(ParticleCounterArena);
+        ParticleCounterArenaSlots = 0;
+        FreeBuffer(ParticleDrawArgsArena);
+        ParticleDrawArgsArenaSlots = 0;
 
         FreeBuffer(StreamingFeedbackBuffer);
         for (RHI::FGPUAllocation& Readback : StreamingFeedbackReadback)
@@ -384,7 +393,6 @@ namespace Lumina
             FreeBuffer(Readback);
         }
 
-        FreeBuffer(PrevBoneArenaBuffer);
         FreeBuffer(PrevRetainedTransformBuffer);
 
         for (FParticleCollisionReadback& Readback : ParticleCollisionReadback)
@@ -452,6 +460,16 @@ namespace Lumina
         {
             return CVarAsyncCompute.GetValue() && RHI::SupportsAsyncCompute();
         }
+
+        TConsoleVar<bool> CVarShadowReceiverCull(
+            "r.Shadows.ReceiverCull",
+            true,
+            "Cull near cascade casters whose shadow reaches nothing the camera can see, surfaces or fogged air, after this frame's depth.");
+
+        TConsoleVar<bool> CVarAsyncFrameCull(
+            "r.AsyncCompute.FrameCull",
+            true,
+            "Run the frame-head GPU cull on the compute queue, where it overlaps the previous frame's shading.");
     }
 
     void FDefaultSceneRenderer::RenderView(uint8 FrameIndex)
@@ -535,9 +553,33 @@ namespace Lumina
         RHI::FCmdListH CL = OpenSceneCommandList(RHI::EQueueType::Graphics);
 
         const bool bAsyncCompute = IsAsyncComputeEnabled();
+        const bool bCullOnCompute = bAsyncCompute && ShouldCullOnCompute(Frame);
+        bShadowReceiverCullThisFrame = WantsShadowReceiverCull(Frame);
+        bReceiverMaskValid = false;
         RHI::FSemaphoreInfo AsyncComputeWait = {};
+        bool bShadingWaitSubmitted = false;
 
-        BeginFrameScratch(CL, Frame);
+        // Only a pyramid last frame handed to compute may be read by a compute cull, and one handed over for nothing cannot be read on graphics.
+        const RHI::FTextureH CascadePyramidTexture = GetNamedImage(ENamedImage::CascadePyramid).Texture;
+        const bool bPyramidOnCompute = CascadePyramidOnCompute && CascadePyramidOnCompute == CascadePyramidTexture;
+        if (bCullOnCompute != bPyramidOnCompute)
+        {
+            Frame.SceneGlobalData.CullData.bCascadeHZBValid = 0u;
+        }
+        CascadePyramidOnCompute = {};
+
+        RHI::FCmdListH CullCL = CL;
+        if (bCullOnCompute)
+        {
+            CullCL = OpenSceneCommandList(RHI::EQueueType::Compute);
+            RHI::CmdBeginMarker(CullCL, "RenderView Frame Cull");
+            if (bPyramidOnCompute)
+            {
+                RHI::CmdAcquireTexture(CullCL, CascadePyramidTexture, RHI::EQueueType::Graphics);
+            }
+        }
+
+        BeginFrameScratch(CullCL, Frame);
         GrassCursorCursor = 0;
         
         {
@@ -555,8 +597,19 @@ namespace Lumina
             }
 
             {
-                SCENE_GPU_SCOPE(CL, "Compile Draw Commands");
-                CompileDrawCommands_Render(CL);
+                SCENE_GPU_SCOPE(CullCL, "Compile Draw Commands");
+                CompileDrawCommands_Render(CullCL);
+            }
+
+            if (bCullOnCompute)
+            {
+                if (bPyramidOnCompute)
+                {
+                    RHI::CmdReleaseTexture(CullCL, CascadePyramidTexture, RHI::EQueueType::Graphics);
+                    RHI::CmdAcquireTexture(CL, CascadePyramidTexture, RHI::EQueueType::Compute);
+                }
+                RHI::CmdEndMarker(CullCL);
+                RHI::CmdSetSceneRoot(CL, SceneBindings);
             }
 
             PrepareSceneColorForCallbacks(CL);
@@ -614,6 +667,17 @@ namespace Lumina
                 {
                     SCENE_GPU_SCOPE(CL, "VisBuffer Late");
                     VisBufferPass(CL, CurrentCameraEarlyView, /*bClear*/ false, ECullPhase::Late);
+                }
+
+                // Near cascades cull only now, against everything the finished depth shows the camera can see, and ahead of GTAO so it cannot starve them.
+                if (bShadowReceiverCullThisFrame)
+                {
+                    {
+                        SCENE_GPU_SCOPE(CL, "Shadow Receiver Mask");
+                        ShadowReceiverMaskPass(CL);
+                    }
+                    SCENE_GPU_SCOPE(CL, "Cascade Meshlet Cull");
+                    MeshletCullPass(CL, EMeshletSlice::Late, /*bCascadePhase*/ true);
                 }
 
                 // No rebuild here. Nothing between this and the build after Terrain Render writes depth or reads it.
@@ -712,6 +776,8 @@ namespace Lumina
                     CascadedShowPass(CL, Frame.Views.CascadeViewBase);
                 }
 
+                WeatherOcclusionPass(CL);
+
                 {
                     SCENE_GPU_SCOPE(CL, "Light Functions");
                     LightFunctionPass(CL);
@@ -789,6 +855,23 @@ namespace Lumina
                     FogShaftPass(CL);
                 }
 
+                // Here rather than at the end, since nothing later reads the past and the next frame's cull may rewrite the present after this.
+                RHI::CmdBarrier(CL,
+                    RHI::EStageFlags::Compute | RHI::EStageFlags::Transfer, RHI::EAccessFlags::TransferWrite | RHI::EAccessFlags::ShaderWrite,
+                    RHI::EStageFlags::Transfer | RHI::EStageFlags::Compute,
+                    RHI::EAccessFlags::TransferRead | RHI::EAccessFlags::TransferWrite | RHI::EAccessFlags::ShaderRead | RHI::EAccessFlags::ShaderWrite);
+                {
+                    SCENE_GPU_SCOPE(CL, "Snapshot Motion State");
+                    SnapshotMotionState(CL);
+                }
+
+                // The next frame decides again, and drops cascade occlusion for a frame if it decides otherwise.
+                if (bAsyncCompute && ShouldCullOnCompute(Frame) && CascadePyramidTexture)
+                {
+                    RHI::CmdReleaseTexture(CL, CascadePyramidTexture, RHI::EQueueType::Compute);
+                    CascadePyramidOnCompute = CascadePyramidTexture;
+                }
+
                 RHI::CmdEndMarker(CL);
 
                 // Its own submission, since the wait on the compute queue belongs only to the work that reads its outputs.
@@ -796,7 +879,21 @@ namespace Lumina
                 {
                     // The retained re-send and its staging fills have to land before the first segment runs.
                     WaitDeferredStageFills();
-                    const uint64 GeometryValue = RHI::Submit(RHI::EQueueType::Graphics, TSpan<const RHI::FCmdListH>{&GeometryCL, 1});
+
+                    // The cull waits for last frame's readers of what it rewrites, and the geometry waits for the cull.
+                    RHI::FSemaphoreInfo CullWait = {};
+                    if (bCullOnCompute)
+                    {
+                        const RHI::FSemaphoreInfo Gate = { RHI::GetQueueTimeline(RHI::EQueueType::Graphics), FrameCullGateValue };
+                        const uint64 CullValue = RHI::Submit(RHI::EQueueType::Compute, TSpan<const RHI::FCmdListH>{&CullCL, 1},
+                                                             FrameCullGateValue != 0 ? TSpan<const RHI::FSemaphoreInfo>{&Gate, 1}
+                                                                                     : TSpan<const RHI::FSemaphoreInfo>{});
+                        CullWait = { RHI::GetQueueTimeline(RHI::EQueueType::Compute), CullValue };
+                    }
+
+                    const uint64 GeometryValue = RHI::Submit(RHI::EQueueType::Graphics, TSpan<const RHI::FCmdListH>{&GeometryCL, 1},
+                                                             bCullOnCompute ? TSpan<const RHI::FSemaphoreInfo>{&CullWait, 1}
+                                                                            : TSpan<const RHI::FSemaphoreInfo>{});
                     AsyncComputeWait = { RHI::GetQueueTimeline(RHI::EQueueType::Graphics), GeometryValue };
                     const uint64 ComputeValue = RHI::Submit(RHI::EQueueType::Compute, TSpan<const RHI::FCmdListH>{&ComputeCL, 1},
                                                             TSpan<const RHI::FSemaphoreInfo>{&AsyncComputeWait, 1});
@@ -894,6 +991,9 @@ namespace Lumina
                     ParticleRenderPass(CL);
                 }
 
+                RainPass(CL);
+                ReleaseIdleWeatherResources();
+
                 {
                     SCENE_GPU_SCOPE(CL, "Billboards");
                     BillboardPass(CL);
@@ -942,6 +1042,19 @@ namespace Lumina
                 {
                     SCENE_GPU_SCOPE(CL, "Auto Exposure");
                     AutoExposurePass(CL);
+                }
+
+                // The next frame's compute cull starts here, beside the upscale, unless something after it renders the scene again.
+                if (bAsyncCompute)
+                {
+                    RHI::CmdEndMarker(CL);
+                    WaitDeferredStageFills();
+                    FrameCullGateValue = RHI::Submit(RHI::EQueueType::Graphics, TSpan<const RHI::FCmdListH>{&CL, 1},
+                                                     TSpan<const RHI::FSemaphoreInfo>{&AsyncComputeWait, 1});
+                    bShadingWaitSubmitted = true;
+                    CL = OpenSceneCommandList(RHI::EQueueType::Graphics);
+                    RHI::CmdSetSceneRoot(CL, SceneBindings);
+                    RHI::CmdBeginMarker(CL, "RenderView Post");
                 }
 
                 // After exposure, which an upscaler such as DLSS reads, and before anything runs at display resolution.
@@ -1037,16 +1150,18 @@ namespace Lumina
         // After every material lane has run, so the accumulated mask is this frame's complete demand.
         CollectStreamingFeedback(CL);
 
-        // Last, so the copy captures the fully uploaded state and next frame reads it as the past.
-        RHI::CmdBarrier(CL,
-            RHI::EStageFlags::Compute | RHI::EStageFlags::Transfer, RHI::EAccessFlags::TransferWrite | RHI::EAccessFlags::ShaderWrite,
-            RHI::EStageFlags::Transfer,
-            RHI::EAccessFlags::TransferRead | RHI::EAccessFlags::TransferWrite);
-        SnapshotMotionState(CL);
-
         WaitDeferredStageFills();
-        RHI::Submit(RHI::EQueueType::Graphics, TSpan<const RHI::FCmdListH>{&CL, 1},
-                    bAsyncCompute ? TSpan<const RHI::FSemaphoreInfo>{&AsyncComputeWait, 1} : TSpan<const RHI::FSemaphoreInfo>{});
+        const bool bWaitCompute = bAsyncCompute && !bShadingWaitSubmitted;
+        const uint64 FinalValue = RHI::Submit(RHI::EQueueType::Graphics, TSpan<const RHI::FCmdListH>{&CL, 1},
+                    bWaitCompute ? TSpan<const RHI::FSemaphoreInfo>{&AsyncComputeWait, 1} : TSpan<const RHI::FSemaphoreInfo>{});
+
+        // Captures and probe bakes draw the scene again past the upscale, and a callback there may read anything.
+        const bool bLateSceneReaders = !Frame.Views.CaptureViews.empty() || Frame.ReflectionProbes.BakingProbe >= 0
+                                    || HasRenderCallbacks(ERenderStage::AfterPostProcess) || HasRenderCallbacks(ERenderStage::Overlay);
+        if (!bShadingWaitSubmitted || bLateSceneReaders)
+        {
+            FrameCullGateValue = FinalValue;
+        }
 
         if (FramesComposited == 0)
         {
@@ -1082,6 +1197,7 @@ namespace Lumina
         Globals.GTAOSettings.SunShadowMaskIndex = Constants::kIndexNoneU32;
 
         PublishFogGlobals(Globals);
+        PublishWeatherGlobals(Globals);
 
         return Globals;
     }
@@ -1275,6 +1391,155 @@ namespace Lumina
             Slot.bPending = false;
         }
         #endif
+    }
+
+    bool FDefaultSceneRenderer::WantsShadowReceiverCull(const FFrameData& Frame) const
+    {
+        // Captures and probe bakes see the cascades from viewpoints the camera's receivers do not describe.
+        return CVarShadowReceiverCull.GetValue() && !FrameSettings.bFreezeCulling && Frame.Lighting.LightData.bHasSun
+            && !Frame.Lighting.Lights.empty() && Frame.Lighting.Lights[0].ShadowDataIndex != Constants::kIndexNone
+            && Frame.Views.NumNearCascadeViews > 0u && Frame.Views.CaptureViews.empty() && Frame.ReflectionProbes.BakingProbe < 0;
+    }
+
+    void FDefaultSceneRenderer::ShadowReceiverMaskPass(RHI::FCmdListH CL)
+    {
+        const FFrameData& Frame = *RenderFrame;
+        bReceiverMaskValid = false;
+
+        static const FShaderH AirShader    = FShaderLibrary::Get("ShadowReceiverAir.slang");
+        static const FShaderH DilateShader = FShaderLibrary::Get("ShadowReceiverDilate.slang");
+        const int32 SunShadowIndex = Frame.Lighting.Lights[0].ShadowDataIndex;
+        const FSceneImage& Depth   = GetNamedImage(ENamedImage::DepthAttachment);
+        if (!AirShader || !DilateShader || SunShadowIndex < 0 || SunShadowIndex >= (int32)Frame.Lighting.Shadows.size())
+        {
+            return;
+        }
+
+        // The raw marks, then per cascade a pyramid of the dilated marks whose levels must match ReceiverPyramidCells in MeshletCull.slang.
+        constexpr uint32 kPyramidLevels = 4u;
+        const uint32 Dim             = kReceiverMaskDim;
+        const uint32 NumMaskCascades = Math::Min<uint32>(Frame.Views.NumNearCascadeViews, (uint32)NumCascades);
+        uint32 PyramidCells = 0u;
+        for (uint32 L = 0; L < kPyramidLevels; ++L)
+        {
+            PyramidCells += (Dim >> L) * (Dim >> L);
+        }
+        const uint32 RawCells = NumMaskCascades * Dim * Dim;
+        const uint32 AllCells = RawCells + NumMaskCascades * PyramidCells;
+        ReserveBuffer(CL, ReceiverMaskBuffer, (uint64)AllCells * sizeof(uint32));
+        if (!ReceiverMaskBuffer)
+        {
+            return;
+        }
+        const RHI::GPUPtr PyramidBase   = ReceiverMaskBuffer.Gpu + (uint64)RawCells * sizeof(uint32);
+        const RHI::TGPUSpan<uint32> Raw = RHI::TGPUSpan<uint32>::FromAddress(ReceiverMaskBuffer.Gpu, RawCells);
+        ReceiverMaskFinal               = RHI::TGPUSpan<uint32>::FromAddress(PyramidBase, NumMaskCascades * PyramidCells);
+
+        RHI::CmdMemset(CL, { ReceiverMaskBuffer.Gpu, (uint64)RawCells * sizeof(uint32) }, 0u);
+        Barriers::TransferToCompute(CL);
+
+        const uint32 ScreenW = Depth.GetSizeX();
+        const uint32 ScreenH = Depth.GetSizeY();
+        constexpr uint32 kAirTile = 16u;
+
+        // How far a tile's corner ray strays from its center ray per unit of distance, from the projection's pixel pitch.
+        const float PixelPitch = 2.0f / Math::Max(Math::Abs(Frame.SceneGlobalData.CameraData.Projection[1][1]) * (float)ScreenH, 1e-6f);
+
+        struct FAirPC
+        {
+            RHI::TGPUSpan<uint32>   Mask;
+            RHI::TGPUSpan<FMatrix4> CascadeViewProjection;
+            uint32 TilesX;
+            uint32 TilesY;
+            uint32 TileSize;
+            uint32 ScreenW;
+            uint32 ScreenH;
+            uint32 MaskDim;
+            uint32 NumCascades;
+            float  TileSpreadPerDistance;
+        } AirPC = {};
+        static_assert(sizeof(FAirPC) == 64, "FAirPC must match ShadowReceiverAir.slang.");
+        AirPC.Mask                  = Raw;
+        AirPC.CascadeViewProjection = RHI::CopyTransientArray(Frame.Lighting.Shadows[SunShadowIndex].ViewProjection, NumMaskCascades);
+        AirPC.TilesX                = RenderUtils::GetGroupCount(ScreenW, kAirTile);
+        AirPC.TilesY                = RenderUtils::GetGroupCount(ScreenH, kAirTile);
+        AirPC.TileSize              = kAirTile;
+        AirPC.ScreenW               = ScreenW;
+        AirPC.ScreenH               = ScreenH;
+        AirPC.MaskDim               = Dim;
+        AirPC.NumCascades           = NumMaskCascades;
+        AirPC.TileSpreadPerDistance = 0.5f * 1.4143f * (float)kAirTile * PixelPitch;
+        DispatchCompute(CL, AirShader, AirPC, RenderUtils::GetGroupCount(AirPC.TilesX, 8u), RenderUtils::GetGroupCount(AirPC.TilesY, 8u), NumMaskCascades);
+
+        struct FDilatePC
+        {
+            RHI::TGPUSpan<uint32> Source;
+            RHI::TGPUSpan<uint32> Dest;
+            uint32 DestDim;
+            uint32 NumCascades;
+            uint32 bDilate;
+            uint32 SourceStride;
+            uint32 DestStride;
+            uint32 _Pad0;
+            uint32 _Pad1;
+            uint32 _Pad2;
+        };
+        static_assert(sizeof(FDilatePC) == 64, "FDilatePC must match ShadowReceiverDilate.slang.");
+
+        uint32 LevelOffset = 0u;
+        for (uint32 L = 0; L < kPyramidLevels; ++L)
+        {
+            RHI::CmdBarrier(CL, RHI::EStageFlags::Compute, RHI::EAccessFlags::ShaderWrite,
+                RHI::EStageFlags::Compute, RHI::EAccessFlags::ShaderRead);
+
+            const uint32 LevelDim = Dim >> L;
+            FDilatePC PC = {};
+            PC.DestDim     = LevelDim;
+            PC.NumCascades = NumMaskCascades;
+            PC.bDilate     = L == 0u ? 1u : 0u;
+            PC.DestStride  = PyramidCells;
+            PC.Dest        = RHI::TGPUSpan<uint32>::FromAddress(PyramidBase + (uint64)LevelOffset * sizeof(uint32), NumMaskCascades * PyramidCells - LevelOffset);
+            if (L == 0u)
+            {
+                PC.Source       = Raw;
+                PC.SourceStride = Dim * Dim;
+            }
+            else
+            {
+                const uint32 PrevOffset = LevelOffset - (LevelDim * 2u) * (LevelDim * 2u);
+                PC.Source       = RHI::TGPUSpan<uint32>::FromAddress(PyramidBase + (uint64)PrevOffset * sizeof(uint32), NumMaskCascades * PyramidCells - PrevOffset);
+                PC.SourceStride = PyramidCells;
+            }
+            DispatchCompute(CL, DilateShader, PC, RenderUtils::GetGroupCount(LevelDim, 8u), RenderUtils::GetGroupCount(LevelDim, 8u), NumMaskCascades);
+            LevelOffset += LevelDim * LevelDim;
+        }
+
+        RHI::CmdBarrier(CL, RHI::EStageFlags::Compute, RHI::EAccessFlags::ShaderWrite,
+            RHI::EStageFlags::Compute, RHI::EAccessFlags::ShaderRead);
+        bReceiverMaskValid = true;
+    }
+
+    bool FDefaultSceneRenderer::ShouldCullOnCompute(const FFrameData& Frame) const
+    {
+        if (!CVarAsyncFrameCull.GetValue() || FrameSettings.bFreezeCulling)
+        {
+            return false;
+        }
+
+        // Grass scatter runs inside the cull and samples terrain images that only graphics owns.
+        return !HasGrassScatter(Frame);
+    }
+
+    bool FDefaultSceneRenderer::HasGrassScatter(const FFrameData& Frame)
+    {
+        for (const FFrameData::FTerrainExtract& Terrain : Frame.Extracts.TerrainExtracts)
+        {
+            if (!Terrain.Grass.empty() && Terrain.GrassMaxInstances != 0u)
+            {
+                return true;
+            }
+        }
+        return false;
     }
 
     void FDefaultSceneRenderer::ResetPass_Render(RHI::FCmdListH CL)
@@ -1908,8 +2173,8 @@ namespace Lumina
         View.Images[(int)ENamedImage::GBufferB] = CreateSceneImage(Desc, true, /*bMipUAVs*/ true);
         Desc.Format = EFormat::R11G11B10_FLOAT;
         View.Images[(int)ENamedImage::GBufferD] = CreateSceneImage(Desc, true, /*bMipUAVs*/ true);
-        // Each pixel's deferred slot plus one, which fp16 holds exactly up to MATERIAL_MAX_SLOTS.
-        Desc.Format = EFormat::R16_FLOAT;
+        // Each pixel's deferred slot plus one, which 16 bits hold up to MATERIAL_MAX_SLOTS.
+        Desc.Format = EFormat::R16_UINT;
         View.Images[(int)ENamedImage::MaterialSlot] = CreateSceneImage(Desc, true, /*bMipUAVs*/ true);
 
         // The optional targets now arrive through EnsureOptionalViewImages on first use.

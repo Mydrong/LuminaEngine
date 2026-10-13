@@ -129,6 +129,7 @@ namespace Lumina::MCP
                     }
 
                     Out.Name = FString(Target.Asset->GetName().ToString().c_str());
+                    Out.bReadyForRender = Target.Material != nullptr && Target.Material->IsReadyForRender();
 
                     for (const TStrongObjectPtr<CEdGraphNode>& Node : Target.Graph->Nodes)
                     {

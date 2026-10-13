@@ -167,7 +167,7 @@ namespace Lumina
                     {
                         // Read into a temporary first, so a corrupt archive cannot leave a live component half-written.
                         TComponent Value{};
-                        TComponent::StaticStruct()->SerializeTaggedProperties(Ar, &Value);
+                        TComponent::StaticStruct()->SerializeProperties(Ar, &Value);
                         return &R.EmplaceOrReplace<TComponent>(E, Move(Value));
                     }
                 },

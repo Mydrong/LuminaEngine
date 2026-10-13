@@ -1,4 +1,5 @@
 #include "ReflectedType.h"
+#include <algorithm>
 
 #include "Reflector/CodeGeneration/CodeWriter.h"
 #include "Reflector/CodeGeneration/ReflectionNames.h"
@@ -22,20 +23,6 @@ namespace Lumina::Reflection
     void FReflectedStruct::PushProperty(std::unique_ptr<FReflectedProperty>&& NewProperty)
     {
         NewProperty->Outer = OffsetBaseTypeName();
-
-        if (bIsAlias)
-        {
-            NewProperty->AccessorDefinitionScope = DisplayName + "_";
-            NewProperty->AccessorScope = Namespace.empty()
-                ? NewProperty->AccessorDefinitionScope
-                : Namespace + "::" + NewProperty->AccessorDefinitionScope;
-        }
-        else
-        {
-            NewProperty->AccessorScope = EmittedCppQualifiedName() + "::";
-            NewProperty->AccessorDefinitionScope = NewProperty->AccessorScope;
-        }
-
         Props.push_back(std::move(NewProperty));
     }
 
@@ -63,92 +50,74 @@ namespace Lumina::Reflection
         return Taken;
     }
 
-    std::unique_ptr<FReflectedProperty> FReflectedStruct::TakeBackProperty(FReflectedProperty* Property)
-    {
-        for (auto It = Props.begin(); It != Props.end(); ++It)
-        {
-            if (It->get() == Property)
-            {
-                std::unique_ptr<FReflectedProperty> Owned = std::move(*It);
-                Props.erase(It);
-                return Owned;
-            }
-        }
-
-        return nullptr;
-    }
-
     void FReflectedStruct::EmitMetadataArrays(FCodeWriter& Writer) const
     {
-        // Type-level metadata.
-        EmitMetadataArray(Writer, Names::FriendlyFromQualified(QualifiedName), Metadata);
+        EmitMetadataArray(Writer, Names::FriendlyFromQualified(QualifiedName), Metadata, ESpecifierTarget::Reflect);
 
-        // Per-property metadata.
         for (const auto& Prop : Props)
         {
-            EmitMetadataArray(Writer, Prop->Name, Prop->Metadata);
+            if (!Prop->bInner)
+            {
+                EmitMetadataArray(Writer, Prop->Name, Prop->Metadata, ESpecifierTarget::Property);
+            }
         }
     }
 
-    void FReflectedStruct::EmitPropertyFieldDeclarations(FCodeWriter& Writer) const
+    void FReflectedStruct::EmitPropertyTable(FCodeWriter& Writer) const
     {
+        const bool bAnyMember = std::any_of(Props.begin(), Props.end(), [](const auto& Prop) { return !Prop->bInner; });
+        if (!bAnyMember)
+        {
+            return;
+        }
+
+        Writer.Line("static constexpr Lumina::FPropertyDesc Properties[] =");
+        Writer.BeginBlock();
         for (const auto& Prop : Props)
         {
-            Writer.Linef("static const Lumina::%s %s;", Prop->GetPropertyParamType(), Prop->Name.c_str());
+            if (!Prop->bInner)
+            {
+                Prop->EmitDescriptor(Writer);
+            }
         }
-    }
-
-    void FReflectedStruct::EmitPropertyDefinitions(FCodeWriter& Writer, std::string_view StaticsName)
-    {
-        // Free-function wrappers go in the owner's namespace, where its members' type names resolve.
-        const bool bWrapInNamespace = bIsAlias && !Namespace.empty();
-        if (bWrapInNamespace)
-        {
-            Writer.Linef("namespace %s", Namespace.c_str());
-            Writer.BeginBlock();
-        }
-
-        // Accessor function bodies first (Getter/Setter wrappers + array wrappers).
-        for (const auto& Prop : Props)
-        {
-            Prop->DefineAccessors(Writer, this);
-        }
-
-        if (bWrapInNamespace)
-        {
-            Writer.EndBlock();
-            Writer.Line();
-        }
-
-        // Then the FXxxPropertyParams literal for each property.
-        for (const auto& Prop : Props)
-        {
-            Writer.Appendf("const Lumina::%s %s::%s = ",
-                Prop->GetPropertyParamType(), std::string(StaticsName).c_str(), Prop->Name.c_str());
-            Prop->AppendDefinition(Writer);
-        }
-    }
-
-    void FReflectedStruct::EmitPropertyPointerTable(FCodeWriter& Writer, std::string_view StaticsName) const
-    {
-        Writer.Line();
-        Writer.Linef("const Lumina::FPropertyParams* const %s::PropPointers[] = {",
-            std::string(StaticsName).c_str());
-        for (const auto& Prop : Props)
-        {
-            Writer.Linef("\t(const Lumina::FPropertyParams*)&%s::%s,",
-                std::string(StaticsName).c_str(), Prop->Name.c_str());
-        }
+        Writer.PopIndent();
         Writer.Line("};");
         Writer.Line();
     }
 
+    std::string FReflectedStruct::MemberTableFields() const
+    {
+        std::string Fields;
+        if (std::any_of(Props.begin(), Props.end(), [](const auto& Prop) { return !Prop->bInner; }))
+        {
+            Fields += ", .Properties = Properties, .NumProperties = (Lumina::uint32)std::size(Properties)";
+        }
+        if (HasNativeFunctions())
+        {
+            Fields += ", .Functions = Functions, .NumFunctions = (Lumina::uint32)std::size(Functions)";
+        }
+        return Fields;
+    }
+
     void FReflectedStruct::DefineInitialHeader(FCodeWriter& Writer, const std::string& /*FileID*/)
     {
-        const std::string Api = Names::ProjectApiMacro(Header->Project->Name);
-        const std::string ConstructFn = Names::ConstructFunction("CStruct", Namespace, DisplayName);
+        // An alias name belongs to the `using`, which is declared after this header is included, so it gets no forward declaration.
+        if (bIsAlias)
+        {
+            return;
+        }
 
-        Writer.Linef("%s Lumina::CStruct* %s();", Api.c_str(), ConstructFn.c_str());
+        if (!Namespace.empty())
+        {
+            Writer.Linef("namespace %s { struct %s; }", Namespace.c_str(), EmittedCppName().c_str());
+        }
+        else
+        {
+            Writer.Linef("struct %s;", EmittedCppName().c_str());
+        }
+
+        const std::string Api = Names::ProjectApiMacro(Header->Project->Name);
+        Writer.Linef("template<> %s Lumina::CStruct* Lumina::StaticStruct<%s>();", Api.c_str(), EmittedCppQualifiedName().c_str());
     }
 
     void FReflectedStruct::DefineSecondaryHeader(FCodeWriter& Writer, const std::string& FileID)
@@ -160,13 +129,9 @@ namespace Lumina::Reflection
             return;
         }
 
-        const bool bHasAccessors = DeclareAccessors(Writer, FileID);
-
         Writer.Linef("#define %s_%u_GENERATED_BODY \\", FileID.c_str(), GeneratedBodyLineNumber);
-        if (bHasAccessors)
-        {
-            Writer.Macrof("%s_%u_ACCESSORS", FileID.c_str(), GeneratedBodyLineNumber);
-        }
+        Writer.Macrof("friend struct %s;", TypeInfoName().c_str());
+
         // Exports StaticStruct() so the type is referenceable without force-exporting every member.
         if (HasMetadata("MinimalAPI"))
         {
@@ -187,176 +152,53 @@ namespace Lumina::Reflection
         Writer.BlankLines(2);
     }
 
-    namespace
-    {
-        void EmitComponentMetaRegistrations(FCodeWriter& Writer, const FReflectedStruct& Struct)
-        {
-            for (const FMetadataPair& Data : Struct.Metadata)
-            {
-                if (Data.Key == "Component")
-                {
-                    Writer.Linef("::Lumina::Meta::RegisterComponentMeta<%s>();", Struct.EmittedCppQualifiedName().c_str());
-                }
-            }
-        }
-
-        void EmitStructParams(FCodeWriter& Writer, const FReflectedStruct& Struct, std::string_view StaticsName)
-        {
-            const std::string MetadataSymbol = Names::FriendlyFromQualified(Struct.QualifiedName);
-
-            Writer.Linef("const Lumina::FStructParams %s::StructParams = {",
-                std::string(StaticsName).c_str());
-
-            if (Struct.Parent.empty())
-            {
-                Writer.Line("\tnullptr,");
-            }
-            else
-            {
-                Writer.Linef("\t%s::Super::StaticStruct,", Struct.EmittedCppQualifiedName().c_str());
-            }
-
-            Writer.Line("\t&GetStructOps,");
-            Writer.Linef("\t\"%s\",", Struct.DisplayName.c_str());
-
-            if (!Struct.Props.empty())
-            {
-                Writer.Line("\tPropPointers,");
-                Writer.Line("\t(uint32)std::size(PropPointers),");
-            }
-            else
-            {
-                Writer.Line("\tnullptr,");
-                Writer.Line("\t0,");
-            }
-
-            Writer.Linef("\tsizeof(%s),", Struct.EmittedCppQualifiedName().c_str());
-            Writer.Appendf("\talignof(%s)", Struct.EmittedCppQualifiedName().c_str());
-
-            if (!Struct.Metadata.empty())
-            {
-                Writer.Line(",");
-                Writer.Linef("\t(uint32)std::size(%s_Metadata),", MetadataSymbol.c_str());
-                Writer.Appendf("\t%s_Metadata", MetadataSymbol.c_str());
-            }
-            else
-            {
-                // Spelled out rather than left off, since the function table below is positional after them.
-                Writer.Line(",");
-                Writer.Line("\t0,");
-                Writer.Append("\tnullptr");
-            }
-
-            if (Struct.HasNativeFunctions())
-            {
-                Writer.Line(",");
-                Writer.Line("\tFuncPointers,");
-                Writer.Append("\t(uint32)std::size(FuncPointers)");
-            }
-
-            Writer.Line();
-            Writer.Line("};");
-            Writer.Line();
-        }
-    }
-
     void FReflectedStruct::DeclareImplementation(FCodeWriter& Writer)
     {
-        const std::string RegInfo = Names::RegistrationInfo("CStruct", Namespace, DisplayName);
-        const std::string ConstructFn = Names::ConstructFunction("CStruct", Namespace, DisplayName);
-        const std::string Statics = Names::StaticsStruct("CStruct", Namespace, DisplayName);
+        const std::string& Cpp = EmittedCppQualifiedName();
 
         const std::string OffsetBase = OffsetBaseTypeName();
-        if (OffsetBase != EmittedCppQualifiedName())
+        if (OffsetBase != Cpp)
         {
+            Writer.Linef("using %s = %s;", OffsetBase.c_str(), Cpp.c_str());
             Writer.Line();
-            Writer.Linef("using %s = %s;", OffsetBase.c_str(), EmittedCppQualifiedName().c_str());
         }
 
-        Writer.BlankLines(2);
         Writer.Linef("// Begin %s", DisplayName.c_str());
-        Writer.Linef("static Lumina::FStructRegistrationInfo %s;", RegInfo.c_str());
-        Writer.Line();
-
-        // Frames and thunks first: offsetof below is taken against them, so they have to be complete.
+        OpenNamespace(Writer);
         EmitFunctionFrames(Writer);
 
-        // Statics struct body.
-        Writer.Linef("struct %s", Statics.c_str());
+        Writer.Linef("struct %s", TypeInfoName().c_str());
         Writer.BeginBlock();
 
-        Writer.Line("static Lumina::FStructOps* GetStructOps()");
-        Writer.BeginBlock();
-        Writer.Linef("return Lumina::MakeStructOps<%s>();", EmittedCppQualifiedName().c_str());
-        Writer.EndBlock();
+        Writer.Linef("static Lumina::FStructOps* MakeOps() { return Lumina::MakeStructOps<%s>(); }", Cpp.c_str());
         Writer.Line();
 
         EmitMetadataArrays(Writer);
-        Writer.Line();
+        EmitPropertyTable(Writer);
+        EmitFunctionTable(Writer);
 
-        EmitPropertyFieldDeclarations(Writer);
-        Writer.Line("static const Lumina::FStructParams StructParams;");
-        EmitFunctionFieldDeclarations(Writer);
-
-        if (!Props.empty())
-        {
-            Writer.Line("static const Lumina::FPropertyParams* const PropPointers[];");
-        }
-
-        Writer.Line();
+        const std::string Super = Parent.empty() ? std::string() : (", .Super = &" + Cpp + "::Super::StaticStruct");
+        Writer.Linef("static constexpr Lumina::FStructDesc Desc = { .Name = \"%s\"%s, .MakeOps = &MakeOps, "
+            ".Size = sizeof(%s), .Alignment = alignof(%s)%s%s };",
+            DisplayName.c_str(), Super.c_str(), Cpp.c_str(), Cpp.c_str(), MemberTableFields().c_str(),
+            MetadataField(Names::FriendlyFromQualified(QualifiedName), Metadata, ESpecifierTarget::Reflect).c_str());
 
         Writer.PopIndent();
         Writer.Line("};");
-        Writer.Line();
+        CloseNamespace(Writer);
 
-        // Construct_CStruct_*
-        Writer.Linef("Lumina::CStruct* %s()", ConstructFn.c_str());
-        Writer.BeginBlock();
-        Writer.Linef("if (!%s.InnerSingleton)", RegInfo.c_str());
-        Writer.BeginBlock();
-        Writer.Linef("Lumina::ConstructCStruct(&%s.InnerSingleton, %s::StructParams);",
-            RegInfo.c_str(), Statics.c_str());
-        EmitComponentMetaRegistrations(Writer, *this);
-        Writer.EndBlock();
-        Writer.Linef("return %s.InnerSingleton;", RegInfo.c_str());
-        Writer.EndBlock();
-        Writer.Line();
+        EmitTypeFunctions(Writer, HasMetadata("Component") ? ("Lumina::Meta::RegisterComponentMeta<" + Cpp + ">();") : std::string());
 
-        // The outer singleton is a member of QualifiedName, and an alias has no such member to define.
+        // An alias has no StaticStruct member to define.
         if (!bIsAlias)
         {
-            Writer.Linef("class Lumina::CStruct* %s::StaticStruct()", EmittedCppQualifiedName().c_str());
-            Writer.BeginBlock();
-            Writer.Linef("if (!%s.OuterSingleton)", RegInfo.c_str());
-            Writer.BeginBlock();
-            Writer.Linef("%s.OuterSingleton = %s();", RegInfo.c_str(), ConstructFn.c_str());
-            Writer.EndBlock();
-            Writer.Linef("return %s.OuterSingleton;", RegInfo.c_str());
-            Writer.EndBlock();
+            Writer.Linef("Lumina::CStruct* %s::StaticStruct()", Cpp.c_str());
+            Writer.Line("{");
+            Writer.Linef("\treturn Lumina::Generated::%s();", GetTypeFunctionName().c_str());
+            Writer.Line("}");
         }
-
-        // Property definitions + accessor impls + PropPointers table.
-        if (!Props.empty())
-        {
-            EmitPropertyDefinitions(Writer, Statics);
-            EmitPropertyPointerTable(Writer, Statics);
-        }
-
-        EmitFunctionDefinitions(Writer, Statics);
-        EmitFunctionPointerTable(Writer, Statics);
-
-        // FStructParams singleton definition.
-        EmitStructParams(Writer, *this, Statics);
 
         Writer.Linef("//~ End %s", DisplayName.c_str());
         Writer.Line();
-        Writer.Line("//------------------------------------------------------------");
-        Writer.Line();
-    }
-
-    void FReflectedStruct::DeclareStaticRegistration(FCodeWriter& Writer)
-    {
-        const std::string ConstructFn = Names::ConstructFunction("CStruct", Namespace, DisplayName);
-        Writer.Linef("\t{ %s, TEXT(\"%s\") },", ConstructFn.c_str(), DisplayName.c_str());
     }
 }

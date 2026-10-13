@@ -13,7 +13,7 @@ internal interface IDelegateInvoker
 internal sealed class VoidInvoker : IDelegateInvoker
 {
     public Action Handler = null!;
-    public EntityScript? Owner;
+    public Lumina.CEntityScript? Owner;
 
     public void Invoke(IntPtr Payload)
     {
@@ -34,7 +34,7 @@ internal sealed class VoidInvoker : IDelegateInvoker
 internal sealed class PayloadInvoker<T> : IDelegateInvoker where T : unmanaged
 {
     public Action<T> Handler = null!;
-    public EntityScript? Owner;
+    public Lumina.CEntityScript? Owner;
 
     public unsafe void Invoke(IntPtr Payload)
     {

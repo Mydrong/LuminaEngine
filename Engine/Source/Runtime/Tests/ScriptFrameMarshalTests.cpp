@@ -159,7 +159,7 @@ namespace
     FFunction* MintFrame(const char* ClassName, const Scripting::FScriptExportSchema& ParamSchema,
         const char* FunctionName = "Marshal", int32 ReturnIndex = -1)
     {
-        static const bool bReflectionReady = [] { ProcessNewlyLoadedCObjects(); return true; }();
+        static const bool bReflectionReady = [] { RegisterPendingTypes(); return true; }();
         (void)bReflectionReady;
 
         CScriptClass* Class = FScriptableRegistry::Mint(ClassName, "CScriptableTest");
@@ -456,7 +456,7 @@ namespace
 {
     FFunction* FindOptionalEcho()
     {
-        static const bool bReflectionReady = [] { ProcessNewlyLoadedCObjects(); return true; }();
+        static const bool bReflectionReady = [] { RegisterPendingTypes(); return true; }();
         (void)bReflectionReady;
 
         return CScriptableTest::StaticClass()->FindFunction(FName("OnEchoOptional"));
@@ -580,7 +580,7 @@ namespace
 {
     FFunction* FindVectorAppend()
     {
-        static const bool bReflectionReady = [] { ProcessNewlyLoadedCObjects(); return true; }();
+        static const bool bReflectionReady = [] { RegisterPendingTypes(); return true; }();
         (void)bReflectionReady;
 
         return CScriptableTest::StaticClass()->FindFunction(FName("OnAppendSum"));
@@ -1367,7 +1367,7 @@ TEST_F(FFrameMarshalTest, ASlotViewBindsInPlaceRatherThanByWidth)
     auto* Probe = (FSlotViewFn)DotNet::ResolveManagedExport("Test_SlotViewBinds");
     ASSERT_NE(Probe, nullptr);
 
-    ProcessNewlyLoadedCObjects();
+    RegisterPendingTypes();
 
     struct FCase { const char* Struct; const char* Property; int32 bDelegate; };
     const FCase Cases[] =
@@ -1395,7 +1395,7 @@ TEST_F(FFrameMarshalTest, AMapCarriesAMarshalledKeyAndValue)
     auto* RoundTrip = (FMapRoundTripFn)DotNet::ResolveManagedExport("Test_MarshalledMapRoundTrip");
     ASSERT_NE(RoundTrip, nullptr);
 
-    ProcessNewlyLoadedCObjects();
+    RegisterPendingTypes();
 
     FInteropOpaqueStruct Opaque;
     EXPECT_EQ(RoundTrip(&Opaque), 63) << "a map operation did not survive the round trip";
@@ -1445,7 +1445,7 @@ TEST_F(FFrameMarshalTest, AnOptionalCarriesAMarshalledPayload)
     auto* RoundTrip = (FOptRoundTripFn)DotNet::ResolveManagedExport("Test_MarshalledOptionalRoundTrip");
     ASSERT_NE(RoundTrip, nullptr);
 
-    ProcessNewlyLoadedCObjects();
+    RegisterPendingTypes();
 
     FInteropOpaqueStruct Opaque;
     EXPECT_EQ(RoundTrip(&Opaque), 15) << "an optional operation did not survive the round trip";
@@ -1581,7 +1581,7 @@ TEST_F(FFrameMarshalTest, AManagedHandlerReceivesEveryDelegateArgument)
     ASSERT_NE(Flags, nullptr);
     ASSERT_NE(Release, nullptr);
 
-    ProcessNewlyLoadedCObjects();
+    RegisterPendingTypes();
 
     SDelegateTestHost Host;
     ASSERT_EQ(Bind(&Host), 1) << "one of the generated accessors refused to bind";
@@ -1615,7 +1615,7 @@ TEST_F(FFrameMarshalTest, ABlittableBroadcastReachesManagedWithoutAllocating)
     ASSERT_NE(Release, nullptr);
     ASSERT_NE(Allocated, nullptr);
 
-    ProcessNewlyLoadedCObjects();
+    RegisterPendingTypes();
 
     SDelegateTestHost Host;
     ASSERT_EQ(Bind(&Host), 1);

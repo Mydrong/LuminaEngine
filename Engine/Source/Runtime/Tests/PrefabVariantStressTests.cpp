@@ -20,7 +20,7 @@ namespace
 {
     CPrefab* NewPrefab()
     {
-        ProcessNewlyLoadedCObjects();
+        RegisterPendingTypes();
         return NewObject<CPrefab>(nullptr, NAME_None, FGuid::New(), OF_Transient);
     }
 
@@ -248,7 +248,7 @@ namespace
     // A bare world skips InitializeWorld, so its transforms are bound the way the world's construct hook binds them.
     CWorld* MakeWorld()
     {
-        ProcessNewlyLoadedCObjects();
+        RegisterPendingTypes();
         CWorld* World = NewObject<CWorld>(nullptr, NAME_None, FGuid::New(), OF_Transient);
         ECS::GetWorldRegistry(*World).GetSignals<STransformComponent>().OnConstruct.Connect<&BindTransformLikeAWorld>();
         return World;

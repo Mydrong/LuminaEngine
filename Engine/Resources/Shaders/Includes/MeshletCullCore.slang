@@ -18,6 +18,7 @@ struct FMeshletCullContext
     bool     bNoCull;
     bool     bCaster;
     bool     bFarCaster;
+    bool     bFoliage;
     bool     bShadowOnly;
     bool     bTwoSided;
     float4x4 Model;
@@ -42,6 +43,7 @@ FMeshletCullContext MakeMeshletCullContext(FGPUInstance* Inst)
     Ctx.bNoCull     = I.HasFlag(EInstanceFlags::NoCull);
     Ctx.bCaster     = I.HasFlag(EInstanceFlags::CastShadow);
     Ctx.bFarCaster  = I.HasFlag(EInstanceFlags::CastFarShadow);
+    Ctx.bFoliage    = I.HasFlag(EInstanceFlags::Foliage);
     Ctx.bShadowOnly = I.HasFlag(EInstanceFlags::ShadowOnly);
     Ctx.bTwoSided   = I.HasFlag(EInstanceFlags::TwoSided);
 
@@ -164,6 +166,7 @@ bool TestMeshletAgainstView(FMeshletCullContext Ctx, FCullView View,
 
     bool bKeep = !(bShadowView && !Ctx.bCaster)
               && !(View.HasFlag(CULL_VIEW_FLAG_FAR_CASCADE) && !Ctx.bFarCaster)
+              && !(View.HasFlag(CULL_VIEW_FLAG_NO_FOLIAGE) && Ctx.bFoliage)
               && !(!bShadowView && Ctx.bShadowOnly)
               && !(View.HasFlag(CULL_VIEW_FLAG_DISTANCE) && (Ctx.DistToCamera - Ctx.InstRadius > Ctx.MaxShadowDist));
 
@@ -201,6 +204,12 @@ bool TestMeshletAgainstView(FMeshletCullContext Ctx, FCullView View,
                     // The camera slice swept toward the sun, which unlike the ortho box does not nest.
                     bKeep = FrustumContainsSphere(Scene().CullData.CascadeFrustum[View.CascadeIndex],
                                                  CullCenter, CullRadius);
+                }
+
+                // The instance test against last frame's cascade depth, repeated per meshlet for the parts a canopy hides.
+                if (bKeep && Ctx.bPosedBounds && Scene().CullData.bShadowOcclusionCull != 0u)
+                {
+                    bKeep = !IsCascadeHZBOccluded(View.CascadeIndex, Cache.WorldCenter, Cache.WorldRadius);
                 }
             }
 

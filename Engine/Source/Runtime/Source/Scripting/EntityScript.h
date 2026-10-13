@@ -290,6 +290,9 @@ namespace Lumina
          *  script on the entity existing by the time it runs. */
         RUNTIME_API CEntityScript* Attach(ECS::FRegistry& Registry, ECS::FEntity Entity, CClass* ScriptClass);
 
+        // A detached copy of Source's values with no owner and no lifecycle, for script data held outside a world.
+        RUNTIME_API CEntityScript* Clone(CEntityScript* Source);
+
         /** Drains pending OnReady (PrePhysics only), then runs OnUpdate on the scripts declaring Phase. */
         RUNTIME_API void Tick(ECS::FRegistry& Registry, float DeltaTime,
             EScriptUpdatePhase Phase = EScriptUpdatePhase::PrePhysics);

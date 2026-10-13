@@ -79,12 +79,8 @@ namespace Lumina::DragDrop
     // Outliner folder drop. On delivery, writes outputs and returns true.
     RUNTIME_API bool AcceptSceneFolder(CWorld** OutWorld, uint32* OutFolderID);
 
-    // Plain file drop. ExtensionFilter is empty for "any file", or e.g. "luau",
-    // "rml" (lowercase, no dot) to gate by extension.
+    // Plain file drop. ExtensionFilter is empty for any file, or a lowercase extension without the dot such as "rml".
     RUNTIME_API bool AcceptFile(FStringView ExtensionFilter, FFixedString& OutPath);
-
-    // Convenience for script slots: accepts .lua or .luau files.
-    RUNTIME_API bool AcceptScript(FFixedString& OutPath);
 
     // Internal: cleared when no drag is active so a stale payload does not
     // leak across frames. Safe to call from a per-frame top-level place.

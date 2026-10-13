@@ -192,11 +192,12 @@ namespace Lumina
         // Dispatches on Delta's own AdditiveSpace, so callers holding a pose from anywhere apply it right.
         RUNTIME_API void ApplyAdditivePose(const FPose& Base, const FPose& Delta, float Alpha, const FSkeletonResource* Skeleton, FPose& Out, int32 NumActiveBones = -1);
 
-        // Resolves a local-space pose into GPU skinning matrices (Global * InvBind).
-        RUNTIME_API void ToSkinningMatrices(const FPose& Pose, const FSkeletonResource* Skeleton, TVector<FMatrix4>& OutMatrices);
+        // Global * InvBind for the first NumActiveBones, each written to OutputSlot[bone] when given so another bone order lands in asset order.
+        RUNTIME_API void ToSkinningMatrices(const FPose& Pose, const FSkeletonResource* Skeleton, TVector<FMatrix4>& OutMatrices,
+                                            int32 NumActiveBones = -1, const int32* OutputSlot = nullptr);
 
-        // ComposeTRS of every bone in the pose, eight bones per step and bit-identical to the scalar form.
-        RUNTIME_API void ComposeLocalMatrices(const FPose& Pose, FMatrix4* OutMatrices);
+        // ComposeTRS of the first NumMatrices bones, or all of them when negative, eight per step and bit-identical to the scalar form.
+        RUNTIME_API void ComposeLocalMatrices(const FPose& Pose, FMatrix4* OutMatrices, int32 NumMatrices = -1);
 
         enum class EBoneSpace : uint8
         {

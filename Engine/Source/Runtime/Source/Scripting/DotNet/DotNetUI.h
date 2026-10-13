@@ -14,8 +14,5 @@ namespace Lumina
     {
         // Pushes what changed in every C# ViewModel bound in World, just before its UI updates.
         RUNTIME_API void PollModels(CWorld* World);
-
-        // A UIScript's document loaded, so its [Element] members resolve and its OnDocumentLoaded runs. A no-op for a C++ script.
-        RUNTIME_API void ScriptDocumentLoaded(CObject* Script);
     }
 }

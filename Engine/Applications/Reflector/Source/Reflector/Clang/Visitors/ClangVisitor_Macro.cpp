@@ -56,6 +56,12 @@ namespace Lumina::Reflection::Visitor
             Context->ReflectedHeader->bHasReflectionMacros = true;
         }
 
+        // A member or function carries its own specifiers as an annotation, so only types are matched by macro.
+        if (MacroType == EReflectionMacro::Property || MacroType == EReflectionMacro::Function || MacroType == EReflectionMacro::ScriptExport)
+        {
+            return CXChildVisit_Continue;
+        }
+
         FReflectionMacro Macro(Context->ReflectedHeader, Cursor, clang_getCursorExtent(Cursor), MacroType);
         if (MacroType == EReflectionMacro::GeneratedBody)
         {

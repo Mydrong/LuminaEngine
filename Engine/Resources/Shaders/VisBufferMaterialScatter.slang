@@ -9,7 +9,7 @@ struct FMaterialScatterArgs
     GPUSpan<uint> Cursors;    // zeroed by the args pass, same two halves
     GPUSpan<uint> PairList;   // packed tile coordinates, grouped by slot
     GPUSpan<uint> TileSlots;  // MATERIAL_TILE_RECORD entries per tile
-    GPUSpan<uint> Overflow;   // tile index above the slot bits
+    GPUSpan<uint> Overflow;   // a tile index then a slot per pair
     GPUSpan<uint> OverflowCount;  // the pairs the classify appended to Overflow
     GPUSpan<uint> PixelList;  // packed pixel coordinates of sparse pairs, grouped by slot
     uint  TilesX;
@@ -141,13 +141,13 @@ void ComputeMain(uint3 GroupID : SV_GroupID, uint ThreadIndex : SV_GroupIndex)
     }
 
     const uint OverflowIndex = Index - Pass().NumTiles;
-    if (OverflowIndex < min(Pass().OverflowCount.Get(0u), Pass().Overflow.Count))
+    if (OverflowIndex < min(Pass().OverflowCount.Get(0u), Pass().Overflow.Count / MATERIAL_OVERFLOW_PAIR_WORDS))
     {
-        const uint Packed = Pass().Overflow.Get(OverflowIndex);
-        const uint Slot   = Packed & MATERIAL_PAIR_SLOT_MASK;
+        const uint First = OverflowIndex * MATERIAL_OVERFLOW_PAIR_WORDS;
+        const uint Slot  = Pass().Overflow.Get(First + 1u);
         if (Slot < NumSlots)
         {
-            AppendPair(Slot, Packed >> MATERIAL_PAIR_SLOT_BITS);
+            AppendPair(Slot, Pass().Overflow.Get(First));
         }
     }
 }

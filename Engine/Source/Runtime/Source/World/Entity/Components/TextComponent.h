@@ -92,7 +92,7 @@ namespace Lumina
         PROPERTY(Editable, Category = "Text")
         bool bDepthTest = true;
 
-        //~ Script setters (reflected fields aren't directly assignable from Lua). Font is optional -- a null
+        //~ Script setters (reflected fields aren't directly assignable from scripts). Font is optional -- a null
         //  font falls back to the engine default world-text font (CFontManager).
 
         FUNCTION()

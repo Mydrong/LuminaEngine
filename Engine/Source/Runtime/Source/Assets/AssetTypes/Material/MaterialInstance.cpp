@@ -793,11 +793,22 @@ namespace Lumina
 
     void CMaterialInstance::RequestStaticSwitchPermutation()
     {
-#if USING(WITH_EDITOR)
         CMaterial* Root = GetMaterial();
-        if (Root != nullptr && !Root->StaticSwitches.empty())
+        if (Root == nullptr || Root->StaticSwitches.empty())
         {
-            CMaterial::RequestPermutation(Root, GetStaticSwitchKey());
+            return;
+        }
+
+        // A permutation compiled on any machine sharing the cache is reused before the editor is asked to build one.
+        const uint64 Key = GetStaticSwitchKey();
+        if (Root->LoadPermutationFromArtifactCache(Key))
+        {
+            return;
+        }
+#if USING(WITH_EDITOR)
+        if (FRenderManager* Renderer = TryRender())
+        {
+            Renderer->GetMaterialCompileQueue().QueuePermutation(Root, Key);
         }
 #endif
     }

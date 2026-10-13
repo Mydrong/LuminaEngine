@@ -1,4 +1,4 @@
-﻿#include "RuntimePCH.h"
+#include "RuntimePCH.h"
 #include "NetReplication.h"
 #include "World/ECS/Registry.h"
 #include "NetWorldState.h"
@@ -453,12 +453,7 @@ namespace Lumina::Net
     // The Rate a Sync field declares, as the shortest gap between sends, or zero when it may go every tick.
     static double MinSendInterval(const FProperty* Property)
     {
-        const FCStringView Rate = Property->GetMetadata("Rate");
-        if (Rate.empty())
-        {
-            return 0.0;
-        }
-        const double Hz = std::strtod(Rate.data(), nullptr);
+        const double Hz = Property->GetMetadataNumber("Rate").value_or(0.0);
         return Hz > 0.0 ? 1.0 / Hz : 0.0;
     }
 

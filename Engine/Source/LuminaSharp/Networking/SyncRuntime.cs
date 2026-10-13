@@ -19,20 +19,20 @@ public static class SyncRuntime
     // Emitted into a [Sync] setter carrying [Change], so the writer's own change runs the handler the same as an arriving one.
     public static void Changed<T>(object Owner, string Member, T Old, T New)
     {
-        if (Owner is EntityScript Script && !Script.Entity.IsNull)
+        if (Owner is Lumina.CEntityScript Script && !Script.Entity.IsNull)
         {
             SyncChanges.DispatchLocal(Script, Member, Old, New);
         }
     }
 
     // A FromOwner write goes to the host only from the owning client, and never while an arriving value is being applied.
-    public static bool ShouldForward(EntityScript Script)
+    public static bool ShouldForward(Lumina.CEntityScript Script)
     {
         return !Script.Entity.IsNull && Script.World.IsClient && Script.Network.IsNetworked && Script.Network.IsOwner && !RpcRuntime.IsReceiving;
     }
 
     // Native sends the stored value through the field's FProperty, then validates, applies or corrects it on the host, as for C++.
-    public static void Forward(EntityScript Script, string Field)
+    public static void Forward(Lumina.CEntityScript Script, string Field)
     {
         IntPtr Handle = NativeObjectMarshal.ToHandle(Script);
         IntPtr Property = FieldOf(Script.GetType(), Handle, Field);
@@ -81,7 +81,7 @@ internal static class SyncChanges
         public readonly Dictionary<string, FHandler> ByMember = new(StringComparer.Ordinal);
     }
 
-    public static void DispatchLocal<T>(EntityScript Script, string Member, T Old, T New)
+    public static void DispatchLocal<T>(Lumina.CEntityScript Script, string Member, T Old, T New)
     {
         FTypeHandlers Handlers = Cache.GetValue(Script.GetType(), Build);
         if (!Handlers.ByMember.TryGetValue(Member, out FHandler? Handler))
@@ -95,7 +95,7 @@ internal static class SyncChanges
 
     [ThreadStatic] private static List<(FHandler Handler, object? Old)>? Pending;
 
-    public static void Dispatch(EntityScript Script, ReadOnlySpan<byte> Names, bool bAfter)
+    public static void Dispatch(Lumina.CEntityScript Script, ReadOnlySpan<byte> Names, bool bAfter)
     {
         FTypeHandlers Handlers = Cache.GetValue(Script.GetType(), Build);
         if (Handlers.ByName.Count == 0)

@@ -270,6 +270,40 @@ namespace Lumina::Screenshot
         return Out;
     }
 
+    FCaptureResult SaveWindowCapture(const TVector<uint8>& BGRA, uint32 Width, uint32 Height, const FString& OutputPath)
+    {
+        FCaptureResult Out;
+        Out.ResolutionX = Width;
+        Out.ResolutionY = Height;
+        if (Width == 0 || Height == 0 || BGRA.size() < (size_t)Width * Height * 4u)
+        {
+            Out.ErrorMessage = "The window capture holds no pixels.";
+            return Out;
+        }
+
+        const FString ResolvedPath = OutputPath.empty() ? GenerateDefaultPath(ECaptureSource::FinalLDR) : OutputPath;
+        const FString Parent = Paths::Parent(FStringView(ResolvedPath.c_str(), ResolvedPath.size()), true);
+        if (!Parent.empty())
+        {
+            Paths::CreateDirectories(FStringView(Parent.c_str(), Parent.size()));
+        }
+
+        // The window composites opaque, but UI passes leave arbitrary alpha behind, which a PNG would show as holes.
+        TVector<uint8> Opaque = BGRA;
+        for (size_t i = 3; i < Opaque.size(); i += 4)
+        {
+            Opaque[i] = 255;
+        }
+
+        if (WritePNG(ResolvedPath, Width, Height, EFormat::BGRA8_UNORM, Opaque.data(), (size_t)Width * 4u, Out.ErrorMessage))
+        {
+            Out.bSuccess   = true;
+            Out.OutputPath = ResolvedPath;
+            LOG_INFO("Saved editor window capture ({}x{}) to {}", Width, Height, ResolvedPath);
+        }
+        return Out;
+    }
+
     IRenderScene* FindActiveRenderScene()
     {
         if (GWorldManager == nullptr)

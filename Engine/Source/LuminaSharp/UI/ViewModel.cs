@@ -48,20 +48,6 @@ public sealed class BindCommandAttribute : Attribute
 /// }
 /// </code>
 /// </summary>
-// The name an .rml's data-model attribute uses for a ViewModel or UIScript. The class name when absent.
-[AttributeUsage(AttributeTargets.Class, Inherited = false)]
-public sealed class DataModelAttribute : Attribute
-{
-    public DataModelAttribute(string Name)
-    {
-        this.Name = Name;
-    }
-
-    public string Name { get; }
-
-    internal static string NameOf(Type Type) => (Attribute.GetCustomAttribute(Type, typeof(DataModelAttribute), false) as DataModelAttribute)?.Name ?? Type.Name;
-}
-
 public abstract class ViewModel
 {
     /// <summary>The live binding, or null while the model is not registered. Set by <see cref="UIDataModel"/>.</summary>

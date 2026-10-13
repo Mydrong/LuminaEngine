@@ -124,6 +124,8 @@ namespace Lumina
             FName                   Name;
             bool                    bEnabled = true;
             TVector<EUpdateStage>   Stages;     // stages this system participates in
+            // The priority it asked for in each of Stages, parallel to it, which a disabled system still reports.
+            TVector<uint8>          Priorities;
         };
 
         //~ Construction and the CObject contract.

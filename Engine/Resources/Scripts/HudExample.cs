@@ -4,9 +4,9 @@ using Lumina;
 
 namespace Lumina.Examples;
 
-// One model drives four composed <template> widgets, and as a UIScript the script itself is that model, so nothing here sets the UI up.
-[UIDocument("/Engine/Resources/Content/UI/Examples/Composition/HudComposed.rml"), DataModel("hud")]
-public sealed class HudExample : UIScript
+// One model drives four composed <template> widgets, and as a CUIScript the script itself is that model, so nothing here sets the UI up.
+[Reflect(UIDocument = "/Engine/Resources/Content/UI/Examples/Composition/HudComposed.rml", DataModel = "hud")]
+public sealed class HudExample : CUIScript
 {
     // StatBar reads this and flips its own .low class below 25, with no help from here.
     [Bind] public int Health = 100;

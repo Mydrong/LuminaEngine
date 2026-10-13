@@ -1,12 +1,4 @@
-// X-macro list of reflected property types: the single source for EPropertyTypeFlags and its name tables
-// (expanded in ObjectCore.h). Order IS the ABI: the enum values are the wire kind bytes the C# script schema
-// sends (LuminaSharp.EPropertyType mirrors this, validated at bootstrap), so only ever APPEND here.
-//
-// NOTE: the Reflector keeps a deliberately-isolated parallel copy in Reflector/Types/PropertyFlags.h; it cannot
-// include runtime headers, so it must be kept in the same order by hand.
-//
-// Usage: #define LE_PROPERTY_TYPE(Name) ... then #include this, then #undef. 'None' (0) and 'Count' are added
-// by the includer around this list.
+// The kind bytes C# and packages agree on, so append only, and keep the Reflector's copy in Reflector/Types/PropertyFlags.h in the same order.
 
 LE_PROPERTY_TYPE(Int8)
 LE_PROPERTY_TYPE(Int16)

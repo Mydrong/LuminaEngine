@@ -23,8 +23,9 @@ float3 RibbonPoint(uint Slot, float3 Head, uint Point)
 }
 
 [shader("vertex")]
-FParticleVertexOutput VertexMain(uint VertexIndex : SV_VulkanVertexID)
+FParticleVertexOutput VertexMain(uint VertexIndex : SV_VulkanVertexID, uint DrawIndex : SV_DrawIndex)
 {
+    BeginParticleDraw(DrawIndex);
     const uint Segments = Pass().RibbonSegments;
     const uint Slot     = ParticleSlotForVertex(VertexIndex);
     FGPUParticle P      = Pass().Particles.Get(Slot);
@@ -62,6 +63,7 @@ FParticleVertexOutput VertexMain(uint VertexIndex : SV_VulkanVertexID)
     Out.UV           = float2(Along, (float)Corner.y);
     Out.Color        = P.Color * float4(Pass().Tint.rgb * Pass().Tint.w, 1.0 - Along);
     Out.TextureIndex = Pass().TextureIndex;
+    Out.DrawIndex    = DrawIndex;
     Out.Position     = ParticleToClip(Position + Side * (Width * 0.5 * SideSign));
     Out.Normal       = normalize(ToEye);
     LightParticleVertex(Out, P.Position, P.Size);

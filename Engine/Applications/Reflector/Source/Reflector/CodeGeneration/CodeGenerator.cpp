@@ -121,7 +121,7 @@ namespace Lumina::Reflection
             return WorkspacePath + "/Intermediates/CSharpBindings/" + Header.Project->Name + "/" + Header.FileName + ".generated.cs";
         }
 
-        // kUnityShardCount MUST match LuminaConfig.ReflectionUnityShardCount in BuildScripts/Dependencies.lua.
+        // Must match ReflectionStep.UnityShardCount in LuminaBuildTool.
         constexpr int kUnityShardCount = 8;
 
         // Runtime lands on the 8-shard cap, while a plugin with ten types stays at one and compiles as before.
@@ -183,6 +183,8 @@ namespace Lumina::Reflection
             return ProjectGeneratedDir(WorkspacePath, Project)
                  + "/ReflectionUnity_" + std::to_string(Shard) + ".gen.cpp";
         }
+
+        constexpr const char* kModuleTableFile = "ReflectionModule.gen.cpp";
 
         std::string MakeProjectIntermediateDir(const std::string& WorkspacePath, const FReflectedProject& Project)
         {
@@ -590,7 +592,7 @@ namespace Lumina::Reflection
         Writer.Line();
         EmitFileBanner(Writer);
 
-        Writer.Line("#include \"Core/Reflection/ReflectedTypeAccessors.h\"");
+        Writer.Line("#include \"Core/Object/ObjectMacros.h\"");
         Writer.BlankLines(2);
 
         // Guard against double-inclusion without a #pragma once in the upstream header.
@@ -600,7 +602,7 @@ namespace Lumina::Reflection
         Writer.Linef("#define %s_generated_h", FileID.c_str());
         Writer.BlankLines(3);
 
-        // Forward declarations + Construct_* decls + DECLARE_CLASS macros.
+        // Forward declarations, accessor specializations and DECLARE_CLASS macros.
         for (const auto& Type : Types)
         {
             Type->DefineInitialHeader(Writer, FileID);
@@ -623,132 +625,136 @@ namespace Lumina::Reflection
 
     namespace
     {
-        // One reference per reflected type in this TU, plus one per property pointing at another module.
-        void EmitCrossModuleReferences(FCodeWriter& Writer, const FReflectionDatabase& Db,
-            FReflectedHeader* Header, const std::vector<std::unique_ptr<FReflectedType>>& Types)
+        // Guarded, since a unity shard concatenates files that would each declare the same thing.
+        void EmitGuardedDeclaration(FCodeWriter& Writer, const std::string& Guard, const std::string& Declaration)
         {
-            const std::string OwningApi = Names::ProjectApiMacro(Header->Project->Name);
+            Writer.Linef("#ifndef LRT_DECL_%s", Guard.c_str());
+            Writer.Linef("#define LRT_DECL_%s", Guard.c_str());
+            Writer.Line(Declaration);
+            Writer.Line("#endif");
+        }
 
-            Writer.Line("// Begin Cross-Module References");
+        // Every StaticStruct, StaticClass and StaticEnum the traits below reach, declared before that first use.
+        void EmitTypeLinks(FCodeWriter& Writer, const FReflectionDatabase& Db, const std::vector<std::unique_ptr<FReflectedType>>& Types)
+        {
+            auto Declare = [&](const FReflectedType& Type)
+            {
+                const std::string Kind = Type.GetTypeName();
+                const std::string Api = Names::ProjectApiMacro(Type.Header->Project->Name);
+                const std::string Friendly = Names::FriendlyFromParts(Type.Namespace, Type.DisplayName);
+
+                EmitGuardedDeclaration(Writer, std::string(Type.AccessorName()) + "_" + Friendly,
+                    "template<> " + Api + " Lumina::" + Kind + "* Lumina::" + Type.AccessorName() + "<" + Type.EmittedCppQualifiedName() + ">();");
+            };
 
             for (const auto& Type : Types)
             {
-                const std::string Kind = Type->GetTypeName();
-                const std::string ConstructFn = Names::ConstructFunction(Kind, Type->Namespace, Type->DisplayName);
-                Names::EmitGuardedCrossModuleDecl(Writer, OwningApi, Kind, ConstructFn);
+                Declare(*Type);
 
-                if (auto* Struct = dynamic_cast<FReflectedStruct*>(Type.get()))
+                auto* Struct = dynamic_cast<FReflectedStruct*>(Type.get());
+                if (Struct == nullptr)
                 {
-                    auto DeclareFor = [&](FReflectedProperty& Property)
-                    {
-                        if (const auto* PropType = Db.GetReflectedType<FReflectedType>(FStringHash(Property.TypeName)))
-                        {
-                            const std::string PropApi = Names::ProjectApiMacro(PropType->Header->Project->Name);
-                            Property.DeclareCrossModuleReference(PropApi, Writer);
-                        }
-                    };
+                    continue;
+                }
 
-                    for (auto& Property : Struct->Props)
+                auto DeclareFor = [&](const FReflectedProperty& Property)
+                {
+                    if (Property.GetLink() == EReflectedLink::None || Property.TypeName.empty())
                     {
-                        DeclareFor(*Property);
+                        return;
                     }
-
-                    // A function parameter reaches another module's type exactly as a member does, and its
-                    // property definition names that type's Construct function the same way.
-                    for (auto& Function : Struct->Functions)
+                    if (const auto* Linked = Db.GetReflectedType<FReflectedType>(FStringHash(Property.TypeName)))
                     {
-                        for (auto& Parameter : Function->ParamEntries)
-                        {
-                            DeclareFor(*Parameter);
-                        }
+                        Declare(*Linked);
+                    }
+                };
+
+                for (const auto& Property : Struct->Props)
+                {
+                    DeclareFor(*Property);
+                }
+                for (const auto& Function : Struct->Functions)
+                {
+                    for (const auto& Parameter : Function->ParamEntries)
+                    {
+                        DeclareFor(*Parameter);
                     }
                 }
             }
 
-            Writer.Line("// End Cross-Module References");
             Writer.Line();
         }
 
-        // The per-file Register_Static_Initializer struct + trampoline.
-        void EmitStaticRegistration(FCodeWriter& Writer, const std::string& FileID,
-            const std::vector<std::unique_ptr<FReflectedType>>& Types)
+        // Every type a project reflects, in one table its module registers once at load.
+        std::string ModuleTableContents(const FReflectionDatabase& Db, const FReflectedProject& Project)
         {
-            bool bHasEnum = false;
-            bool bHasClass = false;
-            bool bHasStruct = false;
-
-            for (const auto& Type : Types)
+            std::vector<const FReflectedType*> Types;
+            for (const auto& [Header, HeaderTypes] : Db.ReflectedTypes)
             {
-                switch (Type->Type)
+                if (Header->Project != &Project)
                 {
-                    case FReflectedType::EType::Enum:      bHasEnum   = true; break;
-                    case FReflectedType::EType::Class:     bHasClass  = true; break;
-                    case FReflectedType::EType::Structure: bHasStruct = true; break;
+                    continue;
+                }
+                for (const auto& Type : HeaderTypes)
+                {
+                    Types.push_back(Type.get());
                 }
             }
 
-            Writer.Line("// ** Begin Static Registration **");
+            std::sort(Types.begin(), Types.end(), [](const FReflectedType* A, const FReflectedType* B)
+            {
+                return A->GetTypeFunctionName() < B->GetTypeFunctionName();
+            });
+
+            FCodeWriter Writer(kStreamInitialCapacity);
+            EmitFileBanner(Writer);
+            Writer.Line("#include \"Core/Object/ObjectBase.h\"");
             Writer.Line();
 
-            Writer.Linef("struct Registration_%s", FileID.c_str());
-            Writer.BeginBlock();
-
-            auto EmitInfoArray = [&](const char* FieldName, const char* ParamType, FReflectedType::EType Kind)
+            Writer.Line("namespace Lumina::Generated");
+            Writer.Line("{");
+            for (const FReflectedType* Type : Types)
             {
-                Writer.Linef("static constexpr Lumina::%s %s[] = {", ParamType, FieldName);
-                for (const auto& Type : Types)
+                Writer.Linef("\tLumina::%s* %s();", Type->GetTypeName().c_str(), Type->GetTypeFunctionName().c_str());
+            }
+            Writer.Line("}");
+            Writer.Line();
+
+            Writer.Line("namespace");
+            Writer.Line("{");
+
+            auto EmitTable = [&](FReflectedType::EType Kind, const char* Constructor, const char* Table) -> std::string
+            {
+                std::string Rows;
+                for (const FReflectedType* Type : Types)
                 {
                     if (Type->Type == Kind)
                     {
-                        Type->DeclareStaticRegistration(Writer);
+                        Rows += "\t\t&Lumina::Generated::" + Type->GetTypeFunctionName() + ",\n";
                     }
                 }
-                Writer.Line("};");
+                if (Rows.empty())
+                {
+                    return std::string(".") + Table + " = nullptr";
+                }
+
+                Writer.Linef("\tconstexpr Lumina::%s %s[] =", Constructor, Table);
+                Writer.Line("\t{");
+                Writer.Append(Rows);
+                Writer.Line("\t};");
+                Writer.Line();
+                return std::string(".") + Table + " = " + Table + ", .Num" + Table + " = (Lumina::uint32)std::size(" + Table + ")";
             };
 
-            if (bHasEnum)
-            {
-                EmitInfoArray("EnumInfo", "FEnumRegisterCompiledInInfo", FReflectedType::EType::Enum);
-            }
-            if (bHasClass)
-            {
-                EmitInfoArray("ClassInfo", "FClassRegisterCompiledInInfo", FReflectedType::EType::Class);
-            }
-            if (bHasStruct)
-            {
-                EmitInfoArray("StructInfo", "FStructRegisterCompiledInInfo", FReflectedType::EType::Structure);
-            }
+            const std::string Enums = EmitTable(FReflectedType::EType::Enum, "FEnumConstructor", "Enums");
+            const std::string Structs = EmitTable(FReflectedType::EType::Structure, "FStructConstructor", "Structs");
+            const std::string Classes = EmitTable(FReflectedType::EType::Class, "FClassConstructor", "Classes");
 
-            Writer.PopIndent();
-            Writer.Line("};");
+            Writer.Linef("\tconstexpr Lumina::FCompiledInTypes Types = { %s, %s, %s };", Enums.c_str(), Structs.c_str(), Classes.c_str());
+            Writer.Line("\tconst Lumina::FTypeRegistrar Registrar(Types);");
+            Writer.Line("}");
 
-            // Feeds the Registration_* struct into the compiled-in registrar at translation-unit init time.
-            Writer.Linef("static Lumina::FRegisterCompiledInInfo %s_Register_Static_Initializer(",
-                FileID.c_str());
-
-            auto EmitInfoPointer = [&](const char* ArrayName, bool bHasIt, bool bLast)
-            {
-                const char* Terminator = bLast ? "" : ",";
-                if (bHasIt)
-                {
-                    Writer.Linef("\tRegistration_%s::%s,", FileID.c_str(), ArrayName);
-                    Writer.Linef("\tstd::size(Registration_%s::%s)%s", FileID.c_str(), ArrayName, Terminator);
-                }
-                else
-                {
-                    Writer.Line("\tnullptr,");
-                    Writer.Linef("\t0%s", Terminator);
-                }
-            };
-
-            EmitInfoPointer("EnumInfo", bHasEnum, false);
-            EmitInfoPointer("ClassInfo", bHasClass, false);
-            EmitInfoPointer("StructInfo", bHasStruct, true);
-
-            Writer.Line(");");
-            Writer.Line();
-            Writer.Line("// ** End Static Registration **");
-            Writer.Line();
+            return Writer.String();
         }
     }
 
@@ -757,7 +763,6 @@ namespace Lumina::Reflection
         Writer.Clear();
 
         const auto& Types = TypesFor(*ReflectionDatabase, Header);
-        const std::string FileID = Names::MakeFileIDForHeaderPath(Header->HeaderPath);
 
         EmitFileBanner(Writer);
 
@@ -775,9 +780,9 @@ namespace Lumina::Reflection
         Writer.Line("#include \"Core/Object/Class.h\"");
         Writer.Line("#include \"Core/Object/ObjectCore.h\"");
         Writer.Line("#include \"Core/Reflection/Type/Function.h\"");
+        Writer.Line("#include \"Core/Reflection/PropertyTypeTraits.h\"");
         Writer.Line("#include \"Scripting/ScriptReturn.h\"");
         Writer.Line("#include <utility>");
-        Writer.Line("#include \"Containers/ContainerOps.h\"");
         // Pull the headers and placement-new only when the header actually declares a Scriptable class.
         for (const auto& T : Types)
         {
@@ -810,7 +815,7 @@ namespace Lumina::Reflection
         }();
         Writer.BlankLines(2);
 
-        EmitCrossModuleReferences(Writer, *ReflectionDatabase, Header, Types);
+        EmitTypeLinks(Writer, *ReflectionDatabase, Types);
 
         Writer.Line("//*************************************************************************");
         Writer.Line("// Type Implementations. ");
@@ -822,11 +827,6 @@ namespace Lumina::Reflection
         }
 
         Writer.BlankLines(2);
-        // A free-function-only header has none, and an empty block pulls in registrar machinery it never needs.
-        if (!Types.empty())
-        {
-            EmitStaticRegistration(Writer, FileID, Types);
-        }
 
         // The thunks below return blittable UDTs by C linkage (mirroring C# structs) -> C4190 is expected.
         Writer.Line("#if defined(_MSC_VER)");
@@ -872,6 +872,14 @@ namespace Lumina::Reflection
         for (const std::string& Source : Sorted)
         {
             Shards[ShardFor(Source, ActiveShards)] += "#include \"" + Source + "\"\n";
+        }
+
+        // The module table rides in the first shard, which a project with any reflected type always compiles.
+        if (!Sorted.empty())
+        {
+            WriteTextFileIfChanged(ProjectGeneratedDir(Workspace->GetPath(), *Project) + "/" + kModuleTableFile,
+                ModuleTableContents(*ReflectionDatabase, *Project));
+            Shards[0] += std::string("#include \"") + kModuleTableFile + "\"\n";
         }
 
         for (int Shard = 0; Shard < kUnityShardCount; ++Shard)

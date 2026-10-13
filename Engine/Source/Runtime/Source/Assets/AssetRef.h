@@ -8,13 +8,13 @@ namespace Lumina
 {
     class FNetArchive;
 
-    // Rename-safe reference to a loose text asset (.luau/.rml/.rcss).
+    // Rename-safe reference to a loose text asset (.rml/.rcss).
     REFLECT()
     struct RUNTIME_API FAssetRef
     {
         GENERATED_BODY()
 
-        /** Last-known virtual path, e.g. "/Scripts/Player.luau". Healed on resolve after a rename. */
+        /** Last-known virtual path, e.g. "/UI/HUD.rml". Healed on resolve after a rename. */
         PROPERTY(Editable)
         FString Path;
 

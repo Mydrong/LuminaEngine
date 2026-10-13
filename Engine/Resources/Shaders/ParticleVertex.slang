@@ -3,8 +3,9 @@
 // Built-in sprite vertex stage, used by every sprite emitter that has no Particle material assigned.
 
 [shader("vertex")]
-FParticleVertexOutput VertexMain(uint VertexIndex : SV_VulkanVertexID)
+FParticleVertexOutput VertexMain(uint VertexIndex : SV_VulkanVertexID, uint DrawIndex : SV_DrawIndex)
 {
+    BeginParticleDraw(DrawIndex);
     FGPUParticle P;
     const FParticleSprite Sprite = ExpandParticleSprite(VertexIndex, P);
     if (!Sprite.bAlive)
@@ -16,6 +17,7 @@ FParticleVertexOutput VertexMain(uint VertexIndex : SV_VulkanVertexID)
     Out.UV           = Sprite.UV;
     Out.Color        = P.Color * float4(Pass().Tint.rgb * Pass().Tint.w, 1.0);
     Out.TextureIndex = Pass().TextureIndex;
+    Out.DrawIndex    = DrawIndex;
     Out.Position     = ParticleToClip(Sprite.WorldPosition);
 
     // Each corner leans away from the camera, so the interpolated normal bulges the flat quad into a puff.

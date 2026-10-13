@@ -46,7 +46,7 @@ namespace Lumina
         FJsonStructuredArchive Ar(OutNode, false);
         FArchiveSlot Root = Ar.Open();
         FArchiveRecord Record = Root.EnterRecord();
-        Type->SerializeTaggedProperties(Record, Data);
+        Type->SerializeProperties(Record, Data);
     }
 
     void FJsonStructuredArchive::LoadStruct(json& InNode, const CStruct* Type, void* Data)
@@ -54,7 +54,7 @@ namespace Lumina
         FJsonStructuredArchive Ar(InNode, true);
         FArchiveSlot Root = Ar.Open();
         FArchiveRecord Record = Root.EnterRecord();
-        Type->SerializeTaggedProperties(Record, Data);
+        Type->SerializeProperties(Record, Data);
     }
 
     void FJsonStructuredArchive::EnterRecord()

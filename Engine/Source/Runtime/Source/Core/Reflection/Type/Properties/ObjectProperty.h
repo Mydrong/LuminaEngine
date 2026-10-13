@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include "Core/Object/ObjectHandleTyped.h"
 #include "Core/Reflection/Type/LuminaTypes.h"
 
@@ -7,12 +7,10 @@ namespace Lumina
     class FObjectProperty : public FProperty
     {
     public:
-        DECLARE_FPROPERTY(EPropertyTypeFlags::Object)
-
-        explicit FObjectProperty(const FObjectPropertyParams* Params)
-            : FProperty(Params)
+        explicit FObjectProperty(const FPropertyDesc& Desc)
+            : FProperty(Desc)
         {
-            ObjectClass = Params->ClassFunc();
+            ObjectClass = Desc.Type->GetClass();
             SetElementSize(sizeof(TStrongObjectPtr<CObject>));
         }
 

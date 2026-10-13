@@ -311,7 +311,7 @@ namespace Lumina::MCP
                         SParticleEmitterInfo Info;
                         Info.Index     = Index;
                         Info.Name      = Emitter->EmitterName;
-                        Info.bCompiled = !Emitter->ComputeShaderBinaries.empty();
+                        Info.bCompiled = Emitter->HasCustomComputeShader();
                         Info.Settings  = EditableValues(Emitter->GetClass(), Emitter);
                         CollectModules(System, Index, EParticleModuleStage::Spawn, Info.SpawnModules);
                         CollectModules(System, Index, EParticleModuleStage::Update, Info.UpdateModules);

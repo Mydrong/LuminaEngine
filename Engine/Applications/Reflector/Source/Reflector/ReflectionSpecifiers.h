@@ -5,6 +5,7 @@
 #include <span>
 #include <string_view>
 #include <vector>
+#include "Reflector/Types/PropertyFlags.h"
 #include "Reflector/Utils/MetadataUtils.h"
 
 namespace Lumina::Reflection
@@ -25,6 +26,7 @@ namespace Lumina::Reflection
         Flag,   // bare keyword, PROPERTY(Editable)
         Value,  // key and value, PROPERTY(Category = "Rendering")
         Either, // legal both ways, PROPERTY(Getter) or PROPERTY(Getter = "GetFoo")
+        Number, // key and numeric value, PROPERTY(ClampMin = 0.5f)
     };
 
     // Which layer reads the specifier after the Reflector has parsed it.
@@ -46,9 +48,9 @@ namespace Lumina::Reflection
     X(Event,                Flag,   Runtime,   "Documents the struct as an ECS event. The dispatcher is type-driven, so this emits no registration.") \
     X(BitMask,              Flag,   Runtime,   "Marks an enum as a set of bit flags. CEnum::IsBitmaskEnum() reports it and the editor draws checkboxes.") \
     X(ParallelUpdate,       Flag,   Runtime,   "An entity script's promise that its OnUpdate and OnFixedUpdate read and write only its own entity, so the driver runs it in parallel with other such scripts. Inherited by subclasses.") \
-    X(HostOnly,             Flag,   Runtime,   "A script, system or world subsystem that runs only on the host, a dedicated server or a standalone game. Inherited, like C# [HostOnly].") \
-    X(ClientOnly,           Flag,   Runtime,   "A script, system or world subsystem that runs only on a client joined to a host. Inherited, like C# [ClientOnly].") \
-    X(Cosmetic,             Flag,   Runtime,   "A script, system or world subsystem that runs only where something is drawn or played, never on a dedicated server, a bot or a headless process. Inherited, like C# [Cosmetic].") \
+    X(HostOnly,             Flag,   Runtime,   "A script, system or world subsystem that runs only on the host, a dedicated server or a standalone game. Inherited, and spelled [Reflect(HostOnly = true)] in C#.") \
+    X(ClientOnly,           Flag,   Runtime,   "A script, system or world subsystem that runs only on a client joined to a host. Inherited, and spelled [Reflect(ClientOnly = true)] in C#.") \
+    X(Cosmetic,             Flag,   Runtime,   "A script, system or world subsystem that runs only where something is drawn or played, never on a dedicated server, a bot or a headless process. Inherited, and spelled [Reflect(Cosmetic = true)] in C#.") \
     X(ConfigFile,           Value,  Runtime,   "Backs the class with the named config file. The config system loads and saves its properties there.") \
     X(DataModel,            Value,  Runtime,   "The name a UI document's data-model attribute uses for this class. The class name without its C prefix when absent.") \
     X(UIDocument,           Value,  Runtime,   "The .rml a UI script shows when its Document property is empty.") \
@@ -75,19 +77,20 @@ namespace Lumina::Reflection
     X(Change,               Value,  Runtime,   "A FUNCTION() run whenever the Sync field changes, or a Bind field is changed by its UI, taking nothing or (Old, New).") \
     X(Bind,                 Either, Runtime,   "Exposes the value to a UI document as {{ Name }} and the data-* views, under this name or its own. A struct binds its members and a TVector binds for data-for.") \
     X(Element,              Either, Runtime,   "Fills an FUIElement with the element of this id, or of the property's name, each time the script's UI document loads.") \
-    X(Rate,                 Value,  Runtime,   "The most times a second the host sends the Sync field. A change sooner than that waits for the next slot.") \
-    X(Quantize,             Value,  Runtime,   "Snaps a numeric Sync field to multiples of this step, so a smaller wobble never reaches the wire.") \
+    X(Rate,                 Number,  Runtime,   "The most times a second the host sends the Sync field. A change sooner than that waits for the next slot.") \
+    X(Quantize,             Number,  Runtime,   "Snaps a numeric Sync field to multiples of this step, so a smaller wobble never reaches the wire.") \
     X(Validate,             Value,  Runtime,   "For a Sync = FromOwner field, a FUNCTION() taking the proposed value and returning whether the host accepts it.") \
-    X(DuplicateTransient,   Flag,   Runtime,   "Resets the property to its default when the owning object is duplicated.")     X(SaveGame,             Flag,   Runtime,   "Writes the property into save games, its whole value included. A SaveGame field marked NoSerialize is saved in games but kept out of levels and assets.") \
+    X(DuplicateTransient,   Flag,   Runtime,   "Resets the property to its default when the owning object is duplicated.") \
+    X(SaveGame,             Flag,   Runtime,   "Writes the property into save games, its whole value included. A SaveGame field marked NoSerialize is saved in games but kept out of levels and assets.") \
     X(StructBase,           Value,  Runtime,   "Constrains a bare FInstancedStruct to structs deriving from the named base.") \
     X(Editable,             Flag,   Editor,    "Shows the property in the details panel and allows editing.") \
     X(ReadOnly,             Flag,   Editor,    "Shows the property in the details panel with editing disabled. Do not combine with Editable.") \
     X(Category,             Value,  Editor,    "Groups the property under a named heading. Nested headings separate with a pipe.") \
     X(DisplayName,          Value,  Editor,    "Overrides the label shown for the property.") \
     X(ToolTip,              Value,  Editor,    "Hover text for the property. Filled from the declaration's doc comment when not written by hand.") \
-    X(ClampMin,             Value,  Editor,    "Lower bound applied to a numeric property by the editor widget.") \
-    X(ClampMax,             Value,  Editor,    "Upper bound applied to a numeric property by the editor widget.") \
-    X(Delta,                Value,  Editor,    "Per-pixel drag step for a numeric property.") \
+    X(ClampMin,             Number,  Editor,    "Lower bound applied to a numeric property by the editor widget.") \
+    X(ClampMax,             Number,  Editor,    "Upper bound applied to a numeric property by the editor widget.") \
+    X(Delta,                Number,  Editor,    "Per-pixel drag step for a numeric property.") \
     X(Units,                Value,  Editor,    "Unit suffix appended to a numeric property's displayed value.") \
     X(Color,                Flag,   Editor,    "Draws the numeric vector as a color swatch and picker.") \
     X(NoDrag,               Flag,   Editor,    "Disables click-drag editing on a numeric property.") \
@@ -97,7 +100,6 @@ namespace Lumina::Reflection
     X(Picker,               Value,  Editor,    "Draws a name or string property as the named picker, resolved from the editor picker registry. Built in kinds are Bone, Socket, Curve, Parameter, ObjectParameter and InputAction.") \
     X(AssetType,            Value,  Editor,    "Restricts an asset reference picker to the named asset class.") \
     X(RowType,              Value,  Editor,    "Restricts a data table row handle picker to the named row struct.") \
-\
     X(NoReorder,            Flag,   Editor,    "Removes the drag handles from an array property.") \
     X(NoResize,             Flag,   Editor,    "Removes the add and remove buttons from an array property.") \
     X(DefaultCollapsed,     Flag,   Editor,    "Draws a struct or instanced struct property collapsed on first open.") \
@@ -126,7 +128,8 @@ namespace Lumina::Reflection
 #define LUMINA_RUNTIME_INJECTED_METADATA(X) \
     X(Aliases,            Value, Runtime, "Prior C# type names for a script type, written by the host so renamed scripts still resolve.") \
     X(ScriptTypeName,     Value, Runtime, "The C# type name behind a script-backed struct, stable across reloads unlike its object name.") \
-    X(ScriptInstanceBase, Flag,  Runtime, "Marks the generated base struct of a script type so pickers offer the concrete subtypes instead.")
+    X(ScriptInstanceBase, Flag,  Runtime, "Marks the generated base struct of a script type so pickers offer the concrete subtypes instead.") \
+    X(UpdatePhase,        Value, Runtime, "PrePhysics or PostPhysics, from a C# [Reflect(UpdatePhase)], the side of the physics step a minted script class ticks on.")
 
     struct FSpecifierInfo
     {
@@ -146,6 +149,23 @@ namespace Lumina::Reflection
     // Nearest known specifier within a small edit distance, or nullptr. Turns a typo into a suggestion.
     const FSpecifierInfo* SuggestSpecifier(ESpecifierTarget Target, std::string_view Key);
 
-    // Warns LRT1009 for each specifier missing from the target's table, naming the nearest known one.
+    // Warns LRT1009 for each specifier missing from the target's table, naming the nearest known one, and LRT1011 for one written in the wrong form.
     void ValidateSpecifiers(const CXCursor& Cursor, ESpecifierTarget Target, const std::vector<FMetadataPair>& Metadata);
+
+    // Where a specifier lands in generated code.
+    enum class ESpecifierStorage : uint8_t
+    {
+        None,           // consumed by the Reflector or turned into an EPropertyFlags bit
+        Metadata,       // a metadata entry every build keeps
+        EditorMetadata, // a metadata entry only the editor keeps
+        EditorFlag,     // an EPropertyEditorFlags bit
+    };
+
+    ESpecifierStorage GetSpecifierStorage(ESpecifierTarget Target, std::string_view Key);
+
+    // The EPropertyFlags bit a PROPERTY specifier sets, None for one that sets nothing.
+    EPropertyFlags PropertyFlagForSpecifier(std::string_view Key);
+
+    // Accepts what an author writes for a number in C++, so a trailing f is allowed.
+    bool ParseSpecifierNumber(std::string_view Text, double& OutValue);
 }

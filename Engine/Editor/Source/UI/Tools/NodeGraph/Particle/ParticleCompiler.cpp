@@ -121,6 +121,12 @@ namespace Lumina
         uint64 Hash = 0;
         Hash::HashCombine(Hash, FStringView(SpawnChunks.data(), SpawnChunks.size()));
         Hash::HashCombine(Hash, FStringView(UpdateChunks.data(), UpdateChunks.size()));
+        // The attribute block is spliced into the source too, so it keys the artifact cache alongside the stacks.
+        for (const FAttributeDecl& Attribute : Attributes)
+        {
+            Hash::HashCombine(Hash, FStringView(Attribute.Name.data(), Attribute.Name.size()));
+            Hash::HashCombine(Hash, FStringView(Attribute.DefaultExpr.data(), Attribute.DefaultExpr.size()));
+        }
         return Hash;
     }
 

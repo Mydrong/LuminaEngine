@@ -26,6 +26,9 @@ namespace Lumina::Platform
     RUNTIME_API uint32 GetCurrentCoreNumber();
     RUNTIME_API FString GetCurrentProcessPath();
 
+    // The binary holding the Runtime module, which is the executable itself in a monolithic build.
+    RUNTIME_API FString GetRuntimeModulePath();
+
     enum class ECpuCoreType : uint8 { Performance, Efficiency, Unknown };
 
     // Process-wide CPU core layout, detected once and cached. Platform-agnostic: where the OS can't

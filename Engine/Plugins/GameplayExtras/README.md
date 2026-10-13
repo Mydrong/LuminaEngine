@@ -7,7 +7,7 @@ Anything that lives here can be disabled per-project via the `.lproject`
 ## Currently bundled
 
 - `SHealthComponent` (`Components/HealthComponent.h`), health + max health
-  + optional regen. Reflected Lua API: `ApplyDamage(float)`, `GiveHealth(float)`.
+  + optional regen. Reflected script API: `ApplyDamage(float)`, `GiveHealth(float)`.
 
 ## How to disable for a project
 
@@ -38,6 +38,6 @@ should adopt so it works in both modular (Debug/Development) and monolithic
 #endif
 ```
 
-`LUMINA_MONOLITHIC` is defined by Workspace.lua only in Shipping config;
+`LUMINA_MONOLITHIC` is defined by LuminaBuildTool for monolithic targets;
 in that config every module is statically linked into the final exe and
 dllexport/dllimport would just produce LNK4286 warnings.

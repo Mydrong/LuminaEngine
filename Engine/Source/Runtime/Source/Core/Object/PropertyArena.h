@@ -11,6 +11,7 @@ namespace Lumina
 {
     class CStruct;
     class FProperty;
+    struct FPropertyDesc;
 }
 
 namespace Lumina
@@ -44,6 +45,14 @@ namespace Lumina
             T* Property = Memory::ConstructAt(static_cast<T*>(Storage), std::forward<TArgs>(Args)...);
             Owned.push_back(Property);
             return Property;
+        }
+
+        // Trivially destructible data the arena never has to tear down, such as a descriptor built at runtime.
+        template<typename T, typename... TArgs>
+        requires std::is_trivially_destructible_v<T>
+        T* EmplaceData(TArgs&&... Args)
+        {
+            return Memory::ConstructAt(static_cast<T*>(AllocateBytes(sizeof(T), alignof(T))), std::forward<TArgs>(Args)...);
         }
 
         /** Raw arena storage, for the metadata table a script-minted property builds at runtime. */
@@ -97,10 +106,10 @@ namespace Lumina
         // there. Set in place of Struct, which is what keeps a parameter off the owning type's member list.
         TVector<FProperty*>* Collector = nullptr;
 
-        template<typename T, typename TParams>
-        T* Build(const TParams* Params) const
+        template<typename T>
+        T* Build(const FPropertyDesc& Desc) const
         {
-            T* Property = Arena->Emplace<T>(Params);
+            T* Property = Arena->Emplace<T>(Desc);
             Attach(Property);
             return Property;
         }

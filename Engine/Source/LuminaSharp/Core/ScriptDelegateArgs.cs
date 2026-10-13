@@ -121,7 +121,7 @@ internal sealed class ArgsInvoker1<T1> : IDelegateInvoker
 {
     public Action<T1> Handler = null!;
     public FrameMarshal.FSlot[] Slots = null!;
-    public EntityScript? Owner;
+    public Lumina.CEntityScript? Owner;
 
     public void Invoke(IntPtr Payload)
     {
@@ -147,7 +147,7 @@ internal sealed class ArgsInvoker2<T1, T2> : IDelegateInvoker
 {
     public Action<T1, T2> Handler = null!;
     public FrameMarshal.FSlot[] Slots = null!;
-    public EntityScript? Owner;
+    public Lumina.CEntityScript? Owner;
 
     public void Invoke(IntPtr Payload)
     {
@@ -172,7 +172,7 @@ internal sealed class ArgsInvoker3<T1, T2, T3> : IDelegateInvoker
 {
     public Action<T1, T2, T3> Handler = null!;
     public FrameMarshal.FSlot[] Slots = null!;
-    public EntityScript? Owner;
+    public Lumina.CEntityScript? Owner;
 
     public void Invoke(IntPtr Payload)
     {
@@ -198,7 +198,7 @@ internal sealed class ArgsInvoker4<T1, T2, T3, T4> : IDelegateInvoker
 {
     public Action<T1, T2, T3, T4> Handler = null!;
     public FrameMarshal.FSlot[] Slots = null!;
-    public EntityScript? Owner;
+    public Lumina.CEntityScript? Owner;
 
     public void Invoke(IntPtr Payload)
     {
@@ -225,7 +225,7 @@ internal sealed class ArgsInvoker5<T1, T2, T3, T4, T5> : IDelegateInvoker
 {
     public Action<T1, T2, T3, T4, T5> Handler = null!;
     public FrameMarshal.FSlot[] Slots = null!;
-    public EntityScript? Owner;
+    public Lumina.CEntityScript? Owner;
 
     public void Invoke(IntPtr Payload)
     {
@@ -253,7 +253,7 @@ internal sealed class ArgsInvoker6<T1, T2, T3, T4, T5, T6> : IDelegateInvoker
 {
     public Action<T1, T2, T3, T4, T5, T6> Handler = null!;
     public FrameMarshal.FSlot[] Slots = null!;
-    public EntityScript? Owner;
+    public Lumina.CEntityScript? Owner;
 
     public void Invoke(IntPtr Payload)
     {
@@ -319,7 +319,7 @@ public readonly unsafe struct ScriptDelegate<T1>
             return default;
         }
 
-        EntityScript? Owner = Engine.ActiveScript;
+        Lumina.CEntityScript? Owner = Engine.ActiveScript;
         return DelegateBindings.Bind(Address, new ArgsInvoker1<T1> { Handler = Handler, Slots = Slots, Owner = Owner });
     }
 }
@@ -353,7 +353,7 @@ public readonly unsafe struct ScriptDelegate<T1, T2>
             return default;
         }
 
-        EntityScript? Owner = Engine.ActiveScript;
+        Lumina.CEntityScript? Owner = Engine.ActiveScript;
         return DelegateBindings.Bind(Address, new ArgsInvoker2<T1, T2> { Handler = Handler, Slots = Slots, Owner = Owner });
     }
 }
@@ -387,7 +387,7 @@ public readonly unsafe struct ScriptDelegate<T1, T2, T3>
             return default;
         }
 
-        EntityScript? Owner = Engine.ActiveScript;
+        Lumina.CEntityScript? Owner = Engine.ActiveScript;
         return DelegateBindings.Bind(Address, new ArgsInvoker3<T1, T2, T3> { Handler = Handler, Slots = Slots, Owner = Owner });
     }
 }
@@ -421,7 +421,7 @@ public readonly unsafe struct ScriptDelegate<T1, T2, T3, T4>
             return default;
         }
 
-        EntityScript? Owner = Engine.ActiveScript;
+        Lumina.CEntityScript? Owner = Engine.ActiveScript;
         return DelegateBindings.Bind(Address, new ArgsInvoker4<T1, T2, T3, T4> { Handler = Handler, Slots = Slots, Owner = Owner });
     }
 }
@@ -455,7 +455,7 @@ public readonly unsafe struct ScriptDelegate<T1, T2, T3, T4, T5>
             return default;
         }
 
-        EntityScript? Owner = Engine.ActiveScript;
+        Lumina.CEntityScript? Owner = Engine.ActiveScript;
         return DelegateBindings.Bind(Address, new ArgsInvoker5<T1, T2, T3, T4, T5> { Handler = Handler, Slots = Slots, Owner = Owner });
     }
 }
@@ -489,7 +489,7 @@ public readonly unsafe struct ScriptDelegate<T1, T2, T3, T4, T5, T6>
             return default;
         }
 
-        EntityScript? Owner = Engine.ActiveScript;
+        Lumina.CEntityScript? Owner = Engine.ActiveScript;
         return DelegateBindings.Bind(Address, new ArgsInvoker6<T1, T2, T3, T4, T5, T6> { Handler = Handler, Slots = Slots, Owner = Owner });
     }
 }

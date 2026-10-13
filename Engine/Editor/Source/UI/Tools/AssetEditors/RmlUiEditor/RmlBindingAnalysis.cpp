@@ -671,7 +671,7 @@ namespace Lumina::RmlBinding
             if (!bDescribed)
             {
                 Add(Bindings.ModelLines[Index], "No class registers as '" + Bindings.Models[Index]
-                    + "', so the preview fills in placeholders. Name a class " + Bindings.Models[Index] + ", or give it [DataModel(\""
+                    + "', so the preview fills in placeholders. Name a class " + Bindings.Models[Index] + ", or give it [Reflect(DataModel = \""
                     + Bindings.Models[Index] + "\")] in C# or REFLECT(DataModel = \"" + Bindings.Models[Index] + "\") in C++.", false);
             }
         }

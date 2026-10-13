@@ -322,7 +322,7 @@ namespace Lumina
 
             if (Type != nullptr)
             {
-                Type->SerializeTaggedProperties(Ar, Value.GetMutableMemory());
+                Type->SerializeProperties(Ar, Value.GetMutableMemory());
             }
             return;
         }
@@ -333,7 +333,7 @@ namespace Lumina
 
         if (Type != nullptr)
         {
-            Type->SerializeTaggedProperties(Ar, Value.GetMutableMemory());
+            Type->SerializeProperties(Ar, Value.GetMutableMemory());
         }
     }
 }

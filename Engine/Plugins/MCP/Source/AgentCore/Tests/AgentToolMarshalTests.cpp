@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include "Core/Reflection/PropertyTypeTraits.h"
 
 #include "Agent/AgentTool.h"
 #include "Agent/AgentToolMarshal.h"
@@ -348,76 +349,32 @@ TEST(AgentToolMarshal, AMalformedGuidInsideAnArrayNamesItsIndex)
     EXPECT_NE(Result.Error.find("[1]"), FString::npos);
 }
 
-// ---------------------------------------------------------------------------------------------------------------
-// Container and reference kinds. Reflection is off here, so the map, optional and sub-struct fixtures are built the
-// way generated code builds them; the soft object, class and instanced struct ones ride on types the engine reflects.
-// ---------------------------------------------------------------------------------------------------------------
+// Container and reference kinds, built from descriptors the way generated code builds them.
 
 namespace
 {
-    const FMapOps* NameToIntMapOps() { return GetMapOpsFor<THashMap<FName, int32>>(); }
-
-    // The emitter orders a map's entries [Value, Key, Map]; only the map itself is built at the top level here.
-    const FNumericPropertyParams GNameToIntValue = { "Table_Value", EPropertyFlags::SubField, EPropertyTypeFlags::Int32, nullptr, nullptr, 0 };
-    const FNamePropertyParams GNameToIntKey = { "Table_Key", EPropertyFlags::SubField, EPropertyTypeFlags::Name, nullptr, nullptr, 0 };
-    const FMapPropertyParams GNameToIntMap = { { "Table", EPropertyFlags::None, EPropertyTypeFlags::Map, nullptr, nullptr, 0 }, &NameToIntMapOps };
-
-    bool  OptionalFloatHasValue(const void* Object) { return static_cast<const TOptional<float>*>(Object)->has_value(); }
-    void* OptionalFloatGetValue(void* Object) { TOptional<float>* Opt = static_cast<TOptional<float>*>(Object); return Opt->has_value() ? &Opt->value() : nullptr; }
-    void  OptionalFloatSetValue(void* Object, const void* InValue) { TOptional<float>* Opt = static_cast<TOptional<float>*>(Object); if (InValue) { *Opt = *static_cast<const float*>(InValue); } else { Opt->emplace(); } }
-    void  OptionalFloatReset(void* Object) { static_cast<TOptional<float>*>(Object)->reset(); }
-
-    const FNumericPropertyParams GOptionalFloatInner = { "Regen_Inner", EPropertyFlags::SubField, EPropertyTypeFlags::Float, nullptr, nullptr, 0 };
-    const FOptionalPropertyParams GOptionalFloat = { { "Regen", EPropertyFlags::None, EPropertyTypeFlags::Optional, nullptr, nullptr, 0 }, &OptionalFloatHasValue, &OptionalFloatGetValue, &OptionalFloatSetValue, &OptionalFloatReset };
-
-    CStruct* AnimNotifyBase() { return SAnimNotify::StaticStruct(); }
-    const FSubStructPropertyParams GNotifySubStruct = { { "NotifyType", EPropertyFlags::None, EPropertyTypeFlags::SubStruct, nullptr, nullptr, 0 }, &AnimNotifyBase };
-
-    CClass* WorldClass() { return CWorld::StaticClass(); }
-    const FSoftObjectPropertyParams GStartupMap = { { "GameStartupMap", EPropertyFlags::None, EPropertyTypeFlags::SoftObject, nullptr, nullptr, 0 }, &WorldClass };
-
-    CClass* GameInstanceClass() { return CGameInstance::StaticClass(); }
-    const FClassPropertyParams GGameInstanceClass = { { "GameInstanceClass", EPropertyFlags::None, EPropertyTypeFlags::Class, nullptr, nullptr, 0 }, &GameInstanceClass };
+    constexpr FPropertyDesc GNameToIntMap{ .Name = "Table", .Type = PropertyTypeOf<THashMap<FName, int32>> };
+    constexpr FPropertyDesc GOptionalFloat{ .Name = "Regen", .Type = PropertyTypeOf<TOptional<float>> };
+    constexpr FPropertyDesc GNotifySubStruct{ .Name = "NotifyType", .Type = PropertyTypeOf<TSubStructOf<SAnimNotify>> };
+    constexpr FPropertyDesc GStartupMap{ .Name = "GameStartupMap", .Type = PropertyTypeOf<TSoftObjectPtr<CWorld>> };
+    constexpr FPropertyDesc GGameInstanceClass{ .Name = "GameInstanceClass", .Type = PropertyTypeOf<TSubclassOf<CGameInstance>> };
 
     struct FContainerFixtures
     {
         FPropertyArena      Arena;
         TVector<FProperty*> Collected;
 
-        FMapProperty* NameToIntMap()
+        template<typename TProperty>
+        TProperty* Build(const FPropertyDesc& Desc)
         {
-            const FPropertyOwner Owner{ &Arena, nullptr, nullptr, &Collected };
-            FMapProperty* Map = Owner.Build<FMapProperty>(&GNameToIntMap);
-            Owner.Inner(Map).Build<FNameProperty>(&GNameToIntKey);
-            Owner.Inner(Map).Build<FInt32Property>(&GNameToIntValue);
-            return Map;
+            return static_cast<TProperty*>(ConstructProperty(FPropertyOwner{ &Arena, nullptr, nullptr, &Collected }, Desc));
         }
 
-        FOptionalProperty* OptionalFloat()
-        {
-            const FPropertyOwner Owner{ &Arena, nullptr, nullptr, &Collected };
-            FOptionalProperty* Optional = Owner.Build<FOptionalProperty>(&GOptionalFloat);
-            Owner.Inner(Optional).Build<FFloatProperty>(&GOptionalFloatInner);
-            return Optional;
-        }
-
-        FSubStructProperty* NotifySubStruct()
-        {
-            const FPropertyOwner Owner{ &Arena, nullptr, nullptr, &Collected };
-            return Owner.Build<FSubStructProperty>(&GNotifySubStruct);
-        }
-
-        FSoftObjectProperty* StartupMap()
-        {
-            const FPropertyOwner Owner{ &Arena, nullptr, nullptr, &Collected };
-            return Owner.Build<FSoftObjectProperty>(&GStartupMap);
-        }
-
-        FClassProperty* GameInstance()
-        {
-            const FPropertyOwner Owner{ &Arena, nullptr, nullptr, &Collected };
-            return Owner.Build<FClassProperty>(&GGameInstanceClass);
-        }
+        FMapProperty* NameToIntMap()              { return Build<FMapProperty>(GNameToIntMap); }
+        FOptionalProperty* OptionalFloat()        { return Build<FOptionalProperty>(GOptionalFloat); }
+        FSubStructProperty* NotifySubStruct()     { return Build<FSubStructProperty>(GNotifySubStruct); }
+        FSoftObjectProperty* StartupMap()         { return Build<FSoftObjectProperty>(GStartupMap); }
+        FClassProperty* GameInstance()            { return Build<FClassProperty>(GGameInstanceClass); }
     };
 }
 
@@ -459,8 +416,8 @@ TEST(AgentToolMarshal, ASoftObjectGuidNamingNothingIsReported)
 
 TEST(AgentToolMarshal, AClassIsResolvedByName)
 {
-    // The registrar normally constructs every class; here the lookup needs it done by hand.
-    Construct_CClass_Lumina_CGameInstance();
+    // The lookup goes by name, so the class has to exist before it runs.
+    StaticClass<CGameInstance>();
 
     FContainerFixtures Fixtures;
     FClassProperty* Property = Fixtures.GameInstance();
@@ -478,8 +435,8 @@ TEST(AgentToolMarshal, AClassIsResolvedByName)
 
 TEST(AgentToolMarshal, AClassOutsideTheConstraintIsRefused)
 {
-    Construct_CClass_Lumina_CGameInstance();
-    Construct_CClass_Lumina_CWorld();
+    StaticClass<CGameInstance>();
+    StaticClass<CWorld>();
 
     FContainerFixtures Fixtures;
     FClassProperty* Property = Fixtures.GameInstance();

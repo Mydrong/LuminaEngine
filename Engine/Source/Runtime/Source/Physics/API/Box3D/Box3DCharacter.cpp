@@ -31,6 +31,9 @@ namespace Lumina::Physics
         // Below this a floor normal is too close to horizontal for the ramp solve to stay finite.
         constexpr float kMinRampNormalY = 0.1f;
 
+        // A face already this close to vertical acts as a wall unchanged.
+        constexpr float kMinSteepNormalY = 0.02f;
+
         // A couple of seconds of fixed steps, long past any deferred collider build.
         constexpr uint32 kAwaitingGroundWarnSteps = 120;
 
@@ -53,6 +56,7 @@ namespace Lumina::Physics
             b3Vec3              Points[kMaxMoverPlanes];
             b3ShapeId           Shapes[kMaxMoverPlanes];
             int32               Count = 0;
+            float               CosMaxSlope = 0.0f;
 
             b3Pos               Origin{};
             b3BodyId            IgnoreBody{};
@@ -76,6 +80,19 @@ namespace Lumina::Physics
             return Box3DUtils::ShouldProfileCollideWithShape(Query.Profile, ShapeId, Query.bPermissive);
         }
 
+        // Sliding along, or pushing out of, a face too steep to walk lifts the character, so it collides as a vertical wall.
+        // The offset is rescaled so the wall holds the same contact, since penetration along it is deeper than along the face.
+        b3Plane UprightIfTooSteep(const b3Plane& Plane, float CosMaxSlope)
+        {
+            if (Plane.normal.y <= kMinSteepNormalY || Plane.normal.y >= CosMaxSlope)
+            {
+                return Plane;
+            }
+            const float Horizontal = b3Length(b3Vec3{ Plane.normal.x, 0.0f, Plane.normal.z });
+            const b3Vec3 Upright = b3MulSV(1.0f / Horizontal, b3Vec3{ Plane.normal.x, 0.0f, Plane.normal.z });
+            return b3Plane{ Upright, Plane.offset / Horizontal };
+        }
+
         bool GatherPlanes(b3ShapeId ShapeId, const b3PlaneResult* Results, int32 PlaneCount, void* Context)
         {
             FMoverPlanes& Out = *static_cast<FMoverPlanes*>(Context);
@@ -87,7 +104,7 @@ namespace Lumina::Physics
 
             for (int32 i = 0; i < PlaneCount && Out.Count < kMaxMoverPlanes; ++i)
             {
-                Out.Planes[Out.Count] = b3CollisionPlane{ Results[i].plane, FLT_MAX, 0.0f, true };
+                Out.Planes[Out.Count] = b3CollisionPlane{ UprightIfTooSteep(Results[i].plane, Out.CosMaxSlope), FLT_MAX, 0.0f, true };
                 Out.Points[Out.Count] = b3Add(Out.Origin, Results[i].point);
                 Out.Shapes[Out.Count] = ShapeId;
                 ++Out.Count;
@@ -789,6 +806,7 @@ namespace Lumina::Physics
         Gathered.Profile = Character.Profile;
         Gathered.bPermissive = Box3DUtils::UsesPermissiveCollisionFilter();
         Gathered.bCollideWithCharacters = Character.bCollideWithCharacters;
+        Gathered.CosMaxSlope = Character.CosMaxSlope;
 
         auto GatherAt = [&](b3Pos At)
         {
@@ -894,9 +912,19 @@ namespace Lumina::Physics
                     const b3Vec3 StepDown{ 0.0f, -Character.StepHeight, 0.0f };
                     const float DownFraction = b3World_CastMover(WorldId, Stepped, &Mover, StepDown, Character.Filter, &MoverCastFilter, &Gathered);
 
-                    Position = b3Add(Stepped, b3MulSV(DownFraction, StepDown));
-                    GatherAt(Position);
-                    GroundPlane = FindWalkablePlane();
+                    // A step only counts when it lands on something walkable, or a steep face is climbed a step at a time.
+                    const b3Pos Landed = b3Add(Stepped, b3MulSV(DownFraction, StepDown));
+                    GatherAt(Landed);
+                    const int32 LandedPlane = DownFraction < 1.0f ? FindWalkablePlane() : Constants::kIndexNone;
+                    if (LandedPlane != Constants::kIndexNone)
+                    {
+                        Position    = Landed;
+                        GroundPlane = LandedPlane;
+                    }
+                    else
+                    {
+                        GatherAt(Position);
+                    }
                 }
             }
         }

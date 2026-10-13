@@ -332,7 +332,7 @@ namespace Lumina
         MeshResolve::StampSurfaceSource(R, RawMaterial);
 
         R.MaterialID            = (uint64)ConcreteMaterial;
-        R.MaterialIdx           = (uint16)Material->GetMaterialIndex();
+        R.MaterialIdx           = (uint32)Material->GetMaterialIndex();
         R.bMaterialCastsShadows = Material->DoesCastShadows();
 
         // Casting is what shadow-only draws, so the two together are the only useful combination.

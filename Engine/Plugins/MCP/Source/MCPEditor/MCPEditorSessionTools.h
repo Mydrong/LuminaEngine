@@ -218,7 +218,7 @@ namespace Lumina
     {
         GENERATED_BODY()
 
-        /** FinalLDR writes a PNG of the tonemapped frame; SceneHDR writes a Radiance .hdr of scene color. */
+        /** FinalLDR writes a PNG of the tonemapped frame, SceneHDR a Radiance .hdr of scene color, and EditorUI a PNG of the whole editor window. */
         PROPERTY()
         FString Source = "FinalLDR";
 

@@ -5,6 +5,8 @@
 [shader("fragment")]
 float4 FragmentMain(FParticleMaterialVertexOutput Input) : SV_Target0
 {
+    BeginParticleDraw(Input.DrawIndex);
+
     // Material graph aliases, matching the names the vertex template declares.
     uint   MaterialIndex = Pass().MaterialIndex;
     float2 UV0           = Input.UV;

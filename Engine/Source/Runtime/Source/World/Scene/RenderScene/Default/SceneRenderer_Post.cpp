@@ -961,46 +961,67 @@ namespace Lumina
 
     void FDefaultSceneRenderer::SnapshotMotionState(RHI::FCmdListH CL)
     {
-        if (!IsTemporalAAEnabledFor(SceneViews[0]))
+        // A temporal upscaler reprojects moving objects too, so it needs their past as much as temporal AA does.
+        const bool bWantsObjectMotion = IsTemporalAAEnabledFor(SceneViews[0]) || IsTemporalUpscalerFor(SceneViews[0]);
+        if (!bWantsObjectMotion || !RetainedTransformBuffer || RetainedTransformBuffer.Size == 0)
         {
-            if (PrevBoneArenaBuffer)         { DeferFree(PrevBoneArenaBuffer); PrevBoneArenaBuffer = {}; }
             if (PrevRetainedTransformBuffer) { DeferFree(PrevRetainedTransformBuffer); PrevRetainedTransformBuffer = {}; }
             bPrevMotionStateValid = false;
             return;
         }
 
-        auto Mirror = [this, CL](const RHI::FGPUAllocation& Source, RHI::FGPUAllocation& Dest, const char* DebugName)
+        const uint64 Bytes = RetainedTransformBuffer.Size;
+        const FFrameData::FGeometry::FRetainedUpload& Upload = RenderFrame->Geometry.RetainedUpload;
+
+        // The past already matches the present everywhere this frame did not upload, except grass the GPU scattered.
+        const bool bFullCopy = !bPrevMotionStateValid || !PrevRetainedTransformBuffer || PrevRetainedTransformBuffer.Size != Bytes
+                            || Upload.bFull || HasGrassScatter(*RenderFrame);
+        if (!PrevRetainedTransformBuffer || PrevRetainedTransformBuffer.Size != Bytes)
         {
-            if (!Source || Source.Size == 0)
+            if (PrevRetainedTransformBuffer)
             {
-                return false;
+                DeferFree(PrevRetainedTransformBuffer);
             }
-
-            const uint64 Bytes = Source.Size;
-            if (!Dest || Dest.Size != Bytes)
+            PrevRetainedTransformBuffer = CreateSceneBuffer(Bytes, "Motion.PrevRetainedTransforms");
+            if (!PrevRetainedTransformBuffer)
             {
-                if (Dest)
-                {
-                    DeferFree(Dest);
-                }
-                Dest = CreateSceneBuffer(Bytes, DebugName);
+                bPrevMotionStateValid = false;
+                return;
             }
+        }
 
-            if (!Dest)
+        static const FShaderH CopyShader = FShaderLibrary::Get("CopyBufferSlots.slang");
+        if (bFullCopy || !CopyShader)
+        {
+            RHI::CmdMemcpy(CL, { PrevRetainedTransformBuffer.Gpu, Bytes }, { RetainedTransformBuffer.Gpu, Bytes });
+        }
+        else if (!Upload.DirtySlots.empty())
+        {
+            static_assert(sizeof(FTransform3x4) % 16 == 0, "CopyBufferSlots moves whole 16-byte words.");
+            constexpr uint32 kWordsPerTransform = sizeof(FTransform3x4) / 16;
+
+            struct FCopySlotsPC
             {
-                return false;
-            }
+                RHI::TGPUSpan<FVector4> Source;
+                RHI::TGPUSpan<FVector4> Dest;
+                RHI::TGPUSpan<uint32>   Slots;
+                uint32 WordsPerElement;
+                uint32 _Pad0;
+                uint32 _Pad1;
+                uint32 _Pad2;
+            } PC = {};
+            static_assert(sizeof(FCopySlotsPC) == 64, "FCopySlotsPC must match CopyBufferSlots.slang.");
+            const uint32 NumSlots = (uint32)Upload.DirtySlots.size();
+            PC.Source          = RHI::TGPUSpan<FVector4>::FromAddress(RetainedTransformBuffer.Gpu, (uint32)(Bytes / 16));
+            PC.Dest            = RHI::TGPUSpan<FVector4>::FromAddress(PrevRetainedTransformBuffer.Gpu, (uint32)(Bytes / 16));
+            PC.Slots           = RHI::CopyTransientArray(Upload.DirtySlots.data(), NumSlots);
+            PC.WordsPerElement = kWordsPerTransform;
 
-            RHI::CmdMemcpy(CL, { Dest.Gpu, Bytes }, { Source.Gpu, Bytes });
-            return true;
-        };
+            const uint32 Groups = RenderUtils::GetGroupCount(NumSlots * kWordsPerTransform, 64u);
+            DispatchCompute(CL, CopyShader, PC, Math::Min(Groups, (uint32)MAX_DISPATCH_AXIS), RenderUtils::GetGroupCount(Groups, (uint32)MAX_DISPATCH_AXIS), 1u);
+        }
 
-        const bool bTransforms = Mirror(RetainedTransformBuffer, PrevRetainedTransformBuffer,
-                                        "Motion.PrevRetainedTransforms");
-        Mirror(BoneArenaBuffer, PrevBoneArenaBuffer, "Motion.PrevBoneArena");
-
-        // Without a previous transform there is no object motion to read, so the pass stays camera-only.
-        bPrevMotionStateValid = bTransforms;
+        bPrevMotionStateValid = true;
     }
 
     ESMAAMode FDefaultSceneRenderer::GetViewSMAAMode(const FSceneView& View)

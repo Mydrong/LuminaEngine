@@ -15,7 +15,7 @@ namespace Lumina
     {
         GENERATED_BODY()
 
-        /** Entity whose pose this mesh copies. It must carry a skeletal mesh that something animates. */
+        /** Entity whose pose this mesh copies. Left empty, it is the nearest parent with a skeletal mesh. */
         PROPERTY(Editable, Category = "Follower Pose")
         ECS::FEntity Leader = ECS::NullEntity;
 
@@ -33,8 +33,12 @@ namespace Lumina
         const void* MappedLeaderSkeleton = nullptr;
         const void* MappedFollowerSkeleton = nullptr;
 
-        // Skips the copy while the leader's pose has not moved. Transient.
+        // Skips the copy while the same leader's pose has not moved. Transient.
+        ECS::FEntity CopiedLeader = ECS::NullEntity;
         uint32 LastLeaderPoseSerial = 0;
+
+        // Set while this mesh has the leader's skeleton, so the renderer skins it from the leader's bones. Transient.
+        bool bSharesLeaderPose = false;
 
         // Set once the map came back empty, so the warning fires once rather than every frame. Transient.
         bool bWarnedNoMatch = false;

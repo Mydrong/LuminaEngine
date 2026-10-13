@@ -38,7 +38,8 @@ internal static class ScriptPropertyRewriter
     public static SyntaxTree Rewrite(CSharpCompilation Probe, SyntaxTree Tree, List<string> OutErrors)
     {
         SyntaxNode Root = Tree.GetRoot();
-        if (!Root.DescendantNodes().OfType<FieldDeclarationSyntax>().Any(MayNeedNativeStorage)
+        if (!Root.DescendantNodes().OfType<FieldDeclarationSyntax>().Any(Field => MayNeedNativeStorage(Field.AttributeLists))
+            && !Root.DescendantNodes().OfType<PropertyDeclarationSyntax>().Any(Property => MayNeedNativeStorage(Property.AttributeLists))
             && !Root.DescendantNodes().OfType<MethodDeclarationSyntax>().Any(MayBeRpc))
         {
             return Tree;
@@ -57,9 +58,9 @@ internal static class ScriptPropertyRewriter
     }
 
     // A syntax-only screen, so a file with no storage attribute anywhere costs no semantic model. ScriptMemberRules decides.
-    private static bool MayNeedNativeStorage(FieldDeclarationSyntax Field)
+    private static bool MayNeedNativeStorage(SyntaxList<AttributeListSyntax> AttributeLists)
     {
-        return Field.AttributeLists
+        return AttributeLists
             .SelectMany(List => List.Attributes)
             .Any(Attribute => ScriptMemberRules.BareName(Attribute.Name.ToString()) is ScriptMemberRules.Property
                 or ScriptMemberRules.Serialize or ScriptMemberRules.Sync or ScriptMemberRules.SaveGame or ScriptMemberRules.Bind);
@@ -94,28 +95,125 @@ internal static class ScriptPropertyRewriter
         private readonly SemanticModel Model;
         private readonly string FilePath;
         private readonly List<string> Errors;
+        private readonly INamedTypeSymbol? NativeObjectSymbol;
+        private readonly INamedTypeSymbol? EntityScriptSymbol;
 
         public Rewriter(SemanticModel Model, string FilePath, List<string> Errors)
         {
             this.Model = Model;
             this.FilePath = FilePath;
             this.Errors = Errors;
+            NativeObjectSymbol = Model.Compilation.GetTypeByMetadataName(typeof(NativeObject).FullName!);
+            EntityScriptSymbol = Model.Compilation.GetTypeByMetadataName(typeof(Lumina.CEntityScript).FullName!);
         }
 
         public override SyntaxNode? VisitClassDeclaration(ClassDeclarationSyntax Node)
         {
-            bool bNativeBacked = DerivesFromNativeObject(Model.GetDeclaredSymbol(Node));
-            List<FieldDeclarationSyntax> Fields = Node.Members.OfType<FieldDeclarationSyntax>()
-                .Where(Field => MayNeedNativeStorage(Field) && IsStored(Field, bNativeBacked)).ToList();
+            bool bNativeBacked = DerivesFrom(Model.GetDeclaredSymbol(Node), NativeObjectSymbol);
+            List<FStoredMember> Stored = CollectStoredMembers(Node, bNativeBacked);
             List<FRpcMethod> Rpcs = CollectRpcs(Node);
-            if (Fields.Count == 0 && Rpcs.Count == 0)
+            if (Stored.Count == 0 && Rpcs.Count == 0)
             {
                 return base.VisitClassDeclaration(Node);
             }
-            return RewriteClass(Node, Fields, Rpcs);
+            return RewriteClass(Node, Stored, Rpcs);
         }
 
-        private SyntaxNode RewriteClass(ClassDeclarationSyntax Node, List<FieldDeclarationSyntax> Fields, List<FRpcMethod> Rpcs)
+        // One member whose value lives in native storage, a field declarator or an auto-property.
+        private sealed class FStoredMember
+        {
+            public required MemberDeclarationSyntax Declaration;
+            public required SyntaxNode At;
+            public required ISymbol Symbol;
+            public required ITypeSymbol Type;
+            public required EqualsValueClauseSyntax? Initializer;
+            public required bool bReadOnly;
+            public string SetKeyword = "set";
+        }
+
+        private List<FStoredMember> CollectStoredMembers(ClassDeclarationSyntax Node, bool bNativeBacked)
+        {
+            var Result = new List<FStoredMember>();
+            foreach (MemberDeclarationSyntax Member in Node.Members)
+            {
+                if (Member is FieldDeclarationSyntax Field && MayNeedNativeStorage(Field.AttributeLists) && IsStored(Field, bNativeBacked))
+                {
+                    foreach (VariableDeclaratorSyntax Declarator in Field.Declaration.Variables)
+                    {
+                        if (Model.GetDeclaredSymbol(Declarator) is IFieldSymbol Symbol)
+                        {
+                            Result.Add(new FStoredMember
+                            {
+                                Declaration = Field,
+                                At = Declarator,
+                                Symbol = Symbol,
+                                Type = Symbol.Type,
+                                Initializer = Declarator.Initializer,
+                                bReadOnly = Symbol.IsReadOnly,
+                            });
+                        }
+                    }
+                }
+                else if (Member is PropertyDeclarationSyntax Property && bNativeBacked && MayNeedNativeStorage(Property.AttributeLists)
+                         && AsStoredProperty(Property) is { } StoredProperty)
+                {
+                    Result.Add(StoredProperty);
+                }
+            }
+            return Result;
+        }
+
+        // Native minted storage for this property, so its accessors must reach it, or the inspector, saves and prefabs edit a value the script never reads.
+        private FStoredMember? AsStoredProperty(PropertyDeclarationSyntax Property)
+        {
+            if (Model.GetDeclaredSymbol(Property) is not IPropertySymbol Symbol || Symbol.IsStatic
+                || Property.Modifiers.Any(SyntaxKind.PartialKeyword))
+            {
+                return null;
+            }
+
+            bool bView = ScriptPropertyClassifier.Classify(Symbol.Type).IsView;
+            EScriptMemberKind Kind = Symbol.SetMethod != null || bView ? EScriptMemberKind.WritableProperty : EScriptMemberKind.ReadOnlyProperty;
+            if (!ScriptPropertyClassifier.RuleFor(Symbol, Kind, bOwnerIsNativeObject: true).bStored)
+            {
+                return null;
+            }
+
+            string Where = $"{FilePath}({Line(Property)}): '{Symbol.Name}'";
+            if (Symbol.IsAbstract)
+            {
+                Errors.Add($"{Where} is abstract, and a stored property needs storage of its own. Declare it on the class that holds the value.");
+                return null;
+            }
+            if (Property.AccessorList == null
+                || Property.AccessorList.Accessors.Any(Accessor => Accessor.Body != null || Accessor.ExpressionBody != null))
+            {
+                Errors.Add($"{Where} has accessor bodies, but the engine keeps a stored property's value in native memory, so a body would "
+                         + "read and write a copy the inspector, saves and prefabs never see. Declare it as '{ get; set; }' or as a field.");
+                return null;
+            }
+            if (Property.AccessorList.Accessors.Any(Accessor => Accessor.IsKind(SyntaxKind.InitAccessorDeclaration)))
+            {
+                Errors.Add($"{Where} has an init accessor, but the engine assigns a stored value after construction. "
+                         + "Use 'private set' to keep it read-only to callers.");
+                return null;
+            }
+
+            AccessorDeclarationSyntax? Setter = Property.AccessorList.Accessors
+                .FirstOrDefault(Accessor => Accessor.IsKind(SyntaxKind.SetAccessorDeclaration));
+            return new FStoredMember
+            {
+                Declaration = Property,
+                At = Property,
+                Symbol = Symbol,
+                Type = Symbol.Type,
+                Initializer = Property.Initializer,
+                bReadOnly = Setter == null,
+                SetKeyword = Setter != null && Setter.Modifiers.Count > 0 ? Setter.Modifiers.ToString() + " set" : "set",
+            };
+        }
+
+        private SyntaxNode RewriteClass(ClassDeclarationSyntax Node, List<FStoredMember> Stored, List<FRpcMethod> Rpcs)
         {
 
             // typeof rather than a spelled name, so the runtime identity rule names it and a nested class resolves too.
@@ -123,57 +221,48 @@ internal static class ScriptPropertyRewriter
                 ? Declared.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)
                 : Node.Identifier.Text;
 
-            // Keyed by field, because one field can declare several members (`float A, B;`) and each expands
-            // to several: two lazy-resolve statics plus the property itself.
-            var Replacements = new Dictionary<FieldDeclarationSyntax, List<MemberDeclarationSyntax>>();
+            // Keyed by declaration, since `float A, B;` declares several members and each expands to statics plus a property.
+            var Replacements = new Dictionary<MemberDeclarationSyntax, List<MemberDeclarationSyntax>>();
             var Defaults = new List<string>();
 
-            foreach (FieldDeclarationSyntax Field in Fields)
+            foreach (FStoredMember Member in Stored)
             {
-                foreach (VariableDeclaratorSyntax Declarator in Field.Declaration.Variables)
+                string Name = Member.Symbol.Name;
+
+                // The shared classifier also runs in the IDE analyzer, so what fails here was already underlined there.
+                FScriptPropertyClassification Classification = ScriptPropertyClassifier.Classify(Member.Type);
+                if (!Classification.IsSupported)
                 {
-                    if (Model.GetDeclaredSymbol(Declarator) is not IFieldSymbol Symbol)
-                    {
-                        continue;
-                    }
-
-                    // Every judgement about the member's type comes from the shared classifier, which the IDE
-                    // analyzer runs too -- so what fails here is what was already underlined as you typed it.
-                    FScriptPropertyClassification Classification = ScriptPropertyClassifier.Classify(Symbol.Type);
-                    if (!Classification.IsSupported)
-                    {
-                        Errors.Add($"{FilePath}({Line(Declarator)}): [Property] '{Symbol.Name}' has type "
-                                 + $"'{Symbol.Type.ToDisplayString()}': {Classification.Rejection}");
-                        continue;
-                    }
-
-                    // A container is a view over storage native owns, so it has no setter and no default:
-                    // assigning it is meaningless while its contents are fully editable.
-                    if (Classification.IsView && Declarator.Initializer != null)
-                    {
-                        Errors.Add($"{FilePath}({Line(Declarator)}): [Property] '{Symbol.Name}' is a container. It is a "
-                                 + "view over the native storage, so it cannot be initialized; add to it in OnReady instead.");
-                        continue;
-                    }
-
-                    // Rewriting it would hand DispatchAction a string instead of the live binding.
-                    if (Classification.KeepsManagedField)
-                    {
-                        continue;
-                    }
-
-                    if (Declarator.Initializer != null)
-                    {
-                        Defaults.Add($"{Symbol.Name} = {Declarator.Initializer.Value};");
-                    }
-
-                    if (!Replacements.TryGetValue(Field, out List<MemberDeclarationSyntax>? Built))
-                    {
-                        Built = new List<MemberDeclarationSyntax>();
-                        Replacements[Field] = Built;
-                    }
-                    Built.AddRange(BuildProperty(Field, Declarator, Symbol, TypeName, Classification));
+                    Errors.Add($"{FilePath}({Line(Member.At)}): [Property] '{Name}' has type "
+                             + $"'{Member.Type.ToDisplayString()}': {Classification.Rejection}");
+                    continue;
                 }
+
+                // A container is a view over native storage, so it is filled rather than assigned.
+                if (Classification.IsView && Member.Initializer != null)
+                {
+                    Errors.Add($"{FilePath}({Line(Member.At)}): [Property] '{Name}' is a container. It is a "
+                             + "view over the native storage, so it cannot be initialized; add to it in OnReady instead.");
+                    continue;
+                }
+
+                // Rewriting it would hand DispatchAction a string instead of the live binding.
+                if (Classification.KeepsManagedField)
+                {
+                    continue;
+                }
+
+                if (Member.Initializer != null)
+                {
+                    Defaults.Add($"{Name} = {Member.Initializer.Value};");
+                }
+
+                if (!Replacements.TryGetValue(Member.Declaration, out List<MemberDeclarationSyntax>? Built))
+                {
+                    Built = new List<MemberDeclarationSyntax>();
+                    Replacements[Member.Declaration] = Built;
+                }
+                Built.AddRange(BuildProperty(Member, TypeName, Classification));
             }
 
             if (Errors.Count > 0)
@@ -192,7 +281,7 @@ internal static class ScriptPropertyRewriter
             var Members = new List<MemberDeclarationSyntax>();
             foreach (MemberDeclarationSyntax Member in Node.Members)
             {
-                if (Member is FieldDeclarationSyntax Field && Replacements.TryGetValue(Field, out List<MemberDeclarationSyntax>? Built))
+                if (Replacements.TryGetValue(Member, out List<MemberDeclarationSyntax>? Built))
                 {
                     Members.AddRange(Built);
                     continue;
@@ -251,9 +340,9 @@ internal static class ScriptPropertyRewriter
                     Errors.Add($"{Where} has a ref or out parameter, which a remote call has no way to hand back.");
                     continue;
                 }
-                if (!DerivesFromEntityScript(Symbol.ContainingType))
+                if (!DerivesFrom(Symbol.ContainingType, EntityScriptSymbol))
                 {
-                    Errors.Add($"{Where} is declared on {Symbol.ContainingType.Name}, and only an EntityScript has an entity to route the call through.");
+                    Errors.Add($"{Where} is declared on {Symbol.ContainingType.Name}, and only an CEntityScript has an entity to route the call through.");
                     continue;
                 }
                 if (!SeenNames.Add(Symbol.Name))
@@ -284,23 +373,11 @@ internal static class ScriptPropertyRewriter
                 && ScriptPropertyClassifier.RuleFor(Symbol, EScriptMemberKind.Field, bNativeBacked).bStored;
         }
 
-        private static bool DerivesFromNativeObject(INamedTypeSymbol? Type)
+        private static bool DerivesFrom(INamedTypeSymbol? Type, INamedTypeSymbol? Base)
         {
-            for (INamedTypeSymbol? Current = Type; Current != null; Current = Current.BaseType)
+            for (INamedTypeSymbol? Current = Type; Current != null && Base != null; Current = Current.BaseType)
             {
-                if (Current.Name == "NativeObject" && Current.ContainingNamespace?.ToDisplayString() == "LuminaSharp")
-                {
-                    return true;
-                }
-            }
-            return false;
-        }
-
-        private static bool DerivesFromEntityScript(INamedTypeSymbol? Type)
-        {
-            for (INamedTypeSymbol? Current = Type; Current != null; Current = Current.BaseType)
-            {
-                if (Current.Name == "EntityScript" && Current.ContainingNamespace?.ToDisplayString() == "LuminaSharp")
+                if (SymbolEqualityComparer.Default.Equals(Current, Base))
                 {
                     return true;
                 }
@@ -344,14 +421,14 @@ internal static class ScriptPropertyRewriter
         /// stack trace, a breakpoint and any later diagnostic in the file still name the line the author
         /// wrote rather than an offset into generated text.
         /// </summary>
-        private IEnumerable<MemberDeclarationSyntax> BuildProperty(FieldDeclarationSyntax Field, VariableDeclaratorSyntax Declarator,
-            IFieldSymbol Symbol, string TypeName, FScriptPropertyClassification Classification)
+        private IEnumerable<MemberDeclarationSyntax> BuildProperty(FStoredMember Member, string TypeName, FScriptPropertyClassification Classification)
         {
-            string Name = Symbol.Name;
-            string Type = Symbol.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+            string Name = Member.Symbol.Name;
+            SyntaxNode Declarator = Member.At;
+            string Type = Member.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
             string Offset = $"__lazyoff_{Name}.Get(typeof({TypeName}), \"{Name}\")";
             string Token = $"__lazyprop_{Name}.Get(typeof({TypeName}), \"{Name}\")";
-            bool bWritable = !Classification.IsView && !Symbol.IsReadOnly;
+            bool bWritable = !Classification.IsView && !Member.bReadOnly;
 
             string Get;
             string? Set = null;
@@ -443,16 +520,21 @@ internal static class ScriptPropertyRewriter
             // The attributes come across verbatim, and they are not decoration: TypeLibrary discovers a
             // member BY [Property] at run time, and reads Category/Tooltip/Min/Max off it to build the
             // inspector row. Dropping them here would compile perfectly and publish nothing.
-            foreach (AttributeListSyntax List in Field.AttributeLists)
+            foreach (AttributeListSyntax List in Member.Declaration.AttributeLists)
             {
+                // A field-targeted attribute on an auto-property has no backing field left to land on.
+                if (Member.Declaration is PropertyDeclarationSyntax && List.Target?.Identifier.IsKind(SyntaxKind.FieldKeyword) == true)
+                {
+                    continue;
+                }
                 Body.AppendLine(List.ToString());
             }
-            Body.Append(Accessibility(Field)).Append(' ').Append(Type).Append(' ').AppendLine(Name);
+            Body.Append(Accessibility(Member.Declaration.Modifiers)).Append(' ').Append(Type).Append(' ').AppendLine(Name);
             Body.AppendLine("{");
             // Gated on HasNativeStorage: the schema pass creates one UNBOUND instance per script type purely
             // to describe it, and reading through a null handle there is an access violation on load.
             Body.Append("    get => HasNativeStorage ? ").Append(Get).Append(" : ").Append(Unbound).AppendLine(";");
-            bool bSync = HasAttributeNamed(Field.AttributeLists, "Sync");
+            bool bSync = HasAttributeNamed(Member.Declaration.AttributeLists, "Sync");
             if (bSync && Classification.IsView)
             {
                 Errors.Add($"{FilePath}({Line(Declarator)}): [Sync] '{Name}' is a container, and only whole values replicate. "
@@ -461,14 +543,14 @@ internal static class ScriptPropertyRewriter
             }
             if (bWritable && Set != null && bSync)
             {
-                if (!BuildSyncSetter(Body, Declarator, Symbol, TypeName, Type, Get, Set))
+                if (!BuildSyncSetter(Body, Member, Type, Get, Set))
                 {
                     return System.Array.Empty<MemberDeclarationSyntax>();
                 }
             }
             else if (bWritable && Set != null)
             {
-                Body.Append("    set { if (HasNativeStorage) { ").Append(Set).AppendLine("; } }");
+                Body.Append("    ").Append(Member.SetKeyword).Append(" { if (HasNativeStorage) { ").Append(Set).AppendLine("; } }");
             }
             Body.AppendLine("}");
 
@@ -504,7 +586,7 @@ internal static class ScriptPropertyRewriter
             Members[0] = Members[0].WithLeadingTrivia(Directive(Line(Declarator)));
             Members[^1] = Members[^1].WithTrailingTrivia(
                 Members[^1].GetTrailingTrivia().AddRange(
-                    Directive(Field.GetLocation().GetLineSpan().EndLinePosition.Line + OneBased + NextLine)));
+                    Directive(Member.Declaration.GetLocation().GetLineSpan().EndLinePosition.Line + OneBased + NextLine)));
             return Members;
         }
 
@@ -513,10 +595,10 @@ internal static class ScriptPropertyRewriter
             or SpecialType.System_Int32 or SpecialType.System_UInt32 or SpecialType.System_Int64 or SpecialType.System_UInt64;
 
         // Snaps, writes, then on a real change marks dirty, forwards an owner's write to the host and runs the change handler.
-        private bool BuildSyncSetter(StringBuilder Body, VariableDeclaratorSyntax Declarator, IFieldSymbol Symbol, string TypeName,
-            string Type, string Get, string Set)
+        private bool BuildSyncSetter(StringBuilder Body, FStoredMember Member, string Type, string Get, string Set)
         {
-            string Where = $"{FilePath}({Line(Declarator)}): [Sync] '{Symbol.Name}'";
+            ISymbol Symbol = Member.Symbol;
+            string Where = $"{FilePath}({Line(Member.At)}): [Sync] '{Symbol.Name}'";
             AttributeData? Sync = Symbol.GetAttributes().FirstOrDefault(Data => Data.AttributeClass?.Name == "SyncAttribute");
             AttributeData? Change = Symbol.GetAttributes().FirstOrDefault(Data => Data.AttributeClass?.Name == "ChangeAttribute");
 
@@ -539,14 +621,14 @@ internal static class ScriptPropertyRewriter
                 }
             }
 
-            if (Quantize > 0.0 && !IsNumber(Symbol.Type))
+            if (Quantize > 0.0 && !IsNumber(Member.Type))
             {
                 Errors.Add($"{Where} sets Quantize, which only a number can snap to.");
                 return false;
             }
-            if (bFromOwner && !DerivesFromEntityScript(Symbol.ContainingType))
+            if (bFromOwner && !DerivesFrom(Symbol.ContainingType, EntityScriptSymbol))
             {
-                Errors.Add($"{Where} is FromOwner, and only an EntityScript has an owner to take the write from.");
+                Errors.Add($"{Where} is FromOwner, and only an CEntityScript has an owner to take the write from.");
                 return false;
             }
             if (Validate != null && !bFromOwner)
@@ -554,14 +636,14 @@ internal static class ScriptPropertyRewriter
                 Errors.Add($"{Where} names Validate without SyncFlags.FromOwner, and only an owner's write is validated.");
                 return false;
             }
-            if (Validate != null && !HasValidator(Symbol.ContainingType, Validate, Symbol.Type))
+            if (Validate != null && !HasValidator(Symbol.ContainingType, Validate, Member.Type))
             {
-                Errors.Add($"{Where} names Validate method '{Validate}', which must take one {Symbol.Type.ToDisplayString()} and return bool.");
+                Errors.Add($"{Where} names Validate method '{Validate}', which must take one {Member.Type.ToDisplayString()} and return bool.");
                 return false;
             }
 
             string Step = Quantize.ToString("R", System.Globalization.CultureInfo.InvariantCulture) + "d";
-            Body.Append("    set { if (HasNativeStorage) { ");
+            Body.Append("    ").Append(Member.SetKeyword).Append(" { if (HasNativeStorage) { ");
             if (Quantize > 0.0)
             {
                 Body.Append("value = (").Append(Type).Append(")(global::System.Math.Round((double)value / ").Append(Step).Append(") * ").Append(Step).Append("); ");
@@ -633,15 +715,15 @@ internal static class ScriptPropertyRewriter
             return ParseMembers(Builder.ToString());
         }
 
-        private static string Accessibility(FieldDeclarationSyntax Field)
+        private static string Accessibility(SyntaxTokenList DeclaredModifiers)
         {
             // 'unsafe' because every accessor dereferences the container pointer; the field's own modifiers
             // (public/internal) carry over so the property is reachable exactly where the field was.
-            List<string> Modifiers = Field.Modifiers
+            List<string> Modifiers = DeclaredModifiers
                 .Select(Token => Token.Text)
-                .Where(Text => Text is "public" or "private" or "protected" or "internal")
+                .Where(Text => Text is "public" or "private" or "protected" or "internal" or "new" or "virtual" or "override" or "sealed")
                 .ToList();
-            if (Modifiers.Count == 0)
+            if (!Modifiers.Any(Text => Text is "public" or "private" or "protected" or "internal"))
             {
                 Modifiers.Add("private");
             }

@@ -425,44 +425,15 @@ namespace Lumina::UIScripts
             return DotNet::IsInitialized() ? DotNet::GetScriptGeneration() : -1;
         }
 
-        // C++ spells it bShowOnStart and C# ShowOnStart, the same property in each language's naming.
-        const FProperty* FindFlag(const CClass* Class, const char* Name)
-        {
-            const FProperty* Property = Class->GetProperty(FName((FString("b") + Name).c_str()));
-            if (Property == nullptr)
-            {
-                Property = Class->GetProperty(FName(Name));
-            }
-            return Property != nullptr && Property->GetType() == EPropertyTypeFlags::Bool ? Property : nullptr;
-        }
-
-        bool ReadFlag(const CEntityScript* Script, const char* Name, bool bDefault)
-        {
-            const FProperty* Property = FindFlag(Script->GetClass(), Name);
-            return Property != nullptr ? *Property->GetValuePtr<bool>(Script) : bDefault;
-        }
-
         FString DocumentPathOf(const CEntityScript* Script)
         {
             const CClass* Class = Script->GetClass();
-            if (const FProperty* Property = Class->GetProperty(FName("Document")))
+            if (const CUIScript* UIScript = Cast<CUIScript>(Script))
             {
-                if (Property->GetType() == EPropertyTypeFlags::String)
+                const FStringView Path = UIScript->Document.ResolvePath();
+                if (!Path.empty())
                 {
-                    const FString& Path = *Property->GetValuePtr<FString>(Script);
-                    if (!Path.empty())
-                    {
-                        return Path;
-                    }
-                }
-                else if (Property->GetType() == EPropertyTypeFlags::Struct
-                    && static_cast<const FStructProperty*>(Property)->GetStruct()->IsChildOf(FAssetRef::StaticStruct()))
-                {
-                    const FStringView Path = Property->GetValuePtr<FAssetRef>(Script)->ResolvePath();
-                    if (!Path.empty())
-                    {
-                        return FString(Path.data(), Path.size());
-                    }
+                    return FString(Path.data(), Path.size());
                 }
             }
 
@@ -527,11 +498,10 @@ namespace Lumina::UIScripts
         {
             ResolveElements(Open);
             CEntityScript* Script = Open.Script;
-            if (CUIScript* Native = Cast<CUIScript>(Script))
+            if (CUIScript* UIScript = Cast<CUIScript>(Script))
             {
-                Native->OnDocumentLoaded();
+                UIScript->OnDocumentLoaded();
             }
-            DotNetUI::ScriptDocumentLoaded(Script);
         }
 
         bool LoadDocument(FOpenUI& Open)
@@ -589,7 +559,8 @@ namespace Lumina::UIScripts
             {
                 return;
             }
-            const bool bInteractive = ReadFlag(Open.Script, "Interactive", false);
+            const CUIScript* UIScript = Cast<CUIScript>(Open.Script);
+            const bool bInteractive = UIScript != nullptr && UIScript->bInteractive;
             RmlUi::ShowDocument(Open.Document, false, bInteractive);
             if (bInteractive && !Open.bHoldsCursor)
             {
@@ -624,22 +595,7 @@ namespace Lumina::UIScripts
 
     bool IsUIScript(const CClass* Class)
     {
-        if (Class == nullptr)
-        {
-            return false;
-        }
-        if (Class->IsChildOf(CUIScript::StaticClass()))
-        {
-            return true;
-        }
-        for (const CClass* Current = Class; Current != nullptr; Current = Current->GetSuperClass())
-        {
-            if (Current->HasMeta("UIScript"))
-            {
-                return true;
-            }
-        }
-        return false;
+        return Class != nullptr && Class->IsChildOf(CUIScript::StaticClass());
     }
 
     void Open(CEntityScript* Script)
@@ -659,7 +615,8 @@ namespace Lumina::UIScripts
         Open.Script = Script;
         Open.World = World;
         Open.Path = DocumentPathOf(Script);
-        Open.bWantShown = ReadFlag(Script, "ShowOnStart", true);
+        const CUIScript* UIScript = Cast<CUIScript>(Script);
+        Open.bWantShown = UIScript == nullptr || UIScript->bShowOnStart;
 
         // The model exists before the load, since RmlUi resolves bindings while it parses.
         CreateModel(Open);

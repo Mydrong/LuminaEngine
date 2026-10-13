@@ -10,10 +10,6 @@
 #include "Memory/SmartPtr.h"
 
 
-// BUMP whenever the binary interface to modules changes: type layout, enum values, exported
-// signatures, or vtable shape. A stale plugin then crashes somewhere unrelated instead of failing to load.
-#define LUMINA_MODULE_ABI_VERSION 44
-
 #if defined(WITH_EDITOR) && WITH_EDITOR
     #define LUMINA_MODULE_ABI_PLATFORM "Editor"
 #elif defined(WITH_SERVER) && WITH_SERVER
@@ -45,9 +41,9 @@
     #define LUMINA_MODULE_ABI_STDLIB "UNKNOWNSTL"
 #endif
 
-// Compile-time fingerprint, identical for the engine and any ABI-compatible module.
+// Covers configuration and toolchain, while the BuildId in the build tool's .modules manifest covers engine headers.
 #define LUMINA_MODULE_ABI_SIGNATURE                              \
-    "LMABI/" LUMINA_MODULE_ABI_STR(LUMINA_MODULE_ABI_VERSION)    \
+    "LMABI"                                                      \
     "|" LUMINA_BINARY_SUFFIX                                     \
     "|" LUMINA_MODULE_ABI_PLATFORM                               \
     "|" LUMINA_MODULE_ABI_COMPILER                               \
@@ -167,7 +163,7 @@ namespace Lumina
         // Static module factories from IMPLEMENT_MODULE in monolithic builds (linear list).
         TVector<TPair<FName, ModuleInitFunc>> StaticModuleFactories;
 
-        // Reason the last LoadModule failed (ABI mismatch, etc.); see GetLastLoadError.
+        // Reason the last LoadModule failed, such as an ABI or BuildId mismatch; see GetLastLoadError.
         FString LastLoadError;
 
         // Engine ImGui/ImPlot contexts (opaque void* to keep ImGui out of this header), null until

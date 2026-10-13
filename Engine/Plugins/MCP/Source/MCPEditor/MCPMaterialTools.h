@@ -123,6 +123,10 @@ namespace Lumina
 
         PROPERTY()
         TVector<SMaterialNodeInfo> Nodes;
+
+        // False for a material function, and for a material whose shaders are still compiling or failed to.
+        PROPERTY()
+        bool bReadyForRender = false;
     };
 
     REFLECT()

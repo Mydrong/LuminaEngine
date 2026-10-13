@@ -5,9 +5,11 @@
 #include "Containers/Vector.h"
 #include "Containers/Function.h"
 #include "Containers/String.h"
+#include "Memory/SmartPtr.h"
 #include "Core/Threading/Atomic.h"
 #include "Core/Threading/Thread.h"
 #include "TaskSystem/FiberSync.h"
+#include "TaskSystem/TaskTypes.h"
 
 namespace Lumina
 {
@@ -27,27 +29,55 @@ namespace Lumina
         FString TemplateVirtualPath;
         // Which entry point to compile. Required once a module defines more than one.
         FString EntryPoint;
-        // Non-zero replaces the source-text key with the caller's own, stored in the project's material cache.
-        uint64 MaterialCacheKey = 0;
+        // Read by raw compiles, where Background keeps a long compile off any thread only helping out while it waits.
+        ETaskPriority Priority = ETaskPriority::Medium;
     };
     
     class IShaderCompiler
     {
     public:
         using CompletedFunc = TFunction<void(FShaderHeader)>;
+        using FinishedFunc  = TFunction<void()>;
 
         virtual ~IShaderCompiler() = default;
 
         virtual void Initialize() = 0;
         virtual void Shutdown() = 0;
 
-        virtual bool CompilerShaderRaw(FString ShaderString, const FShaderCompileOptions& CompileOptions, CompletedFunc OnCompleted) = 0;
-        virtual bool CompileShaderPath(FString ShaderPath, const FShaderCompileOptions& CompileOptions, CompletedFunc OnCompleted) = 0;
-        virtual bool CompileShaderPaths(TSpan<FString> ShaderPaths, TSpan<FShaderCompileOptions> CompileOptions, CompletedFunc OnCompleted) = 0;
+        // OnCompleted runs per successful shader, and OnFinished once every request in the call has returned, failed ones included.
+        virtual bool CompilerShaderRaw(FString ShaderString, const FShaderCompileOptions& CompileOptions, CompletedFunc OnCompleted, FinishedFunc OnFinished = {}) = 0;
+        virtual bool CompileShaderPath(FString ShaderPath, const FShaderCompileOptions& CompileOptions, CompletedFunc OnCompleted, FinishedFunc OnFinished = {}) = 0;
+        virtual bool CompileShaderPaths(TSpan<FString> ShaderPaths, TSpan<FShaderCompileOptions> CompileOptions, CompletedFunc OnCompleted, FinishedFunc OnFinished = {}) = 0;
 
-        virtual bool HasPendingRequests() const = 0;
         virtual void Flush() const = 0;
         
+    };
+
+    // Waits on the requests handed its Track callbacks, where Flush would also wait on every unrelated compile in flight.
+    class RUNTIME_API FShaderCompileWaiter
+    {
+    public:
+        FShaderCompileWaiter();
+
+        // Pass the result as a request's OnFinished, one per call.
+        IShaderCompiler::FinishedFunc Track();
+
+        NODISCARD uint32 GetOutstanding() const;
+        NODISCARD bool IsSettled() const { return GetOutstanding() == 0; }
+
+        // Parks a fiber rather than the worker under it, so a waiter on the task system cannot starve its own compiles.
+        void Wait() const;
+
+    private:
+        struct FState
+        {
+            TAtomic<uint32>         Outstanding{0};
+            FFiberMutex             Mutex;
+            FFiberConditionVariable Settled;
+        };
+
+        // Shared with every callback, since the last one still notifies after Wait may have returned.
+        TSharedPtr<FState> State;
     };
     
     // Exported so a host outside Runtime -- RHITests, a cooker -- can stand one up. Note that
@@ -67,11 +97,10 @@ namespace Lumina
         void Initialize() override;
         void Shutdown() override;
 
-        bool CompilerShaderRaw(FString ShaderString, const FShaderCompileOptions& CompileOptions, CompletedFunc OnCompleted) override;
-        bool CompileShaderPath(FString ShaderPath, const FShaderCompileOptions& CompileOptions, CompletedFunc OnCompleted) override;
-        bool CompileShaderPaths(TSpan<FString> ShaderPaths, TSpan<FShaderCompileOptions> CompileOptions, CompletedFunc OnCompleted) override;
+        bool CompilerShaderRaw(FString ShaderString, const FShaderCompileOptions& CompileOptions, CompletedFunc OnCompleted, FinishedFunc OnFinished = {}) override;
+        bool CompileShaderPath(FString ShaderPath, const FShaderCompileOptions& CompileOptions, CompletedFunc OnCompleted, FinishedFunc OnFinished = {}) override;
+        bool CompileShaderPaths(TSpan<FString> ShaderPaths, TSpan<FShaderCompileOptions> CompileOptions, CompletedFunc OnCompleted, FinishedFunc OnFinished = {}) override;
 
-        bool HasPendingRequests() const override;
         void Flush() const override;
         
         FMutex                      RequestMutex;

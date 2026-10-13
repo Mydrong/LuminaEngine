@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "Containers/Invoke.h"
 #include "Lumina.h"
@@ -12,7 +12,6 @@
 #include "PropertyArena.h"
 #include "Memory/SmartPtr.h"
 
-RUNTIME_API Lumina::CClass* Construct_CClass_Lumina_CStruct();
 
 namespace Lumina
 {
@@ -29,7 +28,7 @@ namespace Lumina
     {
     public:
 
-        DECLARE_CLASS(Lumina, CField, CObject, "/Script/Engine", RUNTIME_API)
+        DECLARE_CLASS(Lumina, CField, CObject, "/Types/Engine", RUNTIME_API)
         DEFINE_CLASS_FACTORY(CField)
         
         CField() = default;
@@ -60,7 +59,7 @@ namespace Lumina
     {
     public:
         
-        DECLARE_CLASS(Lumina, CEnum, CField, "/Script/Engine", RUNTIME_API)
+        DECLARE_CLASS(Lumina, CEnum, CField, "/Types/Engine", RUNTIME_API)
         DEFINE_CLASS_FACTORY(CEnum)
 
         CEnum() = default;
@@ -86,9 +85,9 @@ namespace Lumina
     /** Reflected type with properties; supports single inheritance via SuperStruct. */
     class LUMINA_VISIBLE_TYPE CStruct : public CField
     {
-        friend RUNTIME_API void ConstructCStruct(CStruct** OutStruct, const FStructParams& Params);
+        friend RUNTIME_API void ConstructCStruct(CStruct** OutStruct, const FStructDesc& Desc);
 
-        DECLARE_CLASS(Lumina, CStruct, CField, "/Script/Engine", RUNTIME_API)
+        DECLARE_CLASS(Lumina, CStruct, CField, "/Types/Engine", RUNTIME_API)
         DEFINE_CLASS_FACTORY(CStruct)
 
     public:
@@ -117,7 +116,6 @@ namespace Lumina
         /** Every reflected function on this type: its own in declaration order, then each super's. */
         NODISCARD TSpan<FFunction* const> GetFunctions() const { return AllFunctions; }
 
-        NODISCARD TSpan<FFunction* const> GetOwnFunctions() const { return OwnFunctions; }
 
         /** Nearest declaration of Name walking up the chain, or null. */
         RUNTIME_API NODISCARD FFunction* FindFunction(const FName& Name) const;
@@ -151,8 +149,11 @@ namespace Lumina
         RUNTIME_API virtual void CopyStruct(void* Dest, const void* Src) const;
         RUNTIME_API virtual bool CompareStruct(const void* A, const void* B) const;
 
+        // Copies every reflected property, the trivial ones a contiguous run at a time.
+        RUNTIME_API void CopyProperties(void* Dest, const void* Src) const;
+
         /** Reflected-property serialization with tags for versioning/skip support. */
-        RUNTIME_API void SerializeTaggedProperties(FArchive& Ar, void* Data) const;
+        RUNTIME_API void SerializeProperties(FArchive& Ar, void* Data) const;
 
         /** Compact network serialization: walks PROPERTY(Replicated) fields (this struct + supers) in a
          *  fixed, tag-less order, calling each property's NetSerialize. Both peers must share the layout. */
@@ -190,7 +191,7 @@ namespace Lumina
 
         /** Structured (named-field) variant; drives each property's SerializeItem. Used by the
          *  JSON backend so reflected data round-trips through human-readable named fields. */
-        RUNTIME_API void SerializeTaggedProperties(IStructuredArchive::FRecord& Record, void* Data, void const* Defaults = nullptr) const;
+        RUNTIME_API void SerializeProperties(IStructuredArchive::FRecord& Record, void* Data, void const* Defaults = nullptr) const;
 
         void Serialize(FArchive& Ar) override { }
         void SerializeStructured(IStructuredArchive::FRecord& Slot) override { }
@@ -287,6 +288,16 @@ namespace Lumina
         TVector<FFunction*> OwnFunctions;
         TVector<FFunction*> AllFunctions;
 
+        struct FCopyRun
+        {
+            uint32 Offset;
+            uint32 Size;
+        };
+
+        // AllProperties split for CopyProperties, trivial ones merged only where they touch so no unreflected member is overwritten.
+        TVector<FCopyRun>   TrivialCopyRuns;
+        TVector<FProperty*> NonTrivialProperties;
+
         FPropertyArena PropertyArena;
 
         // Points at a function-local static owned by Meta::GetComponentOps, so this never owns it.
@@ -305,7 +316,7 @@ namespace Lumina
     {
     public:
 
-        DECLARE_CLASS(Lumina, CClass, CStruct, "/Script/Engine", RUNTIME_API)
+        DECLARE_CLASS(Lumina, CClass, CStruct, "/Types/Engine", RUNTIME_API)
         DEFINE_CLASS_FACTORY(CClass)
 
         using FactoryFunctionType = CObject*(*)(void*);
@@ -380,44 +391,4 @@ namespace Lumina
     RUNTIME_API void AllocateStaticScriptClass(const TCHAR* Package, const TCHAR* Name, class CScriptClass** OutClass, uint32 Size, uint32 Alignment, CClass* (*SuperClassFn)(), CClass::FactoryFunctionType FactoryFunc);
     RUNTIME_API void AllocateStaticScriptClass(const TCHAR* Package, const TCHAR* Name, class CScriptClass** OutClass, uint32 Size, uint32 Alignment, CClass* SuperClass, CClass::FactoryFunctionType FactoryFunc);
     
-
-    template<typename Class>
-    FORCEINLINE FString GetClassName()
-    {
-    	return Class::StaticClass()->GetName();
-    }
-    
-    template <typename T>
-    struct TBaseStructureBase
-    {
-        static CStruct* Get()
-        {
-            return T::StaticStruct();
-        }
-    };
-
-    template <typename T>
-    struct TBaseStructure : TBaseStructureBase<T>
-    {
-    };
-
-    template<> struct TBaseStructure<FVector2>
-    {
-        static RUNTIME_API CStruct* Get();
-    };
-
-    template<> struct TBaseStructure<FVector3>
-    {
-        static RUNTIME_API CStruct* Get();
-    };
-
-    template<> struct TBaseStructure<FVector4>
-    {
-        static RUNTIME_API CStruct* Get();
-    };
-
-    template<> struct TBaseStructure<FQuat>
-    {
-        static RUNTIME_API CStruct* Get();
-    };
 }

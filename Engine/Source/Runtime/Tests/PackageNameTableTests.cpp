@@ -7,7 +7,7 @@
 #include "Core/Object/Package/Package.h"
 #include "FileSystem/FileSystem.h"
 #include "Core/Object/ObjectCore.h"
-#include "Core/Reflection/Type/Properties/PropertyTag.h"
+#include "Core/Reflection/Type/Properties/PropertyHeader.h"
 #include "Core/Serialization/MemoryArchiver.h"
 #include "Core/Serialization/Package/PackageNameTable.h"
 #include "Core/Versioning/CoreVersion.h"
@@ -193,9 +193,9 @@ TEST(PackageNameTable, ACorruptEntryCountIsRefused)
     EXPECT_EQ(Table.Num(), 0u);
 }
 
-TEST(PropertyTag, ATagRoundTripsAtTheCurrentVersion)
+TEST(PropertyHeader, RoundTripsAtTheCurrentVersion)
 {
-    FPropertyTag Written;
+    FPropertyHeader Written;
     Written.Type = EPropertyTypeFlags::Float;
     Written.Name = "NoiseScale";
     Written.Size = 4;
@@ -210,7 +210,7 @@ TEST(PropertyTag, ATagRoundTripsAtTheCurrentVersion)
     // 1 kind + the name + 4 size, where the name costs 8 bytes of text length before its 10 characters.
     EXPECT_LT(Bytes.size(), 24u) << "the tag is what the stream pays per property";
 
-    FPropertyTag Read;
+    FPropertyHeader Read;
     FMemoryReader Reader(Bytes);
     Reader.SetFileVersion(kNameTableVersion);
     Reader << Read;
@@ -221,9 +221,9 @@ TEST(PropertyTag, ATagRoundTripsAtTheCurrentVersion)
 }
 
 // files written before PACKAGE_NAME_TABLE spell the kind out and carry an offset nothing reads
-TEST(PropertyTag, ALegacyTagStillDecodesItsKind)
+TEST(PropertyHeader, ALegacyHeaderStillDecodesItsKind)
 {
-    FPropertyTag Written;
+    FPropertyHeader Written;
     Written.Type = EPropertyTypeFlags::Struct;
     Written.Name = "ShapeSize";
     Written.Size = 12;
@@ -235,7 +235,7 @@ TEST(PropertyTag, ALegacyTagStillDecodesItsKind)
         Writer << Written;
     }
 
-    FPropertyTag Read;
+    FPropertyHeader Read;
     FMemoryReader Reader(Bytes);
     Reader.SetFileVersion(kNameTableVersion - 1);
     Reader << Read;
@@ -245,7 +245,7 @@ TEST(PropertyTag, ALegacyTagStillDecodesItsKind)
     EXPECT_EQ(Read.Size, Written.Size);
 }
 
-TEST(PropertyTag, EveryKindNameMapsBackToItsKind)
+TEST(PropertyHeader, EveryKindNameMapsBackToItsKind)
 {
     for (uint16 Kind = 0; Kind < (uint16)EPropertyTypeFlags::Count; ++Kind)
     {
@@ -255,7 +255,7 @@ TEST(PropertyTag, EveryKindNameMapsBackToItsKind)
 }
 
 // IsValueValidForType tested "IntProperty" where the real name is Int32Property, so int32 always failed
-TEST(PropertyTag, EveryNumericKindAcceptsAValueInItsRange)
+TEST(PropertyHeader, EveryNumericKindAcceptsAValueInItsRange)
 {
     const EPropertyTypeFlags Numeric[] = {
         EPropertyTypeFlags::Int8,  EPropertyTypeFlags::Int16,  EPropertyTypeFlags::Int32,  EPropertyTypeFlags::Int64,
@@ -283,7 +283,7 @@ namespace
     {
         static const bool bReady = []
         {
-            ProcessNewlyLoadedCObjects();
+            RegisterPendingTypes();
             VFS::Mount<VFS::FMemoryFileSystem>(kCompatAlias);
             return true;
         }();

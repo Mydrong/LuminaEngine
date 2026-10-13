@@ -7,26 +7,24 @@
 #define CONCAT_INNER(a, b) a##b
 #define CONCAT(a, b) CONCAT_INNER(a, b)
 
-#define CONCAT3_INNER(a, b, c) a##b##c
-#define CONCAT3(a, b, c) CONCAT3_INNER(a, b, c)
-
 #define CONCAT4_INNER(a, b, c, d) a##b##c##d
 #define CONCAT4(a, b, c, d) CONCAT4_INNER(a, b, c, d)
 
-#define CONCAT_WITH_UNDERSCORE(a, b) CONCAT3(a, _, b)
-#define FRIEND_STRUCT_NAME(ns, cls) CONCAT3(Construct_CClass_, CONCAT_WITH_UNDERSCORE(ns, cls), _Statics)
+// The generated struct that describes a type, a friend so its tables can reach private members.
+#define LUMINA_TYPE_INFO(TClass) CONCAT(FTypeInfo_, TClass)
 
 // The specifiers these accept are listed in Applications/Reflector/Source/Reflector/ReflectionSpecifiers.h.
 
-// libclang variadic macro expansion is unreliable during reflection parsing; stub these out then.
 #if defined(REFLECTION_PARSER)
 
+    // A type is found through its macro, since an attribute cannot reach a class from in front of the class key.
     #define GENERATED_BODY(...)
     #define REFLECT(...)
-    #define PROPERTY(...)
-    #define FUNCTION(...)
-    // A marker only, detected via the macro record; it generates no code at the call site.
-    #define SCRIPT_EXPORT(...)
+
+    // A declaration carries its own specifiers, so the parser reads them off the declaration it is visiting.
+    #define PROPERTY(...) [[clang::annotate("lumina.property:" #__VA_ARGS__)]]
+    #define FUNCTION(...) [[clang::annotate("lumina.function:" #__VA_ARGS__)]]
+    #define SCRIPT_EXPORT(...) [[clang::annotate("lumina.export:" #__VA_ARGS__)]]
 
 #else
 

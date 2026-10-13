@@ -1,6 +1,7 @@
 #include "Includes/AppendBuffer.slang"
 #include "Includes/SceneGlobals.slang"
 #include "Includes/Culling.slang"
+#include "Includes/ShadowReceiver.slang"
 
 // Reads back the range CullInstances reserved against, so the two cannot disagree on LOD or rejects.
 
@@ -24,6 +25,13 @@ struct FBuildMeshletBlocksArgs
     // This frame's stamp, so a slot visible last frame holds one less than it.
     uint                   VisibilityTag;
     GPUSpan<uint>          PrevVisibility;
+
+    // 1 leaves near cascades for a later build, 2 builds only them, dropping instances whose shadow reaches nothing seen.
+    uint                   bDeferCascades;
+    uint                   ReceiverMaskDim;
+    int                    SunShadowDataIndex;
+    uint                   _Pad0;
+    GPUSpan<uint>          ReceiverMask;
 };
 FBuildMeshletBlocksArgs* Pass() { return GetPassArgs<FBuildMeshletBlocksArgs>(); }
 
@@ -139,6 +147,13 @@ void ComputeMain(uint3 ThreadID : SV_DispatchThreadID)
         return;
     }
 
+    const bool bDeferredCascade = Pass().bDeferCascades != 0u && CullViewHasFlag(ViewIndex, CULL_VIEW_FLAG_CASCADE)
+                               && !CullViewHasFlag(ViewIndex, CULL_VIEW_FLAG_FAR_CASCADE);
+    if ((Pass().bDeferCascades == 2u) != bDeferredCascade)
+    {
+        return;
+    }
+
     // Read rather than re-derived, already clamped, and zero when the pair is invisible or out of range.
     uint2 Range = Pass().InstanceViewRanges.Get(Flat);
     if (Range.y == 0u)
@@ -147,6 +162,16 @@ void ComputeMain(uint3 ThreadID : SV_DispatchThreadID)
     }
 
     FGPUInstance* Inst = Instances() + InstanceID;
+
+    if (Pass().bDeferCascades == 2u && !FGPUInstance::HasFlag(Inst, EInstanceFlags::NoCull))
+    {
+        const float4 Sphere = loadAligned<16>(&Inst.SphereBounds);
+        if (IsShadowUnreceived(Pass().ReceiverMask, Pass().ReceiverMaskDim, Pass().SunShadowDataIndex,
+                               CullViews().GetAligned(ViewIndex).CascadeIndex, Sphere.xyz, Sphere.w))
+        {
+            return;
+        }
+    }
 
     // Only for the bucket index; the reject itself already happened where the range was decided.
     const uint DrawID = FGPUInstance::GetDrawID(Inst);

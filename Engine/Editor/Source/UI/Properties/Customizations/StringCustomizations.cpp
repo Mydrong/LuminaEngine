@@ -1,4 +1,4 @@
-﻿#include "CoreTypeCustomization.h"
+#include "CoreTypeCustomization.h"
 #include "Tools/UI/ImGui/ImGuiDesignIcons.h"
 #include "Tools/UI/ImGui/ImGuiX.h"
 #include "UI/Properties/NamePicker.h"
@@ -123,10 +123,10 @@ namespace Lumina
 
         // "FilePath" meta turns the field into an asset-path picker ("..." button, searchable), and "AssetType" narrows it to those text files.
         const bool bTextAsset = Property->Property->HasMetadata("AssetType");
-        const bool bFilePath = bTextAsset || Property->Property->HasMetadata("FilePath");
+        const bool bFilePath = bTextAsset || Property->Property->HasEditorFlag(EPropertyEditorFlags::FilePath);
         const TVector<ETextAssetKind> TextKinds = bTextAsset ? TextAsset::ParseAssetTypeMeta(Property->Property->GetMetadata("AssetType")) : TVector<ETextAssetKind>();
         // "Multiline" meta turns the field into a wrapping multi-line box (newlines allowed).
-        const bool bMultiline = Property->Property->HasMetadata("Multiline");
+        const bool bMultiline = Property->Property->HasEditorFlag(EPropertyEditorFlags::Multiline);
         const float ButtonWidth = bFilePath ? ImGui::GetFrameHeight() * (bTextAsset ? 2.0f : 1.0f) : 0.0f;
 
         EPropertyChangeOp Result = EPropertyChangeOp::None;

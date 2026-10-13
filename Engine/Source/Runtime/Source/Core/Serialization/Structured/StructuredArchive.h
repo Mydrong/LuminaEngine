@@ -114,10 +114,7 @@ namespace Lumina
             , StructuredArchive(InAr)
         {}
 
-        // The destructor closes the scope, so a copy would close it twice. Passing one of these by value
-        // (SerializeTaggedProperties used to) left the backend's node stack one level too shallow for
-        // everything written after the first nested struct. Pass by reference; returning by value from
-        // Enter*() is a prvalue and needs no copy.
+        // The destructor closes the scope, so a copy would close it twice and leave the backend's node stack short.
         FArchiveRecord(const FArchiveRecord&) = delete;
         FArchiveRecord& operator=(const FArchiveRecord&) = delete;
 
@@ -352,7 +349,4 @@ namespace Lumina
             ElementSlot.Serialize(Value[i]);
         }
     }
-
-    // Helper macro for easy field serialization
-    #define SERIALIZE_NAMED_FIELD(Archive, Field) Archive << StructuredArchive::TNamedValue(#Field, Field)
 }

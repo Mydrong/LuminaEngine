@@ -4,7 +4,7 @@ using System.Collections.Generic;
 namespace LuminaSharp;
 
 /// <summary>
-/// C# mirror of the engine's reflected type taxonomy <c>Lumina::EPropertyTypeFlags</c> (ObjectCore.h). The
+/// C# mirror of the engine's reflected type taxonomy <c>Lumina::EPropertyTypeFlags</c> (PropertyFlags.h). The
 /// script schema keys on this single shared enum instead of a parallel one, so there is nothing to keep in
 /// sync by hand; <see cref="LayoutValidator"/> asserts the values match native at bootstrap. Order IS the wire
 /// ABI (the schema sends these as kind bytes), so only ever append. Script-specific shapes are carried as data

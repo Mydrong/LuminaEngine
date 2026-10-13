@@ -12,7 +12,7 @@ struct FSSRDownsampleArgs
     FGBufferTargets GBuffer;
 
     FTexture2D   Depth;
-    FTexture2D   SlotImage;  // slot + 1 per pixel from the classify count, 0 where nothing deferred shades it
+    FTexture2DUInt SlotImage;  // slot + 1 per pixel from the classify count, 0 where nothing deferred shades it
     FRWTexture2D OutDepth;     // mip 0 of the closest-depth pyramid
     FRWTexture2D OutSurface;   // world normal in xyz, roughness in w, roughness 1 where nothing may reflect
 
@@ -56,7 +56,7 @@ void ComputeMain(uint3 DTid : SV_DispatchThreadID)
     }
 
     float4 Surface = float4(0.0, 0.0, 1.0, 1.0);
-    if (BestDepth > 0.0 && Pass().SlotImage.Load(BestPixel).r >= 0.5)
+    if (BestDepth > 0.0 && Pass().SlotImage.Load(BestPixel) != 0u)
     {
         const FGBufferTargets Targets = Pass().GBuffer;
 

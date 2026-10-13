@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include "Core/Reflection/PropertyTypeTraits.h"
 
 #include "Core/Object/Class.h"
 #include "Core/Object/ObjectCore.h"
@@ -50,10 +51,8 @@ namespace
 
     CStruct* StoredInt32Struct()
     {
-        static const FNumericPropertyParams ValueParams = {
-            "Value", EPropertyFlags::None, EPropertyTypeFlags::Int32, nullptr, nullptr, offsetof(FStoredInt32, Value)
-        };
-        static FInt32Property ValueProperty(&ValueParams);
+        static constexpr FPropertyDesc ValueDesc{ .Name = "Value", .Offset = offsetof(FStoredInt32, Value), .Type = PropertyTypeOf<int32> };
+        static FInt32Property ValueProperty(ValueDesc);
         static FProperty* const Properties[] = { &ValueProperty };
         static CStruct* Struct = MakeNumericStruct("FTaggedMigrationStoredInt32", sizeof(FStoredInt32), Properties, 1);
         return Struct;
@@ -61,14 +60,10 @@ namespace
 
     CStruct* LoadedUInt8Struct()
     {
-        static const FNumericPropertyParams ValueParams = {
-            "Value", EPropertyFlags::None, EPropertyTypeFlags::UInt8, &SetLoadedUInt8, nullptr, offsetof(FLoadedUInt8, Value)
-        };
-        static const FNumericPropertyParams AdjacentParams = {
-            "Adjacent", EPropertyFlags::None, EPropertyTypeFlags::UInt32, nullptr, nullptr, offsetof(FLoadedUInt8, Adjacent)
-        };
-        static TPropertyWithSetterAndGetter<FUInt8Property> ValueProperty(&ValueParams);
-        static FUInt32Property AdjacentProperty(&AdjacentParams);
+        static constexpr FPropertyDesc ValueDesc{ .Name = "Value", .Offset = offsetof(FLoadedUInt8, Value), .Type = PropertyTypeOf<uint8>, .Setter = &SetLoadedUInt8 };
+        static constexpr FPropertyDesc AdjacentDesc{ .Name = "Adjacent", .Offset = offsetof(FLoadedUInt8, Adjacent), .Type = PropertyTypeOf<uint32> };
+        static FUInt8Property ValueProperty(ValueDesc);
+        static FUInt32Property AdjacentProperty(AdjacentDesc);
         static FProperty* const Properties[] = { &ValueProperty, &AdjacentProperty };
         static CStruct* Struct = MakeNumericStruct("FTaggedMigrationLoadedUInt8", sizeof(FLoadedUInt8), Properties, 2);
         return Struct;
@@ -76,14 +71,10 @@ namespace
 
     CStruct* LoadedFloatStruct()
     {
-        static const FNumericPropertyParams ValueParams = {
-            "Value", EPropertyFlags::None, EPropertyTypeFlags::Float, nullptr, nullptr, offsetof(FLoadedFloat, Value)
-        };
-        static const FNumericPropertyParams AdjacentParams = {
-            "Adjacent", EPropertyFlags::None, EPropertyTypeFlags::UInt32, nullptr, nullptr, offsetof(FLoadedFloat, Adjacent)
-        };
-        static FFloatProperty ValueProperty(&ValueParams);
-        static FUInt32Property AdjacentProperty(&AdjacentParams);
+        static constexpr FPropertyDesc ValueDesc{ .Name = "Value", .Offset = offsetof(FLoadedFloat, Value), .Type = PropertyTypeOf<float> };
+        static constexpr FPropertyDesc AdjacentDesc{ .Name = "Adjacent", .Offset = offsetof(FLoadedFloat, Adjacent), .Type = PropertyTypeOf<uint32> };
+        static FFloatProperty ValueProperty(ValueDesc);
+        static FUInt32Property AdjacentProperty(AdjacentDesc);
         static FProperty* const Properties[] = { &ValueProperty, &AdjacentProperty };
         static CStruct* Struct = MakeNumericStruct("FTaggedMigrationLoadedFloat", sizeof(FLoadedFloat), Properties, 2);
         return Struct;
@@ -94,7 +85,7 @@ namespace
         FStoredInt32 Source{ Value };
         TVector<uint8> Bytes;
         FMemoryWriter Writer(Bytes);
-        StoredInt32Struct()->SerializeTaggedProperties(Writer, &Source);
+        StoredInt32Struct()->SerializeProperties(Writer, &Source);
         return Bytes;
     }
 }
@@ -106,7 +97,7 @@ TEST(TaggedNumericMigration, Int32ToUInt8LeavesAdjacentFieldUntouched)
     Loaded.Adjacent = 0x78563412u;
 
     FMemoryReader Reader(Bytes);
-    LoadedUInt8Struct()->SerializeTaggedProperties(Reader, &Loaded);
+    LoadedUInt8Struct()->SerializeProperties(Reader, &Loaded);
 
     EXPECT_FALSE(Reader.HasError());
     EXPECT_EQ(Loaded.Value, 37u);
@@ -122,7 +113,7 @@ TEST(TaggedNumericMigration, OutOfRangeValueLeavesDestinationUntouched)
     Loaded.Adjacent = 0x78563412u;
 
     FMemoryReader Reader(Bytes);
-    LoadedUInt8Struct()->SerializeTaggedProperties(Reader, &Loaded);
+    LoadedUInt8Struct()->SerializeProperties(Reader, &Loaded);
 
     EXPECT_FALSE(Reader.HasError());
     EXPECT_EQ(Loaded.Value, 5u);
@@ -136,7 +127,7 @@ TEST(TaggedNumericMigration, Int32ToFloatLeavesAdjacentFieldUntouched)
     FLoadedFloat Loaded{ 0.0f, 0x78563412u };
 
     FMemoryReader Reader(Bytes);
-    LoadedFloatStruct()->SerializeTaggedProperties(Reader, &Loaded);
+    LoadedFloatStruct()->SerializeProperties(Reader, &Loaded);
 
     EXPECT_FALSE(Reader.HasError());
     EXPECT_FLOAT_EQ(Loaded.Value, 37.0f);

@@ -134,12 +134,12 @@ namespace PackageLoadBench
 
     constexpr const char* kAlias = "/PkgBench";
 
-    // the harness only starts the object system, so the deferred registration pass has to run here
+    // the harness only starts the object system, so registering the reflected types has to happen here
     void EnsureMount()
     {
         static const bool bReady = []
         {
-            ProcessNewlyLoadedCObjects();
+            RegisterPendingTypes();
             VFS::Mount<VFS::FMemoryFileSystem>(kAlias);
             return true;
         }();
@@ -593,7 +593,7 @@ TEST(PackageLoadBenchmark, DISABLED_Primitives)
         TVector<uint8> Buffer;
         {
             FMemoryWriter Writer(Buffer);
-            Subject_Class->SerializeTaggedProperties(Writer, Subject);
+            Subject_Class->SerializeProperties(Writer, Subject);
         }
         // what the tag costs versus what the property values actually are
         size_t PayloadBytes = 0;
@@ -630,9 +630,9 @@ TEST(PackageLoadBenchmark, DISABLED_Primitives)
         {
             TVector<uint8> Scratch;
             FMemoryWriter Writer(Scratch);
-            Subject_Class->SerializeTaggedProperties(Writer, Subject);
+            Subject_Class->SerializeProperties(Writer, Subject);
         }
-        std::printf("SerializeTaggedProperties write    %8.1f ns  (%.1f ns/prop)\n",
+        std::printf("SerializeProperties write    %8.1f ns  (%.1f ns/prop)\n",
             (Watch.ElapsedMilliseconds() * 1e6) / Reps, (Watch.ElapsedMilliseconds() * 1e6) / Reps / (double)NumProps);
 
         Sampler::Start();
@@ -640,13 +640,13 @@ TEST(PackageLoadBenchmark, DISABLED_Primitives)
         for (int32 i = 0; i < Reps; ++i)
         {
             FMemoryReader Reader(Buffer);
-            Subject_Class->SerializeTaggedProperties(Reader, Subject);
+            Subject_Class->SerializeProperties(Reader, Subject);
         }
         const double ReadNs = (Watch.ElapsedMilliseconds() * 1e6) / Reps;
         Sampler::Stop();
         Sampler::Dump("tagged-property-read");
 
-        std::printf("SerializeTaggedProperties read     %8.1f ns  (%.1f ns/prop)\n", ReadNs, ReadNs / (double)NumProps);
+        std::printf("SerializeProperties read     %8.1f ns  (%.1f ns/prop)\n", ReadNs, ReadNs / (double)NumProps);
 
         for (CObject* Object : Objects)
         {

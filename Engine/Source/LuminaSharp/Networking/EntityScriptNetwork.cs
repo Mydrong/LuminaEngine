@@ -1,6 +1,8 @@
-namespace LuminaSharp;
+using LuminaSharp;
 
-public abstract partial class EntityScript
+namespace Lumina;
+
+public partial class CEntityScript
 {
     // Who controls this script's entity, and whether this peer does.
     public EntityNetwork Network => new(World, Entity);

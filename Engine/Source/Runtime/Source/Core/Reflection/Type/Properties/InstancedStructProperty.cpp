@@ -1,4 +1,4 @@
-﻿#include "RuntimePCH.h"
+#include "RuntimePCH.h"
 #include "InstancedStructProperty.h"
 #include "Memory/Construct.h"
 
@@ -8,11 +8,11 @@
 
 namespace Lumina
 {
-    FInstancedStructProperty::FInstancedStructProperty(const FInstancedStructPropertyParams* Params)
-        : FProperty(Params)
+    FInstancedStructProperty::FInstancedStructProperty(const FPropertyDesc& Desc)
+        : FProperty(Desc)
     {
         // Null for a bare FInstancedStruct, which constrains nothing and accepts any reflected struct.
-        MetaStruct = Params->StructFunc != nullptr ? Params->StructFunc() : nullptr;
+        MetaStruct = Desc.Type->GetStruct();
         bResolvedStructBase = MetaStruct != nullptr;
         SetElementSize(sizeof(FInstancedStruct));
     }
@@ -44,7 +44,7 @@ namespace Lumina
 
             if (Type != nullptr)
             {
-                Type->SerializeTaggedProperties(Ar, Instance->GetMutableMemory());
+                Type->SerializeProperties(Ar, Instance->GetMutableMemory());
             }
         }
         else
@@ -55,7 +55,7 @@ namespace Lumina
 
             if (Type != nullptr)
             {
-                Type->SerializeTaggedProperties(Ar, Instance->GetMutableMemory());
+                Type->SerializeProperties(Ar, Instance->GetMutableMemory());
             }
         }
     }
@@ -76,7 +76,7 @@ namespace Lumina
             if (Type != nullptr)
             {
                 FArchiveRecord DataRecord = Record.EnterField("Data").EnterRecord();
-                Type->SerializeTaggedProperties(DataRecord, Instance->GetMutableMemory());
+                Type->SerializeProperties(DataRecord, Instance->GetMutableMemory());
             }
         }
         else
@@ -88,7 +88,7 @@ namespace Lumina
             if (Type != nullptr)
             {
                 FArchiveRecord DataRecord = Record.EnterField("Data").EnterRecord();
-                Type->SerializeTaggedProperties(DataRecord, Instance->GetMutableMemory());
+                Type->SerializeProperties(DataRecord, Instance->GetMutableMemory());
             }
         }
     }

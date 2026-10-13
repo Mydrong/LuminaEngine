@@ -10,6 +10,8 @@
 #include "Reflector/CodeGeneration/CodeGenerator.h"
 #include "Reflector/ReflectionCore/ReflectedProject.h"
 #include "Reflector/Utils/Timing.h"
+#include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <cstdio>
 #include <thread>
@@ -17,6 +19,69 @@
 
 using json = nlohmann::json;
 using namespace Lumina::Reflection;
+
+namespace
+{
+    std::string_view TrimSpaces(std::string_view Text)
+    {
+        while (!Text.empty() && std::isspace((unsigned char)Text.front())) { Text.remove_prefix(1); }
+        while (!Text.empty() && std::isspace((unsigned char)Text.back()))  { Text.remove_suffix(1); }
+        return Text;
+    }
+
+    // The property names an EditCondition reads, in the grammar the editor parses of A, !A, A == B and A != B joined by && or ||.
+    std::vector<std::string> EditConditionNames(std::string_view Expression)
+    {
+        std::vector<std::string> Names;
+        while (!Expression.empty())
+        {
+            const size_t And = Expression.find("&&");
+            const size_t Or = Expression.find("||");
+            const size_t Split = std::min(And, Or);
+
+            std::string_view Term = TrimSpaces(Expression.substr(0, Split));
+            Expression = Split == std::string_view::npos ? std::string_view() : Expression.substr(Split + 2);
+
+            if (!Term.empty() && Term.front() == '!' && (Term.size() < 2 || Term[1] != '='))
+            {
+                Term.remove_prefix(1);
+            }
+            const size_t Compare = std::min(Term.find("=="), Term.find("!="));
+            Names.emplace_back(TrimSpaces(Term.substr(0, Compare)));
+        }
+        return Names;
+    }
+
+    // Walks the reflected parents, and an unreflected one carries no properties to find.
+    bool HasReflectedProperty(const FReflectionDatabase& Db, const FReflectedStruct& Struct, const std::string& Name)
+    {
+        for (const FReflectedStruct* Current = &Struct; Current != nullptr;)
+        {
+            for (const auto& Property : Current->Props)
+            {
+                if (!Property->bInner && Property->Name == Name)
+                {
+                    return true;
+                }
+            }
+
+            const std::string& Parent = Current->Parent;
+            if (Parent.empty())
+            {
+                return false;
+            }
+            const bool bQualified = Parent.find("::") != std::string::npos;
+            const std::string Qualified = (bQualified || Current->Namespace.empty()) ? Parent : (Current->Namespace + "::" + Parent);
+            const FReflectedType* Found = Db.GetReflectedType<FReflectedType>(Lumina::FStringHash(Qualified));
+            if (Found == nullptr || Found->Type == FReflectedType::EType::Enum || Found == Current)
+            {
+                return false;
+            }
+            Current = static_cast<const FReflectedStruct*>(Found);
+        }
+        return false;
+    }
+}
 
 int main(int argc, char* argv[])
 {    
@@ -332,7 +397,7 @@ int main(int argc, char* argv[])
         }
     }
 
-    // An unreflected property type emits a Construct_ call with nothing to call, so name the header.
+    // An unreflected property type leaves its trait nothing to link against, so name the header.
     for (const auto& Project : Workspace.ReflectedProjects)
     {
         if (Project->bReferenceOnly)
@@ -358,7 +423,27 @@ int main(int argc, char* argv[])
 
                 for (const auto& Property : Struct->Props)
                 {
-                    if (!Property->CanDeclareCrossModuleReferences())
+                    if (const auto Condition = std::find_if(Property->Metadata.begin(), Property->Metadata.end(),
+                            [](const FMetadataPair& Pair) { return Pair.Key == "EditCondition"; });
+                        Condition != Property->Metadata.end())
+                    {
+                        for (const std::string& Name : EditConditionNames(Condition->Value))
+                        {
+                            if (Name.empty() || !HasReflectedProperty(Parser.ParsingContext.ReflectionDatabase, *Struct, Name))
+                            {
+                                FDiagLocation Loc;
+                                Loc.File = Header->HeaderPath;
+                                Loc.Line = Type->LineNumber;
+                                FDiagnostics::Get().Warningf(Loc, EDiagId::EditConditionUnknown,
+                                    "Property '%s' on '%s' has EditCondition \"%s\", which names '%s', not a reflected property "
+                                    "of '%s'. The editor ignores the whole condition.",
+                                    Property->Name.c_str(), Type->DisplayName.c_str(), Condition->Value.c_str(), Name.c_str(),
+                                    Type->DisplayName.c_str());
+                            }
+                        }
+                    }
+
+                    if (!Property->RequiresReflectedType())
                     {
                         continue;
                     }

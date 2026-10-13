@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include "Animation/AnimCompression.h"
+#include "Animation/BoneLOD.h"
 #include "Animation/Pose.h"
 #include "Animation/TaskSystem/AnimTask.h"
 #include "Animation/TaskSystem/AnimTaskExecutor.h"
@@ -269,6 +270,80 @@ TEST(AnimationBench, LocomotionRecipeAndKernels)
     std::printf("  foot IK (with pose copy)      %7.2f us\n", FootUs);
     std::printf("  skinning matrices             %7.2f us\n", SkinUs);
     std::printf("  pose copy                     %7.2f us\n\n", CopyUs);
+    SUCCEED();
+}
+
+// What a bone LOD cut saves per character, and what evaluating in a bone order other than the asset's costs.
+TEST(AnimationBench, BoneLODCutScaling)
+{
+    FBenchRig Rig;
+    BuildBenchSkeleton(Rig.Skeleton);
+    for (int32 i = 0; i < 4; ++i)
+    {
+        Rig.Clips.push_back(MakeBenchClip(Rig.Skeleton, 1.2f + 0.1f * (float)i, (float)i));
+    }
+    Rig.Mask.assign(kBenchBones, 1.0f);
+
+    // Depth first, where the asset is breadth first, so clip tracks and pose bones disagree the way a sorted layout makes them.
+    TVector<int32> PoseToAsset;
+    TVector<int32> Stack = { 0 };
+    while (!Stack.empty())
+    {
+        const int32 Bone = Stack.back();
+        Stack.pop_back();
+        PoseToAsset.push_back(Bone);
+        for (int32 Child : { 2 * Bone + 2, 2 * Bone + 1 })
+        {
+            if (Child < kBenchBones)
+            {
+                Stack.push_back(Child);
+            }
+        }
+    }
+    FSkeletonResource PoseSkeleton;
+    PoseSkeleton.Bones = Rig.Skeleton.Bones;
+    PoseSkeleton.BoneNameToIndex = Rig.Skeleton.BoneNameToIndex;
+    const TVector<int32> AssetToPose = BoneLOD::ReorderSkeleton(PoseSkeleton, PoseToAsset);
+
+    constexpr int32 Iterations = 4000;
+    FAnimTaskList List;
+    TVector<FMatrix4> Matrices;
+
+    const auto Run = [&](int32 ActiveBones, bool bLayout)
+    {
+        const auto Once = [&](float Time)
+        {
+            BuildLocomotionRecipe(Rig, List, Time, 0.35f);
+            List.ActiveBoneCount = ActiveBones;
+            if (bLayout)
+            {
+                List.Skeleton    = &PoseSkeleton;
+                List.PoseToAsset = PoseToAsset.data();
+                List.AssetToPose = AssetToPose.data();
+            }
+            Anim::ExecuteTaskList(List, Matrices, nullptr);
+        };
+        for (int32 i = 0; i < 200; ++i)
+        {
+            Once(0.01f * (float)i);
+        }
+        const uint64 Start = PlatformTime::Cycles();
+        for (int32 i = 0; i < Iterations; ++i)
+        {
+            Once(0.0003f * (float)i);
+        }
+        return NanosSince(Start) / Iterations / 1000.0;
+    };
+
+    std::printf("\n  %d bones, blending locomotion recipe, one thread\n", kBenchBones);
+    std::printf("  every bone, asset order        %7.2f us\n", Run(0, false));
+    std::printf("  every bone, pose order         %7.2f us\n", Run(0, true));
+    for (int32 Percent : { 80, 50, 25 })
+    {
+        const int32 Active = kBenchBones * Percent / 100;
+        std::printf("  %3d%% of bones (%3d), pose order %7.2f us\n", Percent, Active, Run(Active, true));
+    }
+    std::printf("\n");
     SUCCEED();
 }
 

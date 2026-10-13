@@ -20,7 +20,7 @@ namespace Lumina
             return "A Texture2DArray built from an ordered list of images. Sample it in a material with "
                    "TextureSampleArray, picking a layer with the Slice pin.";
         }
-        FString GetCategory() const override { return "Textures"; }
+        FString GetCategory() const override { return "Texture"; }
         FStringView GetDefaultAssetCreationName() override { return "NewTextureArray"; }
 
         // Deliberately NOT an importer: layers are existing texture ASSETS, not files, so there is

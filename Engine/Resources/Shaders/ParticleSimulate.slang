@@ -115,9 +115,9 @@ void SimulateParticle(inout FGPUParticle P, float DeltaTime, float TotalTime)
 
 [shader("compute")]
 [numthreads(64, 1, 1)]
-void ComputeMain(uint3 DispatchThreadID : SV_DispatchThreadID)
+void ComputeMain(uint3 GroupId : SV_GroupID, uint Lane : SV_GroupIndex)
 {
-    uint Index = DispatchThreadID.x;
+    uint Index = BeginParticleSimGroup(GroupId.x, Lane);
     uint MaxParticles = SimParams().Counts.x;
     if (Index >= MaxParticles)
     {

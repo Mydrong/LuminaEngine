@@ -1,6 +1,7 @@
 #include "RHITestHarness.h"
 
 #include "Renderer/RHITexture.h"
+#include "Log/Log.h"
 #include "Renderer/RHIUpload.h"
 
 namespace Lumina::RHITests
@@ -121,6 +122,108 @@ namespace Lumina::RHITests
         Ctx.PumpFrames(1);
         RHI_CHECK_EQ(ProbeSlot(Ctx, Probe, Slot), kMagenta);
 
+        Ctx.PumpFrames(RHI::kFramesInFlight * 2 + 1);
+    }
+
+    // More images and heap writes than one batch holds, the way a level load creates them before its first submit.
+    RHI_TEST(Heap, ManyTexturesInitializeAndBindAcrossBatches)
+    {
+        const RHI::FPipelineH Probe = CreateSlotProbe(Ctx);
+        RHI_REQUIRE(RHI::IsValid(Probe));
+
+        constexpr uint32 kCount = 10000;
+        const float Red[4]   = { 1.0f, 0.0f, 0.0f, 1.0f };
+        const float Green[4] = { 0.0f, 1.0f, 0.0f, 1.0f };
+
+        TVector<RHI::FTextureH> Textures;
+        for (uint32 i = 0; i < kCount; ++i)
+        {
+            const RHI::FTextureH Texture = Ctx.CreateTexture(MakeSampledDesc(1), "RHITests.ManyTextures");
+            RHI_REQUIRE(RHI::IsValid(Texture));
+            Textures.push_back(Texture);
+        }
+
+        for (uint32 i = 0; i < kCount; ++i)
+        {
+            RHI::UploadClearTexture(Textures[i], (i % 2) == 0 ? Red : Green);
+        }
+        RHI::FlushUploadsAndWait();
+
+        const RHI::FTextureHeapH Heap = RHI::GetGlobalHeap();
+        TVector<uint32> Slots;
+        for (const RHI::FTextureH Texture : Textures)
+        {
+            const uint32 Slot = RHI::HeapWriteTexture(Heap, Texture);
+            RHI_REQUIRE(Slot != RHI::kInvalidHeapSlot);
+            Slots.push_back(Slot);
+        }
+
+        Ctx.PumpFrames(RHI::kFramesInFlight);
+
+        for (const uint32 Index : { 0u, 255u, 256u, 511u, 512u, 4095u, 4096u, 7777u, 9727u, 9728u, kCount - 1u })
+        {
+            RHI_CHECK_EQ(ProbeSlot(Ctx, Probe, Slots[Index]), (Index % 2) == 0 ? kRed : kGreen);
+        }
+
+        for (const uint32 Slot : Slots)
+        {
+            RHI::HeapFreeTexture(Heap, Slot);
+        }
+        Ctx.PumpFrames(RHI::kFramesInFlight * 2 + 1);
+    }
+
+    // A slot index past 16 bits must bind and read back like any other.
+    RHI_TEST(Heap, SlotsPastSixteenBitsReadBack)
+    {
+        constexpr uint32 kSixteenBits = 1u << 16;
+        constexpr uint32 kCount = kSixteenBits + 512u;
+        if (RHI::GetSampledHeapCapacity() < kCount + 1024u)
+        {
+            LOG_WARN("Heap.SlotsPastSixteenBitsReadBack skipped, this device's heap holds {} textures.", RHI::GetSampledHeapCapacity());
+            return;
+        }
+
+        const RHI::FPipelineH Probe = CreateSlotProbe(Ctx);
+        RHI_REQUIRE(RHI::IsValid(Probe));
+
+        // Two images fill every slot, since the slot range is what is under test and validation slows with each live image.
+        const float Red[4]   = { 1.0f, 0.0f, 0.0f, 1.0f };
+        const float Green[4] = { 0.0f, 1.0f, 0.0f, 1.0f };
+        const RHI::FTextureH Colors[2] = { Ctx.CreateTexture(MakeSampledDesc(1), "RHITests.WideSlotsRed"),
+                                           Ctx.CreateTexture(MakeSampledDesc(1), "RHITests.WideSlotsGreen") };
+        RHI_REQUIRE(RHI::IsValid(Colors[0]) && RHI::IsValid(Colors[1]));
+        RHI::UploadClearTexture(Colors[0], Red);
+        RHI::UploadClearTexture(Colors[1], Green);
+        RHI::FlushUploadsAndWait();
+
+        const RHI::FTextureHeapH Heap = RHI::GetGlobalHeap();
+        TVector<uint32> Slots;
+        Slots.reserve(kCount);
+        for (uint32 i = 0; i < kCount; ++i)
+        {
+            const uint32 Slot = RHI::HeapWriteTexture(Heap, Colors[i % 2]);
+            RHI_REQUIRE(Slot != RHI::kInvalidHeapSlot);
+            Slots.push_back(Slot);
+        }
+
+        Ctx.PumpFrames(RHI::kFramesInFlight);
+
+        uint32 Checked = 0;
+        for (uint32 i = 0; i < kCount; ++i)
+        {
+            const uint32 Slot = Slots[i];
+            if (Slot == kSixteenBits - 1u || Slot == kSixteenBits || Slot == kSixteenBits + 1u || i == kCount - 1u)
+            {
+                RHI_CHECK_EQ(ProbeSlot(Ctx, Probe, Slot), (i % 2) == 0 ? kRed : kGreen);
+                Checked += Slot >= kSixteenBits ? 1u : 0u;
+            }
+        }
+        RHI_CHECK(Checked >= 2u);
+
+        for (const uint32 Slot : Slots)
+        {
+            RHI::HeapFreeTexture(Heap, Slot);
+        }
         Ctx.PumpFrames(RHI::kFramesInFlight * 2 + 1);
     }
 
