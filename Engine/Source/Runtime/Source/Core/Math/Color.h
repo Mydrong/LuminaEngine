@@ -195,6 +195,12 @@ namespace Lumina
         static const FColor Yellow;
         static const FColor White;
         static const FColor Black;
+        static const FColor Gray;
+        static const FColor Orange;
+        static const FColor Cyan;
+        static const FColor Magenta;
+        static const FColor Purple;
+        static const FColor Transparent;
         
     };
 }

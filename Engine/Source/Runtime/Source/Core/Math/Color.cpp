@@ -10,6 +10,12 @@ namespace Lumina
     constexpr FColor FColor::Yellow     = FColor(1.0f, 1.0f, 0.0f);
     constexpr FColor FColor::White      = FColor(1.0f, 1.0f, 1.0f);
     constexpr FColor FColor::Black      = FColor(0.0f, 0.0f, 0.0f);
+    constexpr FColor FColor::Gray       = FColor(0.5f, 0.5f, 0.5f);
+    constexpr FColor FColor::Orange     = FColor(1.0f, 0.5f, 0.0f);
+    constexpr FColor FColor::Cyan       = FColor(0.0f, 1.0f, 1.0f);
+    constexpr FColor FColor::Magenta    = FColor(1.0f, 0.0f, 1.0f);
+    constexpr FColor FColor::Purple     = FColor(0.5f, 0.0f, 0.5f);
+    constexpr FColor FColor::Transparent = FColor(0.0f, 0.0f, 0.0f, 0.0f);
 
     // A shared unsynchronized generator corrupted whenever two threads asked for a random color.
 
