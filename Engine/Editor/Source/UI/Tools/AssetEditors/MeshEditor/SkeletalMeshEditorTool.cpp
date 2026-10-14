@@ -10,6 +10,8 @@
 #include "World/Entity/Components/SkyLightComponent.h"
 #include "World/Entity/Components/LightComponent.h"
 #include "World/Entity/Components/SkeletalMeshComponent.h"
+#include "World/Entity/Components/SimpleAnimationComponent.h"
+#include "Assets/AssetTypes/Mesh/Animation/Animation.h"
 #include <UI/Tools/AssetEditors/AssetEditorTool.h>
 #include <UI/Tools/EditorTool.h>
 #include <Lumina.h>
@@ -95,6 +97,7 @@ namespace Lumina
 
     FSkeletalMeshEditorTool::FSkeletalMeshEditorTool(IEditorToolContext* Context, CObject* InAsset)
         : FAssetEditorTool(Context, InAsset->GetName().c_str(), InAsset, NewObject<CWorld>())
+        , PreviewClips(CAnimation::StaticClass())
     {
     }
 
@@ -258,6 +261,17 @@ namespace Lumina
 
         const FMatrix4 EntityMatrix = World->GetComponent<STransformComponent>(MeshEntity).GetWorldMatrix();
         OutTransforms.resize(SkeletonResource->GetNumBones());
+
+        // A playing clip leaves skinning matrices here, and skinning times the global bind is the posed bone.
+        const TVector<FMatrix4>& Pose = World->GetComponent<SSkeletalMeshComponent>(MeshEntity).BoneTransforms;
+        if ((int32)Pose.size() == SkeletonResource->GetNumBones() && SkeletonResource->HasBindGlobalMatrices())
+        {
+            for (int32 i = 0; i < SkeletonResource->GetNumBones(); ++i)
+            {
+                OutTransforms[i] = EntityMatrix * (Pose[i] * SkeletonResource->BindGlobalMatrices[i]);
+            }
+            return;
+        }
 
         // Bones[] is parents-before-children, so one linear pass resolves the whole hierarchy.
         for (int32 i = 0; i < SkeletonResource->GetNumBones(); ++i)
@@ -534,13 +548,18 @@ namespace Lumina
             DrawSkinningPanel();
         });
 
+        CreateToolWindow(AnimationPreviewName, [&](bool bFocused)
+        {
+            DrawAnimationPreviewPanel();
+        });
+
         CreateToolWindow(MeshPropertiesName, [&](bool bFocused)
         {
             CSkeletalMesh* SkeletalMesh = CastAsserted<CSkeletalMesh>(Asset.Get());
 
             FMeshResource& Resource = SkeletalMesh->GetMeshResource();
             const FMeshletData& MD = Resource.MeshletData;
-            const FAABB& BoundingBox = SkeletalMesh->GetAABB();
+            const SAABB& BoundingBox = SkeletalMesh->GetAABB();
 
             ImGuiX::Font::PushFont(ImGuiX::Font::EFont::Large);
             ImGui::SeparatorText("Mesh Statistics");
@@ -831,7 +850,7 @@ namespace Lumina
         STransformComponent& MeshTransform = World->GetComponent<STransformComponent>(MeshEntity);
 
         // Framed off bounds, or anything but a human-sized rig opens inside the mesh or too far to see.
-        const FAABB Bounds = SkeletalMesh->GetAABB();
+        const SAABB Bounds = SkeletalMesh->GetAABB();
         CreateFloorPlane(MeshTransform.GetLocation().y + Bounds.Min.y);
 
         const FVector3 Center = MeshTransform.GetLocation() + Bounds.GetCenter();
@@ -853,6 +872,146 @@ namespace Lumina
             SkeletalMesh->Skeleton->ComputeBindPoseSkinningMatrices(MeshComponent.BoneTransforms);
             MeshComponent.bRenderBonesDirty = true;
         }
+
+        if (PreviewClip.IsValid())
+        {
+            // Advanced by hand in Update, since the editor world does not tick playback.
+            SSimpleAnimationComponent& AnimComponent = World->EmplaceComponent<SSimpleAnimationComponent>(MeshEntity);
+            AnimComponent.Animation = PreviewClip.Get();
+            AnimComponent.bPlaying  = false;
+            AnimComponent.bLooping  = bPreviewLooping;
+        }
+    }
+
+    void FSkeletalMeshEditorTool::SetPreviewClip(CAnimation* Clip)
+    {
+        PreviewClip = Clip;
+
+        // Removing the clip has to restore the bind pose, which only a fresh entity does cleanly.
+        if (World.IsValid() && MeshEntity != ECS::NullEntity)
+        {
+            World->DestroyEntity(MeshEntity);
+            CreatePreviewMeshEntity();
+        }
+    }
+
+    void FSkeletalMeshEditorTool::AdvancePreviewClip(float DeltaTime)
+    {
+        SSimpleAnimationComponent* AnimComponent = World->TryGetComponent<SSimpleAnimationComponent>(MeshEntity);
+        if (AnimComponent == nullptr || !PreviewClip.IsValid() || !bPreviewPlaying)
+        {
+            return;
+        }
+
+        const float Duration = Math::Max(PreviewClip->GetDuration(), 0.0001f);
+        AnimComponent->CurrentTime += DeltaTime * PreviewPlayRate;
+        if (AnimComponent->CurrentTime >= Duration)
+        {
+            if (bPreviewLooping)
+            {
+                AnimComponent->CurrentTime = fmodf(AnimComponent->CurrentTime, Duration);
+            }
+            else
+            {
+                AnimComponent->CurrentTime = Duration;
+                bPreviewPlaying = false;
+            }
+        }
+        AnimComponent->bDirty = true;
+    }
+
+    void FSkeletalMeshEditorTool::DrawAnimationPreviewPanel()
+    {
+        CSkeletalMesh* SkeletalMesh = Cast<CSkeletalMesh>(Asset.Get());
+        CSkeleton* Skeleton = SkeletalMesh != nullptr ? SkeletalMesh->Skeleton.Get() : nullptr;
+        if (Skeleton == nullptr)
+        {
+            ImGui::TextDisabled("Assign a skeleton to preview animations on this mesh.");
+            return;
+        }
+
+        const TVector<FCompatibleAssetList::FEntry>& Clips = PreviewClips.Get(Skeleton);
+
+        int32 CurrentIndex = Constants::kIndexNone;
+        for (int32 i = 0; i < (int32)Clips.size(); ++i)
+        {
+            if (PreviewClip.IsValid() && Clips[i].GUID == PreviewClip->GetGUID())
+            {
+                CurrentIndex = i;
+                break;
+            }
+        }
+
+        constexpr float kClearButtonWidth = 70.0f;
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextUnformatted("Clip");
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(PreviewClip.IsValid() ? ImGui::GetContentRegionAvail().x - kClearButtonWidth : -1.0f);
+
+        const FString Preview = PreviewClip.IsValid() ? PreviewClip->GetName().ToString() : FString("None (bind pose)");
+        const int32 Picked = ImGuiX::SearchableCombo("##PreviewClip", Preview.c_str(), (int32)Clips.size(), CurrentIndex,
+            [&Clips](int32 Index) { return FFixedString(Clips[Index].Name.c_str()); }, LE_ICON_ANIMATION);
+
+        if (Picked != Constants::kIndexNone && Picked != CurrentIndex)
+        {
+            if (CAnimation* Clip = Cast<CAnimation>(LoadObject<CObject>(Clips[Picked].GUID)))
+            {
+                bPreviewPlaying = true;
+                SetPreviewClip(Clip);
+            }
+        }
+
+        if (PreviewClip.IsValid())
+        {
+            ImGui::SameLine();
+            if (ImGui::Button(LE_ICON_CLOSE " Clear"))
+            {
+                SetPreviewClip(nullptr);
+            }
+        }
+
+        if (Clips.empty())
+        {
+            ImGui::TextDisabled("No clips match this skeleton's bones.");
+        }
+
+        SSimpleAnimationComponent* AnimComponent = (World.IsValid() && MeshEntity != ECS::NullEntity)
+            ? World->TryGetComponent<SSimpleAnimationComponent>(MeshEntity)
+            : nullptr;
+        if (!PreviewClip.IsValid() || AnimComponent == nullptr)
+        {
+            return;
+        }
+
+        ImGui::Spacing();
+
+        const float Duration = Math::Max(PreviewClip->GetDuration(), 0.0001f);
+
+        if (ImGui::Button(bPreviewPlaying ? LE_ICON_PAUSE " Pause" : LE_ICON_PLAY " Play"))
+        {
+            if (!bPreviewPlaying && !bPreviewLooping && AnimComponent->CurrentTime >= Duration)
+            {
+                AnimComponent->CurrentTime = 0.0f;
+            }
+            bPreviewPlaying = !bPreviewPlaying;
+        }
+
+        ImGui::SameLine();
+        if (ImGui::Checkbox("Loop", &bPreviewLooping))
+        {
+            AnimComponent->bLooping = bPreviewLooping;
+        }
+
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(90.0f);
+        ImGui::DragFloat("Rate", &PreviewPlayRate, 0.01f, 0.0f, 4.0f, "%.2fx");
+
+        ImGui::SetNextItemWidth(-1.0f);
+        if (ImGui::SliderFloat("##PreviewTime", &AnimComponent->CurrentTime, 0.0f, Duration, "%.3f s"))
+        {
+            bPreviewPlaying = false;
+            AnimComponent->bDirty = true;
+        }
     }
 
     void FSkeletalMeshEditorTool::Update(const FUpdateContext& UpdateContext)
@@ -872,6 +1031,8 @@ namespace Lumina
         SSkeletalMeshComponent& MeshComponent = World->GetComponent<SSkeletalMeshComponent>(MeshEntity);
         STransformComponent&    Transform     = World->GetComponent<STransformComponent>(MeshEntity);
 
+        AdvancePreviewClip((float)UpdateContext.GetDeltaTime());
+
         // A direct write is not enough, since the retained scene only re-reads primitives reporting a change.
         if (MeshComponent.ForcedLODIndex != PreviewLODIndex)
         {
@@ -883,7 +1044,7 @@ namespace Lumina
 
         if (bShowAABB)
         {
-            FAABB AABB = MeshComponent.GetAABB().ToWorld(EntityMatrix);
+            SAABB AABB = MeshComponent.GetAABB().ToWorld(EntityMatrix);
             World->GetDebugInterface()->DrawBox(AABB.GetCenter(), AABB.GetSize() * 0.5f, FQuat(1, 0, 0, 0), FColor::Green);
         }
 
@@ -919,7 +1080,7 @@ namespace Lumina
                         Hi = Math::Max(Hi, B.Center + FVector3(B.Radius));
                     }
 
-                    FAABB SurfaceAABB;
+                    SAABB SurfaceAABB;
                     SurfaceAABB.Min = Lo;
                     SurfaceAABB.Max = Hi;
                     SurfaceAABB     = SurfaceAABB.ToWorld(EntityMatrix);
@@ -986,7 +1147,7 @@ namespace Lumina
 
         if (bShowSockets)
         {
-            for (const FMeshSocket& Socket : SkeletalMesh->Skeleton->Sockets)
+            for (const SMeshSocket& Socket : SkeletalMesh->Skeleton->Sockets)
             {
                 const int32 BoneIndex = SkeletonResource->FindBoneIndex(Socket.BoneName);
                 if (BoneIndex == Constants::kIndexNone || BoneIndex >= (int32)BoneWorld.size())
@@ -1047,6 +1208,7 @@ namespace Lumina
         // The scene claims a primitive's bone range only when it is new, so a reused preview keeps the old skeleton.
         if (Event.PropertyName == "Skeleton" && MeshEntity != ECS::NullEntity)
         {
+            PreviewClip = nullptr;
             World->DestroyEntity(MeshEntity);
             CreatePreviewMeshEntity();
         }
@@ -1150,5 +1312,6 @@ namespace Lumina
         ImGui::DockBuilderDockWindow(GetToolWindowName(UVViewerName.data()).c_str(), leftDockID);
         ImGui::DockBuilderDockWindow(GetToolWindowName(MeshPropertiesName.data()).c_str(), rightDockID);
         ImGui::DockBuilderDockWindow(GetToolWindowName(SkinningName.data()).c_str(), rightDockID);
+        ImGui::DockBuilderDockWindow(GetToolWindowName(AnimationPreviewName.data()).c_str(), rightDockID);
     }
 }

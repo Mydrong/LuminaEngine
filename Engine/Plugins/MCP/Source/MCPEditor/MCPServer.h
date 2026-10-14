@@ -4,6 +4,7 @@
 #include "Core/Http/HttpMessage.h"
 #include "Core/Http/HttpServer.h"
 #include "Core/JsonRpc/JsonRpc.h"
+#include "Core/Object/ObjectHandleTyped.h"
 
 namespace Lumina::MCP
 {
@@ -35,6 +36,9 @@ namespace Lumina::MCP
         // Where a plugin or subsystem registers the methods it wants to answer.
         NODISCARD JsonRpc::FDispatcher& GetDispatcher() { return Dispatcher; }
 
+        // Holds an asset for the session, as an open editor tab would, when a tool's own short-lived ref is its only one.
+        void KeepLoaded(CObject* Object);
+
     private:
 
         void RegisterProtocolMethods();
@@ -45,5 +49,7 @@ namespace Lumina::MCP
         JsonRpc::FDispatcher Dispatcher;
 
         FServerSettings Settings;
+
+        TVector<TStrongObjectPtr<CObject>> KeptLoaded;
     };
 }

@@ -289,7 +289,7 @@ namespace Lumina
             }
 
             Out.Center = Centroid;
-            Out.Bounds = FAABB(Mn, Mx);
+            Out.Bounds = SAABB(Mn, Mx);
             return true;
         }
 
@@ -386,7 +386,7 @@ namespace Lumina
             return;
         }
 
-        const FAABB Bounds = SourceMesh->GetAABB();
+        const SAABB Bounds = SourceMesh->GetAABB();
         const FVector3 Mn = Bounds.Min;
         const FVector3 Mx = Bounds.Max;
         const FVector3 Size = Math::Max(Mx - Mn, FVector3(1e-4f));

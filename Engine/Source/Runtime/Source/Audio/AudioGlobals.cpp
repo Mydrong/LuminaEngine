@@ -14,40 +14,40 @@ namespace Lumina
         {
         public:
 
-            FAudioHandle PlayAudio(const TSharedPtr<FAudioData>&, const FAudioPlayParams&) override { return {}; }
-            FAudioHandle PlayFile(FStringView, const FAudioPlayParams&) override { return {}; }
-            FAudioHandle PlayProceduralStream(TSharedPtr<FProceduralAudioStream>, const FAudioPlayParams&) override { return {}; }
-            FAudioHandle PlayAudioGraph(TSharedPtr<FAudioGraphInstance>, const FAudioPlayParams&) override { return {}; }
-            bool SetGraphFloatParameter(FAudioHandle, const FName&, float) override { return false; }
-            bool SetGraphIntParameter(FAudioHandle, const FName&, int32) override { return false; }
-            bool SetGraphBoolParameter(FAudioHandle, const FName&, bool) override { return false; }
-            bool TriggerGraphParameter(FAudioHandle, const FName&) override { return false; }
-            float GetGraphFloatOutput(FAudioHandle, const FName&) const override { return 0.0f; }
-            uint32 GetGraphTriggerOutputCount(FAudioHandle, const FName&) const override { return 0; }
+            SAudioHandle PlayAudio(const TSharedPtr<FAudioData>&, const SAudioPlayParams&) override { return {}; }
+            SAudioHandle PlayFile(FStringView, const SAudioPlayParams&) override { return {}; }
+            SAudioHandle PlayProceduralStream(TSharedPtr<FProceduralAudioStream>, const SAudioPlayParams&) override { return {}; }
+            SAudioHandle PlayAudioGraph(TSharedPtr<FAudioGraphInstance>, const SAudioPlayParams&) override { return {}; }
+            bool SetGraphFloatParameter(SAudioHandle, const FName&, float) override { return false; }
+            bool SetGraphIntParameter(SAudioHandle, const FName&, int32) override { return false; }
+            bool SetGraphBoolParameter(SAudioHandle, const FName&, bool) override { return false; }
+            bool TriggerGraphParameter(SAudioHandle, const FName&) override { return false; }
+            float GetGraphFloatOutput(SAudioHandle, const FName&) const override { return 0.0f; }
+            uint32 GetGraphTriggerOutputCount(SAudioHandle, const FName&) const override { return 0; }
 
-            void StopSound(FAudioHandle, EAudioStopMode, float) override {}
+            void StopSound(SAudioHandle, EAudioStopMode, float) override {}
             void StopAllSounds(EAudioStopMode, float) override {}
 
-            void SetVolume(FAudioHandle, float) override {}
-            void SetPitch(FAudioHandle, float) override {}
-            void SetLooping(FAudioHandle, bool) override {}
-            void SetPosition(FAudioHandle, FVector3) override {}
-            void SetVelocity(FAudioHandle, FVector3) override {}
-            void SetDirection(FAudioHandle, FVector3) override {}
-            void SetAttenuation(FAudioHandle, const SAudioAttenuation&) override {}
-            void SetMinMaxDistance(FAudioHandle, float, float) override {}
-            void SetPan(FAudioHandle, float) override {}
-            void SetPaused(FAudioHandle, bool) override {}
-            void SetBus(FAudioHandle, EAudioBus) override {}
-            void SetPriority(FAudioHandle, uint8) override {}
-            void SetOcclusion(FAudioHandle, float, float, float) override {}
-            void SetLowPassCutoff(FAudioHandle, float) override {}
-            void FadeTo(FAudioHandle, float, float) override {}
-            void SeekToFrame(FAudioHandle, uint64) override {}
+            void SetVolume(SAudioHandle, float) override {}
+            void SetPitch(SAudioHandle, float) override {}
+            void SetLooping(SAudioHandle, bool) override {}
+            void SetPosition(SAudioHandle, FVector3) override {}
+            void SetVelocity(SAudioHandle, FVector3) override {}
+            void SetDirection(SAudioHandle, FVector3) override {}
+            void SetAttenuation(SAudioHandle, const SAudioAttenuation&) override {}
+            void SetMinMaxDistance(SAudioHandle, float, float) override {}
+            void SetPan(SAudioHandle, float) override {}
+            void SetPaused(SAudioHandle, bool) override {}
+            void SetBus(SAudioHandle, EAudioBus) override {}
+            void SetPriority(SAudioHandle, uint8) override {}
+            void SetOcclusion(SAudioHandle, float, float, float) override {}
+            void SetLowPassCutoff(SAudioHandle, float) override {}
+            void FadeTo(SAudioHandle, float, float) override {}
+            void SeekToFrame(SAudioHandle, uint64) override {}
 
             // No voice was ever handed out, so every handle reads as one that has finished.
-            EAudioVoiceState GetVoiceState(FAudioHandle) const override { return EAudioVoiceState::Free; }
-            uint64 GetPlaybackFrame(FAudioHandle) const override { return 0; }
+            EAudioVoiceState GetVoiceState(SAudioHandle) const override { return EAudioVoiceState::Free; }
+            uint64 GetPlaybackFrame(SAudioHandle) const override { return 0; }
             uint32 GetActiveVoiceCount() const override { return 0; }
             uint32 GetMaxVoiceCount() const override { return 0; }
             uint64 GetDroppedVoiceCount() const override { return 0; }

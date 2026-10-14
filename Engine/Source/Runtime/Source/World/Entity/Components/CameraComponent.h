@@ -32,7 +32,7 @@ namespace Lumina
 
     // Result of CWorld::WorldToScreen. Blittable so C# receives it by value.
     REFLECT()
-    struct RUNTIME_API FScreenProjection
+    struct RUNTIME_API SScreenProjection
     {
         GENERATED_BODY()
 
@@ -51,7 +51,7 @@ namespace Lumina
 
     // Result of CWorld::ScreenToWorldRay. Blittable so C# receives it by value.
     REFLECT()
-    struct RUNTIME_API FWorldRay
+    struct RUNTIME_API SWorldRay
     {
         GENERATED_BODY()
 

@@ -7,6 +7,9 @@
 
 namespace Lumina
 {
+    class CAnimation;
+    class CSkeleton;
+
     REFLECT()
     class CAnimationMontageFactory : public CFactory
     {
@@ -14,6 +17,8 @@ namespace Lumina
     public:
 
         CObject* CreateNew(const FName& Name, CPackage* Package) override;
+
+        static void InitializeMontage(CAnimationMontage& Montage, CSkeleton* Skeleton, CAnimation* FirstClip);
 
         FString GetAssetName() const override { return "Animation Montage"; }
         FStringView GetDefaultAssetCreationName() override { return "NewAnimationMontage"; }

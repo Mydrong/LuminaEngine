@@ -88,7 +88,7 @@ namespace Lumina
         virtual bool IsSkinned() const { return false; }
         
         FUNCTION()
-        FORCEINLINE const FAABB& GetAABB() const { return BoundingBox; }
+        FORCEINLINE const SAABB& GetAABB() const { return BoundingBox; }
         
         template<typename TCallable>
         void ForEachSurface(TCallable&& Lambda) const;
@@ -100,7 +100,7 @@ namespace Lumina
         TVector<TStrongObjectPtr<CMaterialInterface>> Materials;
 
         PROPERTY(Category = "AABB")
-        FAABB BoundingBox;
+        SAABB BoundingBox;
 
         // Multiplies this mesh's LOD errors, so 2 switches twice as far away and 0.5 lets card foliage coarsen sooner.
         PROPERTY(Editable, Category = "Level Of Detail", ClampMin = 0.05f, ClampMax = 4.0f)

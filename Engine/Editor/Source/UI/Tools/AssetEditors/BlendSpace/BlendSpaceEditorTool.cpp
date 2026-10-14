@@ -6,6 +6,7 @@
 #include "Assets/AssetTypes/Mesh/SkeletalMesh/SkeletalMesh.h"
 #include "Assets/AssetTypes/Mesh/Skeleton/Skeleton.h"
 #include "Tools/UI/ImGui/ImGuiDesignIcons.h"
+#include "Tools/UI/ImGui/ImGuiDragDrop.h"
 #include "Tools/UI/ImGui/ImGuiFonts.h"
 #include "Tools/UI/ImGui/ImGuiX.h"
 #include "UI/Properties/PropertyTable.h"
@@ -43,12 +44,6 @@ namespace Lumina
     {
         CBlendSpace* BlendSpace = GetAsset<CBlendSpace>();
         return BlendSpace != nullptr ? BlendSpace->Skeleton.Get() : nullptr;
-    }
-
-    FSkeletonResource* FBlendSpaceEditorTool::GetSkeletonResource()
-    {
-        CSkeleton* Skeleton = GetSkeleton();
-        return Skeleton != nullptr ? Skeleton->GetSkeletonResource() : nullptr;
     }
 
     void FBlendSpaceEditorTool::OnInitialize()
@@ -106,16 +101,16 @@ namespace Lumina
             MeshEntity = ECS::NullEntity;
         }
 
-        CSkeleton* Skeleton = GetSkeleton();
-        if (Skeleton == nullptr || !Skeleton->PreviewMesh.IsValid())
+        CSkeletalMesh* PreviewMesh = PreviewMeshSelection.Resolve(GetSkeleton());
+        if (PreviewMesh == nullptr || !PreviewMesh->Skeleton.IsValid())
         {
             return;
         }
 
         MeshEntity = World->ConstructEntity("PreviewMesh");
         SSkeletalMeshComponent& MeshComponent = World->EmplaceComponent<SSkeletalMeshComponent>(MeshEntity);
-        MeshComponent.SetSkeletalMesh(Skeleton->PreviewMesh.Get());
-        Skeleton->ComputeBindPoseSkinningMatrices(MeshComponent.BoneTransforms);
+        MeshComponent.SetSkeletalMesh(PreviewMesh);
+        PreviewMesh->Skeleton->ComputeBindPoseSkinningMatrices(MeshComponent.BoneTransforms);
         MeshComponent.bRenderBonesDirty = true;
 
         STransformComponent& MeshTransform = World->GetComponent<STransformComponent>(MeshEntity);
@@ -170,9 +165,23 @@ namespace Lumina
         EvaluatePreviewPose((float)UpdateContext.GetDeltaTime());
     }
 
+    // Poses go through the preview mesh's own skeleton, which may only match the blend space's by bone names.
+    FSkeletonResource* FBlendSpaceEditorTool::GetPreviewSkeletonResource() const
+    {
+        const SSkeletalMeshComponent* MeshComponent = MeshEntity != ECS::NullEntity
+            ? World->TryGetComponent<SSkeletalMeshComponent>(MeshEntity)
+            : nullptr;
+        const CSkeletalMesh* PreviewMesh = MeshComponent != nullptr ? MeshComponent->SkeletalMesh.Get() : nullptr;
+        if (PreviewMesh == nullptr || !PreviewMesh->Skeleton.IsValid())
+        {
+            return nullptr;
+        }
+        return PreviewMesh->Skeleton->GetSkeletonResource();
+    }
+
     void FBlendSpaceEditorTool::EvaluatePreviewPose(float DeltaTime)
     {
-        FSkeletonResource* Resource = GetSkeletonResource();
+        FSkeletonResource* Resource = GetPreviewSkeletonResource();
         if (Resource == nullptr || MeshEntity == ECS::NullEntity)
         {
             return;
@@ -382,7 +391,7 @@ namespace Lumina
         return Best;
     }
 
-    void FBlendSpaceEditorTool::AddSampleAt(const FVector2& AxisPosition)
+    void FBlendSpaceEditorTool::AddSampleAt(const FVector2& AxisPosition, CAnimation* Clip)
     {
         BeginAssetTransaction("Add Blend Sample");
 
@@ -390,11 +399,52 @@ namespace Lumina
 
         SBlendSpaceSample& Sample = BlendSpace->Samples.emplace_back();
         Sample.Position = AxisPosition;
+        Sample.Animation = Clip;
 
         SelectedSample = (int32)BlendSpace->Samples.size() - 1;
 
         RefreshAfterStructuralEdit();
         EndAssetTransaction();
+    }
+
+    void FBlendSpaceEditorTool::AssignClipToSample(int32 SampleIndex, CAnimation* Clip)
+    {
+        CBlendSpace* BlendSpace = GetAsset<CBlendSpace>();
+        if (SampleIndex < 0 || SampleIndex >= (int32)BlendSpace->Samples.size())
+        {
+            return;
+        }
+
+        BeginAssetTransaction("Assign Blend Sample Clip");
+
+        BlendSpace->Samples[SampleIndex].Animation = Clip;
+        SelectedSample = SampleIndex;
+
+        RefreshAfterStructuralEdit();
+        EndAssetTransaction();
+    }
+
+    // Dropping onto a sample swaps its clip, and dropping on empty grid adds a sample there.
+    void FBlendSpaceEditorTool::HandleClipDrop(const ImVec2& MousePos)
+    {
+        if (!ImGui::BeginDragDropTarget())
+        {
+            return;
+        }
+
+        if (CAnimation* Dropped = DragDrop::AcceptAsset<CAnimation>())
+        {
+            const int32 Hit = FindSampleAtCanvasPos(MousePos);
+            if (Hit != Constants::kIndexNone)
+            {
+                AssignClipToSample(Hit, Dropped);
+            }
+            else
+            {
+                AddSampleAt(SnapToGrid(CanvasToAxis(MousePos)), Dropped);
+            }
+        }
+        ImGui::EndDragDropTarget();
     }
 
     void FBlendSpaceEditorTool::RemoveSampleAt(int32 SampleIndex)
@@ -752,6 +802,8 @@ namespace Lumina
         const bool bHovered = ImGui::IsItemHovered();
         const ImVec2 MousePos = ImGui::GetMousePos();
 
+        HandleClipDrop(MousePos);
+
         if (DraggedSample != Constants::kIndexNone)
         {
             if (!ImGui::IsMouseDown(ImGuiMouseButton_Left))
@@ -777,7 +829,7 @@ namespace Lumina
             return;
         }
 
-        // Double-click on empty space drops a new sample there; the clip is assigned in Details.
+        // Double-click on empty space drops an empty sample there, filled from Details or by dropping a clip on it.
         if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) && FindSampleAtCanvasPos(MousePos) == Constants::kIndexNone)
         {
             AddSampleAt(SnapToGrid(CanvasToAxis(MousePos)));
@@ -853,6 +905,11 @@ namespace Lumina
     void FBlendSpaceEditorTool::DrawToolMenu(const FUpdateContext& UpdateContext)
     {
         FAssetEditorTool::DrawToolMenu(UpdateContext);
+
+        if (PreviewMeshSelection.DrawMenu(GetSkeleton()))
+        {
+            RefreshPreviewMesh();
+        }
 
         if (ImGui::BeginMenu(LE_ICON_CHART_SCATTER_PLOT " Blend Space"))
         {

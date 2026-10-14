@@ -331,7 +331,13 @@ namespace Lumina
 
                 void* ValuePtr = Current->GetValuePtr<void>(Data);
 
+                const FCStringView Bundles = Current->GetMetadata("Bundle");
+                const FStringView OuterBundles = Bundles.empty() ? FStringView() : Ar.SetSoftReferenceBundles(FStringView(Bundles.data(), Bundles.size()));
                 Current->Serialize(Ar, ValuePtr);
+                if (!Bundles.empty())
+                {
+                    Ar.SetSoftReferenceBundles(OuterBundles);
+                }
 
                 int64 DataEndPosition = Ar.Tell();
                 Header.Size = (int32)(DataEndPosition - AfterHeaderPosition);
@@ -568,8 +574,8 @@ namespace Lumina
         Tmp.NetGUIDToEntity    = HookSource.NetGUIDToEntity;
         Tmp.ObjectToNetIndex   = HookSource.ObjectToNetIndex;
         Tmp.NetIndexToObject   = HookSource.NetIndexToObject;
-        Tmp.AssetRefToNetIndex = HookSource.AssetRefToNetIndex;
-        Tmp.NetIndexToAssetRef = HookSource.NetIndexToAssetRef;
+        Tmp.DocumentRefToNetIndex = HookSource.DocumentRefToNetIndex;
+        Tmp.NetIndexToDocumentRef = HookSource.NetIndexToDocumentRef;
         Tmp.NameToNetIndex     = HookSource.NameToNetIndex;
         Tmp.NetIndexToName     = HookSource.NetIndexToName;
 
@@ -619,8 +625,8 @@ namespace Lumina
                 Tmp.NetGUIDToEntity    = Ar.NetGUIDToEntity;
                 Tmp.ObjectToNetIndex   = Ar.ObjectToNetIndex;
                 Tmp.NetIndexToObject   = Ar.NetIndexToObject;
-                Tmp.AssetRefToNetIndex = Ar.AssetRefToNetIndex;
-                Tmp.NetIndexToAssetRef = Ar.NetIndexToAssetRef;
+                Tmp.DocumentRefToNetIndex = Ar.DocumentRefToNetIndex;
+                Tmp.NetIndexToDocumentRef = Ar.NetIndexToDocumentRef;
                 Tmp.NameToNetIndex     = Ar.NameToNetIndex;
                 Tmp.NetIndexToName     = Ar.NetIndexToName;
                 Property->NetSerialize(Tmp, Property->GetValuePtr<void>(Source));

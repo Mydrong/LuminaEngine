@@ -40,26 +40,21 @@ namespace Lumina::ECS
     }
 
     FSparseSet::FSparseSet(const FComponentTypeInfo& InTypeInfo)
-        : TypeInfo(InTypeInfo)
-        , ElementSize(InTypeInfo.bEmpty ? 0u : InTypeInfo.Size)
-        , ElementAlignment(InTypeInfo.Alignment)
-        , bPaged(InTypeInfo.bPaged && !InTypeInfo.bEmpty)
-        , bInPlaceDelete(InTypeInfo.bInPlaceDelete)
     {
-        const uint32 RequestedPageSize = InTypeInfo.PageSize != 0u ? InTypeInfo.PageSize : 1024u;
-        DEBUG_ASSERT((RequestedPageSize & (RequestedPageSize - 1u)) == 0u, "page size must be a power of two");
-
-        while ((1u << PayloadPageShift) < RequestedPageSize)
-        {
-            ++PayloadPageShift;
-        }
-
-        PayloadPageMask = RequestedPageSize - 1u;
+        ApplyLayout(InTypeInfo);
         LayoutEpoch = AcquireLayoutEpochSlot();
+        if (TypeInfo.bRuntimeLayout)
+        {
+            FComponentTypeRegistry::Get().TrackPool(this);
+        }
     }
 
     FSparseSet::~FSparseSet()
     {
+        if (TypeInfo.bRuntimeLayout)
+        {
+            FComponentTypeRegistry::Get().UntrackPool(this);
+        }
         *LayoutEpoch = DeadLayoutEpoch;
         DestroyLiveElements();
         FreePayload();
@@ -153,6 +148,104 @@ namespace Lumina::ECS
         return Dense[DenseIndex];
     }
 
+    void FSparseSet::ApplyLayout(const FComponentTypeInfo& InTypeInfo)
+    {
+        TypeInfo         = InTypeInfo;
+        ElementSize      = InTypeInfo.bEmpty ? 0u : InTypeInfo.Size;
+        ElementAlignment = InTypeInfo.Alignment;
+        bPaged           = InTypeInfo.bPaged && !InTypeInfo.bEmpty;
+        bInPlaceDelete   = InTypeInfo.bInPlaceDelete;
+
+        const uint32 RequestedPageSize = InTypeInfo.PageSize != 0u ? InTypeInfo.PageSize : 1024u;
+        DEBUG_ASSERT((RequestedPageSize & (RequestedPageSize - 1u)) == 0u, "page size must be a power of two");
+
+        PayloadPageShift = 0;
+        while ((1u << PayloadPageShift) < RequestedPageSize)
+        {
+            ++PayloadPageShift;
+        }
+        PayloadPageMask = RequestedPageSize - 1u;
+    }
+
+    void FSparseSet::Relayout(const FComponentTypeInfo& NewInfo, FMigrateComponentValue Migrate)
+    {
+        // The entity mapping and dense order stay, so only the payload is rebuilt and every dense index still holds.
+        const FComponentTypeInfo OldInfo = TypeInfo;
+        const uint32 OldElementSize = ElementSize;
+        const bool   bOldPaged = bPaged;
+        const uint32 OldPageShift = PayloadPageShift;
+        const uint32 OldPageMask = PayloadPageMask;
+        uint8* OldPacked = PackedData;
+        TVector<uint8*> OldPages = std::move(PayloadPages);
+
+        auto OldValueAt = [&](uint32 DenseIndex) -> uint8*
+        {
+            if (OldElementSize == 0)
+            {
+                return nullptr;
+            }
+            return bOldPaged
+                ? OldPages[DenseIndex >> OldPageShift] + static_cast<size_t>(DenseIndex & OldPageMask) * OldElementSize
+                : OldPacked + static_cast<size_t>(DenseIndex) * OldElementSize;
+        };
+
+        PackedData = nullptr;
+        PackedCapacity = 0;
+        PayloadPages.clear();
+        ApplyLayout(NewInfo);
+
+        // Allocated outright, since growing a packed block would relocate elements this payload does not hold yet.
+        if (ElementSize != 0 && !Dense.empty())
+        {
+            if (bPaged)
+            {
+                GrowPayloadTo(Dense.size());
+            }
+            else
+            {
+                PackedCapacity = Dense.size() > MinPackedCapacity ? Dense.size() : MinPackedCapacity;
+                PackedData = static_cast<uint8*>(Memory::Malloc(PackedCapacity * ElementSize, PayloadAlignment(ElementAlignment)));
+            }
+        }
+
+        for (uint32 Index = 0; Index < static_cast<uint32>(Dense.size()); ++Index)
+        {
+            if (Dense[Index].IsTombstone())
+            {
+                continue;
+            }
+            uint8* OldValue = OldValueAt(Index);
+            if (void* NewValue = GetRawAtDense(Index))
+            {
+                TypeInfo.DefaultConstruct(TypeInfo, NewValue);
+                if (OldValue != nullptr && Migrate != nullptr)
+                {
+                    Migrate(OldInfo, OldValue, TypeInfo, NewValue);
+                }
+            }
+            if (OldValue != nullptr && !OldInfo.bTriviallyDestructible && OldInfo.Destruct != nullptr)
+            {
+                OldInfo.Destruct(OldInfo, OldValue);
+            }
+        }
+
+        if (OldPacked != nullptr)
+        {
+            void* Block = OldPacked;
+            Memory::Free(Block);
+        }
+        for (uint8* Page : OldPages)
+        {
+            if (Page != nullptr)
+            {
+                void* Block = Page;
+                Memory::Free(Block);
+            }
+        }
+
+        BumpLayoutEpoch();
+    }
+
     void FSparseSet::FreePayload()
     {
         if (PackedData != nullptr)
@@ -185,7 +278,7 @@ namespace Lumina::ECS
         {
             if (!Dense[Index].IsTombstone())
             {
-                TypeInfo.Destruct(GetRawAtDense(Index));
+                TypeInfo.Destruct(TypeInfo, GetRawAtDense(Index));
             }
         }
     }
@@ -261,7 +354,7 @@ namespace Lumina::ECS
             // Dense.size() is the constructed count, which is why growth has to happen before a push.
             for (size_t Index = 0; Index < Dense.size(); ++Index)
             {
-                TypeInfo.Relocate(NewBlock + Index * ElementSize, PackedData + Index * ElementSize);
+                TypeInfo.Relocate(TypeInfo, NewBlock + Index * ElementSize, PackedData + Index * ElementSize);
             }
             if (PackedData != nullptr)
             {
@@ -341,7 +434,7 @@ namespace Lumina::ECS
         {
             if (ElementSize != 0 && !TypeInfo.bTriviallyDestructible && TypeInfo.Destruct != nullptr)
             {
-                TypeInfo.Destruct(GetRawAtDense(DenseIndex));
+                TypeInfo.Destruct(TypeInfo, GetRawAtDense(DenseIndex));
             }
 
             Dense[DenseIndex] = MakeTombstone(FreeDenseHead);
@@ -357,7 +450,7 @@ namespace Lumina::ECS
 
             if (!TypeInfo.bTriviallyDestructible && TypeInfo.Destruct != nullptr)
             {
-                TypeInfo.Destruct(Target);
+                TypeInfo.Destruct(TypeInfo, Target);
             }
 
             if (DenseIndex != LastIndex)
@@ -365,7 +458,7 @@ namespace Lumina::ECS
                 void* Source = GetRawAtDense(LastIndex);
                 if (TypeInfo.Relocate != nullptr)
                 {
-                    TypeInfo.Relocate(Target, Source);
+                    TypeInfo.Relocate(TypeInfo, Target, Source);
                 }
                 else
                 {
@@ -403,9 +496,9 @@ namespace Lumina::ECS
             void* Target = GetRawAtDense(ExistingSlot.GetIndex());
             if (!TypeInfo.bTriviallyDestructible && TypeInfo.Destruct != nullptr)
             {
-                TypeInfo.Destruct(Target);
+                TypeInfo.Destruct(TypeInfo, Target);
             }
-            TypeInfo.DefaultConstruct(Target);
+            TypeInfo.DefaultConstruct(TypeInfo, Target);
             return Target;
         }
 
@@ -416,7 +509,7 @@ namespace Lumina::ECS
         }
 
         void* Target = GetRawAtDense(DenseIndex);
-        TypeInfo.DefaultConstruct(Target);
+        TypeInfo.DefaultConstruct(TypeInfo, Target);
         return Target;
     }
 
@@ -433,15 +526,15 @@ namespace Lumina::ECS
             void* Target = GetRawAtDense(ExistingSlot.GetIndex());
             if (!TypeInfo.bTriviallyDestructible && TypeInfo.Destruct != nullptr)
             {
-                TypeInfo.Destruct(Target);
+                TypeInfo.Destruct(TypeInfo, Target);
             }
-            TypeInfo.CopyConstruct(Target, Source);
+            TypeInfo.CopyConstruct(TypeInfo, Target, Source);
             return Target;
         }
 
         const uint32 DenseIndex = AllocateSlot(Entity);
         void* Target = GetRawAtDense(DenseIndex);
-        TypeInfo.CopyConstruct(Target, Source);
+        TypeInfo.CopyConstruct(TypeInfo, Target, Source);
         return Target;
     }
 
@@ -490,7 +583,7 @@ namespace Lumina::ECS
                     void* Source = GetRawAtDense(Read);
                     if (TypeInfo.Relocate != nullptr)
                     {
-                        TypeInfo.Relocate(Target, Source);
+                        TypeInfo.Relocate(TypeInfo, Target, Source);
                     }
                     else
                     {

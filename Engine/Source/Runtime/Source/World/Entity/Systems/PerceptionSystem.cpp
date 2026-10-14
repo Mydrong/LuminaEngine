@@ -59,7 +59,7 @@ namespace Lumina
         };
 
         // An empty perceiver filter senses everyone; otherwise the source must carry a matching tag.
-        bool PassesAffiliation(const FGameplayTagContainer& Filter, const FGameplayTagContainer* SourceTags)
+        bool PassesAffiliation(const SGameplayTagContainer& Filter, const SGameplayTagContainer* SourceTags)
         {
             if (Filter.IsEmpty())
             {
@@ -131,7 +131,7 @@ namespace Lumina
         // Apply one drained hearing/damage report to the relevant perceiver(s).
         void ApplyStimulus(ECS::FRegistry& Registry, const TVector<ECS::FEntity>& Perceivers, const FAIStimulusEvent& Stim)
         {
-            const FGameplayTagContainer* SrcTags = nullptr;
+            const SGameplayTagContainer* SrcTags = nullptr;
             if (!Stim.Tags.IsEmpty())
             {
                 SrcTags = &Stim.Tags;

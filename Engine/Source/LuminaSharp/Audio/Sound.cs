@@ -21,13 +21,13 @@ public static class Sound
         => Engine.IsHeadless ? default : PlayAt(ObjectCore.LoadObject<CSoundBase>(ClipPath), Location, Volume, Pitch, MinDistance, MaxDistance, Loop);
 
     /// Play with the full parameter set, so bus, attenuation, cone, priority and fades.
-    public static PlayingSound PlayEx(CSoundBase? Clip, FAudioPlayParams Params)
+    public static PlayingSound PlayEx(CSoundBase? Clip, SAudioPlayParams Params)
         => new(CAudioLibrary.PlaySoundEx(Clip!, Params));
 
     /// Play a one-shot on a specific mix group without building a full parameter set.
     public static PlayingSound PlayOnBus(CSoundBase? Clip, EAudioBus Bus, float Volume = 1.0f, float Pitch = 1.0f)
     {
-        FAudioPlayParams Params = FAudioPlayParams.Default();
+        SAudioPlayParams Params = SAudioPlayParams.Default();
         Params.Bus = Bus;
         Params.Volume = Volume;
         Params.Pitch = Pitch;
@@ -38,9 +38,9 @@ public static class Sound
 /// A live voice. Holds only its handle, so it stays valid past the callback that started it, and every setter no-ops once the voice is gone.
 public readonly struct PlayingSound
 {
-    public readonly FAudioHandle Handle;
+    public readonly SAudioHandle Handle;
 
-    internal PlayingSound(FAudioHandle Handle)
+    internal PlayingSound(SAudioHandle Handle)
     {
         this.Handle = Handle;
     }

@@ -1,31 +1,19 @@
 using System;
 using System.Linq;
-using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
 
 namespace LuminaSharp;
 
-/// <summary>
-/// The recursive blob codec bridging managed script reflection and the native script schema/value
-/// model (Lumina::Scripting::FScriptExportSchema / FScriptPropertyValue, which is already nesting-complete).
-/// One self-describing value encoding (a leading kind byte) is used both for the schema's default
-/// values and for the per-instance overrides, so nested structs and arrays round-trip uniformly. The
-/// managed side WRITES the schema (+ defaults) and READS overrides onto a live instance; the native
-/// side does the mirror.
-/// </summary>
+// Writes a type's schema, its fields' types and metadata and its functions, which the native ScriptSchemaCodec reads.
 internal static class Serializer
 {
     /// <summary>'LSCH'. Mirrors Lumina::Scripting::kScriptSchemaMagic.</summary>
     private const uint SchemaMagic = 0x4843534Cu;
 
-    /// <summary>
-    /// Mirrors Lumina::Scripting::kScriptSchemaVersion. Bump only when an existing field changes meaning,
-    /// type or position -- APPENDING to the end of a record needs no bump, because every record carries its
-    /// byte length and an older reader skips what it does not recognise.
-    /// </summary>
-    private const ushort SchemaVersion = 1;
+    // Mirrors Lumina::Scripting::kScriptSchemaVersion, bumped only when an existing field changes meaning, type or position.
+    private const ushort SchemaVersion = 3;
 
     /// <summary>Mirrors Lumina::Scripting::EScriptSchemaRecord.</summary>
     private enum ERecord : byte
@@ -33,16 +21,10 @@ internal static class Serializer
         Field = 0,
         Meta,
         Type,
-        Candidate,
         Function,
     }
 
-    /// <summary>
-    /// Opens a length-delimited record and backfills its length on dispose.
-    ///
-    /// The tag and length are what let the native reader resync: it skips to the end of any record it does
-    /// not fully understand rather than misreading the remainder of the buffer.
-    /// </summary>
+    // A tagged, length-framed record whose length is backfilled on dispose, so the native reader can skip what it does not understand.
     private readonly struct Record : IDisposable
     {
         private readonly BinaryWriter Writer;
@@ -65,12 +47,9 @@ internal static class Serializer
         }
     }
 
-    // ---- Schema (managed -> native): types + meta + default values, recursive ----
-
     // MintedParent's members already live in its own minted class, so only what derives below it is written.
     public static byte[] WriteSchema(TypeDescription Description, Type? MintedParent = null)
     {
-        object? Defaults = Description.Create();
         List<ScriptProperty> Properties = MintedParent == null
             ? new List<ScriptProperty>(Description.Properties)
             : Description.Properties.Where(Property => Property.DeclaringType == null || !Property.DeclaringType.IsAssignableFrom(MintedParent)).ToList();
@@ -84,11 +63,10 @@ internal static class Serializer
         Writer.Write(Properties.Count);
         foreach (ScriptProperty Property in Properties)
         {
-            WriteField(Writer, Property, Defaults, bTopLevel: true);
+            WriteField(Writer, Property, bTopLevel: true);
         }
 
-        // After the fields, so a reader that stops at their count never sees them and one built before
-        // functions existed leaves the list empty rather than failing on a record it does not know.
+        // After the fields, so an older buffer without functions leaves the list empty.
         Writer.Write(Description.Functions.Count);
         foreach (ScriptFunction Function in Description.Functions)
         {
@@ -98,38 +76,23 @@ internal static class Serializer
             Writer.Write(Function.Params.Count);
             foreach (ScriptProperty Parameter in Function.Params)
             {
-                // No owner, so no default is captured: a parameter's value comes from the call, not the type.
-                WriteField(Writer, Parameter, null, bTopLevel: false);
+                WriteField(Writer, Parameter, bTopLevel: false);
             }
             Writer.Write(Function.Flags);
+            Writer.Write(Function.Meta.Count);
+            foreach (KeyValuePair<string, string> Pair in Function.Meta)
+            {
+                WriteString(Writer, Pair.Key);
+                WriteString(Writer, Pair.Value);
+            }
         }
 
         Writer.Flush();
         return Stream.ToArray();
     }
 
-    // ---- Buttons (managed -> native): [Button] method name + label + tooltip, flat ----
-
-    public static byte[] WriteButtons(TypeDescription Description)
-    {
-        using var Stream = new MemoryStream();
-        using var Writer = new BinaryWriter(Stream, Encoding.UTF8, leaveOpen: true);
-
-        Writer.Write(Description.Buttons.Count);
-        foreach (ScriptButton Button in Description.Buttons)
-        {
-            WriteString(Writer, Button.Method);
-            WriteString(Writer, Button.Label);
-            WriteString(Writer, Button.Tooltip);
-        }
-
-        Writer.Flush();
-        return Stream.ToArray();
-    }
-
-    // The one writer for a field, matching the native ReadField: the top level, a nested struct and an
-    // instanced candidate all go through here so the framing can never differ between them.
-    private static void WriteField(BinaryWriter Writer, ScriptProperty Property, object? Owner, bool bTopLevel)
+    // The one writer for a field and a function parameter alike, mirroring the native ReadField.
+    private static void WriteField(BinaryWriter Writer, ScriptProperty Property, bool bTopLevel)
     {
         using var Frame = new Record(Writer, ERecord.Field);
 
@@ -144,12 +107,6 @@ internal static class Serializer
         }
 
         WriteType(Writer, Property.Type);
-
-        // A native-owned view has no declared default to capture: the instance this reads from is
-        // unbound (created purely to describe the type), so its view points at no storage at all.
-        // Reading through it would decode a container header at address zero.
-        object? DefaultValue = (Owner != null && !Property.IsNativeOwnedView) ? Property.Get(Owner) : null;
-        WriteValue(Writer, Property.Type, DefaultValue);
     }
 
     private static void WriteMeta(BinaryWriter Writer, PropertyAttribute? Meta, bool bHidden = false,
@@ -194,9 +151,7 @@ internal static class Serializer
         }
     }
 
-    // Type descriptor; parsed in lockstep by the native ReadType. The kind is the shared reflected taxonomy
-    // (EPropertyType). A Struct always writes its NativeName (empty for a C#-defined script struct) so the reader
-    // tells the two apart from one uniform shape.
+    // A field type in lockstep with the native ReadType, naming any struct, enum or class it refers to.
     private static void WriteType(BinaryWriter Writer, ScriptType Type)
     {
         using var Frame = new Record(Writer, ERecord.Type);
@@ -205,27 +160,19 @@ internal static class Serializer
         Writer.Write((byte)(Type.IsInputAction ? 1 : 0));
         switch (Type.Kind)
         {
+            // A field names the reflected type it holds, which is minted on its own and found by that name.
             case EPropertyType.Enum:
             {
                 WriteString(Writer, Type.EnumName ?? "");
                 Writer.Write((byte)Type.EnumUnderlying);
-                IReadOnlyList<EnumEntry> Entries = Type.EnumEntries ?? Array.Empty<EnumEntry>();
-                Writer.Write(Entries.Count);
-                foreach (EnumEntry Entry in Entries)
-                {
-                    WriteString(Writer, Entry.Name);
-                    Writer.Write(Entry.Value);
-                }
                 break;
             }
             case EPropertyType.Struct:
             {
                 WriteString(Writer, Type.NativeName ?? "");
-                // Zero for a native mirror, which native sizes from the CStruct it resolves by name.
-                Writer.Write(Type.NativeName == null ? Type.ManagedSize : 0);
-                WriteFields(Writer, Type.Fields, Type.Clr);
                 break;
             }
+            case EPropertyType.Object:
             case EPropertyType.SoftObject:
             {
                 WriteString(Writer, Type.TargetClass ?? "");
@@ -246,54 +193,8 @@ internal static class Serializer
             case EPropertyType.InstancedStruct:
             {
                 WriteString(Writer, Type.BaseName ?? "");
-                IReadOnlyList<ScriptInstanceCandidate> Candidates = Type.Candidates ?? Array.Empty<ScriptInstanceCandidate>();
-                Writer.Write(Candidates.Count);
-                foreach (ScriptInstanceCandidate Candidate in Candidates)
-                {
-                    using var CandidateFrame = new Record(Writer, ERecord.Candidate);
-
-                    WriteString(Writer, Candidate.TypeName);
-                    WriteFields(Writer, Candidate.Fields, Candidate.Clr);
-                }
                 break;
             }
-        }
-    }
-
-    // Nested fields carry their default alongside the type, exactly as the top-level schema does. Without
-    // it a minted sub-struct or instanced candidate is only default-constructed on the native side, so every
-    // C# field initializer is lost and the inspector shows zeroes.
-    private static void WriteFields(BinaryWriter Writer, IReadOnlyList<ScriptProperty>? Fields, Type? Owner)
-    {
-        IReadOnlyList<ScriptProperty> List = Fields ?? Array.Empty<ScriptProperty>();
-        object? Defaults = TryCreateDefaults(Owner);
-
-        Writer.Write(List.Count);
-        foreach (ScriptProperty Field in List)
-        {
-            WriteField(Writer, Field, Defaults, bTopLevel: false);
-        }
-    }
-
-    // A throwaway instance purely to read field initializers off. Instanced candidates are filtered to
-    // default-constructible types, and script structs are value types or classes with a parameterless ctor,
-    // so this normally succeeds; a type that resists it just falls back to zeroes as before.
-    private static object? TryCreateDefaults(Type? Owner)
-    {
-        if (Owner == null)
-        {
-            return null;
-        }
-        try
-        {
-            return Activator.CreateInstance(Owner);
-        }
-        catch (Exception Ex)
-        {
-            Native.Log(ELogLevel.Warn,
-                $"Serializer: could not instantiate '{Owner.Name}' to read its defaults ({Ex.GetType().Name}); "
-                + "its fields will start at zero.");
-            return null;
         }
     }
 
@@ -307,650 +208,10 @@ internal static class Serializer
         }
     }
 
-    // Coarse self-describing value with a leading EScriptValueKind byte.
-    private static void WriteValue(BinaryWriter Writer, ScriptType Type, object? Value)
-    {
-        EScriptValueKind Kind = Type.ValueKind;
-        Writer.Write((byte)Kind);
-        switch (Kind)
-        {
-            case EScriptValueKind.Bool:
-            {
-                Writer.Write((byte)(Value is bool Bool && Bool ? 1 : 0));
-                break;
-            }
-            case EScriptValueKind.Int:
-            {
-                Writer.Write(EncodeInt(Type, Value));
-                break;
-            }
-            case EScriptValueKind.Double:
-            {
-                Writer.Write(Value != null ? Convert.ToDouble(Value) : 0.0);
-                break;
-            }
-            case EScriptValueKind.String:
-            {
-                WriteString(Writer, EncodeString(Type, Value));
-                break;
-            }
-            case EScriptValueKind.Nested:
-            {
-                WriteNested(Writer, Type, Value);
-                break;
-            }
-            case EScriptValueKind.Array:
-            {
-                WriteArray(Writer, Type, Value);
-                break;
-            }
-            case EScriptValueKind.Map:
-            {
-                WriteMap(Writer, Type, Value);
-                break;
-            }
-            case EScriptValueKind.Instance:
-            {
-                WriteInstance(Writer, Type, Value);
-                break;
-            }
-        }
-    }
-
-    // Writes the chosen type name, then (when non-empty) a field count and each field's name and value.
-    // An unmatched or null instance writes an empty name. The candidate is found by runtime CLR type.
-    private static void WriteInstance(BinaryWriter Writer, ScriptType Type, object? Value)
-    {
-        IReadOnlyList<ScriptInstanceCandidate> Candidates = Type.Candidates ?? Array.Empty<ScriptInstanceCandidate>();
-        ScriptInstanceCandidate? Chosen = null;
-        if (Value != null)
-        {
-            Type Runtime = Value.GetType();
-            foreach (ScriptInstanceCandidate Candidate in Candidates)
-            {
-                if (Candidate.Clr == Runtime)
-                {
-                    Chosen = Candidate;
-                    break;
-                }
-            }
-        }
-
-        if (Chosen == null)
-        {
-            WriteString(Writer, "");
-            return;
-        }
-
-        WriteString(Writer, Chosen.TypeName);
-        Writer.Write(Chosen.Fields.Count);
-        foreach (ScriptProperty Field in Chosen.Fields)
-        {
-            WriteString(Writer, Field.Name);
-            WriteValue(Writer, Field.Type, Value != null ? Field.Get(Value) : null);
-        }
-    }
-
-    private static long EncodeInt(ScriptType Type, object? Value)
-    {
-        if (Value == null)
-        {
-            return 0L;
-        }
-        if (Type.Kind == EPropertyType.Entity)
-        {
-            return Value is FEntity Current ? Current.Id : 0L;
-        }
-        // Bit-preserving for unsigned values: Convert.ToInt64 throws OverflowException on a ulong (or a
-        // ulong-backed enum) whose high bit is set, which would abort the whole schema/value blob and
-        // silently drop every property on the type. Reinterpret the bits instead; DecodeInt casts back.
-        Type Underlying = Value.GetType();
-        if (Underlying.IsEnum)
-        {
-            Underlying = Enum.GetUnderlyingType(Underlying);
-        }
-        if (Underlying == typeof(ulong))
-        {
-            return unchecked((long)Convert.ToUInt64(Value));
-        }
-        return Convert.ToInt64(Value);
-    }
-
-    private static string EncodeString(ScriptType Type, object? Value)
-    {
-        if (Type.Kind == EPropertyType.SoftObject)
-        {
-            return Value is ISoftObjectReference Reference ? Reference.GetPath() : "";
-        }
-        if (Type.IsInputAction)
-        {
-            return Value is SInputBinding Binding ? Binding.Name : "";
-        }
-        if (Value is global::Lumina.FString Text)
-        {
-            return Text.ToString();
-        }
-        return Value as string ?? "";
-    }
-
-    private static void WriteArray(BinaryWriter Writer, ScriptType Type, object? Value)
-    {
-        ScriptType Element = Type.Element ?? new ScriptType();
-        if (Value is IEnumerable Enumerable && Type.Element != null)
-        {
-            var Items = new List<object?>();
-            foreach (object? Item in Enumerable)
-            {
-                Items.Add(Item);
-            }
-            Writer.Write(Items.Count);
-            foreach (object? Item in Items)
-            {
-                WriteValue(Writer, Element, Item);
-            }
-        }
-        else
-        {
-            Writer.Write(0);
-        }
-    }
-
-    // Count followed by that many [key value, value value] pairs, each via the recursive value codec.
-    private static void WriteMap(BinaryWriter Writer, ScriptType Type, object? Value)
-    {
-        ScriptType Key = Type.KeyType ?? new ScriptType();
-        ScriptType Val = Type.ValueType ?? new ScriptType();
-        if (Value is IDictionary Dict && Type.KeyType != null && Type.ValueType != null)
-        {
-            Writer.Write(Dict.Count);
-            IDictionaryEnumerator Enumerator = Dict.GetEnumerator();
-            while (Enumerator.MoveNext())
-            {
-                WriteValue(Writer, Key, Enumerator.Key);
-                WriteValue(Writer, Val, Enumerator.Value);
-            }
-        }
-        else
-        {
-            Writer.Write(0);
-        }
-    }
-
-    private static void WriteNested(BinaryWriter Writer, ScriptType Type, object? Value)
-    {
-        IReadOnlyList<ScriptProperty> Fields = Type.Fields ?? Array.Empty<ScriptProperty>();
-        Writer.Write(Fields.Count);
-        foreach (ScriptProperty Field in Fields)
-        {
-            WriteString(Writer, Field.Name);
-            WriteValue(Writer, Field.Type, Value != null ? Field.Get(Value) : null);
-        }
-    }
-
-    private static void WriteString(BinaryWriter Writer, string Value)
+    internal static void WriteString(BinaryWriter Writer, string Value)
     {
         byte[] Bytes = Encoding.UTF8.GetBytes(Value);
         Writer.Write(Bytes.Length);
         Writer.Write(Bytes);
-    }
-
-    // ---- Overrides (native -> managed): apply a self-describing value blob onto a live instance ----
-
-
-    /// <summary>
-    /// Applies a decoded value to one member. An input binding is renamed in place rather than replaced:
-    /// the live object owns the script's event subscriptions, so swapping it in would silently drop every
-    /// handler the script attached in OnReady.
-    /// </summary>
-    private static void Assign(ScriptProperty Property, object Instance, object? Value)
-    {
-        if (Property.Type.IsInputAction
-            && Value is SInputBinding Incoming
-            && Property.Get(Instance) is SInputBinding Existing)
-        {
-            Existing.Name = Incoming.Name;
-            return;
-        }
-        Property.Set(Instance, Value);
-    }
-
-    private static ScriptProperty? FindProperty(IReadOnlyList<ScriptProperty> Properties, string Name)
-    {
-        foreach (ScriptProperty Property in Properties)
-        {
-            // Case-insensitive so a native struct member matches its differently-cased C# mirror.
-            if (string.Equals(Property.Name, Name, StringComparison.OrdinalIgnoreCase))
-            {
-                return Property;
-            }
-        }
-        return null;
-    }
-
-    /// <summary>
-    /// Reads one self-describing value. If the encoded kind doesn't match the target shape (schema
-    /// drift) the bytes are consumed and false is returned so the field keeps its default.
-    /// </summary>
-    private static bool ReadValue(ref FBlobReader Reader, ScriptType Type, out object? Value)
-    {
-        Value = null;
-
-        var Kind = (EScriptValueKind)Reader.ReadByte();
-        if (Kind != Type.ValueKind)
-        {
-            SkipBody(ref Reader, Kind);
-            return false;
-        }
-
-        switch (Kind)
-        {
-            case EScriptValueKind.Bool:
-            {
-                Value = Reader.ReadByte() != 0;
-                return true;
-            }
-            case EScriptValueKind.Int:
-            {
-                Value = DecodeInt(Reader.ReadInt64(), Type);
-                return true;
-            }
-            case EScriptValueKind.Double:
-            {
-                // Box the EXACT field type: a `? (float) : (double)` ternary re-widens both branches to
-                // double, so a float field would get a boxed double and FieldInfo.SetValue throws.
-                double Number = Reader.ReadDouble();
-                if (Type.Clr == typeof(float))
-                {
-                    Value = (float)Number;
-                }
-                else
-                {
-                    Value = Number;
-                }
-                return true;
-            }
-            case EScriptValueKind.String:
-            {
-                return DecodeString(ref Reader, Type, out Value);
-            }
-            case EScriptValueKind.Array:
-            {
-                return ReadArray(ref Reader, Type, out Value);
-            }
-            case EScriptValueKind.Map:
-            {
-                return ReadMap(ref Reader, Type, out Value);
-            }
-            case EScriptValueKind.Nested:
-            {
-                return ReadNested(ref Reader, Type, out Value);
-            }
-            case EScriptValueKind.Instance:
-            {
-                return ReadInstance(ref Reader, Type, out Value);
-            }
-            default:
-            {
-                return false;
-            }
-        }
-    }
-
-    private static bool ReadInstance(ref FBlobReader Reader, ScriptType Type, out object? Value)
-    {
-        Value = null;
-
-        string TypeName = Reader.ReadString();
-        if (string.IsNullOrEmpty(TypeName))
-        {
-            return true; // a null instance is a valid value
-        }
-
-        ScriptInstanceCandidate? Chosen = null;
-        IReadOnlyList<ScriptInstanceCandidate> Candidates = Type.Candidates ?? Array.Empty<ScriptInstanceCandidate>();
-        foreach (ScriptInstanceCandidate Candidate in Candidates)
-        {
-            if (Candidate.TypeName == TypeName)
-            {
-                Chosen = Candidate;
-                break;
-            }
-        }
-
-        int Count = Reader.ReadInt32();
-        if (Chosen == null)
-        {
-            // Unknown type (removed/renamed): consume the body, leave the field at its default.
-            for (int Index = 0; Index < Count; Index++)
-            {
-                Reader.Skip(Reader.ReadInt32()); // field name
-                SkipValue(ref Reader);
-            }
-            return false;
-        }
-
-        object? Box = Activator.CreateInstance(Chosen.Clr);
-        for (int Index = 0; Index < Count; Index++)
-        {
-            string Name = Reader.ReadString();
-            ScriptProperty? Field = FindProperty(Chosen.Fields, Name);
-            if (Field == null)
-            {
-                SkipValue(ref Reader);
-                continue;
-            }
-            if (Box != null && ReadValue(ref Reader, Field.Type, out object? FieldValue))
-            {
-                Assign(Field, Box, FieldValue);
-            }
-        }
-
-        Value = Box;
-        return Box != null;
-    }
-
-    private static bool DecodeString(ref FBlobReader Reader, ScriptType Type, out object? Value)
-    {
-        string Text = Reader.ReadString();
-        if (Type.IsInputAction)
-        {
-            // A fresh binding; Assign hands the name to the existing one instead when there is one, so
-            // event subscriptions made in OnReady survive a value push from the editor.
-            object? Box = Activator.CreateInstance(Type.Clr);
-            if (Box is SInputBinding Binding)
-            {
-                Binding.Name = Text;
-            }
-            Value = Box;
-            return Box != null;
-        }
-        if (Type.Kind == EPropertyType.SoftObject)
-        {
-            object? Box = Activator.CreateInstance(Type.Clr);
-            if (Box is ISoftObjectReference Reference)
-            {
-                Reference.SetFromPath(Text);
-            }
-            Value = Box;
-            return Box != null;
-        }
-        // Both spellings name one native FString, so the value comes back as whichever the field declares.
-        Value = Type.Clr == typeof(global::Lumina.FString) ? new global::Lumina.FString(Text) : Text;
-        return true;
-    }
-
-    private static bool ReadArray(ref FBlobReader Reader, ScriptType Type, out object? Value)
-    {
-        Value = null;
-        int Count = Reader.ReadInt32();
-        ScriptType Element = Type.Element ?? new ScriptType();
-        Type ElementClr = Element.Clr;
-
-        var Items = new List<object?>(Count);
-        for (int Index = 0; Index < Count; Index++)
-        {
-            if (ReadValue(ref Reader, Element, out object? Item))
-            {
-                Items.Add(Item);
-            }
-        }
-
-        if (Type.Clr.IsArray)
-        {
-            Array Result = Array.CreateInstance(ElementClr, Items.Count);
-            for (int Index = 0; Index < Items.Count; Index++)
-            {
-                Result.SetValue(Items[Index], Index);
-            }
-            Value = Result;
-            return true;
-        }
-
-        // List<T>
-        if (Activator.CreateInstance(Type.Clr) is IList List)
-        {
-            foreach (object? Item in Items)
-            {
-                List.Add(Item);
-            }
-            Value = List;
-            return true;
-        }
-
-        return false;
-    }
-
-    private static bool ReadMap(ref FBlobReader Reader, ScriptType Type, out object? Value)
-    {
-        Value = null;
-        int Count = Reader.ReadInt32();
-        ScriptType Key = Type.KeyType ?? new ScriptType();
-        ScriptType Val = Type.ValueType ?? new ScriptType();
-
-        // The concrete Dictionary<K,V> reached through IDictionary so key/value box/unbox to the exact CLR types.
-        if (Activator.CreateInstance(Type.Clr) is not IDictionary Dict)
-        {
-            for (int Index = 0; Index < Count; Index++)
-            {
-                SkipValue(ref Reader); // key
-                SkipValue(ref Reader); // value
-            }
-            return false;
-        }
-
-        for (int Index = 0; Index < Count; Index++)
-        {
-            bool HasKey = ReadValue(ref Reader, Key, out object? KeyValue);
-            bool HasValue = ReadValue(ref Reader, Val, out object? ValueValue);
-            if (HasKey && KeyValue != null && HasValue)
-            {
-                Dict[KeyValue] = ValueValue;
-            }
-        }
-
-        Value = Dict;
-        return true;
-    }
-
-    private static bool ReadNested(ref FBlobReader Reader, ScriptType Type, out object? Value)
-    {
-        object? Box = Activator.CreateInstance(Type.Clr);
-        IReadOnlyList<ScriptProperty> Fields = Type.Fields ?? Array.Empty<ScriptProperty>();
-
-        int Count = Reader.ReadInt32();
-        for (int Index = 0; Index < Count; Index++)
-        {
-            string Name = Reader.ReadString();
-            ScriptProperty? Field = FindProperty(Fields, Name);
-            if (Field == null)
-            {
-                SkipValue(ref Reader);
-                continue;
-            }
-            if (Box != null && ReadValue(ref Reader, Field.Type, out object? FieldValue))
-            {
-                Assign(Field, Box, FieldValue);
-            }
-        }
-
-        Value = Box;
-        return Box != null;
-    }
-
-    private static object DecodeInt(long Value, ScriptType Type)
-    {
-        if (Type.Kind == EPropertyType.Entity)
-        {
-            return new FEntity(unchecked((uint)Value));
-        }
-        Type Target = Type.Clr;
-        if (Target.IsEnum)
-        {
-            return Enum.ToObject(Target, Value);
-        }
-        if (Target == typeof(ulong))
-        {
-            return (ulong)Value;
-        }
-        if (Target == typeof(long))
-        {
-            return Value;
-        }
-        return Convert.ChangeType(Value, Target);
-    }
-
-    private static void SkipValue(ref FBlobReader Reader)
-    {
-        var Kind = (EScriptValueKind)Reader.ReadByte();
-        SkipBody(ref Reader, Kind);
-    }
-
-    private static void SkipBody(ref FBlobReader Reader, EScriptValueKind Kind)
-    {
-        switch (Kind)
-        {
-            case EScriptValueKind.Bool:
-            {
-                Reader.Skip(1);
-                break;
-            }
-            case EScriptValueKind.Int:
-            {
-                Reader.Skip(8);
-                break;
-            }
-            case EScriptValueKind.Double:
-            {
-                Reader.Skip(8);
-                break;
-            }
-            case EScriptValueKind.String:
-            {
-                Reader.Skip(Reader.ReadInt32());
-                break;
-            }
-            case EScriptValueKind.Array:
-            {
-                int Count = Reader.ReadInt32();
-                for (int Index = 0; Index < Count; Index++)
-                {
-                    SkipValue(ref Reader);
-                }
-                break;
-            }
-            case EScriptValueKind.Map:
-            {
-                int Count = Reader.ReadInt32();
-                for (int Index = 0; Index < Count; Index++)
-                {
-                    SkipValue(ref Reader); // key
-                    SkipValue(ref Reader); // value
-                }
-                break;
-            }
-            case EScriptValueKind.Nested:
-            {
-                int Count = Reader.ReadInt32();
-                for (int Index = 0; Index < Count; Index++)
-                {
-                    Reader.Skip(Reader.ReadInt32()); // field name
-                    SkipValue(ref Reader);
-                }
-                break;
-            }
-            case EScriptValueKind.Instance:
-            {
-                string Name = Reader.ReadString();
-                if (!string.IsNullOrEmpty(Name))
-                {
-                    int Count = Reader.ReadInt32();
-                    for (int Index = 0; Index < Count; Index++)
-                    {
-                        Reader.Skip(Reader.ReadInt32()); // field name
-                        SkipValue(ref Reader);
-                    }
-                }
-                break;
-            }
-        }
-    }
-}
-
-/// <summary>Little-endian cursor over a native value blob.</summary>
-internal ref struct FBlobReader
-{
-    private ReadOnlySpan<byte> Span;
-    private int Position;
-
-    public FBlobReader(ReadOnlySpan<byte> Span)
-    {
-        this.Span = Span;
-        Position = 0;
-    }
-
-    public byte ReadByte()
-    {
-        if (Position >= Span.Length)
-        {
-            return 0;
-        }
-        return Span[Position++];
-    }
-
-    public int ReadInt32()
-    {
-        if (Position + 4 > Span.Length)
-        {
-            Position = Span.Length;
-            return 0;
-        }
-        int Value = BitConverter.ToInt32(Span.Slice(Position, 4));
-        Position += 4;
-        return Value;
-    }
-
-    public long ReadInt64()
-    {
-        if (Position + 8 > Span.Length)
-        {
-            Position = Span.Length;
-            return 0;
-        }
-        long Value = BitConverter.ToInt64(Span.Slice(Position, 8));
-        Position += 8;
-        return Value;
-    }
-
-    public double ReadDouble()
-    {
-        if (Position + 8 > Span.Length)
-        {
-            Position = Span.Length;
-            return 0.0;
-        }
-        double Value = BitConverter.ToDouble(Span.Slice(Position, 8));
-        Position += 8;
-        return Value;
-    }
-
-    public string ReadString()
-    {
-        int Length = ReadInt32();
-        if (Length <= 0 || Position + Length > Span.Length)
-        {
-            return string.Empty;
-        }
-        string Value = Encoding.UTF8.GetString(Span.Slice(Position, Length));
-        Position += Length;
-        return Value;
-    }
-
-    public void Skip(int Bytes)
-    {
-        if (Bytes < 0)
-        {
-            return;
-        }
-        Position = Math.Min(Span.Length, Position + Bytes);
     }
 }

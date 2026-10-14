@@ -3,14 +3,7 @@ using System.Collections.Generic;
 
 namespace LuminaSharp;
 
-/// <summary>
-/// C# mirror of the engine's reflected type taxonomy <c>Lumina::EPropertyTypeFlags</c> (PropertyFlags.h). The
-/// script schema keys on this single shared enum instead of a parallel one, so there is nothing to keep in
-/// sync by hand; <see cref="LayoutValidator"/> asserts the values match native at bootstrap. Order IS the wire
-/// ABI (the schema sends these as kind bytes), so only ever append. Script-specific shapes are carried as data
-/// rather than distinct kinds: an asset ref is
-/// <c>SoftObject</c> + TargetClass; a native vs. script struct is <c>Struct</c> distinguished by NativeName.
-/// </summary>
+// Mirror of native EPropertyTypeFlags sent as kind bytes, so it only ever appends, checked by LayoutValidator at boot.
 public enum EPropertyType : byte
 {
     None = 0,
@@ -22,35 +15,6 @@ public enum EPropertyType : byte
     Entity,
 }
 
-/// <summary>Coarse self-describing kind on the value wire; integers and enums and entity are Int, asset refs String, structs Nested.</summary>
-public enum EScriptValueKind : byte
-{
-    Nil = 0,
-    Bool,
-    Int,
-    Double,
-    String,
-    Nested,
-    Array,
-    Instance,
-    Map,   // count (i32) followed by that many [key value, value value] pairs. Append-only (persisted wire).
-}
-
-/// <summary>One selectable concrete type for an instanced field, with its stable name, CLR type, and members.</summary>
-public sealed class ScriptInstanceCandidate
-{
-    public string TypeName { get; init; } = "";
-    public Type Clr { get; init; } = typeof(object);
-    public IReadOnlyList<ScriptProperty> Fields { get; init; } = Array.Empty<ScriptProperty>();
-}
-
-/// <summary>One enumerator of a C# enum exposed to the editor.</summary>
-public readonly struct EnumEntry
-{
-    public string Name { get; init; }
-    public long Value { get; init; }
-}
-
 /// <summary>The resolved, recursive shape of a script property's type, resolved once per type and shared.</summary>
 public sealed class ScriptType
 {
@@ -59,8 +23,7 @@ public sealed class ScriptType
     /// <summary>The CLR type this describes.</summary>
     public Type Clr { get; init; } = typeof(object);
 
-    /// <summary>True when this is an <see cref="InputBinding"/> (kind <see cref="EPropertyType.String"/>): the
-    /// value round-trips as the action name, and the native editor draws a picker of the project's actions.</summary>
+    // An input binding, stored as its action name and drawn as a picker of the project's actions.
     public bool IsInputAction { get; init; }
 
     /// <summary>Element shape when <see cref="Kind"/> is <see cref="EPropertyType.Vector"/>.</summary>
@@ -72,56 +35,34 @@ public sealed class ScriptType
     /// <summary>Value shape when <see cref="Kind"/> is <see cref="EPropertyType.Map"/>.</summary>
     public ScriptType? ValueType { get; init; }
 
-    /// <summary>Members for a NativeStruct or ScriptStruct, round-tripped as a Nested value by member name.</summary>
-    public IReadOnlyList<ScriptProperty>? Fields { get; init; }
-
     /// <summary>Native CStruct name the editor resolves via FindObject.</summary>
     public string? NativeName { get; init; }
-
-    // sizeof the managed value for a script-declared struct, which native checks its minted layout against.
-    public int ManagedSize { get; init; }
 
     /// <summary>Asset class filter for a soft object reference; empty means any.</summary>
     public string? TargetClass { get; init; }
 
     public string? EnumName { get; init; }
     public EPropertyType EnumUnderlying { get; init; } = EPropertyType.Int32;
-    public IReadOnlyList<EnumEntry>? EnumEntries { get; init; }
 
-    /// <summary>Display name of the base type when <see cref="Kind"/> is <see cref="EPropertyType.InstancedStruct"/>.</summary>
+    // The struct every value of an InstancedStruct kind derives from.
     public string? BaseName { get; init; }
-
-    /// <summary>Selectable concrete types when <see cref="Kind"/> is <see cref="EPropertyType.InstancedStruct"/>.</summary>
-    public IReadOnlyList<ScriptInstanceCandidate>? Candidates { get; init; }
-
-    /// <summary>The coarse wire kind the value codec uses, projected from the reflected property type.</summary>
-    public EScriptValueKind ValueKind => Kind switch
-    {
-        EPropertyType.Bool => EScriptValueKind.Bool,
-        EPropertyType.Int8 or EPropertyType.Int16 or EPropertyType.Int32 or EPropertyType.Int64 or
-        EPropertyType.UInt8 or EPropertyType.UInt16 or EPropertyType.UInt32 or EPropertyType.UInt64 or
-        EPropertyType.Enum or EPropertyType.Entity => EScriptValueKind.Int,
-        EPropertyType.Float or EPropertyType.Double => EScriptValueKind.Double,
-        EPropertyType.String or EPropertyType.Name or EPropertyType.SoftObject => EScriptValueKind.String,
-        EPropertyType.Struct => EScriptValueKind.Nested,
-        EPropertyType.Vector => EScriptValueKind.Array,
-        EPropertyType.Map => EScriptValueKind.Map,
-        EPropertyType.InstancedStruct => EScriptValueKind.Instance,
-        _ => EScriptValueKind.Nil,
-    };
 }
 
-/// <summary>One serializable member of a script type, with name, accessors, type shape, and editor metadata.</summary>
-/// <summary>One [ScriptFunction] method: its name and the fields of its call frame.</summary>
+// One reflected method, its name and the fields of its call frame.
 public sealed class ScriptFunction
 {
-    public ScriptFunction(string Name, IReadOnlyList<ScriptProperty> Params, int ReturnIndex, uint Flags = 0)
+    public ScriptFunction(string Name, IReadOnlyList<ScriptProperty> Params, int ReturnIndex, uint Flags = 0,
+        IReadOnlyList<KeyValuePair<string, string>>? Meta = null)
     {
         this.Name = Name;
         this.Params = Params;
         this.ReturnIndex = ReturnIndex;
         this.Flags = Flags;
+        this.Meta = Meta ?? Array.Empty<KeyValuePair<string, string>>();
     }
+
+    // Function metadata native keeps on the FFunction, such as a [Button]'s label.
+    public IReadOnlyList<KeyValuePair<string, string>> Meta { get; }
 
     // EFunctionFlags the declaration adds, such as where an [Rpc] method runs.
     public uint Flags { get; }
@@ -135,6 +76,7 @@ public sealed class ScriptFunction
     public int ReturnIndex { get; }
 }
 
+// One serializable member of a script type, with name, accessors, type shape, and editor metadata.
 public sealed class ScriptProperty
 {
     public string Name { get; init; } = "";
@@ -158,18 +100,6 @@ public sealed class ScriptProperty
     // Metadata keys the C++ spelling of the same declaration would write, such as Sync or AssetType.
     public IReadOnlyList<KeyValuePair<string, string>>? ExtraMeta { get; init; }
     public Func<object, object?> Get { get; init; } = Instance => null;
-    public Action<object, object?> Set { get; init; } = (Instance, Value) => { };
-
-    /// <summary>
-    /// True when the member is a get-only VIEW over storage native already owns -- a container property on a
-    /// script type, which hands out a <see cref="TVector{T}"/> rather than a managed copy.
-    ///
-    /// Such a member is still a real reflected property (native holds the container and the inspector edits
-    /// it); what it has no meaning for is the two things that assume a managed-side value: capturing a
-    /// declared default off an unbound instance, and assigning a decoded value back through a setter. Both
-    /// are skipped for it, which is why "no setter" cannot simply mean "not a property".
-    /// </summary>
-    public bool IsNativeOwnedView { get; init; }
 
     // Parameter direction, folded onto the minted property's flags. Always None for a member.
     internal EScriptParamFlags ParamFlags { get; init; }
@@ -178,10 +108,3 @@ public sealed class ScriptProperty
     internal EPropertyFlags ExtraFlags { get; init; }
 }
 
-/// <summary>One [Button] method surfaced as an inspector button, invoked by name.</summary>
-public sealed class ScriptButton
-{
-    public string Method { get; init; } = "";
-    public string Label { get; init; } = "";
-    public string Tooltip { get; init; } = "";
-}

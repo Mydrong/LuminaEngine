@@ -751,32 +751,7 @@ public struct FQuat : IEquatable<FQuat>
         R = RLenSq > 1e-8f ? R / MathF.Sqrt(RLenSq) : FVector3.UnitX;
         FVector3 U = FVector3.Cross(F, R);
 
-        // Column-major basis (R, U, F) -> quaternion, branch-by-largest-component.
-        float M00 = R.X, M01 = R.Y, M02 = R.Z;
-        float M10 = U.X, M11 = U.Y, M12 = U.Z;
-        float M20 = F.X, M21 = F.Y, M22 = F.Z;
-
-        float FourWSq = M00 + M11 + M22;
-        float FourXSq = M00 - M11 - M22;
-        float FourYSq = M11 - M00 - M22;
-        float FourZSq = M22 - M00 - M11;
-
-        int Biggest = 0;
-        float FourBiggest = FourWSq;
-        if (FourXSq > FourBiggest) { FourBiggest = FourXSq; Biggest = 1; }
-        if (FourYSq > FourBiggest) { FourBiggest = FourYSq; Biggest = 2; }
-        if (FourZSq > FourBiggest) { FourBiggest = FourZSq; Biggest = 3; }
-
-        float BiggestVal = MathF.Sqrt(FourBiggest + 1.0f) * 0.5f;
-        float Mult = 0.25f / BiggestVal;
-
-        switch (Biggest)
-        {
-            case 0: return new FQuat((M12 - M21) * Mult, (M20 - M02) * Mult, (M01 - M10) * Mult, BiggestVal);
-            case 1: return new FQuat(BiggestVal, (M01 + M10) * Mult, (M20 + M02) * Mult, (M12 - M21) * Mult);
-            case 2: return new FQuat((M01 + M10) * Mult, BiggestVal, (M12 + M21) * Mult, (M20 - M02) * Mult);
-            default: return new FQuat((M20 + M02) * Mult, (M12 + M21) * Mult, BiggestVal, (M01 - M10) * Mult);
-        }
+        return new FMatrix4(new FVector4(R, 0.0f), new FVector4(U, 0.0f), new FVector4(F, 0.0f), new FVector4(0.0f, 0.0f, 0.0f, 1.0f)).ToQuat();
     }
 
     public float Length

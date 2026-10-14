@@ -46,7 +46,7 @@ namespace Lumina
         /** The root's static switches, with a per-switch override toggle. Flipping one selects a different
             permutation of the root's shaders, which the editor compiles in the background. */
         void DrawStaticSwitchSection(class CMaterialInstance* Instance);
-        void DrawTextureParameterColumn(class CMaterialInstance* Instance, const struct FMaterialParameter& Param, bool bEnabled);
+        void DrawTextureParameterColumn(class CMaterialInstance* Instance, const struct SMaterialParameter& Param, bool bEnabled);
 
         /** Parent picker plus the root-to-here chain, so it is clear which level a value comes from. */
         void DrawInheritanceSection(class CMaterialInstance* Instance);
@@ -56,7 +56,7 @@ namespace Lumina
         void DrawBrokenParentNotice(class CMaterialInstance* Instance, class CMaterial* Root);
 
         /** The nearest ancestor supplying Param, or null when the value is the root's own default. */
-        class CMaterialInterface* FindOverridingAncestor(class CMaterialInstance* Instance, const struct FMaterialParameter& Param) const;
+        class CMaterialInterface* FindOverridingAncestor(class CMaterialInstance* Instance, const struct SMaterialParameter& Param) const;
 
         void SetDebugMesh(EDebugMesh Mesh);
 
@@ -71,6 +71,6 @@ namespace Lumina
         // already pushes a per-parameter ImGui ID.
         TSharedPtr<IPropertyTypeCustomization> TexturePicker;
         TSharedPtr<FPropertyHandle>            TextureHandle;
-        FMaterialParameterOverride             TextureScratch;
+        SMaterialParameterOverride             TextureScratch;
     };
 }

@@ -2,22 +2,22 @@ namespace Lumina;
 
 // Hand-written halves of the Reflector's UI handle mirrors, so validity reads off the type itself.
 
-public partial struct FUIDocument
+public partial struct SUIDocument
 {
     public bool IsValid => Handle != 0;
 }
 
-public partial struct FUIElement
+public partial struct SUIElement
 {
     public bool IsValid => Handle != 0;
 }
 
-public partial struct FUIEventListener
+public partial struct SUIEventListener
 {
     public bool IsValid => Handle != 0;
 }
 
-public partial struct FUIDataModel
+public partial struct SUIDataModel
 {
     public bool IsValid => Handle != 0;
 }

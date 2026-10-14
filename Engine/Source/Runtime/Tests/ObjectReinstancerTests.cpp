@@ -13,6 +13,7 @@
 #include "Scripting/ScriptStruct.h"
 #include "Scripting/ScriptableObject.h"
 #include "Scripting/ScriptableTest.h"
+#include "ScriptTestUtil.h"
 
 using namespace Lumina;
 
@@ -21,28 +22,6 @@ using namespace Lumina;
 
 namespace
 {
-    Scripting::FScriptExportField MakeScalarField(const char* Name, EPropertyTypeFlags Kind)
-    {
-        Scripting::FScriptExportField Field;
-        Field.Name = FName(Name);
-        Field.Type = MakeShared<Scripting::FScriptExportType>();
-        Field.Type->Kind = Kind;
-        return Field;
-    }
-
-    CScriptClass* MintWithFields(const char* ClassName, const Scripting::FScriptExportSchema& Schema)
-    {
-        CScriptClass* Minted = FScriptableRegistry::Mint(ClassName, "CScriptableTest");
-        if (Minted == nullptr)
-        {
-            return nullptr;
-        }
-        Scripting::AppendScriptPropertiesToClass(Minted, Schema);
-        RegisterPendingTypes();
-        Minted->GetDefaultObject();
-        return Minted;
-    }
-
     int32* FindInt(CObject* Object, const char* FieldName)
     {
         for (FProperty* Property : Object->GetClass()->GetProperties())
@@ -74,8 +53,8 @@ namespace
 TEST(ObjectReinstancer, MovesInstancesOntoTheReplacementAndKeepsMatchingValues)
 {
     Scripting::FScriptExportSchema Before;
-    Before.Fields.push_back(MakeScalarField("Kept", EPropertyTypeFlags::Int32));
-    CScriptClass* Old = MintWithFields("Reinst_Before", Before);
+    Before.Fields.push_back(ScriptTest::ScalarField("Kept", EPropertyTypeFlags::Int32));
+    CScriptClass* Old = ScriptTest::MintWith("Reinst_Before", Before);
     ASSERT_NE(Old, nullptr);
 
     CObject* Instance = NewObject(Old, nullptr, FName("ReinstSubject"), FGuid::New(), OF_Transient);
@@ -89,9 +68,9 @@ TEST(ObjectReinstancer, MovesInstancesOntoTheReplacementAndKeepsMatchingValues)
 
     // The replacement adds a field, which is exactly the change an in-place rebuild could not make.
     Scripting::FScriptExportSchema After;
-    After.Fields.push_back(MakeScalarField("Kept", EPropertyTypeFlags::Int32));
-    After.Fields.push_back(MakeScalarField("Added", EPropertyTypeFlags::Int32));
-    CScriptClass* New = MintWithFields("Reinst_After", After);
+    After.Fields.push_back(ScriptTest::ScalarField("Kept", EPropertyTypeFlags::Int32));
+    After.Fields.push_back(ScriptTest::ScalarField("Added", EPropertyTypeFlags::Int32));
+    CScriptClass* New = ScriptTest::MintWith("Reinst_After", After);
     ASSERT_NE(New, nullptr);
 
     FObjectReinstancer Reinstancer;
@@ -118,10 +97,10 @@ TEST(ObjectReinstancer, MovesInstancesOntoTheReplacementAndKeepsMatchingValues)
 TEST(ObjectReinstancer, RepointsAReferenceHeldOutsideTheObjectGraph)
 {
     Scripting::FScriptExportSchema Empty;
-    Empty.Fields.push_back(MakeScalarField("Value", EPropertyTypeFlags::Int32));
+    Empty.Fields.push_back(ScriptTest::ScalarField("Value", EPropertyTypeFlags::Int32));
 
-    CScriptClass* Old = MintWithFields("ReinstRef_Before", Empty);
-    CScriptClass* New = MintWithFields("ReinstRef_After", Empty);
+    CScriptClass* Old = ScriptTest::MintWith("ReinstRef_Before", Empty);
+    CScriptClass* New = ScriptTest::MintWith("ReinstRef_After", Empty);
     ASSERT_NE(Old, nullptr);
     ASSERT_NE(New, nullptr);
 
@@ -147,10 +126,10 @@ TEST(ObjectReinstancer, RepointsAReferenceHeldOutsideTheObjectGraph)
 TEST(ObjectReinstancer, AWeakReferenceFollowsTheInstanceOntoTheReplacement)
 {
     Scripting::FScriptExportSchema Schema;
-    Schema.Fields.push_back(MakeScalarField("Value", EPropertyTypeFlags::Int32));
+    Schema.Fields.push_back(ScriptTest::ScalarField("Value", EPropertyTypeFlags::Int32));
 
-    CScriptClass* Old = MintWithFields("ReinstWeak_Before", Schema);
-    CScriptClass* New = MintWithFields("ReinstWeak_After", Schema);
+    CScriptClass* Old = ScriptTest::MintWith("ReinstWeak_Before", Schema);
+    CScriptClass* New = ScriptTest::MintWith("ReinstWeak_After", Schema);
     ASSERT_NE(Old, nullptr);
     ASSERT_NE(New, nullptr);
 
@@ -183,8 +162,8 @@ TEST(ObjectReinstancer, DoesNothingWithoutAMapping)
 TEST(ObjectReinstancer, ThePostReplaceHookSeesEveryReplacementBeforeAnythingPointsAtIt)
 {
     Scripting::FScriptExportSchema Before;
-    Before.Fields.push_back(MakeScalarField("Value", EPropertyTypeFlags::Int32));
-    CScriptClass* Old = MintWithFields("Reinst_HookBefore", Before);
+    Before.Fields.push_back(ScriptTest::ScalarField("Value", EPropertyTypeFlags::Int32));
+    CScriptClass* Old = ScriptTest::MintWith("Reinst_HookBefore", Before);
     ASSERT_NE(Old, nullptr);
 
     CObject* First  = NewObject(Old, nullptr, FName("HookOne"), FGuid::New(), OF_Transient);
@@ -195,9 +174,9 @@ TEST(ObjectReinstancer, ThePostReplaceHookSeesEveryReplacementBeforeAnythingPoin
     *FindInt(Second, "Value") = 22;
 
     Scripting::FScriptExportSchema After;
-    After.Fields.push_back(MakeScalarField("Value", EPropertyTypeFlags::Int32));
-    After.Fields.push_back(MakeScalarField("Added", EPropertyTypeFlags::Int32));
-    CScriptClass* New = MintWithFields("Reinst_HookAfter", After);
+    After.Fields.push_back(ScriptTest::ScalarField("Value", EPropertyTypeFlags::Int32));
+    After.Fields.push_back(ScriptTest::ScalarField("Added", EPropertyTypeFlags::Int32));
+    CScriptClass* New = ScriptTest::MintWith("Reinst_HookAfter", After);
     ASSERT_NE(New, nullptr);
 
     static int32 GHookCalls = 0;
@@ -229,8 +208,8 @@ TEST(ObjectReinstancer, ThePostReplaceHookSeesEveryReplacementBeforeAnythingPoin
 TEST(ObjectReinstancer, CommitWithNoHookIsUnaffected)
 {
     Scripting::FScriptExportSchema Before;
-    Before.Fields.push_back(MakeScalarField("Value", EPropertyTypeFlags::Int32));
-    CScriptClass* Old = MintWithFields("Reinst_NoHookBefore", Before);
+    Before.Fields.push_back(ScriptTest::ScalarField("Value", EPropertyTypeFlags::Int32));
+    CScriptClass* Old = ScriptTest::MintWith("Reinst_NoHookBefore", Before);
     ASSERT_NE(Old, nullptr);
 
     CObject* Instance = NewObject(Old, nullptr, FName("NoHookSubject"), FGuid::New(), OF_Transient);
@@ -238,9 +217,9 @@ TEST(ObjectReinstancer, CommitWithNoHookIsUnaffected)
     *FindInt(Instance, "Value") = 7;
 
     Scripting::FScriptExportSchema After;
-    After.Fields.push_back(MakeScalarField("Value", EPropertyTypeFlags::Int32));
-    After.Fields.push_back(MakeScalarField("Added", EPropertyTypeFlags::Int32));
-    CScriptClass* New = MintWithFields("Reinst_NoHookAfter", After);
+    After.Fields.push_back(ScriptTest::ScalarField("Value", EPropertyTypeFlags::Int32));
+    After.Fields.push_back(ScriptTest::ScalarField("Added", EPropertyTypeFlags::Int32));
+    CScriptClass* New = ScriptTest::MintWith("Reinst_NoHookAfter", After);
     ASSERT_NE(New, nullptr);
 
     FObjectReinstancer Reinstancer;
@@ -275,9 +254,9 @@ namespace
 TEST(ObjectReinstancer, AnOriginalWhoseOnlyHolderMovesDiesAfterTheWalk)
 {
     Scripting::FScriptExportSchema Schema;
-    Schema.Fields.push_back(MakeScalarField("Value", EPropertyTypeFlags::Int32));
-    CScriptClass* Old = MintWithFields("ReinstLast_Before", Schema);
-    CScriptClass* New = MintWithFields("ReinstLast_After", Schema);
+    Schema.Fields.push_back(ScriptTest::ScalarField("Value", EPropertyTypeFlags::Int32));
+    CScriptClass* Old = ScriptTest::MintWith("ReinstLast_Before", Schema);
+    CScriptClass* New = ScriptTest::MintWith("ReinstLast_After", Schema);
     ASSERT_NE(Old, nullptr);
     ASSERT_NE(New, nullptr);
 
@@ -308,9 +287,9 @@ extern "C" void LuminaSharp_UnpinObject(void* Pin);
 TEST(ObjectReinstancer, AManagedPinMovesOntoTheReplacement)
 {
     Scripting::FScriptExportSchema Schema;
-    Schema.Fields.push_back(MakeScalarField("Value", EPropertyTypeFlags::Int32));
-    CScriptClass* Old = MintWithFields("ReinstPin_Before", Schema);
-    CScriptClass* New = MintWithFields("ReinstPin_After", Schema);
+    Schema.Fields.push_back(ScriptTest::ScalarField("Value", EPropertyTypeFlags::Int32));
+    CScriptClass* Old = ScriptTest::MintWith("ReinstPin_Before", Schema);
+    CScriptClass* New = ScriptTest::MintWith("ReinstPin_After", Schema);
     ASSERT_NE(Old, nullptr);
     ASSERT_NE(New, nullptr);
 

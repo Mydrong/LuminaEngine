@@ -209,9 +209,9 @@ namespace Lumina::NavMeshBuilder
         };
         #endif
 
-        bool BakeTile(const FNavBuildInput& In, const FTileGrid& Grid, int32 TX, int32 TY, const int32* TileTriIndices, int32 NumTileTris, FNavTileData& Out)
+        bool BakeTile(const FNavBuildInput& In, const FTileGrid& Grid, int32 TX, int32 TY, const int32* TileTriIndices, int32 NumTileTris, SNavTileData& Out)
         {
-            const FNavBuildSettings& S = In.Settings;
+            const SNavBuildSettings& S = In.Settings;
             Out.X = TX;
             Out.Y = TY;
             Out.Blob.clear();
@@ -649,7 +649,7 @@ namespace Lumina::NavMeshBuilder
     constexpr uint32 kRebakeWorkerShare = 4;
 
     void BakeTiles(const FNavBuildInput& Input, const FNavBuildOutput& BaseLayout,
-                   const TVector<FNavTileCoord>& Coords, TVector<FNavTileData>& Out)
+                   const TVector<FNavTileCoord>& Coords, TVector<SNavTileData>& Out)
     {
         LUMINA_PROFILE_SCOPE();
 
@@ -706,12 +706,12 @@ namespace Lumina::NavMeshBuilder
         }, 1, ETaskPriority::Background);
     }
 
-    bool BakeSingleTile(const FNavBuildInput& Input, const FNavBuildOutput& BaseLayout, int32 TX, int32 TY, FNavTileData& Out)
+    bool BakeSingleTile(const FNavBuildInput& Input, const FNavBuildOutput& BaseLayout, int32 TX, int32 TY, SNavTileData& Out)
     {
         TVector<FNavTileCoord> Coords;
         Coords.push_back(FNavTileCoord{ TX, TY });
 
-        TVector<FNavTileData> Baked;
+        TVector<SNavTileData> Baked;
         BakeTiles(Input, BaseLayout, Coords, Baked);
         if (Baked.empty())
         {
@@ -721,12 +721,12 @@ namespace Lumina::NavMeshBuilder
         return true;
     }
 #else
-    bool BakeSingleTile(const FNavBuildInput&, const FNavBuildOutput&, int32, int32, FNavTileData&)
+    bool BakeSingleTile(const FNavBuildInput&, const FNavBuildOutput&, int32, int32, SNavTileData&)
     {
         return false;
     }
 
-    void BakeTiles(const FNavBuildInput&, const FNavBuildOutput&, const TVector<FNavTileCoord>& Coords, TVector<FNavTileData>& Out)
+    void BakeTiles(const FNavBuildInput&, const FNavBuildOutput&, const TVector<FNavTileCoord>& Coords, TVector<SNavTileData>& Out)
     {
         Out.clear();
         Out.resize(Coords.size());

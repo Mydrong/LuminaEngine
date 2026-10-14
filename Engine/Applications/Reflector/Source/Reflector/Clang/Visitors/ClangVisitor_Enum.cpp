@@ -29,13 +29,7 @@ namespace Lumina::Reflection::Visitor
             Constant.Label = DisplayName;
             Constant.ID = std::string(DisplayName);
             Constant.Value = Value;
-            
-            const CXString CommentString = clang_Cursor_getBriefCommentText(Cursor);
-            if (CommentString.data != nullptr)
-            {
-                Constant.Description = clang_getCString(CommentString);
-            }
-            clang_disposeString(CommentString);
+            Constant.Description = ClangUtils::GetBriefComment(Cursor);
 
             Enum->AddConstant(Constant);
         }
@@ -102,6 +96,10 @@ namespace Lumina::Reflection::Visitor
         ReflectedEnum->LineNumber = ClangUtils::GetCursorLineNumber(Cursor);
         ReflectedEnum->GenerateMetadata(Macro.MacroContents);
         ValidateSpecifiers(Cursor, ESpecifierTarget::Reflect, ReflectedEnum->Metadata);
+        if (std::string Comment = ClangUtils::GetBriefComment(Cursor); !Comment.empty() && !ReflectedEnum->HasMetadata("ToolTip"))
+        {
+            ReflectedEnum->Metadata.push_back({"ToolTip", ClangUtils::EscapeStringLiteral(Comment)});
+        }
 
         // The C# emitter gives the generated enum a matching explicit backing type, so it mirrors by value.
         const long long EnumSizeBytes = clang_Type_getSizeOf(IntegerType);

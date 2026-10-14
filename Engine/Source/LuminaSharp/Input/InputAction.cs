@@ -54,7 +54,7 @@ public abstract partial class SInputBinding
     private string ActionName = string.Empty;
 
     /// <summary>This frame's raw state, for anything the typed members don't expose.</summary>
-    public Lumina.FInputActionState State { get; private set; }
+    public Lumina.SInputActionState State { get; private set; }
 
     /// <summary>True when the name is an action that exists in the project's input settings.</summary>
     public bool IsBound => !string.IsNullOrEmpty(ActionName) && Lumina.CInputLibrary.FindActionIndex(ActionName) >= 0;
@@ -79,11 +79,11 @@ public abstract partial class SInputBinding
 
     // Applies the action's state and raises whatever the concrete binding raises. Called from
     // CEntityScript.OnAction every frame the bound action changes; never call it from game code.
-    internal void Apply(in Lumina.FInputActionState Next)
+    internal void Apply(in Lumina.SInputActionState Next)
     {
         // The first delivery has no previous frame to compare against: hand Raise the incoming state as the
         // previous one so a key already held at bind time doesn't read as a press that just happened.
-        Lumina.FInputActionState Previous = bPrimed ? State : Next;
+        Lumina.SInputActionState Previous = bPrimed ? State : Next;
         bPrimed = true;
         State = Next;
 
@@ -91,7 +91,7 @@ public abstract partial class SInputBinding
     }
 
     // Fires this binding's events for the transition from Previous to the state just applied.
-    private protected abstract void Raise(in Lumina.FInputActionState Previous);
+    private protected abstract void Raise(in Lumina.SInputActionState Previous);
 
 }
 
@@ -148,9 +148,9 @@ public sealed class SInputAction : SInputBinding
     /// <summary>Seconds the current press has lasted; 0 while up.</summary>
     public float HeldTime => State.HeldTime;
 
-    private protected override void Raise(in Lumina.FInputActionState Previous)
+    private protected override void Raise(in Lumina.SInputActionState Previous)
     {
-        Lumina.FInputActionState Current = State;
+        Lumina.SInputActionState Current = State;
 
         // Compared against the last delivered state as well as the engine's flag: a release the entity was
         // not receiving input for would otherwise be missed and leave the press latched.
@@ -206,9 +206,9 @@ public sealed class SInputAxis : SInputBinding
     /// <summary>True while the axis is off zero.</summary>
     public bool IsMoving => State.X != 0.0f || State.Y != 0.0f;
 
-    private protected override void Raise(in Lumina.FInputActionState Previous)
+    private protected override void Raise(in Lumina.SInputActionState Previous)
     {
-        Lumina.FInputActionState Current = State;
+        Lumina.SInputActionState Current = State;
         if (Current.X != Previous.X)
         {
             Changed?.Invoke(Current.X);

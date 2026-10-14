@@ -35,7 +35,7 @@ namespace Lumina
 
         /** Interpolates a bare number, reporting each value to OnValue until the tween is destroyed. */
         FUNCTION()
-        static void ValueTo(CWorld* World, uint32 Tween, float From, float To, float Duration, FScriptCallback OnValue);
+        static void ValueTo(CWorld* World, uint32 Tween, float From, float To, float Duration, SScriptCallback OnValue);
 
         /** Dead time, for spacing steps apart. */
         FUNCTION()
@@ -43,11 +43,11 @@ namespace Lumina
 
         /** Runs OnCall when the sequence reaches this step. */
         FUNCTION()
-        static void Call(CWorld* World, uint32 Tween, FScriptCallback OnCall);
+        static void Call(CWorld* World, uint32 Tween, SScriptCallback OnCall);
 
         /** Runs OnFinished after the last step, including after the final loop. */
         FUNCTION()
-        static void OnFinished(CWorld* World, uint32 Tween, FScriptCallback OnFinished);
+        static void OnFinished(CWorld* World, uint32 Tween, SScriptCallback OnFinished);
 
         /** Transition, Ease and Delay all apply to the step that was added last. */
         FUNCTION()

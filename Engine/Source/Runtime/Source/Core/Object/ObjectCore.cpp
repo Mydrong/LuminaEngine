@@ -11,7 +11,6 @@
 #include "ScriptClass.h"
 #include "ObjectHash.h"
 #include "ObjectIterator.h"
-#include "Assets/AssetManager/AssetManager.h"
 #include "Assets/AssetRegistry/AssetRegistry.h"
 #include "Core/Engine/Engine.h"
 #include "Core/Math/Math.h"
@@ -143,55 +142,6 @@ namespace Lumina
         }
 
         return nullptr;
-    }
-
-    void AsyncLoadObject(const FGuid& GUID, const TFunction<void(CObject*)>& Callback)
-    {
-        Task::AsyncTask(1, 1, [GUID, Callback](uint32, uint32, uint32)
-        {
-            if (CObject* Existing = FindObjectImpl(GUID))
-            {
-                MainThread::Enqueue([Existing, Callback]
-                {
-                    Callback(Existing);
-                });
-                return;
-            }
-
-            if (const FAssetData* Data = FAssetRegistry::Get().GetAssetByGUID(GUID))
-            {
-                if (CPackage* Package = CPackage::LoadPackage(Data->Path))
-                {
-                    if (CObject* Object = Package->LoadObject(GUID))
-                    {
-                        MainThread::Enqueue([Object, Callback]
-                        {
-                            Callback(Object);
-                        });
-                    }
-                }
-            }
-        });
-    }
-
-    void AsyncLoadObject(const FName& Name, const TFunction<void(CObject*)>& Callback)
-    {
-        Task::AsyncTask(1, 1, [Name, Callback](uint32, uint32, uint32)
-        {
-            if (const FAssetData* Data = FAssetRegistry::Get().GetAssetByPath(Name.c_str()))
-            {
-                if (CPackage* Package = CPackage::LoadPackage(Data->Path))
-                {
-                    if (CObject* Object = Package->LoadObject(Data->AssetGUID))
-                    {
-                        MainThread::Enqueue([Object, Callback]
-                        {
-                            Callback(Object);
-                        });
-                    }
-                }
-            }
-        });
     }
 
     CObject* StaticLoadObject(FStringView Name)

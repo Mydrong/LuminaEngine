@@ -12,6 +12,7 @@
 #include "Core/Object/InstancedStruct.h"
 #include "Core/Object/ObjectIterator.h"
 #include "Assets/AssetTypes/Mesh/Animation/Animation.h"
+#include "Assets/AssetTypes/Mesh/SkeletalMesh/SkeletalMesh.h"
 #include "Assets/AssetTypes/Mesh/Skeleton/Skeleton.h"
 #include "Tools/UI/ImGui/ImGuiFonts.h"
 #include "Tools/UI/ImGui/ImGuiX.h"
@@ -109,18 +110,47 @@ namespace Lumina
 
         CameraState.Speed = 5.0f;
 
-        MeshEntity = World->ConstructEntity("MeshEntity");
-        World->EmplaceComponent<SSkeletalMeshComponent>(MeshEntity).SetSkeletalMesh(Animation->Skeleton->PreviewMesh.Get());
-        SSimpleAnimationComponent& AnimComp = World->EmplaceComponent<SSimpleAnimationComponent>(MeshEntity);
-        AnimComp.Animation = Animation;
-        AnimComp.bPlaying  = false;
-        AnimComp.bLooping  = bLooping;
+        CreatePreviewEntity();
+        if (MeshEntity == ECS::NullEntity)
+        {
+            return;
+        }
 
         STransformComponent& MeshTransform = World->GetComponent<STransformComponent>(MeshEntity);
         STransformComponent& EditorTransform = World->GetComponent<STransformComponent>(EditorEntity);
 
         FQuat Rotation = Math::FindLookAtRotation(MeshTransform.GetLocation() + FVector3(0.0f, 0.85f, 0.0f), EditorTransform.GetLocation());
         EditorTransform.SetRotation(Rotation);
+    }
+
+    void FAnimationEditorTool::CreatePreviewEntity()
+    {
+        CAnimation* Animation = GetAsset<CAnimation>();
+        float PreviousTime = 0.0f;
+        if (const SSimpleAnimationComponent* Previous = GetPreviewComponent())
+        {
+            PreviousTime = Previous->CurrentTime;
+        }
+
+        if (MeshEntity != ECS::NullEntity)
+        {
+            World->DestroyEntity(MeshEntity);
+            MeshEntity = ECS::NullEntity;
+        }
+
+        CSkeletalMesh* PreviewMesh = Animation != nullptr ? PreviewMeshSelection.Resolve(Animation->Skeleton.Get()) : nullptr;
+        if (PreviewMesh == nullptr)
+        {
+            return;
+        }
+
+        MeshEntity = World->ConstructEntity("MeshEntity");
+        World->EmplaceComponent<SSkeletalMeshComponent>(MeshEntity).SetSkeletalMesh(PreviewMesh);
+        SSimpleAnimationComponent& AnimComp = World->EmplaceComponent<SSimpleAnimationComponent>(MeshEntity);
+        AnimComp.Animation   = Animation;
+        AnimComp.bPlaying    = false;
+        AnimComp.bLooping    = bLooping;
+        AnimComp.CurrentTime = PreviousTime;
     }
 
     void FAnimationEditorTool::Update(const FUpdateContext& UpdateContext)
@@ -345,6 +375,12 @@ namespace Lumina
             DrawSkeletonDebugMenuItems();
             ImGui::EndMenu();
         }
+
+        CAnimation* Animation = GetAsset<CAnimation>();
+        if (PreviewMeshSelection.DrawMenu(Animation != nullptr ? Animation->Skeleton.Get() : nullptr))
+        {
+            CreatePreviewEntity();
+        }
     }
 
     void FAnimationEditorTool::InitializeDockingLayout(ImGuiID InDockspaceID, const ImVec2& InDockspaceSize) const
@@ -381,7 +417,7 @@ namespace Lumina
         SSimpleAnimationComponent* AnimComp = GetPreviewComponent();
         if (AnimComp == nullptr)
         {
-            ImGui::TextDisabled("No preview mesh - assign a Skeleton with a Preview Mesh to scrub this clip.");
+            ImGui::TextDisabled("No preview mesh. Assign a skeleton, then pick a mesh from the Preview Mesh menu to scrub this clip.");
             return;
         }
 

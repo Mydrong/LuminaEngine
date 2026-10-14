@@ -23,7 +23,7 @@ namespace Lumina
         FVector3               BoundsMin = FVector3( FLT_MAX);
         FVector3               BoundsMax = FVector3(-FLT_MAX);
 
-        FNavBuildSettings       Settings;
+        SNavBuildSettings       Settings;
     };
 
     /** Passed to FNavMesh::Initialize. */
@@ -39,7 +39,7 @@ namespace Lumina
 
         int32                   MaxTiles = 0;
         int32                   MaxPolysPerTile = 0;
-        TVector<FNavTileData>   Tiles;
+        TVector<SNavTileData>   Tiles;
     };
 
     /** Async bake handle; cancellation is cooperative. */
@@ -70,12 +70,12 @@ namespace Lumina
         RUNTIME_API bool BakeSync(FNavBuildInput Input, FNavBuildOutput& Out);
 
         /** Single-tile rebake aligned to BaseLayout's grid (used for hot-swap). */
-        RUNTIME_API bool BakeSingleTile(const FNavBuildInput& Input, const FNavBuildOutput& BaseLayout, int32 TX, int32 TY, FNavTileData& Out);
+        RUNTIME_API bool BakeSingleTile(const FNavBuildInput& Input, const FNavBuildOutput& BaseLayout, int32 TX, int32 TY, SNavTileData& Out);
 
         /** Batch rebake aligned to BaseLayout's grid. Bins the input once and bakes the tiles in
          *  parallel, so a batch costs one pass over the geometry rather than one per tile.
          *  Out is resized to Coords; a tile that failed to bake is left with an empty blob. */
         RUNTIME_API void BakeTiles(const FNavBuildInput& Input, const FNavBuildOutput& BaseLayout,
-                                   const TVector<FNavTileCoord>& Coords, TVector<FNavTileData>& Out);
+                                   const TVector<FNavTileCoord>& Coords, TVector<SNavTileData>& Out);
     }
 }

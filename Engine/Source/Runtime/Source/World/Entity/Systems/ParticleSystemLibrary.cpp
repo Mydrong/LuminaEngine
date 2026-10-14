@@ -62,7 +62,7 @@ namespace Lumina
         return Spawned;
     }
 
-    void CParticleSystemLibrary::GetCollisions(CWorld* World, ECS::FEntity Entity, int32 EmitterIndex, TVector<FParticleCollision>& OutCollisions)
+    void CParticleSystemLibrary::GetCollisions(CWorld* World, ECS::FEntity Entity, int32 EmitterIndex, TVector<SParticleCollision>& OutCollisions)
     {
         if (World == nullptr)
         {
@@ -75,7 +75,7 @@ namespace Lumina
             return;
         }
 
-        for (const FParticleCollision& Hit : Effect->Collisions)
+        for (const SParticleCollision& Hit : Effect->Collisions)
         {
             if (EmitterIndex < 0 || Hit.EmitterIndex == EmitterIndex)
             {

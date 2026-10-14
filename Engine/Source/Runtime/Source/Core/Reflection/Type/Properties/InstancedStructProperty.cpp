@@ -5,6 +5,7 @@
 #include "Core/Object/Class.h"
 #include "Core/Object/InstancedStruct.h"
 #include "Core/Object/ObjectCore.h"
+#include "Scripting/ScriptTypeRegistry.h"
 
 namespace Lumina
 {
@@ -50,7 +51,7 @@ namespace Lumina
         else
         {
             CStruct* Type = Instance->GetScriptStruct();
-            FName StructKey = Type ? InstancedStructKey(Type) : NAME_None;
+            FName StructKey = Type ? StructIdentity(Type) : NAME_None;
             Ar << StructKey;
 
             if (Type != nullptr)
@@ -82,7 +83,7 @@ namespace Lumina
         else
         {
             CStruct* Type = Instance->GetScriptStruct();
-            FName StructKey = Type ? InstancedStructKey(Type) : NAME_None;
+            FName StructKey = Type ? StructIdentity(Type) : NAME_None;
             Record << StructuredArchive::TNamedValue<FName>("StructType", StructKey);
 
             if (Type != nullptr)

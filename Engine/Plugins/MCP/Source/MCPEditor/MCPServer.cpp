@@ -4,6 +4,7 @@
 #include "Agent/AgentToolMarshal.h"
 #include "Agent/AgentToolRegistry.h"
 #include "Agent/AgentToolSchema.h"
+#include "Containers/Algorithm.h"
 #include "Core/Reflection/Type/LuminaTypes.h"
 #include "Log/Log.h"
 #include "MCPAnimGraphTools.h"
@@ -153,10 +154,19 @@ namespace Lumina::MCP
         }
 
         Transport.Stop();
+        KeptLoaded.clear();
 
         UnregisterEditorSessionTools();
         Dispatcher.UnregisterOwner(GOwner);
         Agent::FToolRegistry::Get().UnregisterOwner(GOwner);
+    }
+
+    void FServer::KeepLoaded(CObject* Object)
+    {
+        if (Object != nullptr && !Algo::AnyOf(KeptLoaded, [Object](const TStrongObjectPtr<CObject>& Kept) { return Kept.Get() == Object; }))
+        {
+            KeptLoaded.emplace_back(Object);
+        }
     }
 
     void FServer::RegisterProtocolMethods()

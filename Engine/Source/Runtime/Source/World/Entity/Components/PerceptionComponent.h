@@ -78,7 +78,7 @@ namespace Lumina
 
         /** Only sources whose AffiliationTags match any of these are sensed. Empty = sense everyone. */
         PROPERTY(Editable, Category = "AI|Perception")
-        FGameplayTagContainer DetectableTags;
+        SGameplayTagContainer DetectableTags;
 
         //~ Sight
         PROPERTY(Editable, Category = "AI|Perception|Sight")

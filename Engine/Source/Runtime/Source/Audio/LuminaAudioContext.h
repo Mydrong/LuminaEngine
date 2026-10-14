@@ -28,40 +28,40 @@ namespace Lumina
 
 		void Update() override;
 
-		FAudioHandle PlayAudio(const TSharedPtr<FAudioData>& Data, const FAudioPlayParams& Params) override;
-		FAudioHandle PlayFile(FStringView File, const FAudioPlayParams& Params) override;
-		FAudioHandle PlayProceduralStream(TSharedPtr<FProceduralAudioStream> Stream, const FAudioPlayParams& Params) override;
-		FAudioHandle PlayAudioGraph(TSharedPtr<FAudioGraphInstance> Instance, const FAudioPlayParams& Params) override;
+		SAudioHandle PlayAudio(const TSharedPtr<FAudioData>& Data, const SAudioPlayParams& Params) override;
+		SAudioHandle PlayFile(FStringView File, const SAudioPlayParams& Params) override;
+		SAudioHandle PlayProceduralStream(TSharedPtr<FProceduralAudioStream> Stream, const SAudioPlayParams& Params) override;
+		SAudioHandle PlayAudioGraph(TSharedPtr<FAudioGraphInstance> Instance, const SAudioPlayParams& Params) override;
 
-		bool SetGraphFloatParameter(FAudioHandle Handle, const FName& Name, float Value) override;
-		bool SetGraphIntParameter(FAudioHandle Handle, const FName& Name, int32 Value) override;
-		bool SetGraphBoolParameter(FAudioHandle Handle, const FName& Name, bool Value) override;
-		bool TriggerGraphParameter(FAudioHandle Handle, const FName& Name) override;
-		float GetGraphFloatOutput(FAudioHandle Handle, const FName& Name) const override;
-		uint32 GetGraphTriggerOutputCount(FAudioHandle Handle, const FName& Name) const override;
+		bool SetGraphFloatParameter(SAudioHandle Handle, const FName& Name, float Value) override;
+		bool SetGraphIntParameter(SAudioHandle Handle, const FName& Name, int32 Value) override;
+		bool SetGraphBoolParameter(SAudioHandle Handle, const FName& Name, bool Value) override;
+		bool TriggerGraphParameter(SAudioHandle Handle, const FName& Name) override;
+		float GetGraphFloatOutput(SAudioHandle Handle, const FName& Name) const override;
+		uint32 GetGraphTriggerOutputCount(SAudioHandle Handle, const FName& Name) const override;
 
-		void StopSound(FAudioHandle Handle, EAudioStopMode Mode, float FadeSeconds) override;
+		void StopSound(SAudioHandle Handle, EAudioStopMode Mode, float FadeSeconds) override;
 		void StopAllSounds(EAudioStopMode Mode, float FadeSeconds) override;
 
-		void SetVolume(FAudioHandle Handle, float Volume) override;
-		void SetPitch(FAudioHandle Handle, float Pitch) override;
-		void SetLooping(FAudioHandle Handle, bool bLooping) override;
-		void SetPosition(FAudioHandle Handle, FVector3 Position) override;
-		void SetVelocity(FAudioHandle Handle, FVector3 Velocity) override;
-		void SetDirection(FAudioHandle Handle, FVector3 Direction) override;
-		void SetAttenuation(FAudioHandle Handle, const SAudioAttenuation& Attenuation) override;
-		void SetMinMaxDistance(FAudioHandle Handle, float MinDistance, float MaxDistance) override;
-		void SetPan(FAudioHandle Handle, float Pan) override;
-		void SetPaused(FAudioHandle Handle, bool bPaused) override;
-		void SetBus(FAudioHandle Handle, EAudioBus Bus) override;
-		void SetPriority(FAudioHandle Handle, uint8 Priority) override;
-		void SetOcclusion(FAudioHandle Handle, float Amount, float LowPassFrequency, float VolumeAttenuation) override;
-		void SetLowPassCutoff(FAudioHandle Handle, float CutoffHz) override;
-		void FadeTo(FAudioHandle Handle, float Volume, float Seconds) override;
-		void SeekToFrame(FAudioHandle Handle, uint64 Frame) override;
+		void SetVolume(SAudioHandle Handle, float Volume) override;
+		void SetPitch(SAudioHandle Handle, float Pitch) override;
+		void SetLooping(SAudioHandle Handle, bool bLooping) override;
+		void SetPosition(SAudioHandle Handle, FVector3 Position) override;
+		void SetVelocity(SAudioHandle Handle, FVector3 Velocity) override;
+		void SetDirection(SAudioHandle Handle, FVector3 Direction) override;
+		void SetAttenuation(SAudioHandle Handle, const SAudioAttenuation& Attenuation) override;
+		void SetMinMaxDistance(SAudioHandle Handle, float MinDistance, float MaxDistance) override;
+		void SetPan(SAudioHandle Handle, float Pan) override;
+		void SetPaused(SAudioHandle Handle, bool bPaused) override;
+		void SetBus(SAudioHandle Handle, EAudioBus Bus) override;
+		void SetPriority(SAudioHandle Handle, uint8 Priority) override;
+		void SetOcclusion(SAudioHandle Handle, float Amount, float LowPassFrequency, float VolumeAttenuation) override;
+		void SetLowPassCutoff(SAudioHandle Handle, float CutoffHz) override;
+		void FadeTo(SAudioHandle Handle, float Volume, float Seconds) override;
+		void SeekToFrame(SAudioHandle Handle, uint64 Frame) override;
 
-		EAudioVoiceState GetVoiceState(FAudioHandle Handle) const override;
-		uint64 GetPlaybackFrame(FAudioHandle Handle) const override;
+		EAudioVoiceState GetVoiceState(SAudioHandle Handle) const override;
+		uint64 GetPlaybackFrame(SAudioHandle Handle) const override;
 		uint32 GetActiveVoiceCount() const override { return ActiveVoices.load(Atomic::MemoryOrderRelaxed); }
 		uint32 GetMaxVoiceCount() const override { return MaxActiveVoices.load(Atomic::MemoryOrderRelaxed); }
 		uint64 GetDroppedVoiceCount() const override { return DroppedVoices.load(Atomic::MemoryOrderRelaxed); }
@@ -105,8 +105,8 @@ namespace Lumina
 		/** A play request carrying shared pointers, so it rides a side queue rather than the flat commands. */
 		struct FPendingPlay
 		{
-			FAudioHandle     Handle;
-			FAudioPlayParams Params;
+			SAudioHandle     Handle;
+			SAudioPlayParams Params;
 			FString          Path;
 
 			TSharedPtr<FAudioData>             Data;
@@ -125,7 +125,7 @@ namespace Lumina
 			uint32 Generation = 0;
 		};
 
-		bool AcquireVoiceSlot(uint8 Priority, FAudioHandle& OutHandle);
+		bool AcquireVoiceSlot(uint8 Priority, SAudioHandle& OutHandle);
 		void ReleaseVoiceSlot(uint32 Slot, uint32 Generation);
 		void ResetVoiceSlots();
 
@@ -144,11 +144,11 @@ namespace Lumina
 
 		void PostToMixer(const FAudioCommand& Cmd);
 
-		TSharedPtr<FAudioGraphInstance> FindGraphInstance(FAudioHandle Handle) const;
-		void ForgetGraphInstance(FAudioHandle Handle);
+		TSharedPtr<FAudioGraphInstance> FindGraphInstance(SAudioHandle Handle) const;
+		void ForgetGraphInstance(SAudioHandle Handle);
 		void SweepGraphInstances();
 
-		static uint64 MakeGraphKey(FAudioHandle Handle) { return ((uint64)Handle.Generation << 32) | Handle.Index; }
+		static uint64 MakeGraphKey(SAudioHandle Handle) { return ((uint64)Handle.Generation << 32) | Handle.Index; }
 
 		// Sits between the device and the mixer, so an offline render can take the mixer from the realtime thread.
 		class FDeviceRouter final : public IAudioRenderCallback

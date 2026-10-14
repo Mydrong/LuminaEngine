@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Text;
 using LuminaSharp.ScriptProperties;
 using Microsoft.CodeAnalysis;
@@ -8,33 +9,10 @@ using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 namespace LuminaSharp;
 
-/// <summary>
-/// Rewrites <c>[Property] public float Speed = 5.0f;</c> into a property whose accessors read and write the
-/// NATIVE storage the engine minted for that member, and moves the initializer to where a default belongs.
-///
-/// Why a rewriter and not a source generator. A script property's value has to live in native memory: it is
-/// what the inspector, the tagged serializer, undo, prefab overrides and replication all read, and they read
-/// it through a pointer at <c>Container + Offset</c> while the managed instance may not even exist yet. So the
-/// C# side must go through that pointer, which a field cannot do -- only an accessor can. A source generator
-/// may only ADD members, never replace one, which is what forced the author to write
-/// <c>public partial float Speed { get; set; }</c> and left nowhere to put a default (a partial property may
-/// not have an initializer).
-///
-/// None of that constrains US, because the engine compiles scripts itself: <see cref="ScriptCompiler"/> owns
-/// the syntax trees before they are compiled, and the assembly it emits is the only one ever loaded -- the
-/// generated .csproj is IntelliSense-only, and packaging stages this compiler's output. So the field is simply
-/// turned into the property it needs to be, and the author writes ordinary C#.
-///
-/// The initializer becomes a default rather than a constructor store. A constructor store would run when the
-/// managed wrapper is created, which is AFTER the native object has been loaded from a scene -- it would
-/// overwrite every authored value with the declared default. Instead each class gets a generated
-/// <c>__ApplyScriptDefaults</c> which the engine runs once against the class default object; every instance is
-/// then copied from that, exactly as a C++ class gets its defaults from its constructor via its CDO.
-/// </summary>
+// Turns each stored field into a property over its native storage, and its initializer into a default run once against the CDO.
 internal static class ScriptPropertyRewriter
 {
-    /// <summary>Rewrites one tree against a compilation used only to classify member types. Returns the tree
-    /// unchanged when it declares no fields needing native storage.</summary>
+    // Rewrites one tree against a compilation used only to classify member types, unchanged when nothing needs native storage.
     public static SyntaxTree Rewrite(CSharpCompilation Probe, SyntaxTree Tree, List<string> OutErrors)
     {
         SyntaxNode Root = Tree.GetRoot();
@@ -52,8 +30,7 @@ internal static class ScriptPropertyRewriter
             return Tree;
         }
 
-        // The original path is kept so #line directives (emitted per member) resolve, and so a diagnostic
-        // Roslyn raises anywhere else in the file still names the file the author wrote.
+        // The original path is kept, so #line directives resolve and every other diagnostic still names the author's file.
         return CSharpSyntaxTree.Create((CSharpSyntaxNode)Rewritten, (CSharpParseOptions?)Tree.Options, Tree.FilePath, Encoding.UTF8);
     }
 
@@ -98,6 +75,10 @@ internal static class ScriptPropertyRewriter
         private readonly INamedTypeSymbol? NativeObjectSymbol;
         private readonly INamedTypeSymbol? EntityScriptSymbol;
 
+        // How an accessor reaches its owner's memory, the base wrapper's handle for a class and its own for a script struct.
+        private string SelfHandle = "base.Handle";
+        private bool bStructOwner;
+
         public Rewriter(SemanticModel Model, string FilePath, List<string> Errors)
         {
             this.Model = Model;
@@ -117,6 +98,138 @@ internal static class ScriptPropertyRewriter
                 return base.VisitClassDeclaration(Node);
             }
             return RewriteClass(Node, Stored, Rpcs);
+        }
+
+        // A [Reflect] struct extending a native struct or stored as a component is a handle over memory native mints from its fields.
+        public override SyntaxNode? VisitStructDeclaration(StructDeclarationSyntax Node)
+        {
+            if (Model.GetDeclaredSymbol(Node) is not INamedTypeSymbol Symbol || !IsNativeBackedStruct(Symbol))
+            {
+                return base.VisitStructDeclaration(Node);
+            }
+
+            string Where = $"{FilePath}({Line(Node)}): script struct '{Symbol.Name}'";
+            if (!Node.Modifiers.Any(SyntaxKind.PartialKeyword))
+            {
+                Errors.Add($"{Where} must be partial, since the engine adds the handle it views native memory through.");
+                return Node;
+            }
+
+            var Stored = new List<FStoredMember>();
+            foreach (MemberDeclarationSyntax Member in Node.Members)
+            {
+                if (Member is not FieldDeclarationSyntax Field || Field.Modifiers.Any(SyntaxKind.StaticKeyword) || Field.Modifiers.Any(SyntaxKind.ConstKeyword))
+                {
+                    continue;
+                }
+                if (!MayNeedNativeStorage(Field.AttributeLists) || !IsStored(Field, bNativeBacked: true))
+                {
+                    Errors.Add($"{FilePath}({Line(Field)}): '{Field.Declaration.Variables.First().Identifier.Text}' in script struct '{Symbol.Name}' "
+                             + "has no [Property]. A script struct is a view over native memory, so every field has to be one the engine stores.");
+                    continue;
+                }
+                foreach (VariableDeclaratorSyntax Declarator in Field.Declaration.Variables)
+                {
+                    if (Model.GetDeclaredSymbol(Declarator) is IFieldSymbol FieldSymbol)
+                    {
+                        Stored.Add(new FStoredMember
+                        {
+                            Declaration = Field,
+                            At = Declarator,
+                            Symbol = FieldSymbol,
+                            Type = FieldSymbol.Type,
+                            Initializer = Declarator.Initializer,
+                            bReadOnly = FieldSymbol.IsReadOnly,
+                        });
+                    }
+                }
+            }
+            if (Errors.Count > 0)
+            {
+                return Node;
+            }
+
+            string PreviousHandle = SelfHandle;
+            bool bPreviousStruct = bStructOwner;
+            SelfHandle = "Handle";
+            bStructOwner = true;
+            try
+            {
+                return RewriteScriptStruct(Node, Symbol, Stored);
+            }
+            finally
+            {
+                SelfHandle = PreviousHandle;
+                bStructOwner = bPreviousStruct;
+            }
+        }
+
+        private static bool IsNativeBackedStruct(INamedTypeSymbol Symbol)
+        {
+            bool bReflected = Symbol.GetAttributes().Any(Data => Data.AttributeClass?.ToDisplayString() == "LuminaSharp.ReflectAttribute");
+            bool bHandle = Symbol.AllInterfaces.Any(Interface => Interface.OriginalDefinition.ToDisplayString() is "LuminaSharp.IExtends<TBase>" or "LuminaSharp.IComponent<TSelf>");
+            return bReflected && bHandle;
+        }
+
+        private SyntaxNode RewriteScriptStruct(StructDeclarationSyntax Node, INamedTypeSymbol Symbol, List<FStoredMember> Stored)
+        {
+            string TypeName = Symbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+            var Replacements = new Dictionary<MemberDeclarationSyntax, List<MemberDeclarationSyntax>>();
+            var Defaults = new List<string>();
+
+            foreach (FStoredMember Member in Stored)
+            {
+                string MemberName = Member.Symbol.Name;
+                FScriptPropertyClassification Classification = ScriptPropertyClassifier.Classify(Member.Type);
+                if (!Classification.IsSupported)
+                {
+                    Errors.Add($"{FilePath}({Line(Member.At)}): [Property] '{MemberName}' has type '{Member.Type.ToDisplayString()}': {Classification.Rejection}");
+                    continue;
+                }
+                if (HasAttributeNamed(Member.Declaration.AttributeLists, "Sync"))
+                {
+                    Errors.Add($"{FilePath}({Line(Member.At)}): [Sync] '{MemberName}' is on a script struct, which has no entity to replicate through.");
+                    continue;
+                }
+                if (Classification.IsView && Member.Initializer != null)
+                {
+                    Errors.Add($"{FilePath}({Line(Member.At)}): [Property] '{MemberName}' is a container. It is a view over the native storage, so it cannot be initialized.");
+                    continue;
+                }
+                if (Member.Initializer != null)
+                {
+                    Defaults.Add($"__Self.{MemberName} = {Member.Initializer.Value};");
+                }
+                (CollectionsMarshal.GetValueRefOrAddDefault(Replacements, Member.Declaration, out _) ??= new()).AddRange(BuildProperty(Member, TypeName, Classification));
+            }
+            if (Errors.Count > 0)
+            {
+                return Node;
+            }
+
+            // ScriptStructGenerator adds the handle itself, so only the defaults are left to write here.
+            var Handle = new StringBuilder();
+            Handle.AppendLine("internal static void __ApplyScriptDefaults(global::LuminaSharp.NativeRef Ref)");
+            Handle.AppendLine("{");
+            Handle.Append("    ").Append(TypeName).Append(" __Self = new ").Append(TypeName).AppendLine("(Ref);");
+            foreach (string Assignment in Defaults)
+            {
+                Handle.Append("    ").AppendLine(Assignment);
+            }
+            Handle.AppendLine("}");
+
+            var Members = new List<MemberDeclarationSyntax>(ParseMembers(Handle.ToString()));
+            foreach (MemberDeclarationSyntax Member in Node.Members)
+            {
+                if (Replacements.TryGetValue(Member, out List<MemberDeclarationSyntax>? Built))
+                {
+                    Members.AddRange(Built);
+                    continue;
+                }
+                Members.Add(Member);
+            }
+
+            return Node.WithMembers(SyntaxFactory.List(Members));
         }
 
         // One member whose value lives in native storage, a field declarator or an auto-property.
@@ -257,12 +370,7 @@ internal static class ScriptPropertyRewriter
                     Defaults.Add($"{Name} = {Member.Initializer.Value};");
                 }
 
-                if (!Replacements.TryGetValue(Member.Declaration, out List<MemberDeclarationSyntax>? Built))
-                {
-                    Built = new List<MemberDeclarationSyntax>();
-                    Replacements[Member.Declaration] = Built;
-                }
-                Built.AddRange(BuildProperty(Member, TypeName, Classification));
+                (CollectionsMarshal.GetValueRefOrAddDefault(Replacements, Member.Declaration, out _) ??= new()).AddRange(BuildProperty(Member, TypeName, Classification));
             }
 
             if (Errors.Count > 0)
@@ -270,8 +378,7 @@ internal static class ScriptPropertyRewriter
                 return Node;
             }
 
-            // The declared order is preserved: each field is replaced in place by its property, so the
-            // inspector's row order still follows the source.
+            // Each field is replaced in place by its property, so the inspector's rows keep the source order.
             var RpcBodies = new Dictionary<MethodDeclarationSyntax, MethodDeclarationSyntax>();
             foreach (FRpcMethod Rpc in Rpcs)
             {
@@ -416,11 +523,7 @@ internal static class ScriptPropertyRewriter
 
 
 
-        /// <summary>
-        /// The property replacing one field. Wrapped in #line directives pointing back at the field, so a
-        /// stack trace, a breakpoint and any later diagnostic in the file still name the line the author
-        /// wrote rather than an offset into generated text.
-        /// </summary>
+        // The property replacing one field, wrapped in #line directives so traces and breakpoints name the line the author wrote.
         private IEnumerable<MemberDeclarationSyntax> BuildProperty(FStoredMember Member, string TypeName, FScriptPropertyClassification Classification)
         {
             string Name = Member.Symbol.Name;
@@ -437,54 +540,55 @@ internal static class ScriptPropertyRewriter
             switch (Classification.Access)
             {
                 case EScriptAccess.Blittable:
-                    Get = $"global::System.Runtime.CompilerServices.Unsafe.ReadUnaligned<{Type}>((void*)((nint)Handle + {Offset}))";
-                    Set = $"global::System.Runtime.CompilerServices.Unsafe.WriteUnaligned((void*)((nint)Handle + {Offset}), value)";
+                    Get = $"global::System.Runtime.CompilerServices.Unsafe.ReadUnaligned<{Type}>((void*)((nint){SelfHandle} + {Offset}))";
+                    Set = $"global::System.Runtime.CompilerServices.Unsafe.WriteUnaligned((void*)((nint){SelfHandle} + {Offset}), value)";
                     break;
 
                 // The minted enum property is its underlying type's width, so the enum is read in place.
                 case EScriptAccess.Enum:
-                    Get = $"global::System.Runtime.CompilerServices.Unsafe.ReadUnaligned<{Type}>((void*)((nint)Handle + {Offset}))";
-                    Set = $"global::System.Runtime.CompilerServices.Unsafe.WriteUnaligned((void*)((nint)Handle + {Offset}), value)";
+                    Get = $"global::System.Runtime.CompilerServices.Unsafe.ReadUnaligned<{Type}>((void*)((nint){SelfHandle} + {Offset}))";
+                    Set = $"global::System.Runtime.CompilerServices.Unsafe.WriteUnaligned((void*)((nint){SelfHandle} + {Offset}), value)";
                     break;
 
                 // A string member makes the native value a different shape from the managed one, so it crosses field by field.
                 case EScriptAccess.MarshalledStruct:
-                    Get = $"global::LuminaSharp.ScriptStructMarshal<{Type}>.Read((nint)Handle + {Offset})";
-                    Set = $"global::LuminaSharp.ScriptStructMarshal<{Type}>.Write((nint)Handle + {Offset}, value)";
+                    Get = $"global::LuminaSharp.ScriptStructMarshal<{Type}>.Read((nint){SelfHandle} + {Offset})";
+                    Set = $"global::LuminaSharp.ScriptStructMarshal<{Type}>.Write((nint){SelfHandle} + {Offset}, value)";
                     break;
 
                 case EScriptAccess.String:
-                    Get = $"global::LuminaSharp.NativeMarshal.ReadString((nint)Handle + {Offset})";
-                    Set = $"global::LuminaSharp.Native.PropSetString(Handle, {Token}, value)";
+                    Get = $"global::LuminaSharp.NativeMarshal.ReadString((nint){SelfHandle} + {Offset})";
+                    Set = $"global::LuminaSharp.Native.StringAssign((nint){SelfHandle} + {Offset}, value)";
                     Unbound = "\"\"";
                     break;
 
-                // Every asset-reference type is stored natively as one FSoftObjectPath, so all of them go
-                // through the path. Routed by the ISoftObjectReference interface rather than by type name: a new
-                // asset-reference type implements it and needs nothing here.
+                // Every asset reference is stored natively as an FSoftObjectPath, routed by its interface so a new reference type needs nothing here.
                 case EScriptAccess.AssetPath:
                     Get = $"global::LuminaSharp.SoftObjectReferenceMarshal.Read<{Type}>("
-                        + $"global::LuminaSharp.Native.PropGetAssetPath(Handle, {Token}))";
-                    Set = $"global::LuminaSharp.Native.PropSetAssetPath(Handle, {Token}, "
+                        + $"global::LuminaSharp.Native.SoftPathGet((nint){SelfHandle} + {Offset}))";
+                    Set = $"global::LuminaSharp.Native.SoftPathSet((nint){SelfHandle} + {Offset}, "
                         + $"global::LuminaSharp.SoftObjectReferenceMarshal.Write(value))";
                     break;
 
-                // The canonical wrapper, so reading twice returns the same instance and reference equality
-                // means what a script author expects.
-                // Through NativeObjectMarshal, not Wrapper<T> and value.Handle directly: both are internal or
-                // protected, so generated code in the USER's assembly cannot reach them.
+                // The canonical wrapper through NativeObjectMarshal, which the user's assembly can reach where Wrapper<T> is internal.
                 case EScriptAccess.Object:
                     Get = $"global::LuminaSharp.NativeObjectMarshal.FromHandle<{Type}>("
-                        + $"global::LuminaSharp.Native.PropGetObject(Handle, {Token}))";
-                    Set = $"global::LuminaSharp.Native.PropSetObject(Handle, {Token}, "
+                        + $"global::LuminaSharp.Native.GetObjectPtr((nint){SelfHandle} + {Offset}))";
+                    Set = $"global::LuminaSharp.Native.SetObjectPtr((nint){SelfHandle} + {Offset}, "
                         + "global::LuminaSharp.NativeObjectMarshal.ToHandle(value))";
                     break;
 
-                // A hard object reference. Stored natively as an object property (the same as a C++
-                // TStrongObjectPtr), so it keeps its target alive; the value is just the pointer.
+                // A handle on the embedded struct, so edits through it land in the owner's storage.
+                case EScriptAccess.NativeStruct:
+                    Get = $"global::LuminaSharp.NativeStructs.FromAddress<{Type}>((nint){SelfHandle} + {Offset})";
+                    Set = $"global::LuminaSharp.Native.PropCopyStruct({SelfHandle}, {Token}, "
+                        + "global::LuminaSharp.NativeStructs.AddressOf(value))";
+                    break;
+
+                // A strong object reference, stored natively as an object property so it keeps its target alive.
                 case EScriptAccess.ObjectPtr:
-                    Get = $"new {Type}(global::LuminaSharp.Native.PropGetObject(Handle, {Token}))";
-                    Set = $"global::LuminaSharp.Native.PropSetObject(Handle, {Token}, value.NativeHandle)";
+                    Get = $"new {Type}(global::LuminaSharp.Native.GetObjectPtr((nint){SelfHandle} + {Offset}))";
+                    Set = $"global::LuminaSharp.Native.SetObjectPtr((nint){SelfHandle} + {Offset}, value.NativeHandle)";
                     break;
 
                 case EScriptAccess.MapView:
@@ -492,23 +596,20 @@ internal static class ScriptPropertyRewriter
                     string View = $"global::Lumina.THashMap<{Qualified(Classification.Key!)}, "
                                 + $"{Qualified(Classification.Value!)}>";
                     Type = View;
-                    Get = $"new {View}((nint)Handle + {Offset}, (nint)global::LuminaSharp.Native.PropMapOps({Token}))";
+                    Get = $"new {View}((nint){SelfHandle} + {Offset}, (nint)global::LuminaSharp.Native.PropMapOps({Token}))";
                     break;
                 }
 
-                // One view for every element flavour -- plain value, FString, TStrongObjectPtr<T>. What differs
-                // per element is how a slot is read and written, and TVector routes that through
-                // ElementMarshal, so nothing here needs to know which it is.
+                // One view for every element kind, since TVector routes each slot's read and write through ElementMarshal.
                 case EScriptAccess.ListView:
                 {
                     string View = $"global::Lumina.TVector<{Qualified(Classification.Element!)}>";
                     Type = View;
-                    Get = $"new {View}((nint)Handle + {Offset}, (nint)global::LuminaSharp.Native.PropVectorOps({Token}))";
+                    Get = $"new {View}((nint){SelfHandle} + {Offset}, (nint)global::LuminaSharp.Native.PropVectorOps({Token}))";
                     break;
                 }
 
-                // Listed rather than folded into a default, so adding a kind to the shared classifier without
-                // teaching this emitter fails loudly here instead of being silently emitted as a TVector.
+                // Listed rather than defaulted, so a kind the classifier gains without this emitter learning it fails loudly.
                 default:
                     Errors.Add($"{FilePath}({Line(Declarator)}): [Property] '{Name}' classified as "
                              + $"{Classification.Access}, which this emitter does not handle. This is an engine bug.");
@@ -517,9 +618,13 @@ internal static class ScriptPropertyRewriter
 
             // Built first, so only the cache the accessors actually reached for gets emitted below.
             var Body = new StringBuilder();
-            // The attributes come across verbatim, and they are not decoration: TypeLibrary discovers a
-            // member BY [Property] at run time, and reads Category/Tooltip/Min/Max off it to build the
-            // inspector row. Dropping them here would compile perfectly and publish nothing.
+
+            // A ref to a cached handle on a class owner, since a setter called on a handle returned by value is a compile error.
+            if (Classification.Access == EScriptAccess.NativeStruct && !bStructOwner)
+            {
+                return BuildStructViewProperty(Member, Type, Offset);
+            }
+            // The attributes carry over verbatim, since TypeLibrary finds the member and its inspector metadata through them.
             foreach (AttributeListSyntax List in Member.Declaration.AttributeLists)
             {
                 // A field-targeted attribute on an auto-property has no backing field left to land on.
@@ -529,10 +634,9 @@ internal static class ScriptPropertyRewriter
                 }
                 Body.AppendLine(List.ToString());
             }
-            Body.Append(Accessibility(Member.Declaration.Modifiers)).Append(' ').Append(Type).Append(' ').AppendLine(Name);
+            Body.Append(MemberModifiers(Member.Declaration.Modifiers)).Append(' ').Append(Type).Append(' ').AppendLine(Name);
             Body.AppendLine("{");
-            // Gated on HasNativeStorage: the schema pass creates one UNBOUND instance per script type purely
-            // to describe it, and reading through a null handle there is an access violation on load.
+            // Gated, since the schema pass describes each type through an unbound instance whose handle is null.
             Body.Append("    get => HasNativeStorage ? ").Append(Get).Append(" : ").Append(Unbound).AppendLine(";");
             bool bSync = HasAttributeNamed(Member.Declaration.AttributeLists, "Sync");
             if (bSync && Classification.IsView)
@@ -566,27 +670,43 @@ internal static class ScriptPropertyRewriter
                 Builder.Append("private static global::LuminaSharp.LazyPropertyToken __lazyprop_").Append(Name).AppendLine(";");
             }
             Builder.Append(BodyText);
-            // Parsed as a class body rather than with ParseMemberDeclaration, which returns only the FIRST
-            // member it finds -- that silently dropped the property and kept just the offset static.
+            // Parsed as a class body, since ParseMemberDeclaration returns only the first member and dropped the property.
             List<MemberDeclarationSyntax> Members = ParseMembers(Builder.ToString()).ToList();
             if (Members.Count == 0)
             {
                 return Members;
             }
 
-            // #line, attached as trivia rather than written into the parsed text: inside a wrapper class the
-            // directive binds to the class's own brace token, so extracting the members drops it silently.
-            //
-            // The first maps the expansion back to the field the author wrote; the second hands the counter
-            // to the line just past it, so every LATER line in the file keeps its real number instead of
-            // drifting by however many lines this expanded to. Without them a stack trace from script code
-            // names the wrong statement.
+            // Attached as trivia so they survive extraction, the first mapping the expansion to the field and the second restoring the real numbering after it.
             const int OneBased = 1;
             const int NextLine = 1;
             Members[0] = Members[0].WithLeadingTrivia(Directive(Line(Declarator)));
             Members[^1] = Members[^1].WithTrailingTrivia(
                 Members[^1].GetTrailingTrivia().AddRange(
                     Directive(Member.Declaration.GetLocation().GetLineSpan().EndLinePosition.Line + OneBased + NextLine)));
+            return Members;
+        }
+
+        private IEnumerable<MemberDeclarationSyntax> BuildStructViewProperty(FStoredMember Member, string Type, string Offset)
+        {
+            string Name = Member.Symbol.Name;
+            var Builder = new StringBuilder();
+            Builder.Append("private static global::LuminaSharp.LazyPropertyOffset __lazyoff_").Append(Name).AppendLine(";");
+            Builder.Append("private ").Append(Type).Append(" __view_").Append(Name).AppendLine(";");
+            foreach (AttributeListSyntax List in Member.Declaration.AttributeLists)
+            {
+                Builder.AppendLine(List.ToString());
+            }
+            Builder.Append(Accessibility(Member.Declaration.Modifiers)).Append(" ref readonly ").Append(Type).Append(' ').AppendLine(Name);
+            Builder.AppendLine("{");
+            Builder.Append("    get { __view_").Append(Name).Append(" = HasNativeStorage ? global::LuminaSharp.NativeStructs.FromAddress<").Append(Type)
+                .Append(">((nint)").Append(SelfHandle).Append(" + ").Append(Offset).Append(") : default; return ref __view_").Append(Name).AppendLine("; }");
+            Builder.AppendLine("}");
+
+            List<MemberDeclarationSyntax> Members = ParseMembers(Builder.ToString()).ToList();
+            Members[0] = Members[0].WithLeadingTrivia(Directive(Line(Member.At)));
+            Members[^1] = Members[^1].WithTrailingTrivia(Members[^1].GetTrailingTrivia().AddRange(
+                Directive(Member.Declaration.GetLocation().GetLineSpan().EndLinePosition.Line + 2)));
             return Members;
         }
 
@@ -602,7 +722,9 @@ internal static class ScriptPropertyRewriter
             AttributeData? Sync = Symbol.GetAttributes().FirstOrDefault(Data => Data.AttributeClass?.Name == "SyncAttribute");
             AttributeData? Change = Symbol.GetAttributes().FirstOrDefault(Data => Data.AttributeClass?.Name == "ChangeAttribute");
 
-            uint Flags = Sync != null && Sync.ConstructorArguments.Length > 0 && Sync.ConstructorArguments[0].Value is uint Raw ? Raw : 0u;
+            // An enum constant arrives as its underlying integer, whatever width the native enum chose.
+            uint Flags = Sync != null && Sync.ConstructorArguments.Length > 0 && Sync.ConstructorArguments[0].Value is System.IConvertible Raw
+                ? System.Convert.ToUInt32(Raw) : 0u;
             bool bFromOwner = (Flags & 1u) != 0;
             double Quantize = 0.0;
             string? Validate = null;
@@ -633,7 +755,7 @@ internal static class ScriptPropertyRewriter
             }
             if (Validate != null && !bFromOwner)
             {
-                Errors.Add($"{Where} names Validate without SyncFlags.FromOwner, and only an owner's write is validated.");
+                Errors.Add($"{Where} names Validate without Lumina.ESyncFlags.FromOwner, and only an owner's write is validated.");
                 return false;
             }
             if (Validate != null && !HasValidator(Symbol.ContainingType, Validate, Member.Type))
@@ -650,7 +772,7 @@ internal static class ScriptPropertyRewriter
             }
             Body.Append("var __old = ").Append(Get).Append("; ").Append(Set)
                 .Append("; if (!global::System.Collections.Generic.EqualityComparer<").Append(Type)
-                .Append(">.Default.Equals(__old, value)) { global::LuminaSharp.SyncRuntime.MarkDirty(Handle); ");
+                .Append(">.Default.Equals(__old, value)) { global::LuminaSharp.SyncRuntime.MarkDirty(this); ");
 
             // Native sends the stored value through the field's FProperty, as it does for a C++ PROPERTY(Sync = FromOwner).
             if (bFromOwner)
@@ -691,15 +813,12 @@ internal static class ScriptPropertyRewriter
 
         private static IEnumerable<MemberDeclarationSyntax> ParseMembers(string Text)
         {
-            // The newlines matter: a #line directive is only recognised at the START of a line, so splicing
-            // the wrapper onto the same line silently demotes it to nothing and the mapping is lost.
+            // The newlines matter, since a #line directive is only recognized at the start of a line.
             CompilationUnitSyntax Unit = SyntaxFactory.ParseCompilationUnit("class __Members__ {\n" + Text + "\n}");
             return Unit.Members.OfType<ClassDeclarationSyntax>().SelectMany(Class => Class.Members);
         }
 
-        /// <summary>The class's declared initializers, replayed against the class default object. Not a
-        /// constructor: the managed wrapper is created AFTER the native object is loaded, so assigning there
-        /// would overwrite every authored value with the declared default.</summary>
+        // The declared initializers replayed against the CDO, not a constructor that would overwrite authored values on load.
         private static IEnumerable<MemberDeclarationSyntax> BuildDefaultsMethod(List<string> Defaults)
         {
             var Builder = new StringBuilder();
@@ -717,8 +836,7 @@ internal static class ScriptPropertyRewriter
 
         private static string Accessibility(SyntaxTokenList DeclaredModifiers)
         {
-            // 'unsafe' because every accessor dereferences the container pointer; the field's own modifiers
-            // (public/internal) carry over so the property is reachable exactly where the field was.
+            // Unsafe because every accessor dereferences the container, the field's access carrying over to the property.
             List<string> Modifiers = DeclaredModifiers
                 .Select(Token => Token.Text)
                 .Where(Text => Text is "public" or "private" or "protected" or "internal" or "new" or "virtual" or "override" or "sealed")
@@ -731,8 +849,13 @@ internal static class ScriptPropertyRewriter
             return string.Join(" ", Modifiers);
         }
 
-        /// <summary>A type argument as the emitted code must spell it: fully qualified, so a view's element
-        /// type resolves the same wherever the user's own usings happen to point.</summary>
+        // A script struct's accessors write native memory rather than the handle, so they run on a readonly copy too.
+        private string MemberModifiers(SyntaxTokenList DeclaredModifiers)
+        {
+            return bStructOwner ? Accessibility(DeclaredModifiers) + " readonly" : Accessibility(DeclaredModifiers);
+        }
+
+        // Fully qualified, so a view's element type resolves wherever the user's own usings point.
         private static string Qualified(ITypeSymbol Type) =>
             Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
     }

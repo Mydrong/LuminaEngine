@@ -26,7 +26,7 @@ namespace Lumina
     // One user-declared input or output of a Custom Slang node. Name becomes a real identifier in the
     // emitted shader block, so it is validated (identifier syntax, keyword, uniqueness) at compile time.
     REFLECT()
-    struct FCustomSlangPin
+    struct SCustomSlangPin
     {
         GENERATED_BODY()
 
@@ -94,11 +94,11 @@ namespace Lumina
 
         /** Declared inputs; each becomes an input pin and a const local your code can read. */
         PROPERTY(Editable, Category = "Custom Slang")
-        TVector<FCustomSlangPin> Inputs;
+        TVector<SCustomSlangPin> Inputs;
 
         /** Declared outputs; each becomes an output pin and a local your code assigns to. */
         PROPERTY(Editable, Category = "Custom Slang")
-        TVector<FCustomSlangPin> Outputs;
+        TVector<SCustomSlangPin> Outputs;
 
         /** Slang statements. Assign to your declared output names; no function definitions or preprocessor. */
         PROPERTY(Editable, Category = "Custom Slang", Multiline)

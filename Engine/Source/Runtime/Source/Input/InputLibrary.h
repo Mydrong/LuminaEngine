@@ -30,7 +30,7 @@ namespace Lumina
 
         /** This frame's evaluated state, zeroed when the name is not an authored action. */
         FUNCTION()
-        static FInputActionState GetActionState(CWorld* World, const FName& Action);
+        static SInputActionState GetActionState(CWorld* World, const FName& Action);
 
         FUNCTION()
         static bool IsActionDown(CWorld* World, const FName& Action);

@@ -13,7 +13,7 @@ namespace Lumina
         // Shared with whatever step captured it, so the managed handle frees when the tween is destroyed.
         using FTweenCallback = TSharedPtr<FScriptCallbackOwner>;
 
-        FTweenCallback TweenLibraryMakeCallback(FScriptCallback Callback)
+        FTweenCallback TweenLibraryMakeCallback(SScriptCallback Callback)
         {
             return MakeShared<FScriptCallbackOwner>(Callback);
         }
@@ -72,7 +72,7 @@ namespace Lumina
         }
     }
 
-    void CTweenLibrary::ValueTo(CWorld* World, uint32 Tween, float From, float To, float Duration, FScriptCallback OnValue)
+    void CTweenLibrary::ValueTo(CWorld* World, uint32 Tween, float From, float To, float Duration, SScriptCallback OnValue)
     {
         FTween Builder;
         if (!ResolveTween(World, Tween, Builder))
@@ -97,7 +97,7 @@ namespace Lumina
         }
     }
 
-    void CTweenLibrary::Call(CWorld* World, uint32 Tween, FScriptCallback OnCall)
+    void CTweenLibrary::Call(CWorld* World, uint32 Tween, SScriptCallback OnCall)
     {
         FTween Builder;
         if (!ResolveTween(World, Tween, Builder))
@@ -110,7 +110,7 @@ namespace Lumina
         Builder.Call([Owner] { Owner->Invoke(0); });
     }
 
-    void CTweenLibrary::OnFinished(CWorld* World, uint32 Tween, FScriptCallback OnFinished)
+    void CTweenLibrary::OnFinished(CWorld* World, uint32 Tween, SScriptCallback OnFinished)
     {
         FTween Builder;
         if (!ResolveTween(World, Tween, Builder))

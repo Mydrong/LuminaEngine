@@ -126,6 +126,63 @@ namespace Lumina::Physics
             return 1.0f;
         }
 
+        float AnyHitCastCallback(b3ShapeId ShapeId, b3Pos, b3Vec3, float, uint64_t, int, int, void* Context)
+        {
+            FQueryContext& Query = *static_cast<FQueryContext*>(Context);
+            if (IsIgnored(Query.IgnoreEntities, EntityOfBody(b3Shape_GetBody(ShapeId))))
+            {
+                return -1.0f;
+            }
+
+            // Zero ends the traversal, since one blocker answers the question.
+            Query.bFound = true;
+            return 0.0f;
+        }
+
+        // Box3D proxies are points plus a radius, so each query shape is a few points around the query position.
+        b3ShapeProxy MakeProxy(const SQueryShape& Shape, b3Vec3 (&Points)[8])
+        {
+            switch (Shape.Type)
+            {
+            case EQueryShapeType::Box:
+                for (int32 i = 0; i < 8; ++i)
+                {
+                    const FVector3 Sign((i & 1) ? 1.0f : -1.0f, (i & 2) ? 1.0f : -1.0f, (i & 4) ? 1.0f : -1.0f);
+                    Points[i] = Box3DUtils::ToB3Vec3(Math::Rotate(Shape.Rotation, Sign * Shape.HalfExtents));
+                }
+                return b3ShapeProxy{ Points, 8, 0.0f };
+            case EQueryShapeType::Capsule:
+            {
+                const FVector3 Axis = Math::Rotate(Shape.Rotation, FVector3(0.0f, Shape.HalfHeight, 0.0f));
+                Points[0] = Box3DUtils::ToB3Vec3(Axis);
+                Points[1] = Box3DUtils::ToB3Vec3(-Axis);
+                return b3ShapeProxy{ Points, 2, Shape.Radius };
+            }
+            default:
+                Points[0] = b3Vec3{ 0.0f, 0.0f, 0.0f };
+                return b3ShapeProxy{ Points, 1, Shape.Radius };
+            }
+        }
+
+        void SortNearToFar(TVector<SRayResult>& Hits)
+        {
+            Algo::Sort(Hits, [](const SRayResult& A, const SRayResult& B) { return A.Fraction < B.Fraction; });
+        }
+
+        // Inline for the common single-shape body, spilling only for a large compound.
+        using FBodyShapes = TFixedVector<b3ShapeId, 8>;
+
+        bool GatherShapes(b3BodyId Body, FBodyShapes& Out)
+        {
+            if (!b3Body_IsValid(Body))
+            {
+                return false;
+            }
+            Out.resize((size_t)b3Body_GetShapeCount(Body));
+            Out.resize((size_t)b3Body_GetShapes(Body, Out.data(), (int)Out.size()));
+            return !Out.empty();
+        }
+
         bool OverlapCallback(b3ShapeId ShapeId, void* Context)
         {
             FQueryContext& Query = *static_cast<FQueryContext*>(Context);
@@ -255,127 +312,158 @@ namespace Lumina::Physics
 
         b3World_CastRay(WorldId, Box3DUtils::ToB3Vec3(Settings.Start), Box3DUtils::ToB3Vec3(Delta),
                         MakeLayerFilter(Settings.LayerMask), &AllHitsCastCallback, &Query);
-
-        Algo::Sort(OutHits, [](const SRayResult& A, const SRayResult& B)
-        {
-            return A.Fraction < B.Fraction;
-        });
+        SortNearToFar(OutHits);
     }
 
-    void FBox3DPhysicsScene::CastSphere(const SSphereCastSettings& Settings, TVector<SRayResult>& OutHits)
+    bool FBox3DPhysicsScene::CastRayAny(const SRayCastSettings& Settings)
+    {
+        const FVector3 Delta = Settings.End - Settings.Start;
+        if (Math::Length(Delta) <= Math::kSmallNumber)
+        {
+            return false;
+        }
+
+        FQueryContext Query;
+        Query.IgnoreEntities = TSpan<const ECS::FEntity>(Settings.IgnoreEntities.data(), Settings.IgnoreEntities.size());
+        b3World_CastRay(WorldId, Box3DUtils::ToB3Vec3(Settings.Start), Box3DUtils::ToB3Vec3(Delta),
+                        MakeLayerFilter(Settings.LayerMask), &AnyHitCastCallback, &Query);
+        return Query.bFound;
+    }
+
+    TOptional<SRayResult> FBox3DPhysicsScene::CastRayAgainst(ECS::FEntity Entity, const FVector3& Start, const FVector3& End)
+    {
+        const FVector3 Delta = End - Start;
+        const float Length = Math::Length(Delta);
+        FBodyShapes Shapes;
+        if (Length <= Math::kSmallNumber || !GatherShapes(ResolveBody(FindEntityBody(Entity)), Shapes))
+        {
+            return {};
+        }
+
+        TOptional<SRayResult> Nearest;
+        for (b3ShapeId Shape : Shapes)
+        {
+            const b3WorldCastOutput Hit = b3Shape_RayCast(Shape, Box3DUtils::ToB3Vec3(Start), Box3DUtils::ToB3Vec3(Delta));
+            if (Hit.hit && (!Nearest.has_value() || Hit.fraction < Nearest->Fraction))
+            {
+                Nearest.emplace();
+                FillRayResult(*Nearest, *this, Shape, Start, End, Length, Hit.point, Hit.normal, Hit.fraction);
+            }
+        }
+        return Nearest;
+    }
+
+    void FBox3DPhysicsScene::CastShapeAll(const SQueryShape& Shape, const FVector3& Start, const FVector3& End, ECollisionProfiles LayerMask,
+                                          TSpan<const ECS::FEntity> IgnoreEntities, TVector<SRayResult>& OutHits)
     {
         OutHits.clear();
 
-        const FVector3 Delta = Settings.End - Settings.Start;
+        const FVector3 Delta = End - Start;
         const float Length = Math::Length(Delta);
         if (Length <= Math::kSmallNumber)
         {
             return;
         }
 
-        // A sphere proxy is one point with a radius, so the sweep needs no scratch geometry.
-        const b3Vec3 Origin{ 0.0f, 0.0f, 0.0f };
-        const b3ShapeProxy Proxy{ &Origin, 1, Settings.Radius };
+        b3Vec3 Points[8];
+        const b3ShapeProxy Proxy = MakeProxy(Shape, Points);
 
         FQueryContext Query;
         Query.Scene = this;
-        Query.IgnoreEntities = TSpan<const ECS::FEntity>(Settings.IgnoreEntities.data(), Settings.IgnoreEntities.size());
+        Query.IgnoreEntities = IgnoreEntities;
         Query.Hits = &OutHits;
-        Query.Start = Settings.Start;
-        Query.End = Settings.End;
+        Query.Start = Start;
+        Query.End = End;
         Query.Length = Length;
 
-        b3World_CastShape(WorldId, Box3DUtils::ToB3Vec3(Settings.Start), &Proxy, Box3DUtils::ToB3Vec3(Delta),
-                          MakeLayerFilter(Settings.LayerMask), &AllHitsCastCallback, &Query);
-
-        Algo::Sort(OutHits, [](const SRayResult& A, const SRayResult& B)
-        {
-            return A.Fraction < B.Fraction;
-        });
+        b3World_CastShape(WorldId, Box3DUtils::ToB3Vec3(Start), &Proxy, Box3DUtils::ToB3Vec3(Delta),
+                          MakeLayerFilter(LayerMask), &AllHitsCastCallback, &Query);
+        SortNearToFar(OutHits);
     }
 
-    TOptional<SRayResult> FBox3DPhysicsScene::CastSphereClosest(const SSphereCastSettings& Settings)
+    TOptional<SRayResult> FBox3DPhysicsScene::CastShapeClosest(const SQueryShape& Shape, const FVector3& Start, const FVector3& End,
+                                                               ECollisionProfiles LayerMask, TSpan<const ECS::FEntity> IgnoreEntities)
     {
-        const FVector3 Delta = Settings.End - Settings.Start;
+        const FVector3 Delta = End - Start;
         const float Length = Math::Length(Delta);
         if (Length <= Math::kSmallNumber)
         {
             return {};
         }
 
-        const b3Vec3 Origin{ 0.0f, 0.0f, 0.0f };
-        const b3ShapeProxy Proxy{ &Origin, 1, Settings.Radius };
+        b3Vec3 Points[8];
+        const b3ShapeProxy Proxy = MakeProxy(Shape, Points);
 
         SRayResult Result{};
-
         FQueryContext Query;
         Query.Scene = this;
-        Query.IgnoreEntities = TSpan<const ECS::FEntity>(Settings.IgnoreEntities.data(), Settings.IgnoreEntities.size());
+        Query.IgnoreEntities = IgnoreEntities;
         Query.Closest = &Result;
-        Query.Start = Settings.Start;
-        Query.End = Settings.End;
+        Query.Start = Start;
+        Query.End = End;
         Query.Length = Length;
 
-        b3World_CastShape(WorldId, Box3DUtils::ToB3Vec3(Settings.Start), &Proxy, Box3DUtils::ToB3Vec3(Delta),
-                          MakeLayerFilter(Settings.LayerMask), &ClosestCastCallback, &Query);
-
+        b3World_CastShape(WorldId, Box3DUtils::ToB3Vec3(Start), &Proxy, Box3DUtils::ToB3Vec3(Delta),
+                          MakeLayerFilter(LayerMask), &ClosestCastCallback, &Query);
         if (!FinishClosest(Query))
         {
             return {};
         }
-
         return Result;
     }
 
-    int32 FBox3DPhysicsScene::OverlapSphere(const FVector3& Center, float Radius, TSpan<const ECS::FEntity> IgnoreEntities, TSpan<ECS::FEntity> OutEntities)
+    int32 FBox3DPhysicsScene::OverlapShape(const SQueryShape& Shape, const FVector3& Center, ECollisionProfiles LayerMask,
+                                           TSpan<const ECS::FEntity> IgnoreEntities, TSpan<ECS::FEntity> OutEntities)
     {
-        const b3Vec3 Origin{ 0.0f, 0.0f, 0.0f };
-        const b3ShapeProxy Proxy{ &Origin, 1, Radius };
+        b3Vec3 Points[8];
+        const b3ShapeProxy Proxy = MakeProxy(Shape, Points);
 
         FQueryContext Query;
         Query.Scene = this;
         Query.IgnoreEntities = IgnoreEntities;
         Query.OutEntities = OutEntities;
 
-        b3World_OverlapShape(WorldId, Box3DUtils::ToB3Vec3(Center), &Proxy, b3DefaultQueryFilter(), &OverlapCallback, &Query);
-
+        b3World_OverlapShape(WorldId, Box3DUtils::ToB3Vec3(Center), &Proxy, MakeLayerFilter(LayerMask), &OverlapCallback, &Query);
         return Query.EntityCount;
     }
 
-    int32 FBox3DPhysicsScene::OverlapBox(const FVector3& Center, const FVector3& HalfExtents, const FQuat& Rotation, TSpan<const ECS::FEntity> IgnoreEntities, TSpan<ECS::FEntity> OutEntities)
+    bool FBox3DPhysicsScene::GetClosestPointOnBody(ECS::FEntity Entity, const FVector3& Point, FVector3& OutPoint) const
     {
-        b3Vec3 Corners[8];
-        for (int32 i = 0; i < 8; ++i)
+        FBodyShapes Shapes;
+        if (!GatherShapes(ResolveBody(FindEntityBody(Entity)), Shapes))
         {
-            const FVector3 Sign((i & 1) ? 1.0f : -1.0f, (i & 2) ? 1.0f : -1.0f, (i & 4) ? 1.0f : -1.0f);
-            Corners[i] = Box3DUtils::ToB3Vec3(Math::Rotate(Rotation, Sign * HalfExtents));
+            return false;
         }
 
-        const b3ShapeProxy Proxy{ Corners, 8, 0.0f };
-
-        FQueryContext Query;
-        Query.Scene = this;
-        Query.IgnoreEntities = IgnoreEntities;
-        Query.OutEntities = OutEntities;
-
-        b3World_OverlapShape(WorldId, Box3DUtils::ToB3Vec3(Center), &Proxy, b3DefaultQueryFilter(), &OverlapCallback, &Query);
-
-        return Query.EntityCount;
+        float NearestDistanceSq = FLT_MAX;
+        for (b3ShapeId Shape : Shapes)
+        {
+            const FVector3 Candidate = Box3DUtils::FromB3Vec3(b3Shape_GetClosestPoint(Shape, Box3DUtils::ToB3Vec3(Point)));
+            const float DistanceSq = Math::LengthSquared(Candidate - Point);
+            if (DistanceSq < NearestDistanceSq)
+            {
+                NearestDistanceSq = DistanceSq;
+                OutPoint = Candidate;
+            }
+        }
+        return true;
     }
 
-    int32 FBox3DPhysicsScene::CollidePoint(const FVector3& Point, TSpan<const ECS::FEntity> IgnoreEntities, TSpan<ECS::FEntity> OutEntities)
+    bool FBox3DPhysicsScene::GetBodyBounds(ECS::FEntity Entity, SAABB& OutBounds) const
     {
-        // A zero-radius point proxy is the containment test, with no sweep.
-        const b3Vec3 Origin{ 0.0f, 0.0f, 0.0f };
-        const b3ShapeProxy Proxy{ &Origin, 1, 0.0f };
+        FBodyShapes Shapes;
+        if (!GatherShapes(ResolveBody(FindEntityBody(Entity)), Shapes))
+        {
+            return false;
+        }
 
-        FQueryContext Query;
-        Query.Scene = this;
-        Query.IgnoreEntities = IgnoreEntities;
-        Query.OutEntities = OutEntities;
-
-        b3World_OverlapShape(WorldId, Box3DUtils::ToB3Vec3(Point), &Proxy, b3DefaultQueryFilter(), &OverlapCallback, &Query);
-
-        return Query.EntityCount;
+        OutBounds = SAABB(FVector3(FLT_MAX), FVector3(-FLT_MAX));
+        for (b3ShapeId Shape : Shapes)
+        {
+            const b3AABB Bounds = b3Shape_GetAABB(Shape);
+            OutBounds.Min = Math::Min(OutBounds.Min, Box3DUtils::FromB3Vec3(Bounds.lowerBound));
+            OutBounds.Max = Math::Max(OutBounds.Max, Box3DUtils::FromB3Vec3(Bounds.upperBound));
+        }
+        return true;
     }
 }

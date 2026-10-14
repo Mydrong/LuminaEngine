@@ -2,6 +2,7 @@
 
 #include "Containers/Name.h"
 #include "Core/Reflection/Type/Function.h"
+#include "Scripting/ScriptExports.h"
 #include "ScriptExports.h"
 
 namespace Lumina
@@ -12,42 +13,19 @@ namespace Lumina
 
 namespace Lumina::Scripting
 {
-    /**
-     * Mints a reflected function a script type declared, and attaches it to Class.
-     *
-     * The frame is laid out by the same emitter that lays out a script struct, so alignment, container inners
-     * and the 64KB offset limit are handled in one place rather than twice. Its parameters are collected rather
-     * than attached, since a parameter is not a member of the class that declares the function.
-     *
-     * LayoutRecord owns the element descriptions the parameters point at, so it has to outlive every call.
-     * ReturnIndex is an index into the schema's fields, or -1 for a function that returns nothing.
-     *
-     * Adds the function without linking, matching how script properties are appended: the mint path unlinks the
-     * class, rebuilds its members and functions, and links once at the end.
-     */
+    // Mints a function a script type declared onto Class, laid out by the struct emitter. LayoutRecord owns its element descriptions, and the caller links.
     RUNTIME_API FFunction* MintScriptFunction(CScriptClass& Class, CScriptStruct& LayoutRecord, const FName& Name,
                                              const FScriptExportSchema& ParamSchema, int32 ReturnIndex,
-                                             FFunction::FNativeFuncPtr Thunk, EFunctionFlags ExtraFlags = EFunctionFlags::None);
+                                             FFunction::FNativeFuncPtr Thunk, EFunctionFlags ExtraFlags = EFunctionFlags::None,
+                                             const FScriptExportMeta& Meta = {});
 }
 
 namespace Lumina::Scripting
 {
-    /**
-     * The thunk every script-declared function is minted with.
-     *
-     * One thunk serves all of them, which is why FFunction hands its thunk the function being dispatched:
-     * it forwards the object's managed instance, the function and the frame to a single managed entry point,
-     * and the managed side reads its arguments back out of the frame through the parameters themselves.
-     */
+    // The one thunk every script function is minted with, forwarding the managed instance, the function and the frame to managed.
     RUNTIME_API void ScriptFunctionThunk(const FFunction& Function, void* Context, void* Frame);
 
-    /**
-     * Mints an override of Base onto Class, whose body is the script's rather than the C++ one.
-     *
-     * Shares Base's parameters rather than describing the signature again: they already describe the frame
-     * the generated caller builds, down to the offsets the compiler chose for it, so anything else would be
-     * a second opinion about the same layout. Base belongs to a native class, whose arena outlives everything.
-     */
+    // Mints an override of Base onto Class whose body is the script's, sharing Base's parameters since they already describe the frame.
     RUNTIME_API FFunction* MintScriptOverride(CScriptClass& Class, const FFunction& Base,
                                              FFunction::FNativeFuncPtr Thunk);
 

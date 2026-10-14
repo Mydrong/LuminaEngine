@@ -83,6 +83,11 @@ namespace Lumina
         void DrawHelpMenu() override;
         void DrawLogWindow(bool bIsFocused);
 
+        void FocusCommandInput() { bFocusInput = true; }
+
+        // True while the command line held keyboard focus on the last drawn frame.
+        bool IsCommandInputActive() const;
+
     private:
 
         void ProcessCommand(FStringView Command);
@@ -93,6 +98,7 @@ namespace Lumina
         void UpdateAutoComplete(FStringView CurrentInput);
         void DrawAutoCompletePopup();
         void DrawHistoryPopup();
+        float GetInputOverlayMaxHeight() const;
         void ApplyCompletion(FStringView Replacement);
         float CalculateMatchScore(FStringView Candidate, FStringView Input);
 
@@ -141,5 +147,12 @@ namespace Lumina
         TVector<FAutoCompleteCandidate> AutoCompleteCandidates;
 
         bool bShowHistory;
+
+        // The popups are children placed above the command line, so they share the console's focus and stacking.
+        ImVec2 InputRectMin = ImVec2(0.0f, 0.0f);
+        float  InputWidth = 0.0f;
+        float  LogTopY = 0.0f;
+        float  AutoCompleteOverlayHeight = 0.0f;
+        int32  CommandInputActiveFrame = -1;
     };
 }

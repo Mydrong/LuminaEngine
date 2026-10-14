@@ -120,7 +120,7 @@ namespace Lumina
                     SocketName = FName(Numbered.c_str());
                 }
 
-                FMeshSocket& Socket = Skeleton->Sockets.emplace_back();
+                SMeshSocket& Socket = Skeleton->Sockets.emplace_back();
                 Socket.SocketName = SocketName;
                 Socket.BoneName = BoneName;
 
@@ -266,7 +266,7 @@ namespace Lumina
             DrawBoneHierarchy(World.Get(), SkeletonResource, WorldTransforms, SelectedIndex);
         }
 
-        for (const FMeshSocket& Socket : Skeleton->Sockets)
+        for (const SMeshSocket& Socket : Skeleton->Sockets)
         {
             const int32 BoneIndex = SkeletonResource->FindBoneIndex(Socket.BoneName);
             if (BoneIndex == Constants::kIndexNone)

@@ -523,23 +523,29 @@ namespace Lumina
 
     void FPrefabEditorTool::OnSave()
     {
+        CPrefab* Prefab = GetPrefab();
+        if (Prefab == nullptr || Prefab->GetPackage() == nullptr || !Prefab->GetPackage()->IsDirty())
+        {
+            return;
+        }
+
         // Persist gizmo prefs alongside the asset save so they survive across editor sessions.
         PersistGizmoSettings();
 
         // Super commits the preview world into the prefab (CommitScene) then saves the package.
         Super::OnSave();
 
-        // Pushes the edits onto live instances now rather than only on the next world load.
-        if (CPrefab* Prefab = GetPrefab())
+        if (Prefab->GetPackage()->IsDirty())
         {
-            Prefab->RefreshInstancesInLoadedWorlds();
-
-            // Descendant variants re-resolve and push on, which is the whole point of a variant.
-            Prefab->PropagateToVariants();
-
-            // Only this save's refresh may compare against the old values; a later world load seeds as before.
             Prefab->ClearPreCommitState();
+            return;
         }
+
+        Prefab->RefreshInstancesInLoadedWorlds();
+
+        Prefab->PropagateToVariants();
+
+        Prefab->ClearPreCommitState();
     }
 
     void FPrefabEditorTool::Update(const FUpdateContext& UpdateContext)

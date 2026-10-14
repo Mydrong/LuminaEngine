@@ -10,7 +10,7 @@
 
 namespace Lumina::Audio
 {
-    FSoundPlayResult PlaySound(CSoundBase* Sound, const FAudioPlayParams& Params)
+    FSoundPlayResult PlaySound(CSoundBase* Sound, const SAudioPlayParams& Params)
     {
         FSoundPlayResult Result;
 

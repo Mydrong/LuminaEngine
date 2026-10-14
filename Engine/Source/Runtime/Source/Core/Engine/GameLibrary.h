@@ -8,7 +8,6 @@
 
 namespace Lumina
 {
-    class CGameInstance;
     class CWorld;
     class CWorldSubsystem;
 
@@ -27,10 +26,6 @@ namespace Lumina
         /** Ends the play session in the editor and exits the process in a packaged game, both deferred. */
         FUNCTION()
         static void QuitGame();
-
-        /** The one object that outlives a level change, so where state that survives travel belongs. */
-        FUNCTION()
-        static CGameInstance* GetGameInstance();
 
         // True for a dedicated server or load-test process, which never opens a window or an audio device.
         FUNCTION()

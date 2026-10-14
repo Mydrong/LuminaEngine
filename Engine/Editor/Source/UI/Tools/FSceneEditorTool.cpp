@@ -496,7 +496,7 @@ namespace Lumina
 
         CStruct* Type = const_cast<CStruct*>(Entry.ReflectedType);
         const FComponentOps* Ops = FindComponentOps(Type->GetName().c_str());
-        void* Data = Ops != nullptr && Ops->Get != nullptr ? Ops->Get(Registry, Entity) : nullptr;
+        void* Data = Ops != nullptr ? Ops->Get(Registry, Entity) : nullptr;
 
         const FString Category = Type->HasMeta("Category") ? Type->GetMeta("Category") : FString();
         const FString Friendly = FriendlyComponentName(Entry.Title);
@@ -639,7 +639,7 @@ namespace Lumina
         {
             if (CSkeleton* Skeleton = SkeletalUtils::GetSkeletonAsset(*SkeletalMesh))
             {
-                for (const FMeshSocket& Socket : Skeleton->Sockets)
+                for (const SMeshSocket& Socket : Skeleton->Sockets)
                 {
                     Out.Sockets.push_back(Socket.SocketName);
                 }
@@ -650,7 +650,7 @@ namespace Lumina
         {
             if (StaticMesh->StaticMesh.IsValid())
             {
-                for (const FMeshSocket& Socket : StaticMesh->StaticMesh->Sockets)
+                for (const SMeshSocket& Socket : StaticMesh->StaticMesh->Sockets)
                 {
                     Out.Sockets.push_back(Socket.SocketName);
                 }
@@ -1442,7 +1442,7 @@ namespace Lumina
             uint32 Cursor = FolderID;
             for (uint32 Guard = 0; Cursor != SSceneFolderComponent::NoFolder && Guard < 64; ++Guard)
             {
-                const FSceneFolder* Folder = Folders.Find(Cursor);
+                const SSceneFolder* Folder = Folders.Find(Cursor);
                 if (Folder == nullptr)
                 {
                     break;
@@ -1457,7 +1457,7 @@ namespace Lumina
         int32 GetFolderDepth(const SSceneFolderComponent& Folders, uint32 FolderID)
         {
             int32 Depth = 0;
-            const FSceneFolder* Folder = Folders.Find(FolderID);
+            const SSceneFolder* Folder = Folders.Find(FolderID);
             while (Folder != nullptr && Folder->ParentID != SSceneFolderComponent::NoFolder && Depth < 64)
             {
                 Folder = Folders.Find(Folder->ParentID);
@@ -1530,7 +1530,7 @@ namespace Lumina
 
             const FName CandidateName(Candidate.c_str());
             bool bTaken = false;
-            for (const FSceneFolder& Folder : Folders->Folders)
+            for (const SSceneFolder& Folder : Folders->Folders)
             {
                 if (Folder.ParentID == ParentID && Folder.Name == CandidateName)
                 {
@@ -1564,7 +1564,7 @@ namespace Lumina
         // Dead handles are dropped here rather than on every read; a foreign world is only inspected.
         if (SSceneFolderComponent* Editable = GetEditableSceneFolders())
         {
-            for (FSceneFolder& Folder : Editable->Folders)
+            for (SSceneFolder& Folder : Editable->Folders)
             {
                 for (int32 i = (int32)Folder.Entities.size() - 1; i >= 0; --i)
                 {
@@ -1577,14 +1577,14 @@ namespace Lumina
         }
 
         // Shallowest first, so a folder's parent row always exists by the time the folder is created.
-        TVector<const FSceneFolder*> Ordered;
+        TVector<const SSceneFolder*> Ordered;
         Ordered.reserve(Folders->Folders.size());
-        for (const FSceneFolder& Folder : Folders->Folders)
+        for (const SSceneFolder& Folder : Folders->Folders)
         {
             Ordered.push_back(&Folder);
         }
 
-        Algo::Sort(Ordered, [Folders](const FSceneFolder* LHS, const FSceneFolder* RHS)
+        Algo::Sort(Ordered, [Folders](const SSceneFolder* LHS, const SSceneFolder* RHS)
         {
             const int32 LHSDepth = GetFolderDepth(*Folders, LHS->ID);
             const int32 RHSDepth = GetFolderDepth(*Folders, RHS->ID);
@@ -1599,7 +1599,7 @@ namespace Lumina
             return LHS->ID < RHS->ID;
         });
 
-        for (const FSceneFolder* Folder : Ordered)
+        for (const SSceneFolder* Folder : Ordered)
         {
             FFixedString Label;
             Label.append(LE_ICON_FOLDER).append(" ").append(Folder->Name.c_str());
@@ -1632,7 +1632,7 @@ namespace Lumina
         }
 
         // A folder reads as hidden only when everything inside it is.
-        for (const FSceneFolder* Folder : Ordered)
+        for (const SSceneFolder* Folder : Ordered)
         {
             TVector<ECS::FEntity> Contents;
             CollectFolderEntities(Folder->ID, Contents, true);
@@ -1673,7 +1673,7 @@ namespace Lumina
         ECS::FRegistry& Registry = GetSceneRegistry();
         for (uint32 ID : FolderIDs)
         {
-            const FSceneFolder* Folder = Folders->Find(ID);
+            const SSceneFolder* Folder = Folders->Find(ID);
             if (Folder == nullptr)
             {
                 continue;
@@ -1977,7 +1977,7 @@ namespace Lumina
     void FSceneEditorTool::DrawFolderContextMenu(uint32 FolderID)
     {
         const SSceneFolderComponent* Folders = GetSceneFolders();
-        const FSceneFolder* Folder = Folders != nullptr ? Folders->Find(FolderID) : nullptr;
+        const SSceneFolder* Folder = Folders != nullptr ? Folders->Find(FolderID) : nullptr;
         if (Folder == nullptr)
         {
             return;
@@ -2036,7 +2036,7 @@ namespace Lumina
 
             ImGui::Separator();
 
-            for (const FSceneFolder& Candidate : Folders->Folders)
+            for (const SSceneFolder& Candidate : Folders->Folders)
             {
                 if (Candidate.ID == FolderID || Folders->IsDescendantOf(Candidate.ID, FolderID))
                 {
@@ -2096,7 +2096,7 @@ namespace Lumina
                 ImGui::Separator();
             }
 
-            for (const FSceneFolder& Folder : Folders->Folders)
+            for (const SSceneFolder& Folder : Folders->Folders)
             {
                 const FString Label = FString(LE_ICON_FOLDER " ") + MakeFolderPath(*Folders, Folder.ID);
                 if (ImGui::MenuItem(Label.c_str()))

@@ -6,9 +6,8 @@
 #include "Core/Object/ObjectReinstancer.h"
 #include "Core/Reflection/Type/ObjectReferenceVisitor.h"
 #include "ManagedTypeRegistry.h"
-
 #include "EntityScript.h"
-#include "UI/UIScript.h"
+
 
 #include "Containers/HashTable.h"
 #include "Containers/Vector.h"
@@ -21,6 +20,7 @@
 #include "Core/Object/ObjectBase.h"
 #include "Core/Object/ManagedInstance.h"
 #include "Scripting/ScriptStruct.h"
+#include "Scripting/ScriptTypeRegistry.h"
 #include "Core/Reflection/Type/LuminaTypes.h"
 #include "Core/Reflection/Type/Properties/ArrayProperty.h"
 #include "Core/Reflection/Type/Properties/StructProperty.h"
@@ -38,8 +38,7 @@ namespace Lumina
                 return nullptr;
             }
 
-            // A hot reload drains the table, so a missing twin is the rebind signal with no per-instance stamp.
-            // Only the script's own instance short-circuits; a weak wrapper here would silence the script.
+            // A reload drains the table, so a missing twin is the rebind signal. Only the script's own instance short-circuits here.
             if (void* Existing = ManagedInstances::FindScriptTwin(Object))
             {
                 return Existing;
@@ -116,8 +115,13 @@ namespace Lumina
             return Map;
         }
 
-        // Returns false while live instances remain, since destroying the class would dangle their pointers.
-        // A subclass still links to its parent, so a parent with a live subclass is kept even with no instance of its own.
+        // Still waiting for registration, so it has no layout and no instances that a rebuild would have to move.
+        bool IsMintedThisReload(const CClass* Class)
+        {
+            return Class->GetClass() == nullptr;
+        }
+
+        // False while instances remain, or a subclass still links to it, since destroying the class would dangle their pointers.
         bool TryRetireMintedClass(const FName& NameId, CScriptClass* Class, const char* Reason, bool bWarnIfKept = true)
         {
             int32 LiveInstances = 0;
@@ -147,9 +151,7 @@ namespace Lumina
                 return false;
             }
 
-            // Through the same three sources the reinstancer uses, since a walk of the reflected graph alone
-            // cannot see an ECS storage, a config map or an editor tool holding this class. It serializes by
-            // name, so a re-added type re-resolves from config and saves untouched.
+            // Through the same sources the reinstancer uses, since the reflected graph alone misses ECS storage, config and editor tools.
             FObjectReferenceReplacer Replacer(Class, nullptr);
             Replacer.ApplyToAllObjects();
 
@@ -158,8 +160,7 @@ namespace Lumina
             {
                 DefaultObject->RemoveFromRoot();
             }
-            // Before un-rooting, which frees the class: the layout lives ON it, so the other order is a
-            // use-after-free rather than the tidy-up it reads as.
+            // Before un-rooting, since the layout lives on the class that un-rooting frees.
             Scripting::ForgetScriptClassLayout(Class);
 
             Class->RemoveFromRoot();
@@ -175,13 +176,7 @@ namespace Lumina
         GNativeInfos()[FString(NativeClassName)] = Info;
     }
 
-    /**
-     * Turns the events a C# subclass overrides into real functions on the minted class.
-     *
-     * Each one borrows the declaration from the native base, so the override describes exactly the frame the
-     * generated caller builds; all that differs is whose body runs. Rebuilt from scratch, since a reload can
-     * remove an override as easily as add one.
-     */
+    // Turns the events a C# subclass overrides into functions borrowing the native declaration, rebuilt from scratch each reload.
     void FScriptableRegistry::ApplyScriptOverrides(CScriptClass* Minted, TSpan<const FString> OverriddenEvents)
     {
         if (Minted == nullptr)
@@ -273,10 +268,15 @@ namespace Lumina
             AllocateStaticScriptClass(TEXT("/Script"), UTF8_TO_TCHAR(Name.c_str()), &Minted,
                 Info.ShimSize, Info.ShimAlign, Info.GetBaseClass, Info.Factory);
         }
+        else if (CClass* NativeBase = FindObject<CClass>(FName(BaseName.c_str())); NativeBase != nullptr && ToScriptClass(NativeBase) == nullptr)
+        {
+            // Any reflected class can be extended, and REFLECT(Scriptable) only adds events a C# override can replace.
+            AllocateStaticScriptClass(TEXT("/Script"), UTF8_TO_TCHAR(Name.c_str()), &Minted,
+                NativeBase->GetSize(), NativeBase->GetAlignment(), NativeBase, NativeBase->FactoryFunction);
+        }
         else
         {
-            LOG_WARN("Scriptable '{}' derives from '{}', which is neither a REFLECT(Scriptable) class nor a minted one; not minted.",
-                Name.c_str(), BaseName.c_str());
+            LOG_WARN("Script class '{}' derives from '{}', which is not a reflected class; not minted.", Name.c_str(), BaseName.c_str());
             return nullptr;
         }
         if (Minted != nullptr)
@@ -288,14 +288,48 @@ namespace Lumina
     }
 
 
+    void FScriptableRegistry::MintNewClasses(TSpan<const Scripting::FManagedTypeDefinition> Definitions)
+    {
+        // Parents arrive first, so a new class finds its C# parent already minted.
+        for (const Scripting::FManagedTypeDefinition& Desc : Definitions)
+        {
+            if (Desc.Kind != Scripting::EManagedTypeKind::ScriptableClass || GMintedClasses().find(Desc.TypeName) != GMintedClasses().end())
+            {
+                continue;
+            }
+            // A parent from an earlier reload may be replaced by this one, so its new child waits to be minted under the replacement.
+            auto Parent = GMintedClasses().find(FName(Desc.NativeBaseName.c_str()));
+            if (Parent != GMintedClasses().end() && !IsMintedThisReload(Parent->second))
+            {
+                continue;
+            }
+            Mint(Desc.TypeName.c_str(), Desc.NativeBaseName, Desc.OverriddenEvents);
+        }
+    }
+
+    CClass* FScriptableRegistry::FindClass(const FName& Name)
+    {
+        if (Name.IsNone())
+        {
+            return nullptr;
+        }
+        if (auto Minted = GMintedClasses().find(Name); Minted != GMintedClasses().end())
+        {
+            return Minted->second;
+        }
+        return FindObject<CClass>(Name);
+    }
+
     void FScriptableRegistry::RegisterClassRedirect(const FName& OldName, const FName& NewName)
     {
         if (OldName.IsNone() || NewName.IsNone() || OldName == NewName)
         {
             return;
         }
-        // Some other type claiming a live class's name must not shadow the real one.
-        if (FindObject<CClass>(OldName) != nullptr && GMintedClasses().find(OldName) == GMintedClasses().end())
+        // Some other type claiming a live native type's name must not shadow the real one.
+        const CStruct* Existing = FindObject<CStruct>(OldName);
+        const bool bScriptOwned = GMintedClasses().find(OldName) != GMintedClasses().end() || Cast<CScriptStruct>(Existing) != nullptr;
+        if (Existing != nullptr && !bScriptOwned)
         {
             LOG_WARN("Scriptable: '{}' is claimed as a prior name but a native class already owns it; ignored.",
                 OldName.c_str());
@@ -304,45 +338,85 @@ namespace Lumina
         GClassRedirects()[OldName] = NewName;
     }
 
-    CClass* FScriptableRegistry::ResolveClass(const FName& Name)
+    void FScriptableRegistry::SetRedirects(TSpan<const Scripting::FManagedTypeAlias> Aliases)
     {
-        if (Name.IsNone())
+        // Rebuilt rather than added to, so an [Alias] deleted from the C# source stops redirecting.
+        GClassRedirects().clear();
+        for (const Scripting::FManagedTypeAlias& Alias : Aliases)
         {
-            return nullptr;
+            RegisterClassRedirect(FName(Alias.OldName.c_str()), FName(Alias.NewName.c_str()));
         }
-        // Preferring the live old class would strand instances on it during a rename reload.
-        if (GClassRedirects().find(Name) == GClassRedirects().end())
+    }
+
+    namespace
+    {
+        // Visits each name a chain of redirects passes through after Name, stopping when Visit returns true.
+        template<typename TVisit>
+        bool WalkRedirects(const FName& Name, TVisit&& Visit)
         {
-            if (CClass* Direct = FindObject<CClass>(Name))
+            // A visited set, since a bad pair of aliases could otherwise cycle forever.
+            THashSet<FName> Seen;
+            FName Current = Name;
+            Seen.insert(Current);
+            while (true)
             {
-                return Direct;
+                auto It = GClassRedirects().find(Current);
+                if (It == GClassRedirects().end())
+                {
+                    return false;
+                }
+                Current = It->second;
+                if (Seen.find(Current) != Seen.end())
+                {
+                    LOG_WARN("Scriptable: type redirects cycle at '{}'; giving up.", Current.c_str());
+                    return false;
+                }
+                Seen.insert(Current);
+                if (Visit(Current))
+                {
+                    return true;
+                }
             }
-            return nullptr;
         }
 
-        // A visited set, since a bad pair of aliases could otherwise cycle forever.
-        THashSet<FName> Seen;
-        FName Current = Name;
-        Seen.insert(Current);
-        while (true)
+        template<typename T, typename TFind>
+        T* ResolveRedirected(const FName& Name, TFind&& Find)
         {
-            auto It = GClassRedirects().find(Current);
-            if (It == GClassRedirects().end())
+            if (Name.IsNone())
             {
                 return nullptr;
             }
-            Current = It->second;
-            if (Seen.find(Current) != Seen.end())
+            // Preferring the live old type would strand its instances on it during a rename reload.
+            if (GClassRedirects().find(Name) == GClassRedirects().end())
             {
-                LOG_WARN("Scriptable: class redirects cycle at '{}'; giving up.", Current.c_str());
-                return nullptr;
+                return Find(Name);
             }
-            Seen.insert(Current);
-            if (CClass* Renamed = FindObject<CClass>(Current))
-            {
-                return Renamed;
-            }
+            T* Found = nullptr;
+            WalkRedirects(Name, [&](const FName& Current) { Found = Find(Current); return Found != nullptr; });
+            return Found;
         }
+    }
+
+    CClass* FScriptableRegistry::ResolveClass(const FName& Name)
+    {
+        return ResolveRedirected<CClass>(Name, [](const FName& Current) { return FindObject<CClass>(Current); });
+    }
+
+    CStruct* FScriptableRegistry::ResolveStruct(const FName& Name)
+    {
+        return ResolveRedirected<CStruct>(Name, [](const FName& Current) -> CStruct*
+        {
+            if (CScriptStruct* Script = FScriptStructRegistry::Get().Find(Current))
+            {
+                return Script;
+            }
+            return FindObject<CStruct>(Current);
+        });
+    }
+
+    bool FScriptableRegistry::IsRenamedTo(const FName& OldName, const FName& NewName)
+    {
+        return WalkRedirects(OldName, [&](const FName& Current) { return Current == NewName; });
     }
 
     void FScriptableRegistry::GatherRenamedClasses(THashSet<CClass*>& Out)
@@ -358,7 +432,282 @@ namespace Lumina
         }
     }
 
-    void FScriptableRegistry::RefreshMintedClasses(TSpan<const Scripting::FManagedTypeDefinition> Definitions)
+    namespace
+    {
+        // A reshaped class is replaced, since an instance's size is fixed at allocation, and the reinstancer moves its instances.
+        struct FPendingReplacement
+        {
+            FName         Name;
+            CScriptClass* Old = nullptr;
+        };
+
+        // Every class whose layout or parent changed, and every class below one, since a child is laid out after its parent.
+        THashSet<CClass*> CollectClassesToRebuild(const TVector<const Scripting::FManagedTypeDefinition*>& Descs)
+        {
+            THashSet<CClass*> NeedRebuild;
+            for (const Scripting::FManagedTypeDefinition* Desc : Descs)
+            {
+                auto Existing = GMintedClasses().find(Desc->TypeName);
+                if (Existing == GMintedClasses().end() || IsMintedThisReload(Existing->second))
+                {
+                    continue;   // a first mint appends rather than rebuilds
+                }
+
+                // Even with no default object yet, since a subclass may already be laid out after this class's old size.
+                const bool bLayoutChanged = Desc->bHasSchema && !Scripting::ScriptClassLayoutMatches(Existing->second, Desc->Schema);
+                const CClass* Super = Existing->second->GetSuperClass();
+                const bool bParentChanged = Super != nullptr && Super->GetName() != FName(Desc->NativeBaseName.c_str());
+                if (bLayoutChanged || bParentChanged)
+                {
+                    NeedRebuild.insert(Existing->second);
+                }
+            }
+            for (bool bGrew = true; bGrew;)
+            {
+                bGrew = false;
+                for (const auto& [Name, Class] : GMintedClasses())
+                {
+                    if (!IsMintedThisReload(Class) && NeedRebuild.find(Class) == NeedRebuild.end()
+                        && NeedRebuild.find(Class->GetSuperClass()) != NeedRebuild.end())
+                    {
+                        NeedRebuild.insert(Class);
+                        bGrew = true;
+                    }
+                }
+            }
+            return NeedRebuild;
+        }
+
+        // Moves each class out of its name, so a replacement can be minted under it while its instances still point at the old one.
+        TVector<FPendingReplacement> StepAside(const THashSet<CClass*>& NeedRebuild)
+        {
+            TVector<FPendingReplacement> Replacements;
+            for (CClass* Old : NeedRebuild)
+            {
+                auto* const Minted = Cast<CScriptClass>(Old);
+                if (Minted == nullptr)
+                {
+                    continue;
+                }
+
+                // The object stays alive until the reinstance is done, since its instances still point at it.
+                const FName Name = Minted->GetName();
+                GMintedClasses().erase(Name);
+                Minted->bSuperseded = true;
+
+                static uint32 ReplacementCounter = 0;
+                const FString Retired = FString("REPLACED_") + Name.c_str();
+                Minted->Rename(FName(Retired.c_str(), ++ReplacementCounter), Minted->GetPackage());
+
+                Replacements.push_back(FPendingReplacement{ Name, Minted });
+            }
+            return Replacements;
+        }
+
+        // Mints every class this generation declares and lays it out, then runs its C# initializers into its CDO.
+        void MintAndLayOut(const TVector<const Scripting::FManagedTypeDefinition*>& Descs)
+        {
+            bool bMintedAny = false;
+            TVector<CScriptClass*> NeedDefaults;
+            for (const Scripting::FManagedTypeDefinition* Desc : Descs)
+            {
+                if (CScriptClass* Minted = FScriptableRegistry::Mint(Desc->TypeName.c_str(), Desc->NativeBaseName, Desc->OverriddenEvents))
+                {
+                    Minted->bSuperseded = false;
+                    // A class is reused by name across reloads, so an added or removed override must update the mask.
+                    FScriptableRegistry::ApplyScriptOverrides(Minted, Desc->OverriddenEvents);
+                    Minted->bAbstract = Desc->bAbstract;
+                    for (const FName& Key : Minted->ScriptClassMetaKeys)
+                    {
+                        Minted->Metadata.RemoveValue(Key);
+                    }
+                    Minted->ScriptClassMetaKeys.clear();
+                    for (const std::pair<FString, FString>& Pair : Desc->Meta)
+                    {
+                        const FName Key(Pair.first.c_str());
+                        Minted->Metadata.SetValue(Key, Pair.second);
+                        Minted->ScriptClassMetaKeys.push_back(Key);
+                    }
+                    Minted->ScriptUpdatePhase = static_cast<uint8>(UpdatePhaseInChain(Minted));
+
+                    // Re-appending would duplicate properties, so a changed schema tears the block down and rebuilds.
+                    const Scripting::FScriptExportSchema& Schema = Desc->Schema;
+                    const bool bHaveSchema = Desc->bHasSchema;
+
+                    // Only into a class with no block yet, since a second append would shadow the first rather than replace it.
+                    if (Minted->GetDefaultObjectIfCreated() == nullptr && Minted->LayoutRecord.Get() == nullptr)
+                    {
+                        if (bHaveSchema && Schema.IsValid())
+                        {
+                            const uint32 Count = Scripting::AppendScriptPropertiesToClass(Minted, Schema);
+                            if (Count > 0)
+                            {
+                                NeedDefaults.push_back(Minted);
+                            }
+                        }
+                    }
+                    else if (bHaveSchema)
+                    {
+                        // A layout change was staged as a replacement, so only metadata and defaults can differ here.
+                        const EScriptTypeDirty Dirty = Scripting::DiffScriptClassLayout(Minted, Schema);
+
+                        if (EnumHasAnyFlags(Dirty, EScriptTypeDirty::Metadata))
+                        {
+                            Scripting::RefreshScriptPropertyMetadata(Minted, Schema);
+                        }
+
+                        // An unbound instance reads native-backed fields as zero, so the schema never shows an edited initializer.
+                        NeedDefaults.push_back(Minted);
+                    }
+
+                    bMintedAny = true;
+                }
+            }
+
+            // Finalize registration + create CDOs so FindObject<CClass>(name) / NewObject(class) work.
+            if (bMintedAny)
+            {
+                RegisterPendingTypes();
+            }
+
+            // It runs on the managed side because an initializer is an arbitrary C# expression.
+            for (CScriptClass* Minted : NeedDefaults)
+            {
+                CObject* DefaultObject = Minted->GetDefaultObject();
+                DotNet::ApplyScriptableDefaults(Minted->GetName().ToString(), DefaultObject);
+            }
+        }
+
+        // Moves every live instance onto its class's replacement, whether the class was reshaped or renamed.
+        void ReinstanceOntoReplacements(const TVector<FPendingReplacement>& Replacements, const THashSet<CClass*>& Renamed,
+            THashMap<CClass*, FName>& RenamedFrom, const THashSet<FName>& LiveNames)
+        {
+            // After minting, since a replacement needs its default object before an instance can be built on it.
+            FObjectReinstancer Reinstancer;
+
+            // The reinstancer carries every value across, so the [SkipHotReload] reset and the unsaved carry-over happen here.
+            Reinstancer.SetPostReplaceHook([](CObject* Old, CObject* New)
+            {
+                // The tagged carry-over skips what is never saved, such as a UI's Bind values, which a plain reload keeps.
+                if (CScriptClass* NewClass = Cast<CScriptClass>(New->GetClass()))
+                {
+                    NewClass->ForEachScriptProperty([&](FProperty* Property)
+                    {
+                        const FProperty* Previous = Property->ShouldSerialize() ? nullptr : Old->GetClass()->GetProperty(Property->GetPropertyName());
+                        if (Previous != nullptr && Property->HasSameValueType(Previous))
+                        {
+                            Property->CopyCompleteValue(Property->GetValuePtr<void>(New), Previous->GetValuePtr<void>(Old));
+                        }
+                    });
+                }
+                Scripting::ResetSkipHotReloadProperties(New);
+                New->OnReinstanced(*Old);
+            });
+
+            for (const FPendingReplacement& Pending : Replacements)
+            {
+                // A class that was renamed as well as reshaped is found through its alias.
+                const auto Found = GMintedClasses().find(Pending.Name);
+                CClass* const New = Found != GMintedClasses().end() ? Found->second : FScriptableRegistry::ResolveClass(Pending.Name);
+                if (New == nullptr)
+                {
+                    LOG_WARN("Scriptable: '{}' changed shape but was not re-minted; its instances are left on the "
+                             "previous class.", Pending.Name.c_str());
+                    continue;
+                }
+                // Nothing can be built on an abstract class, so its live instances stay on the old one until they go.
+                if (New->IsAbstract())
+                {
+                    LOG_WARN("Scriptable: '{}' became abstract, so its live instances stay on the previous class.", Pending.Name.c_str());
+                    continue;
+                }
+                LOG_TRACE("Scriptable: reshaped '{}' under '{}'.", Pending.Name.c_str(),
+                    New->GetSuperClass() != nullptr ? New->GetSuperClass()->GetName().c_str() : "nothing");
+                Reinstancer.MapClass(Pending.Old, New);
+            }
+
+            // A rename has no replacement of its own, so the instances move onto whatever the alias resolves to.
+            for (CClass* Old : Renamed)
+            {
+                // An alias naming a type that still exists is a stale attribute, not a rename.
+                if (LiveNames.find(RenamedFrom[Old]) != LiveNames.end())
+                {
+                    continue;
+                }
+                if (CClass* Target = FScriptableRegistry::ResolveClass(RenamedFrom[Old]); Target != nullptr && Target != Old && !Target->IsAbstract())
+                {
+                    LOG_TRACE("Scriptable: moving instances of renamed '{}' onto '{}'.", Old->GetName().c_str(), Target->GetName().c_str());
+                    Reinstancer.MapClass(Old, Target);
+                }
+            }
+
+            // Instances stranded on an older class move as soon as its name resolves again, re-added or through an alias.
+            for (const TPair<FName, CScriptClass*>& Waiting : GAwaitingRetirement())
+            {
+                if (CClass* Target = FScriptableRegistry::ResolveClass(Waiting.first); Target != nullptr && Target != Waiting.second && !Target->IsAbstract())
+                {
+                    Reinstancer.MapClass(Waiting.second, Target);
+                }
+            }
+
+            if (!Reinstancer.IsEmpty())
+            {
+                const FReinstanceResult Result = Reinstancer.Commit();
+                LOG_DISPLAY("Scriptable: reinstanced {} object(s), repointed {} reference(s) across {} object(s) "
+                            "and {} provider(s).", Result.InstancesReplaced, Result.ReferencesPatched,
+                            Result.ObjectsScanned, Result.ProvidersVisited);
+            }
+        }
+
+        // Frees every superseded or removed class nothing is still on, keeping the rest for a later reload.
+        void RetireUnusedClasses(const TVector<FPendingReplacement>& Replacements, const TVector<FName>& StaleNames)
+        {
+            // Repeated, because a parent can only go once the subclasses on it have gone.
+            TVector<FPendingReplacement> Unretired = Replacements;
+            for (const TPair<FName, CScriptClass*>& Waiting : GAwaitingRetirement())
+            {
+                Unretired.push_back(FPendingReplacement{ Waiting.first, Waiting.second });
+            }
+            GAwaitingRetirement().clear();
+            for (bool bProgress = true; bProgress;)
+            {
+                bProgress = false;
+                for (size_t Index = Unretired.size(); Index-- > 0;)
+                {
+                    if (TryRetireMintedClass(Unretired[Index].Old->GetName(), Unretired[Index].Old, "superseded by a reshaped replacement", false))
+                    {
+                        Unretired.erase(Unretired.begin() + Index);
+                        bProgress = true;
+                    }
+                }
+                for (const FName& Name : StaleNames)
+                {
+                    auto Stale = GMintedClasses().find(Name);
+                    if (Stale != GMintedClasses().end() && TryRetireMintedClass(Name, Stale->second, "its C# type no longer exists", false))
+                    {
+                        GMintedClasses().erase(Stale);
+                        bProgress = true;
+                    }
+                }
+            }
+            for (const FPendingReplacement& Pending : Unretired)
+            {
+                if (!TryRetireMintedClass(Pending.Old->GetName(), Pending.Old, "superseded by a reshaped replacement"))
+                {
+                    GAwaitingRetirement().push_back({ Pending.Name, Pending.Old });
+                }
+            }
+            for (const FName& Name : StaleNames)
+            {
+                if (auto Stale = GMintedClasses().find(Name); Stale != GMintedClasses().end())
+                {
+                    TryRetireMintedClass(Name, Stale->second, "its C# type no longer exists");
+                }
+            }
+        }
+    }
+
+    void FScriptableRegistry::RefreshMintedClasses(TSpan<const Scripting::FManagedTypeDefinition> Definitions, TSpan<const Scripting::FManagedTypeAlias> Aliases)
     {
         TVector<const Scripting::FManagedTypeDefinition*> Descs;
         for (const Scripting::FManagedTypeDefinition& Definition : Definitions)
@@ -369,55 +718,9 @@ namespace Lumina
             }
         }
 
-        // Read both to decide what to evacuate and to resolve a saved reference to the old name. Rebuilt
-        // rather than added to, so deleting an [Alias] from the C# source actually stops the redirect
-        // instead of leaving this generation honouring a rename the source no longer declares.
-        TVector<DotNet::FScriptableAlias> Aliases;
-        DotNet::GatherScriptableAliases(Aliases);
-        GClassRedirects().clear();
-        for (const DotNet::FScriptableAlias& Alias : Aliases)
-        {
-            RegisterClassRedirect(FName(Alias.OldName.c_str()), FName(Alias.NewName.c_str()));
-        }
+        SetRedirects(Aliases);
 
-        // An object's size is baked in at allocation, so a changed property set needs an empty class.
-        THashSet<CClass*> NeedRebuild;
-        for (const Scripting::FManagedTypeDefinition* Desc : Descs)
-        {
-            auto Existing = GMintedClasses().find(Desc->TypeName);
-            if (Existing == GMintedClasses().end())
-            {
-                continue;   // a first mint appends rather than rebuilds
-            }
-
-            // Even with no default object yet, since a subclass may already be laid out after this class's old size.
-            if (Desc->bHasSchema && !Scripting::ScriptClassLayoutMatches(Existing->second, Desc->Schema))
-            {
-                NeedRebuild.insert(Existing->second);
-            }
-        }
-
-        for (const Scripting::FManagedTypeDefinition* Desc : Descs)
-        {
-            auto Existing = GMintedClasses().find(Desc->TypeName);
-            const CClass* Super = Existing != GMintedClasses().end() ? Existing->second->GetSuperClass() : nullptr;
-            if (Super != nullptr && Super->GetName() != FName(Desc->NativeBaseName.c_str()))
-            {
-                NeedRebuild.insert(Existing->second);
-            }
-        }
-        for (bool bGrew = true; bGrew;)
-        {
-            bGrew = false;
-            for (const auto& [Name, Class] : GMintedClasses())
-            {
-                if (NeedRebuild.find(Class) == NeedRebuild.end() && NeedRebuild.find(Class->GetSuperClass()) != NeedRebuild.end())
-                {
-                    NeedRebuild.insert(Class);
-                    bGrew = true;
-                }
-            }
-        }
+        const THashSet<CClass*> NeedRebuild = CollectClassesToRebuild(Descs);
 
         // Its instances are the wrong class rather than the wrong size, and the redirect moves them across.
         THashSet<CClass*> Renamed;
@@ -430,37 +733,9 @@ namespace Lumina
             RenamedFrom[Old] = Old->GetName();
         }
 
-        // A reshaped class is REPLACED rather than rebuilt: an instance's size is fixed at allocation, so a
-        // new layout needs a new class, and the reinstancer is what moves the live instances onto it.
-        struct FPendingReplacement
-        {
-            FName         Name;
-            CScriptClass* Old = nullptr;
-        };
+        const TVector<FPendingReplacement> Replacements = StepAside(NeedRebuild);
 
-        TVector<FPendingReplacement> Replacements;
-        for (CClass* Old : NeedRebuild)
-        {
-            auto* const Minted = Cast<CScriptClass>(Old);
-            if (Minted == nullptr)
-            {
-                continue;
-            }
-
-            // Out of the registry and out of the way of the name so the replacement can claim it. The class
-            // object itself stays alive until the reinstance is done, since its instances still point at it.
-            const FName Name = Minted->GetName();
-            GMintedClasses().erase(Name);
-            Minted->bSuperseded = true;
-
-            static uint32 ReplacementCounter = 0;
-            const FString Retired = FString("REPLACED_") + Name.c_str();
-            Minted->Rename(FName(Retired.c_str(), ++ReplacementCounter), Minted->GetPackage());
-
-            Replacements.push_back(FPendingReplacement{ Name, Minted });
-        }
-
-        // AFTER the replacements, so a renamed class retires now instead of lingering in editor pickers.
+        // After the replacements step aside, so a renamed class retires now instead of lingering in editor pickers.
         THashSet<FName> LiveNames;
         for (const Scripting::FManagedTypeDefinition* Desc : Descs)
         {
@@ -483,205 +758,8 @@ namespace Lumina
             }
         }
 
-        bool bMintedAny = false;
-        TVector<CScriptClass*> NeedDefaults;
-        for (const Scripting::FManagedTypeDefinition* Desc : Descs)
-        {
-            if (CScriptClass* Minted = Mint(Desc->TypeName.c_str(), Desc->NativeBaseName, Desc->OverriddenEvents))
-            {
-                Minted->bSuperseded = false;
-                // Minted classes are REUSED by name, so an added or removed override must update the mask.
-                ApplyScriptOverrides(Minted, Desc->OverriddenEvents);
-                Minted->bAbstract = Desc->bAbstract;
-                for (const FName& Key : Minted->ScriptClassMetaKeys)
-                {
-                    Minted->Metadata.RemoveValue(Key);
-                }
-                Minted->ScriptClassMetaKeys.clear();
-                for (const std::pair<FString, FString>& Pair : Desc->ClassMeta)
-                {
-                    const FName Key(Pair.first.c_str());
-                    Minted->Metadata.SetValue(Key, Pair.second);
-                    Minted->ScriptClassMetaKeys.push_back(Key);
-                }
-                Minted->ScriptUpdatePhase = static_cast<uint8>(UpdatePhaseInChain(Minted));
-
-                // Re-appending would duplicate properties, so a changed schema tears the block down and rebuilds.
-                const Scripting::FScriptExportSchema& Schema = Desc->Schema;
-                const bool bHaveSchema = Desc->bHasSchema;
-
-                // Only into a class with no block yet, since a second append would shadow the first rather than replace it.
-                if (Minted->GetDefaultObjectIfCreated() == nullptr && Minted->LayoutRecord.Get() == nullptr)
-                {
-                    if (bHaveSchema && Schema.IsValid())
-                    {
-                        const uint32 Count = Scripting::AppendScriptPropertiesToClass(Minted, Schema);
-                        if (Count > 0)
-                        {
-                            NeedDefaults.push_back(Minted);
-                        }
-                    }
-                }
-                else if (bHaveSchema)
-                {
-                    // A layout change never reaches here: it was staged as a replacement above, so this class
-                    // is a fresh one and the branch over it appended its block already.
-                    const EScriptTypeDirty Dirty = Scripting::DiffScriptClassLayout(Minted, Schema);
-
-                    if (EnumHasAnyFlags(Dirty, EScriptTypeDirty::Metadata | EScriptTypeDirty::Defaults))
-                    {
-                        Scripting::RefreshScriptPropertyMetadata(Minted, Schema);
-                    }
-
-                    // An unbound instance reads native-backed fields as zero, so the schema never shows an edited initializer.
-                    NeedDefaults.push_back(Minted);
-                }
-
-                bMintedAny = true;
-            }
-        }
-
-        // Finalize registration + create CDOs so FindObject<CClass>(name) / NewObject(class) work.
-        if (bMintedAny)
-        {
-            RegisterPendingTypes();
-        }
-
-        // It runs on the managed side because an initializer is an arbitrary C# expression.
-        for (CScriptClass* Minted : NeedDefaults)
-        {
-            CObject* DefaultObject = Minted->GetDefaultObject();
-            DotNet::ApplyScriptableDefaults(Minted->GetName().ToString(), DefaultObject);
-        }
-
-        // last, because a replacement has to be linked and hold a default object before an instance can be
-        // built on it. Every holder is reached through the reflected graph and the registered providers, so
-        // nothing here knows what was pointing at the old classes.
-        FObjectReinstancer Reinstancer;
-
-        // A [SkipHotReload] property is the one thing the value carry-over must not carry, and the
-        // reinstancer has no reason to know what that means.
-        Reinstancer.SetPostReplaceHook([](CObject* Old, CObject* New)
-        {
-            // The tagged carry-over skips what is never saved, such as a UI's Bind values, which a plain reload keeps.
-            if (CScriptClass* NewClass = Cast<CScriptClass>(New->GetClass()))
-            {
-                NewClass->ForEachScriptProperty([&](FProperty* Property)
-                {
-                    const FProperty* Previous = Property->ShouldSerialize() ? nullptr : Old->GetClass()->GetProperty(Property->GetPropertyName());
-                    if (Previous != nullptr && Property->HasSameValueType(Previous))
-                    {
-                        Property->CopyCompleteValue(Property->GetValuePtr<void>(New), Previous->GetValuePtr<void>(Old));
-                    }
-                });
-            }
-            Scripting::ResetSkipHotReloadProperties(New);
-
-            // OnReloaded is what a reload delivers, so a replaced script must not look new enough for OnAttach and OnReady again.
-            CEntityScript* OldScript = Cast<CEntityScript>(Old);
-            CEntityScript* NewScript = Cast<CEntityScript>(New);
-            if (OldScript != nullptr && NewScript != nullptr)
-            {
-                NewScript->ContinueLifecycleOf(*OldScript);
-                UIScripts::Replace(OldScript, NewScript);
-            }
-        });
-
-        for (const FPendingReplacement& Pending : Replacements)
-        {
-            // A class that was renamed as well as reshaped is found through its alias.
-            const auto Found = GMintedClasses().find(Pending.Name);
-            CClass* const New = Found != GMintedClasses().end() ? Found->second : ResolveClass(Pending.Name);
-            if (New == nullptr)
-            {
-                LOG_WARN("Scriptable: '{}' changed shape but was not re-minted; its instances are left on the "
-                         "previous class.", Pending.Name.c_str());
-                continue;
-            }
-            // Nothing can be built on an abstract class, so its live instances stay on the old one until they go.
-            if (New->IsAbstract())
-            {
-                LOG_WARN("Scriptable: '{}' became abstract, so its live instances stay on the previous class.", Pending.Name.c_str());
-                continue;
-            }
-            LOG_TRACE("Scriptable: reshaped '{}' under '{}'.", Pending.Name.c_str(),
-                New->GetSuperClass() != nullptr ? New->GetSuperClass()->GetName().c_str() : "nothing");
-            Reinstancer.MapClass(Pending.Old, New);
-        }
-
-        // A rename has no replacement of its own, so the instances move onto whatever the alias resolves to.
-        for (CClass* Old : Renamed)
-        {
-            // An alias naming a type that still exists is a stale attribute, not a rename.
-            if (LiveNames.find(RenamedFrom[Old]) != LiveNames.end())
-            {
-                continue;
-            }
-            if (CClass* Target = ResolveClass(RenamedFrom[Old]); Target != nullptr && Target != Old && !Target->IsAbstract())
-            {
-                LOG_TRACE("Scriptable: moving instances of renamed '{}' onto '{}'.", Old->GetName().c_str(), Target->GetName().c_str());
-                Reinstancer.MapClass(Old, Target);
-            }
-        }
-
-        // Instances stranded on an older class move as soon as its name resolves again, re-added or through an alias.
-        for (const TPair<FName, CScriptClass*>& Waiting : GAwaitingRetirement())
-        {
-            if (CClass* Target = ResolveClass(Waiting.first); Target != nullptr && Target != Waiting.second && !Target->IsAbstract())
-            {
-                Reinstancer.MapClass(Waiting.second, Target);
-            }
-        }
-
-        if (!Reinstancer.IsEmpty())
-        {
-            const FReinstanceResult Result = Reinstancer.Commit();
-            LOG_DISPLAY("Scriptable: reinstanced {} object(s), repointed {} reference(s) across {} object(s) "
-                        "and {} provider(s).", Result.InstancesReplaced, Result.ReferencesPatched,
-                        Result.ObjectsScanned, Result.ProvidersVisited);
-        }
-
-        // Repeated, because a parent can only go once the subclasses on it have gone.
-        TVector<FPendingReplacement> Unretired = Replacements;
-        for (const TPair<FName, CScriptClass*>& Waiting : GAwaitingRetirement())
-        {
-            Unretired.push_back(FPendingReplacement{ Waiting.first, Waiting.second });
-        }
-        GAwaitingRetirement().clear();
-        for (bool bProgress = true; bProgress;)
-        {
-            bProgress = false;
-            for (size_t Index = Unretired.size(); Index-- > 0;)
-            {
-                if (TryRetireMintedClass(Unretired[Index].Old->GetName(), Unretired[Index].Old, "superseded by a reshaped replacement", false))
-                {
-                    Unretired.erase(Unretired.begin() + Index);
-                    bProgress = true;
-                }
-            }
-            for (const FName& Name : StaleNames)
-            {
-                auto Stale = GMintedClasses().find(Name);
-                if (Stale != GMintedClasses().end() && TryRetireMintedClass(Name, Stale->second, "its C# type no longer exists", false))
-                {
-                    GMintedClasses().erase(Stale);
-                    bProgress = true;
-                }
-            }
-        }
-        for (const FPendingReplacement& Pending : Unretired)
-        {
-            if (!TryRetireMintedClass(Pending.Old->GetName(), Pending.Old, "superseded by a reshaped replacement"))
-            {
-                GAwaitingRetirement().push_back({ Pending.Name, Pending.Old });
-            }
-        }
-        for (const FName& Name : StaleNames)
-        {
-            if (auto Stale = GMintedClasses().find(Name); Stale != GMintedClasses().end())
-            {
-                TryRetireMintedClass(Name, Stale->second, "its C# type no longer exists");
-            }
-        }
+        MintAndLayOut(Descs);
+        ReinstanceOntoReplacements(Replacements, Renamed, RenamedFrom, LiveNames);
+        RetireUnusedClasses(Replacements, StaleNames);
     }
 }

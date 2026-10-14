@@ -12,7 +12,7 @@
 namespace Lumina
 {
     REFLECT()
-    struct FAABB
+    struct SAABB
     {
         GENERATED_BODY()
         
@@ -22,11 +22,11 @@ namespace Lumina
         PROPERTY(Editable)
         FVector3 Max;
         
-        FAABB()
+        SAABB()
             : Min(0.0f), Max(0.0f)
         {}
 
-        FAABB(const FVector3& InMin, const FVector3& InMax)
+        SAABB(const FVector3& InMin, const FVector3& InMax)
             : Min(InMin), Max(InMax)
         {}
 
@@ -42,7 +42,7 @@ namespace Lumina
         FUNCTION()
         FORCEINLINE FVector3 GetCenter() const { return Min + GetSize() * 0.5f; }
         
-        NODISCARD FAABB ToWorld(const FMatrix4& World) const
+        NODISCARD SAABB ToWorld(const FMatrix4& World) const
         {
             FVector3 NewMin = FVector3(World[3]);
             FVector3 NewMax = FVector3(World[3]);
@@ -58,7 +58,7 @@ namespace Lumina
                 NewMax += Math::Max(MinContrib, MaxContrib);
             }
 
-            return FAABB(NewMin, NewMax);
+            return SAABB(NewMin, NewMax);
         }
     };
 }

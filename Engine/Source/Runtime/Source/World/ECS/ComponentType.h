@@ -7,6 +7,7 @@
 #include "Containers/Name.h"
 #include "Containers/Vector.h"
 #include "Memory/SmartPtr.h"
+#include "Core/Threading/Sync.h"
 #include "Platform/GenericPlatform.h"
 
 #include <new>
@@ -21,6 +22,8 @@ namespace Lumina
 
 namespace Lumina::ECS
 {
+    class FSparseSet;
+
     // A dense index, so a storage lookup is an array index and never a hash of a type name.
     using FComponentTypeID = uint16;
 
@@ -66,16 +69,22 @@ namespace Lumina::ECS
 
         bool bTriviallyDestructible = false;
 
+        // Laid out at runtime from a C# type, so its pools are tracked and laid out again when the type is reshaped.
+        bool bRuntimeLayout = false;
+
         FComponentTypeID TypeID = InvalidComponentTypeID;
 
-        // The lifetime operations a type-erased path needs. Plain function pointers, so no storage carries a vtable.
-        void (*DefaultConstruct)(void* Dest) = nullptr;
-        void (*CopyConstruct)(void* Dest, const void* Source) = nullptr;
-        void (*Destruct)(void* Dest) = nullptr;
+        // The lifetime operations a type-erased path needs, handed the info so a runtime layout reaches its struct.
+        void (*DefaultConstruct)(const FComponentTypeInfo& Info, void* Dest) = nullptr;
+        void (*CopyConstruct)(const FComponentTypeInfo& Info, void* Dest, const void* Source) = nullptr;
+        void (*Destruct)(const FComponentTypeInfo& Info, void* Dest) = nullptr;
 
         // Move-constructs into Dest and destroys Source. Null when a memcpy does the same job.
-        void (*Relocate)(void* Dest, void* Source) = nullptr;
+        void (*Relocate)(const FComponentTypeInfo& Info, void* Dest, void* Source) = nullptr;
     };
+
+    // Carries one element's value from an old layout of its type into a default-constructed new one.
+    using FMigrateComponentValue = void (*)(const FComponentTypeInfo& From, const void* FromValue, const FComponentTypeInfo& To, void* ToValue);
 
     // Reserved up front so GetInfo never observes a moved buffer, which is what lets workers read it.
     inline constexpr size_t MaxComponentTypes = 2048;
@@ -100,10 +109,20 @@ namespace Lumina::ECS
 
         NODISCARD RUNTIME_API size_t Num() const;
 
+        // Gives a runtime-layout type its new layout, and every live pool of it the same, carrying each value across.
+        RUNTIME_API void Relayout(FComponentTypeID TypeID, const FComponentTypeInfo& Info, FMigrateComponentValue Migrate);
+
+        RUNTIME_API void TrackPool(FSparseSet* Pool);
+        RUNTIME_API void UntrackPool(FSparseSet* Pool);
+
     private:
 
         // Boxed, so a reference handed out for one type survives every later registration.
         TVector<TUniquePtr<FComponentTypeInfo>> Types;
+
+        // Only pools of runtime-layout types, the ones a reshape has to reach.
+        TVector<FSparseSet*> RuntimeLayoutPools;
+        FMutex PoolLock;
     };
 
     template<typename T>
@@ -291,22 +310,22 @@ namespace Lumina::ECS
 
         if constexpr (!TComponentTraits<T>::bEmpty)
         {
-            Info.Destruct = +[](void* Dest) { static_cast<T*>(Dest)->~T(); };
+            Info.Destruct = +[](const FComponentTypeInfo&, void* Dest) { static_cast<T*>(Dest)->~T(); };
 
             if constexpr (std::is_default_constructible_v<T>)
             {
-                Info.DefaultConstruct = +[](void* Dest) { Memory::ConstructAt(static_cast<T*>(Dest)); };
+                Info.DefaultConstruct = +[](const FComponentTypeInfo&, void* Dest) { Memory::ConstructAt(static_cast<T*>(Dest)); };
             }
 
             if constexpr (std::is_copy_constructible_v<T>)
             {
-                Info.CopyConstruct = +[](void* Dest, const void* Source) { Memory::ConstructAt(static_cast<T*>(Dest), *static_cast<const T*>(Source)); };
+                Info.CopyConstruct = +[](const FComponentTypeInfo&, void* Dest, const void* Source) { Memory::ConstructAt(static_cast<T*>(Dest), *static_cast<const T*>(Source)); };
             }
 
             if constexpr (!(std::is_trivially_copyable_v<T> || TIsTriviallyRelocatable_V<T>)
                 && std::is_move_constructible_v<T>)
             {
-                Info.Relocate = +[](void* Dest, void* Source)
+                Info.Relocate = +[](const FComponentTypeInfo&, void* Dest, void* Source)
                 {
                     T* Moved = static_cast<T*>(Source);
                     Memory::ConstructAt(static_cast<T*>(Dest), std::move(*Moved));

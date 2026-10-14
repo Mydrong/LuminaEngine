@@ -82,7 +82,7 @@ namespace Lumina
         };
 
         // Bounding-sphere framing so wide-flat and tall-narrow meshes frame the same as cubes.
-        auto FrameBounds = [](FThumbnailScene& Scene, const FAABB& Bounds)
+        auto FrameBounds = [](FThumbnailScene& Scene, const SAABB& Bounds)
         {
             const FVector3 Center  = Bounds.GetCenter();
             const float    Radius  = Math::Max(Math::Length(Bounds.GetSize() * 0.5f), 0.5f);
@@ -106,7 +106,7 @@ namespace Lumina
             SSkeletalMeshComponent& MeshComponent = World->EmplaceComponent<SSkeletalMeshComponent>(MeshEntity);
             MeshComponent.SetSkeletalMesh(Mesh);
 
-            FAABB Bounds = Mesh->GetAABB();
+            SAABB Bounds = Mesh->GetAABB();
             if (Mesh->Skeleton.IsValid())
             {
                 Mesh->Skeleton->ComputeBindPoseSkinningMatrices(MeshComponent.BoneTransforms);

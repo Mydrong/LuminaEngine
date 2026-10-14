@@ -269,7 +269,7 @@ namespace Lumina
 
         int32 ResolveBoneIndex(const FName& BoneName) const;
 
-        void ResolveBoneMasks(const TVector<FAnimGraphBoneMaskDef>& Defs, const FSkeletonResource* InSkeleton);
+        void ResolveBoneMasks(const TVector<SAnimGraphBoneMaskDef>& Defs, const FSkeletonResource* InSkeleton);
         int32 FindBoneMaskIndex(const FName& Name) const;
 
         // Ad-hoc bone mask from a bone's subtree (weight 1.0 for the root when bInclusive + descendants);
@@ -328,7 +328,7 @@ namespace Lumina
         TVector<FAnimGraphClipCurveMap>         ClipCurveMaps;
         TVector<FAnimGraphBlendSpaceCurveMap>   BlendSpaceCurveMaps;
         TVector<FAnimGraphParameter>            Parameters;
-        TVector<FAnimGraphObjectParameter>      ObjectParameters;
+        TVector<SAnimGraphObjectParameter>      ObjectParameters;
         TVector<TStrongObjectPtr<CObject>>      ObjectConstants;
         TVector<FAnimGraphBoneMask>             BoneMasks;
         THashMap<FName, int32>                  BoneMaskNameToIndex;

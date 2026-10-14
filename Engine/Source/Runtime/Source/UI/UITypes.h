@@ -21,7 +21,7 @@ namespace Lumina
 
     /** An Rml::ElementDocument* loaded into a world's screen context. Valid until it is unloaded. */
     REFLECT()
-    struct RUNTIME_API FUIDocument
+    struct RUNTIME_API SUIDocument
     {
         GENERATED_BODY()
 
@@ -31,7 +31,7 @@ namespace Lumina
 
     /** An Rml::Element* inside a loaded document. Valid while that document is loaded. */
     REFLECT()
-    struct RUNTIME_API FUIElement
+    struct RUNTIME_API SUIElement
     {
         GENERATED_BODY()
 
@@ -41,7 +41,7 @@ namespace Lumina
 
     /** One element event listener, owned by the UI bridge and reaped with the world's UI. */
     REFLECT()
-    struct RUNTIME_API FUIEventListener
+    struct RUNTIME_API SUIEventListener
     {
         GENERATED_BODY()
 
@@ -51,7 +51,7 @@ namespace Lumina
 
     /** A named data model registered on a world's UI context. */
     REFLECT()
-    struct RUNTIME_API FUIDataModel
+    struct RUNTIME_API SUIDataModel
     {
         GENERATED_BODY()
 

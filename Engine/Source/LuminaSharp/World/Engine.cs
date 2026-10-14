@@ -51,12 +51,6 @@ public static partial class Engine
     // False wherever nothing is drawn or heard, so cosmetic work can skip a server, a bot and a headless process alike.
     public static bool HasPresentation => Lumina.CGameLibrary.HasPresentation(World);
 
-    /// The persistent game instance, or null before the project has created one.
-    public static Lumina.CGameInstance? Instance => Lumina.CGameLibrary.GetGameInstance();
-
-    /// The game instance as your own subclass, or null when the project runs a different one.
-    public static T? GetInstance<T>() where T : Lumina.CGameInstance => Instance as T;
-
     [ThreadStatic] private static Lumina.CWorld? ActiveWorld;
     [ThreadStatic] private static FEntity ActiveEntity;
     [ThreadStatic] private static bool ActiveHasEntity;

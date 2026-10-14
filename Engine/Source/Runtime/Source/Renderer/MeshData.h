@@ -648,7 +648,7 @@ namespace Lumina
         FDistanceFieldVolume      DistanceField;
 
         // Published on the meshlet header, derived rather than serialized; CreateForResource fills it.
-        FAABB                     LocalBounds;
+        SAABB                     LocalBounds;
 
         uint32                    RequiredBoneCount = 0;
 

@@ -317,6 +317,8 @@ namespace Lumina::Reflection
         AppendArg("-x");
         AppendArg("c++");
         AppendArg("-std=c++23");
+        // Engine headers document reflected members with plain // comments, which clang otherwise ignores.
+        AppendArg("-fparse-all-comments");
         if (const std::string ResourceDir = FindClangResourceDir(); !ResourceDir.empty())
         {
             AppendArg("-resource-dir=" + ResourceDir);

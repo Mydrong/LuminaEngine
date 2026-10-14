@@ -11,6 +11,7 @@ namespace GameScripts;
 /// CEntityScript gives you: Entity, World, Registry, the cached Transform, and lifecycle hooks
 /// (OnAttach / OnReady / OnUpdate / OnDetach), plus input and collision callbacks.
 /// </summary>
+[Reflect]
 public sealed class ExampleScript : CEntityScript
 {
     [Property(Tooltip = "Degrees per second to spin around the up (Y) axis.")]

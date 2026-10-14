@@ -20,7 +20,7 @@ namespace Lumina
             TWeakObjectPtr<CWorld> World;
             FTimerHandle           Handle;
 
-            FManagedTimer(FScriptCallback InCallback, CWorld* InWorld)
+            FManagedTimer(SScriptCallback InCallback, CWorld* InWorld)
                 : Callback(InCallback)
                 , World(InWorld)
             {
@@ -45,7 +45,7 @@ namespace Lumina
         }
 
         uint32 Schedule(CWorld* World, ECS::FEntity Owner, bool bHasOwner, float Rate, bool bLoop,
-            float FirstDelay, FScriptCallback Callback)
+            float FirstDelay, SScriptCallback Callback)
         {
             if (World == nullptr || !Callback.IsBound())
             {
@@ -69,12 +69,12 @@ namespace Lumina
         }
     }
 
-    uint32 CTimerLibrary::SetTimer(CWorld* World, float Rate, FScriptCallback OnFire, bool bLoop, float FirstDelay)
+    uint32 CTimerLibrary::SetTimer(CWorld* World, float Rate, SScriptCallback OnFire, bool bLoop, float FirstDelay)
     {
         return Schedule(World, ECS::NullEntity, false, Rate, bLoop, FirstDelay, OnFire);
     }
 
-    uint32 CTimerLibrary::SetTimerForEntity(CWorld* World, ECS::FEntity Owner, float Rate, FScriptCallback OnFire,
+    uint32 CTimerLibrary::SetTimerForEntity(CWorld* World, ECS::FEntity Owner, float Rate, SScriptCallback OnFire,
         bool bLoop, float FirstDelay)
     {
         return Schedule(World, Owner, true, Rate, bLoop, FirstDelay, OnFire);

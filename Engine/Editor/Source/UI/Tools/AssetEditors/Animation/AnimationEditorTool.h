@@ -10,6 +10,7 @@
 #include "UI/CurveEditor/CurveEditorWidget.h"
 #include "UI/Properties/PropertyTable.h"
 #include "UI/Tools/AssetEditors/AssetEditorTool.h"
+#include "UI/Tools/AssetEditors/Animation/AnimPreview.h"
 
 namespace Lumina
 {
@@ -70,6 +71,7 @@ namespace Lumina
         void  DeleteSelected(FAnimationResource* Resource);
 
         SSimpleAnimationComponent* GetPreviewComponent() const;
+        void CreatePreviewEntity();
 
         // Transport state
         bool  bIsPlaying = false;
@@ -117,5 +119,6 @@ namespace Lumina
         ImGuizmo::OPERATION GuizmoOp = ImGuizmo::TRANSLATE;
         ECS::FEntity DirectionalLightEntity = ECS::NullEntity;
         ECS::FEntity MeshEntity = ECS::NullEntity;
+        FPreviewMeshSelection PreviewMeshSelection;
     };
 }

@@ -455,7 +455,7 @@ namespace Lumina::SkeletalMeshMerge
                 {
                     continue;
                 }
-                for (const FMeshSocket& Socket : Skeleton->Sockets)
+                for (const SMeshSocket& Socket : Skeleton->Sockets)
                 {
                     if (FindSocketByName(OutSkeleton->Sockets, Socket.SocketName) == nullptr)
                     {

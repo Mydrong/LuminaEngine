@@ -78,6 +78,6 @@ namespace Lumina
 
         /** Coarse visibility for one draw source. Call it BEFORE generating the source's lines. */
         RUNTIME_API bool ShouldDraw(const FDebugDrawState& State, const FVector3& Center, float Radius);
-        RUNTIME_API bool ShouldDraw(const FDebugDrawState& State, const FAABB& Bounds);
+        RUNTIME_API bool ShouldDraw(const FDebugDrawState& State, const SAABB& Bounds);
     }
 }

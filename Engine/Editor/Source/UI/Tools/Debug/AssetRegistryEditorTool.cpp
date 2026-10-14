@@ -189,11 +189,11 @@ namespace Lumina
         if (const CMaterial* Material = Cast<CMaterial>(Asset))
         {
             uint64 Bytes = 0;
-            for (const FMaterialStageBlob& Blob : Material->Stages)
+            for (const SMaterialStageBlob& Blob : Material->Stages)
             {
                 Bytes += Blob.Spirv.capacity() * sizeof(uint32);
             }
-            Bytes += Material->Parameters.capacity() * sizeof(FMaterialParameter);
+            Bytes += Material->Parameters.capacity() * sizeof(SMaterialParameter);
             return Bytes;
         }
 

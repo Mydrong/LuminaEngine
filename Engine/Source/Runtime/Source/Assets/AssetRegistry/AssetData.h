@@ -40,7 +40,6 @@ namespace Lumina
         RuntimeOnly  = 1 << 1,  // Skipped during editor-mode registration.
         AlwaysCook   = 1 << 2,  // Implicit root; included even without inbound ref.
         NeverCook    = 1 << 3,  // Forbid cooking; report error if reached.
-        Primary      = 1 << 4,  // Auto-root for Asset Manager (Phase 2).
     };
 
     constexpr EAssetFlags operator|(EAssetFlags a, EAssetFlags b)
@@ -68,6 +67,13 @@ namespace Lumina
         }
     };
 
+    // A soft reference a property placed in a named bundle, loaded alongside its owner when that bundle is asked for.
+    struct FAssetBundleEntry
+    {
+        FName Bundle;
+        FGuid Target;
+    };
+
     struct FAssetData
     {
         FGuid                       AssetGUID;
@@ -88,6 +94,8 @@ namespace Lumina
 
         // Direct outbound refs from the package ImportTable (reflection-typed where possible).
         TVector<FAssetDependency>   Dependencies;
+        // Empty for almost every asset, so it costs nothing where no property names a bundle.
+        TVector<FAssetBundleEntry>  Bundles;
 
         // Default-chunk hint from the owning plugin/project.
         FName                       OwnerChunk;

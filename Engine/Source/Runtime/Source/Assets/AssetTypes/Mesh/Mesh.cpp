@@ -193,9 +193,9 @@ namespace Lumina
     namespace
     {
         // A cooked mesh has dropped its Positions, so the meshlet streams and then the spheres stand in.
-        FAABB ComputeMeshLocalBounds(const FMeshResource& Resource)
+        SAABB ComputeMeshLocalBounds(const FMeshResource& Resource)
         {
-            FAABB Bounds;
+            SAABB Bounds;
             Bounds.Min = { FLT_MAX, FLT_MAX, FLT_MAX };
             Bounds.Max = { -FLT_MAX, -FLT_MAX, -FLT_MAX };
 
@@ -246,7 +246,7 @@ namespace Lumina
 
     void CMesh::GenerateBoundingBox()
     {
-        BoundingBox = MeshResources ? ComputeMeshLocalBounds(*MeshResources) : FAABB();
+        BoundingBox = MeshResources ? ComputeMeshLocalBounds(*MeshResources) : SAABB();
     }
 
     namespace
@@ -377,7 +377,7 @@ namespace Lumina
                                             ? MB.MeshletCount : 0u;
 
             // Zero when the bounds could not be derived; the shader reads that as a degenerate box.
-            const FAABB& Local = Resource.LocalBounds;
+            const SAABB& Local = Resource.LocalBounds;
             Header.LocalMinX                = Local.Min.x;
             Header.LocalMinY                = Local.Min.y;
             Header.LocalMinZ                = Local.Min.z;

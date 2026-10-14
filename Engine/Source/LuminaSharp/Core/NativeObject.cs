@@ -28,9 +28,7 @@ public unsafe class NativeObject : IDisposable
         BindNativeHandle(Handle);
     }
 
-    /// <summary>Parameterless ctor for a managed-first subclass: a C# subclass of a <c>REFLECT(Scriptable)</c>
-    /// native class is Activator-created, then paired to its (already-constructed) native object via
-    /// <see cref="BindNativeHandle"/>. Until bound the wrapper is invalid.</summary>
+    // A C# subclass is created first and bound to its already constructed native object afterwards, invalid until then.
     protected NativeObject()
     {
     }
@@ -46,16 +44,16 @@ public unsafe class NativeObject : IDisposable
         EntryPtr = bFastPathUsable && ObjectIndex >= 0 ? (byte*)Native.ObjectGetEntry(Handle) : null;
     }
 
+    // Runs once when the bridge pairs a script instance with its native object, before anything dispatches to it.
+    internal virtual void OnScriptInstanceCreated(ScriptableRuntime Runtime, System.Runtime.InteropServices.GCHandle Handle)
+    {
+    }
+
     // Called before the wrapper is published to the instance cache, so no other thread can see it yet.
     internal void StartCountingReferences()
     {
         References = new ObjectReference(RawHandle);
         References.Add();
-    }
-
-    internal void AddReference()
-    {
-        References?.Add();
     }
 
     // A handout from the instance cache. A twin of an object nothing native owns becomes C#'s, held like any wrapper.
@@ -135,6 +133,11 @@ public unsafe class NativeObject : IDisposable
     /// pointer, preserving the old behavior.)
     /// <para>protected, not internal: a user script is a subclass in ANOTHER assembly, and the accessors
     /// ScriptPropertyRewriter emits for it read through here.</para></summary>
+    // The names generated accessors read through, shared with struct handles so one emitter serves both.
+    protected internal IntPtr Self => Handle;
+
+    protected internal NativeRef SelfRef => new(Handle);
+
     protected internal IntPtr Handle
     {
         get
@@ -198,115 +201,5 @@ public unsafe class NativeObject : IDisposable
     public void ThrowIfInvalid()
     {
         _ = Handle;
-    }
-}
-
-/// <summary>
-/// Base for the generated opaque wrappers around native structs that are NOT blittable.
-/// </summary>
-public unsafe class NativeStruct
-{
-    private const uint DeadEpoch = 0xFFFFFFFFu;
-
-    private IntPtr RawHandle;
-
-    // Set for a component fetched through the registry, which makes the view safe to keep across frames.
-    private uint* EpochSlot;
-    private uint Epoch;
-    private ulong World;
-    private uint EntityId;
-    private IntPtr Ops;
-
-    protected internal NativeStruct(IntPtr Handle)
-    {
-        RawHandle = Handle;
-    }
-
-    // A component view revalidates itself when its pool relocates, so it may be stored and reused.
-    protected internal IntPtr Handle
-    {
-        get
-        {
-            if (EpochSlot != null && *EpochSlot != Epoch)
-            {
-                Revalidate(true);
-            }
-
-            return RawHandle;
-        }
-        set
-        {
-            RawHandle = value;
-            EpochSlot = null;
-        }
-    }
-
-    /// False once the component this view points at has been removed or its world destroyed.
-    public bool IsValid
-    {
-        get
-        {
-            if (EpochSlot == null)
-            {
-                return RawHandle != IntPtr.Zero;
-            }
-
-            return *EpochSlot == Epoch || Revalidate(false);
-        }
-    }
-
-    // Gates the accessors ScriptPropertyRewriter emits, since the schema pass builds one unbound instance per script row type.
-    protected internal bool HasNativeStorage => RawHandle != IntPtr.Zero;
-
-    // Overridden by the rewriter with a script row's [Property] initializers, run once into the minted struct's defaults.
-    protected virtual void __ApplyScriptDefaults()
-    {
-    }
-
-    internal void ApplyScriptDefaults() => __ApplyScriptDefaults();
-
-    // Points a script row created unbound at native row memory, since it declares no IntPtr constructor.
-    internal void BindNativeHandle(IntPtr NativeHandle)
-    {
-        RawHandle = NativeHandle;
-        EpochSlot = null;
-    }
-
-    internal void BindComponentView(ulong InWorld, uint InEntity, IntPtr InOps, uint* InEpochSlot)
-    {
-        World = InWorld;
-        EntityId = InEntity;
-        Ops = InOps;
-        EpochSlot = InEpochSlot;
-        Epoch = InEpochSlot != null ? *InEpochSlot : 0;
-    }
-
-    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-    private bool Revalidate(bool bThrow)
-    {
-        uint Observed = *EpochSlot;
-        IntPtr Pointer = IntPtr.Zero;
-        uint* Slot = null;
-
-        // A dead pool means the world is gone, and its handle can no longer be dereferenced.
-        if (Observed != DeadEpoch)
-        {
-            Pointer = Native.GetComponentTracked(World, EntityId, Ops, &Slot);
-        }
-
-        if (Pointer == IntPtr.Zero)
-        {
-            if (bThrow)
-            {
-                throw new InvalidOperationException($"{GetType().Name} is no longer on entity {EntityId & 0xFFFFF}; it was removed or its world was destroyed.");
-            }
-
-            return false;
-        }
-
-        RawHandle = Pointer;
-        EpochSlot = Slot;
-        Epoch = Observed;
-        return true;
     }
 }

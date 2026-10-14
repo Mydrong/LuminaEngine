@@ -136,7 +136,7 @@ namespace Lumina
         // Split a received batch into its framed messages.
         void ForEachFramedMessage(const uint8* Data, SIZE_T Size, const TFunction<void(const uint8*, SIZE_T)>& Fn);
 
-        //~ Net-index caches. A CObject/FAssetRef reference is sent as a compact varint index; identity is
+        //~ Net-index caches. A CObject/SUIDocumentRef reference is sent as a compact varint index; identity is
         //~ exported once and resolved in the sender's index space. Incoming maps are per-connection.
 
         // Bind both index caches on an archive. Writer uses the peer's outgoing maps, reader the sender's

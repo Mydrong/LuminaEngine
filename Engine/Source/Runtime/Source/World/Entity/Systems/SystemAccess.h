@@ -21,13 +21,8 @@ namespace Lumina
         TVector<uint32> Writes;
         TVector<uint32> Reads;
 
-        // One per declared component type. Creating a component pool MUTATES the registry's pool map, and
-        // the registry does it lazily inside View(), Get() and GetStorage(), for reads as much as writes, so two systems
-        // in the same parallel batch can be inside that dense_map at once, one of them rehashing it, and
-        // the reader walks a reallocated bucket array. It does not matter whether the two want the same
-        // component: the map is shared. The scheduler runs these on the tick thread before the batch, so
-        // every assure() inside the batch is a pure lookup. See CWorld::TickSystems.
-        TVector<void(*)(ECS::FRegistry&)> PoolAssurers;
+        // The declared component pools, created before a parallel batch since creating one resizes the shared pool table.
+        TVector<ECS::FComponentTypeID> Pools;
 
         bool            bExclusive = false;
 
@@ -52,7 +47,7 @@ namespace Lumina
         {
             if constexpr (!TIsSystemResource<T>)
             {
-                PoolAssurers.push_back(+[](ECS::FRegistry& Registry) { (void)Registry.GetStorage<T>(); });
+                Pools.push_back(ECS::GetComponentTypeID<T>());
             }
         }
 

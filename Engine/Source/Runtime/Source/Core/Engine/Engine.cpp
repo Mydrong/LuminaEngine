@@ -1,5 +1,6 @@
 ﻿#include "Platform/Time/PlatformTime.h"
 #include "World/ECS/ECSReferenceProvider.h"
+#include "World/Entity/PersistentEntities.h"
 #include "RuntimePCH.h"
 #include <string>
 #include "Engine.h"
@@ -60,7 +61,6 @@
 #include "World/World.h"
 #include "World/WorldContext.h"
 #include "UI/RmlUiBridge.h"
-#include "GameInstance.h"
 #include "Core/CommandLine/CommandLine.h"
 #include "Core/Object/Cast.h"
 #include "Core/Object/Class.h"
@@ -257,8 +257,7 @@ namespace Lumina
             BootLast = Now;
         };
 
-        // Both before anything can build an object, so a reinstance always sees every holder.
-        FObjectReferenceProviders::Register(this);
+        // Before anything can build an object, so a reinstance always sees every holder.
         FECSObjectReferenceProvider::Register();
         if (GConfig != nullptr)
         {
@@ -490,8 +489,6 @@ namespace Lumina
         DeveloperToolUI->Deinitialize(UpdateContext);
         DeveloperToolUI.Reset();
         #endif
-
-        DestroyGameInstance();
 
         Memory::Delete(GWorldManager);
 		GWorldManager = nullptr;
@@ -1093,18 +1090,14 @@ namespace Lumina
         // Must run after GConfig->LoadPath but before any OnReady script body.
         FInputActionMap::Get().RebuildFromSettings();
 
-        // Compile/load C# scripts before creating the GameInstance.
+        // Before the startup map, so its scripts are minted when it loads.
         DotNet::ReloadScripts();
-
-        // A TSubclassOf naming a C# subclass could not resolve at first config load, since scripts were unminted.
-        GConfig->ReloadSettings(CProjectSettings::StaticClass());
 
         // Before the startup map builds any bodies, since Box3D reads its tolerances as shapes are made.
         Physics::SetLengthUnitsPerMeter(GetDefault<CProjectSettings>()->PhysicsLengthUnitsPerMeter);
 
         RefreshWindowTitle();
         ApplyUserSettings();
-        CreateGameInstance();
         LoadStartupMap();
 
         OnProjectLoaded.Broadcast();
@@ -1116,30 +1109,6 @@ namespace Lumina
         #if !USING(WITH_EDITOR)
         CGameUserSettings::Get().Apply();
         #endif
-    }
-
-    void FEngine::CreateGameInstance()
-    {
-        // Gotta tear down any prior instance first.
-        DestroyGameInstance();
-        
-        CClass* InstanceClass = GetDefault<CProjectSettings>()->GameInstanceClass.Get();
-        if (InstanceClass == nullptr)
-        {
-            InstanceClass = CGameInstance::StaticClass();
-        }
-
-        GameInstance = Cast<CGameInstance>(NewObject(InstanceClass, nullptr, NAME_None, FGuid::New(), OF_Transient));
-        if (GameInstance == nullptr)
-        {
-            // The class resolved but is not a CGameInstance, and Init must never run through a null cast.
-            LOG_WARN("GameInstance class '{}' is not a CGameInstance; using base CGameInstance.", InstanceClass->GetName().ToString().c_str());
-            GameInstance = Cast<CGameInstance>(NewObject(CGameInstance::StaticClass(), nullptr, NAME_None, FGuid::New(), OF_Transient));
-        }
-        GameInstance->Init();
-
-        // DISPLAY so it survives Shipping and proves which class actually backs the instance.
-        LOG_DISPLAY("GameInstance created: class '{}'.", GameInstance->GetClass()->GetName().ToString().c_str());
     }
 
     void FEngine::LoadBotWorlds(FStringView MapName)
@@ -1174,7 +1143,6 @@ namespace Lumina
                 continue;
             }
             Context->SourceWorld  = SourceWorld;
-            Context->GameInstance = GameInstance.Get();
             Context->MapPath      = FString(MapName.data(), MapName.size());
             Context->NetHost      = Host;
             Context->NetPort      = Port;
@@ -1266,7 +1234,6 @@ namespace Lumina
             return;
         }
         Context->SourceWorld  = SourceWorld;
-        Context->GameInstance = GameInstance.Get();
 
         if (FInputViewport* Primary = GApp ? GApp->GetPrimaryViewport() : nullptr)
         {
@@ -1376,7 +1343,6 @@ namespace Lumina
             FWorldContext* NewContext = GWorldManager->CreateWorldContext(ColdWorld, EWorldType::Game, ColdNetMode);
             if (NewContext != nullptr)
             {
-                NewContext->GameInstance = GameInstance.Get();
                 NewContext->SourceWorld  = WorldAsset;
                 NewContext->MapPath      = FString(MapName.c_str());
                 if (bPendingHostOverride)
@@ -1401,7 +1367,6 @@ namespace Lumina
         const bool                      bPIE           = OldContext->bPIE;
         const FString                   OldNetHost     = OldContext->NetHost;
         uint16                          NetPort        = OldContext->NetPort;
-        CGameInstance* const            SavedInstance  = OldContext->GameInstance != nullptr ? OldContext->GameInstance : GameInstance.Get();
         CWorld* const                   OldWorld       = OldContext->World.Get();
 
         // A host-level OpenLevel overrides the role/port on the world it travels to.
@@ -1437,6 +1402,9 @@ namespace Lumina
             return;
         }
 
+        FPersistentCarry Carry;
+        Carry.Lift(OldWorld);
+
         GWorldManager->DestroyWorldContext(OldWorld);
 
         FWorldContext* NewContext = GWorldManager->CreateWorldContext(NewWorld, Type, NetMode);
@@ -1444,7 +1412,6 @@ namespace Lumina
         {
             NewContext->bPIE         = bPIE;
             NewContext->SourceWorld  = WorldAsset; // NewWorld was duplicated from WorldAsset -> that's its source
-            NewContext->GameInstance = SavedInstance;
             NewContext->MapPath      = FString(MapName.c_str());
             NewContext->NetHost      = OldNetHost;
             NewContext->NetPort      = NetPort;
@@ -1455,6 +1422,11 @@ namespace Lumina
         if (FInputViewport* Primary = GApp ? GApp->GetPrimaryViewport() : nullptr; Primary != nullptr && OldWorld == nullptr)
         {
             Primary->SetWorld(NewWorld);
+        }
+
+        if (NewContext != nullptr)
+        {
+            Carry.Land(NewWorld);
         }
 
         // OldWorld memory still alive (only TeardownWorld has run); safe to compare identity, do not inspect state.
@@ -1697,15 +1669,11 @@ namespace Lumina
         // After the project DLL so its types exist, and before the startup map so scripts are registered.
         DotNet::LoadCookedScripts();
 
-        // Cooked settings loaded before the scripts minted, so re-resolve now that a C# class exists.
-        GConfig->ReloadSettings(CProjectSettings::StaticClass());
-
         // Before the startup map builds any bodies, since Box3D reads its tolerances as shapes are made.
         Physics::SetLengthUnitsPerMeter(GetDefault<CProjectSettings>()->PhysicsLengthUnitsPerMeter);
 
         RefreshWindowTitle();
         ApplyUserSettings();
-        CreateGameInstance();
         LoadStartupMap();
         return true;
     }
@@ -1740,54 +1708,6 @@ namespace Lumina
         #else
         (void)AverageFrameSeconds;
         #endif
-    }
-
-    // Mirrors the rule CreateWorldContext uses, so a restore lands on exactly the contexts that had one.
-    void FEngine::RepointGameInstanceContexts(CGameInstance* Instance)
-    {
-        if (GWorldManager == nullptr)
-        {
-            return;
-        }
-
-        for (const TUniquePtr<FWorldContext>& Context : GWorldManager->GetContexts())
-        {
-            if (Context->Type == EWorldType::Game || Context->Type == EWorldType::Simulation)
-            {
-                Context->GameInstance = Instance;
-            }
-        }
-    }
-
-    void FEngine::VisitObjectReferences(FObjectReferenceVisitor::FSlotFunc Func)
-    {
-        CGameInstance* const Current = GameInstance.Get();
-        if (Current == nullptr)
-        {
-            return;
-        }
-
-        CObject* const Replacement = Func(Current);
-        if (Replacement == Current)
-        {
-            return;
-        }
-
-        // The world contexts mirror this pointer, so they move with it rather than keeping the retired one.
-        CGameInstance* const Replaced = Cast<CGameInstance>(Replacement);
-        GameInstance = Replaced;
-        RepointGameInstanceContexts(Replaced);
-    }
-
-    void FEngine::DestroyGameInstance()
-    {
-        if (GameInstance == nullptr)
-        {
-            return;
-        }
-
-        GameInstance->Shutdown();
-        GameInstance = nullptr;
     }
 
     FFixedString FEngine::GetProjectContentDirectory() const

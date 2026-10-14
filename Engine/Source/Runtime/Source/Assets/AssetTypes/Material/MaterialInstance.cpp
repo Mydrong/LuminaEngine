@@ -43,7 +43,7 @@ namespace Lumina
         }
 
         // Writes an override into a block without uploading, for the full rebuild that uploads once at the end.
-        void ApplyOverride(const FMaterialParameter& Param, const FMaterialParameterOverride& Override, FMaterialUniforms& Uniforms)
+        void ApplyOverride(const SMaterialParameter& Param, const SMaterialParameterOverride& Override, FMaterialUniforms& Uniforms)
         {
             switch (Override.Type)
             {
@@ -278,7 +278,7 @@ namespace Lumina
 
         // Overrides are never pruned here, so a recompile that drops a parameter cannot destroy its value.
         const uint32 OverriddenMask = GetOverriddenTextureMask();
-        for (const FMaterialParameter& Param : Root->Parameters)
+        for (const SMaterialParameter& Param : Root->Parameters)
         {
             if (Param.Type == EMaterialParameterType::Texture && Param.Index < MAX_TEXTURES && (OverriddenMask & (1u << Param.Index)) == 0)
             {
@@ -286,9 +286,9 @@ namespace Lumina
             }
         }
 
-        for (const FMaterialParameterOverride& Override : Overrides)
+        for (const SMaterialParameterOverride& Override : Overrides)
         {
-            FMaterialParameter Param;
+            SMaterialParameter Param;
             if (Override.bEnabled && Root->GetParameterValue(Override.Type, Override.ParameterName, Param))
             {
                 ApplyOverride(Param, Override, MaterialUniforms);
@@ -316,7 +316,7 @@ namespace Lumina
             return false;
         }
 
-        const bool bOverridden = Algo::AnyOf(Overrides, [&](const FMaterialParameterOverride& Override)
+        const bool bOverridden = Algo::AnyOf(Overrides, [&](const SMaterialParameterOverride& Override)
         {
             return Override.Type == Type && Override.bEnabled && Override.ParameterName == Name;
         });
@@ -365,14 +365,14 @@ namespace Lumina
 
         EnsureRegisteredWithParent();
 
-        FMaterialParameter Param;
+        SMaterialParameter Param;
         if (!GetParameterValue(Type, Name, Param))
         {
             WarnMissingParameterOnce(ParameterKindName(Type), Name);
             return false;
         }
 
-        FMaterialParameterOverride& Override = FindOrAddOverride(Name, Type);
+        SMaterialParameterOverride& Override = FindOrAddOverride(Name, Type);
         Override.bEnabled = true;
         Apply(Override, Param.Index);
 
@@ -382,7 +382,7 @@ namespace Lumina
 
     bool CMaterialInstance::SetScalarValue(const FName& Name, const float Value)
     {
-        return SetOverride(EMaterialParameterType::Scalar, Name, [&](FMaterialParameterOverride& Override, uint16 Index)
+        return SetOverride(EMaterialParameterType::Scalar, Name, [&](SMaterialParameterOverride& Override, uint16 Index)
         {
             Override.Scalar = Value;
             WriteScalarSlot(Index, Value);
@@ -391,7 +391,7 @@ namespace Lumina
 
     bool CMaterialInstance::SetVectorValue(const FName& Name, const FVector4& Value)
     {
-        return SetOverride(EMaterialParameterType::Vector, Name, [&](FMaterialParameterOverride& Override, uint16 Index)
+        return SetOverride(EMaterialParameterType::Vector, Name, [&](SMaterialParameterOverride& Override, uint16 Index)
         {
             Override.Vector = Value;
             WriteVectorSlot(Index, Value);
@@ -400,7 +400,7 @@ namespace Lumina
 
     bool CMaterialInstance::SetTextureValue(const FName& Name, CTexture* TextureValue)
     {
-        return SetOverride(EMaterialParameterType::Texture, Name, [&](FMaterialParameterOverride& Override, uint16 Index)
+        return SetOverride(EMaterialParameterType::Texture, Name, [&](SMaterialParameterOverride& Override, uint16 Index)
         {
             Override.Texture = TextureValue;
 
@@ -410,7 +410,7 @@ namespace Lumina
         });
     }
 
-    bool CMaterialInstance::GetParameterValue(EMaterialParameterType Type, const FName& Name, FMaterialParameter& Param)
+    bool CMaterialInstance::GetParameterValue(EMaterialParameterType Type, const FName& Name, SMaterialParameter& Param)
     {
         // Straight to the root, the only level that declares parameters.
         Param = {};
@@ -418,36 +418,36 @@ namespace Lumina
         return Root != nullptr && Root->GetParameterValue(Type, Name, Param);
     }
 
-    const TVector<FMaterialParameter>& CMaterialInstance::GetMaterialParams() const
+    const TVector<SMaterialParameter>& CMaterialInstance::GetMaterialParams() const
     {
-        static const TVector<FMaterialParameter> Empty;
+        static const TVector<SMaterialParameter> Empty;
         const CMaterial* Root = GetMaterial();
         return Root != nullptr ? Root->Parameters : Empty;
     }
 
-    FMaterialParameterOverride& CMaterialInstance::FindOrAddOverride(const FName& Name, EMaterialParameterType Type)
+    SMaterialParameterOverride& CMaterialInstance::FindOrAddOverride(const FName& Name, EMaterialParameterType Type)
     {
-        auto It = Algo::FindIf(Overrides, [&](const FMaterialParameterOverride& Override) { return Override.ParameterName == Name && Override.Type == Type; });
+        auto It = Algo::FindIf(Overrides, [&](const SMaterialParameterOverride& Override) { return Override.ParameterName == Name && Override.Type == Type; });
         if (It != Overrides.end())
         {
             return *It;
         }
 
-        FMaterialParameterOverride& Added = Overrides.emplace_back();
+        SMaterialParameterOverride& Added = Overrides.emplace_back();
         Added.ParameterName = Name;
         Added.Type = Type;
         return Added;
     }
 
-    const FMaterialParameterOverride* CMaterialInstance::FindOverride(const FName& Name) const
+    const SMaterialParameterOverride* CMaterialInstance::FindOverride(const FName& Name) const
     {
-        auto It = Algo::FindIf(Overrides, [&Name](const FMaterialParameterOverride& Override) { return Override.ParameterName == Name; });
+        auto It = Algo::FindIf(Overrides, [&Name](const SMaterialParameterOverride& Override) { return Override.ParameterName == Name; });
         return It != Overrides.end() ? &*It : nullptr;
     }
 
     bool CMaterialInstance::IsOverrideEnabled(const FName& Name) const
     {
-        const FMaterialParameterOverride* Override = FindOverride(Name);
+        const SMaterialParameterOverride* Override = FindOverride(Name);
         return Override != nullptr && Override->bEnabled;
     }
 
@@ -459,7 +459,7 @@ namespace Lumina
         }
 
         // An existing override keeps its value, so re-enabling restores the user's edit rather than resetting it.
-        auto It = Algo::FindIf(Overrides, [&Name](const FMaterialParameterOverride& Override) { return Override.ParameterName == Name; });
+        auto It = Algo::FindIf(Overrides, [&Name](const SMaterialParameterOverride& Override) { return Override.ParameterName == Name; });
         if (It != Overrides.end())
         {
             if (It->bEnabled != bEnabled)
@@ -475,7 +475,7 @@ namespace Lumina
             return;
         }
 
-        FMaterialParameter Param;
+        SMaterialParameter Param;
         const bool bFound = GetParameterValue(EMaterialParameterType::Scalar,  Name, Param)
                          || GetParameterValue(EMaterialParameterType::Vector,  Name, Param)
                          || GetParameterValue(EMaterialParameterType::Texture, Name, Param);
@@ -487,7 +487,7 @@ namespace Lumina
 
         // Seeded from the immediate parent, so the override starts where the instance already renders.
         const FMaterialUniforms& Inherited = *Material->GetMaterialUniforms();
-        FMaterialParameterOverride& Override = FindOrAddOverride(Name, Param.Type);
+        SMaterialParameterOverride& Override = FindOrAddOverride(Name, Param.Type);
         Override.bEnabled = true;
         switch (Param.Type)
         {
@@ -507,7 +507,7 @@ namespace Lumina
 
     void CMaterialInstance::RemoveOverride(const FName& Name)
     {
-        auto NewEnd = Algo::RemoveIf(Overrides, [&Name](const FMaterialParameterOverride& Override) { return Override.ParameterName == Name; });
+        auto NewEnd = Algo::RemoveIf(Overrides, [&Name](const SMaterialParameterOverride& Override) { return Override.ParameterName == Name; });
         if (NewEnd == Overrides.end())
         {
             return;
@@ -527,9 +527,9 @@ namespace Lumina
         }
 
         uint32 Mask = 0;
-        for (const FMaterialParameterOverride& Override : Overrides)
+        for (const SMaterialParameterOverride& Override : Overrides)
         {
-            FMaterialParameter Param;
+            SMaterialParameter Param;
             if (Override.Type == EMaterialParameterType::Texture && Override.bEnabled && Override.Texture != nullptr
                 && Root->GetParameterValue(EMaterialParameterType::Texture, Override.ParameterName, Param) && Param.Index < MAX_TEXTURES)
             {
@@ -552,7 +552,7 @@ namespace Lumina
 
     CTexture* CMaterialInstance::GetTextureParameterTexture(const FName& Name, uint32 Index)
     {
-        for (const FMaterialParameterOverride& Override : Overrides)
+        for (const SMaterialParameterOverride& Override : Overrides)
         {
             if (Override.Type == EMaterialParameterType::Texture && Override.bEnabled && Override.ParameterName == Name && Override.Texture != nullptr)
             {
@@ -598,7 +598,7 @@ namespace Lumina
     {
         // Inherited textures come from the root, which is why roots refresh before instances.
         const bool bReferences = ChangedTexture == nullptr
-            || Algo::AnyOf(Overrides, [ChangedTexture](const FMaterialParameterOverride& Override)
+            || Algo::AnyOf(Overrides, [ChangedTexture](const SMaterialParameterOverride& Override)
                {
                    return Override.Type == EMaterialParameterType::Texture && Override.Texture.Get() == ChangedTexture;
                })
@@ -627,9 +627,9 @@ namespace Lumina
         }
 
         // Loaded is not resident, and losing the race with the texture's PostLoad would bake the placeholder.
-        for (const FMaterialParameterOverride& Override : Overrides)
+        for (const SMaterialParameterOverride& Override : Overrides)
         {
-            FMaterialParameter Param;
+            SMaterialParameter Param;
             const bool bBinds = Override.Type == EMaterialParameterType::Texture && Override.bEnabled
                              && GetParameterValue(EMaterialParameterType::Texture, Override.ParameterName, Param);
             if (bBinds && Override.Texture != nullptr && Override.Texture->GetResourceID() < 0)
@@ -691,7 +691,7 @@ namespace Lumina
         {
             ParentInstance->GatherStaticSwitchValues(OutValues, Depth + 1);
         }
-        for (const FMaterialStaticSwitchOverride& Override : StaticSwitchOverrides)
+        for (const SMaterialStaticSwitchOverride& Override : StaticSwitchOverrides)
         {
             OutValues[Override.ParameterName] = Override.bValue;
         }
@@ -699,12 +699,12 @@ namespace Lumina
 
     bool CMaterialInstance::HasStaticSwitchOverride(const FName& Name) const
     {
-        return Algo::AnyOf(StaticSwitchOverrides, [&Name](const FMaterialStaticSwitchOverride& Override) { return Override.ParameterName == Name; });
+        return Algo::AnyOf(StaticSwitchOverrides, [&Name](const SMaterialStaticSwitchOverride& Override) { return Override.ParameterName == Name; });
     }
 
     bool CMaterialInstance::GetStaticSwitchValue(const FName& Name) const
     {
-        auto It = Algo::FindIf(StaticSwitchOverrides, [&Name](const FMaterialStaticSwitchOverride& Override) { return Override.ParameterName == Name; });
+        auto It = Algo::FindIf(StaticSwitchOverrides, [&Name](const SMaterialStaticSwitchOverride& Override) { return Override.ParameterName == Name; });
         if (It != StaticSwitchOverrides.end())
         {
             return It->bValue;
@@ -717,7 +717,7 @@ namespace Lumina
 
         if (const CMaterial* Root = GetMaterial())
         {
-            auto Switch = Algo::FindIf(Root->StaticSwitches, [&Name](const FMaterialStaticSwitch& S) { return S.ParameterName == Name; });
+            auto Switch = Algo::FindIf(Root->StaticSwitches, [&Name](const SMaterialStaticSwitch& S) { return S.ParameterName == Name; });
             return Switch != Root->StaticSwitches.end() && Switch->bDefaultValue;
         }
         return false;
@@ -732,7 +732,7 @@ namespace Lumina
             return false;
         }
 
-        auto It = Algo::FindIf(StaticSwitchOverrides, [&Name](const FMaterialStaticSwitchOverride& Override) { return Override.ParameterName == Name; });
+        auto It = Algo::FindIf(StaticSwitchOverrides, [&Name](const SMaterialStaticSwitchOverride& Override) { return Override.ParameterName == Name; });
         if (It != StaticSwitchOverrides.end())
         {
             if (It->bValue == bValue)
@@ -743,7 +743,7 @@ namespace Lumina
         }
         else
         {
-            FMaterialStaticSwitchOverride& Added = StaticSwitchOverrides.emplace_back();
+            SMaterialStaticSwitchOverride& Added = StaticSwitchOverrides.emplace_back();
             Added.ParameterName = Name;
             Added.bValue        = bValue;
         }
@@ -754,7 +754,7 @@ namespace Lumina
 
     void CMaterialInstance::RemoveStaticSwitchOverride(const FName& Name)
     {
-        auto NewEnd = Algo::RemoveIf(StaticSwitchOverrides, [&Name](const FMaterialStaticSwitchOverride& Override) { return Override.ParameterName == Name; });
+        auto NewEnd = Algo::RemoveIf(StaticSwitchOverrides, [&Name](const SMaterialStaticSwitchOverride& Override) { return Override.ParameterName == Name; });
         if (NewEnd == StaticSwitchOverrides.end())
         {
             return;

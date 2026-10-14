@@ -62,9 +62,9 @@ namespace Lumina
         return FString(ToString(Result));
     }
 
-    FNavPoint CNavigationLibrary::ProjectPoint(CWorld* World, FVector3 Point, FVector3 Extents, FName Agent)
+    SNavPoint CNavigationLibrary::ProjectPoint(CWorld* World, FVector3 Point, FVector3 Extents, FName Agent)
     {
-        FNavPoint Result;
+        SNavPoint Result;
         FVector3 Projected;
         if (Nav::ProjectPoint(World, Point, Extents, Projected, Agent))
         {
@@ -74,9 +74,9 @@ namespace Lumina
         return Result;
     }
 
-    FNavRaycastResult CNavigationLibrary::Raycast(CWorld* World, FVector3 Start, FVector3 End, FName Agent)
+    SNavRaycastResult CNavigationLibrary::Raycast(CWorld* World, FVector3 Start, FVector3 End, FName Agent)
     {
-        FNavRaycastResult Result;
+        SNavRaycastResult Result;
         Nav::Raycast(World, Start, End, Result, Agent);
         return Result;
     }
@@ -86,9 +86,9 @@ namespace Lumina
         return Nav::IsWalkableLine(World, From, To, Agent);
     }
 
-    FNavPoint CNavigationLibrary::FindRandomReachablePoint(CWorld* World, FVector3 Origin, float Radius, FName Agent)
+    SNavPoint CNavigationLibrary::FindRandomReachablePoint(CWorld* World, FVector3 Origin, float Radius, FName Agent)
     {
-        FNavPoint Result;
+        SNavPoint Result;
         FVector3 Found;
         if (Nav::FindRandomReachablePoint(World, Origin, Radius, Found, Agent))
         {

@@ -73,7 +73,7 @@ namespace Lumina
 		bool bCullBeyondMaxDistance = true;
 
 		// Handle to the currently playing sound instance.
-		FAudioHandle ActiveHandle;
+		SAudioHandle ActiveHandle;
 
 		// Live graph, when Sound is a CAudioGraph. Shared with the mixer for the life of the voice.
 		TSharedPtr<FAudioGraphInstance> GraphInstance;

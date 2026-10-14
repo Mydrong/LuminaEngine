@@ -5,6 +5,7 @@ using Lumina;
 namespace LuminaExamples;
 
 // Drives a dynamic material instance and a parameter collection from gameplay.
+[Reflect]
 public class MaterialApiExample : CEntityScript
 {
     [Property(Category = "Flash", Tooltip = "Vector parameter on the mesh material to drive.")]
@@ -31,8 +32,7 @@ public class MaterialApiExample : CEntityScript
 
     public override void OnReady()
     {
-        var Mesh = World.TryGetComponent<SStaticMeshComponent>(Entity);
-        if (Mesh == null)
+        if (!World.TryGetComponent(Entity, out SStaticMeshComponent Mesh))
         {
             Debug.Log("MaterialApiExample: no static mesh component on this entity.");
             return;

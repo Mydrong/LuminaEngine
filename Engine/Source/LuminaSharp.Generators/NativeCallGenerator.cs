@@ -75,7 +75,7 @@ namespace LuminaSharp
 
     private sealed record Model(string Namespace, string ClassName, string ClassModifiers, string TypeKeyword, string Member);
 
-    private enum Kind { Pass, String, Bool, Enum, Entity, Array }
+    private enum Kind { Pass, String, SoftPath, Bool, Enum, Entity, Array }
 
     private static Model? BuildModel(GeneratorAttributeSyntaxContext ctx, CancellationToken ct)
     {
@@ -121,10 +121,7 @@ namespace LuminaSharp
         var spanParams = new List<(int Index, string Name, string Elem)>();
         var sigParams = new List<string>();
 
-        // Instance methods route through the object's native Handle as the first thunk argument (the
-        // static delegate* field is still shared across instances - only the call passes `this.Handle`).
-        // The handle's native type is taken from a `Handle` member on the containing type, so a facade
-        // struct whose handle is a `ulong` passes a ulong (NativeObject/NativeStruct expose an IntPtr).
+        // Instance methods pass the containing type's Handle first, typed as that member is declared.
         if (!method.IsStatic)
         {
             string? handleTypeFq = FindHandleType(type, fq);
@@ -154,7 +151,14 @@ namespace LuminaSharp
                 continue;
             }
 
-            // Wrapper arg (NativeObject/NativeStruct subclass) -> the engine handle (IntPtr), zero for null.
+            // A struct handle crosses as the address it views.
+            if (StructHandleOf(p.Type) != null)
+            {
+                nativeTypes.Add("global::System.IntPtr");
+                callArgs.Add($"global::LuminaSharp.NativeStructs.AddressOf({name})");
+                continue;
+            }
+
             if (IsNativeRef(p.Type))
             {
                 nativeTypes.Add("global::System.IntPtr");
@@ -170,6 +174,13 @@ namespace LuminaSharp
                     callArgs.Add($"__enc{i}.Pointer");
                     callArgs.Add($"__enc{i}.Length");
                     stringParams.Add((i, name));
+                    break;
+                case Kind.SoftPath:
+                    nativeTypes.Add("byte*");
+                    nativeTypes.Add("int");
+                    callArgs.Add($"__enc{i}.Pointer");
+                    callArgs.Add($"__enc{i}.Length");
+                    stringParams.Add((i, name + ".GetPath()"));
                     break;
                 case Kind.Bool:
                     nativeTypes.Add("byte");
@@ -199,20 +210,34 @@ namespace LuminaSharp
         bool arrayReturn = false;
         string arrayElemFq = string.Empty;
         bool nativeRefReturn = false;
-        bool nativeRefReturnIsCObject = false;
         string nativeRefRetType = string.Empty;
+        string handleReturnBuild = string.Empty;
         bool arrayElemIsCObject = false;
         if (method.ReturnsVoid)
         {
             retCs = "void";
             nativeTypes.Add("void");
         }
+        else if (StructHandleOf(method.ReturnType) is INamedTypeSymbol handleRet)
+        {
+            string handleFq = handleRet.ToDisplayString(fq);
+            retCs = method.ReturnType.ToDisplayString(fq);
+            nativeRefReturn = true;
+            // A component tracks its owner like a registry fetch, so a kept handle never reads a moved slot.
+            handleReturnBuild = IsComponentHandle(handleRet)
+                ? "global::LuminaSharp.NativeStructs.FromComponentPointer<" + handleFq + ">(__p)"
+                : "global::LuminaSharp.NativeStructs.FromAddressOrNull<" + handleFq + ">(__p)";
+            if (method.ReturnType.OriginalDefinition.SpecialType != SpecialType.System_Nullable_T)
+            {
+                handleReturnBuild += ".GetValueOrDefault()";
+            }
+            nativeTypes.Add("global::System.IntPtr");
+        }
         else if (IsNativeRef(method.ReturnType))
         {
             nativeRefRetType = method.ReturnType.ToDisplayString(fq);
             retCs = nativeRefRetType + "?";
             nativeRefReturn = true;
-            nativeRefReturnIsCObject = IsCObjectRef(method.ReturnType);
             nativeTypes.Add("global::System.IntPtr");
         }
         else
@@ -235,7 +260,7 @@ namespace LuminaSharp
                     arrayElemFq = arrayElem.ToDisplayString(fq);
                     // A CObject element crosses as its handle and is rebuilt managed-side, so its wire width
                     // is a pointer rather than the managed reference the array holds.
-                    arrayElemIsCObject = IsCObjectRef(arrayElem);
+                    arrayElemIsCObject = IsNativeRef(arrayElem);
                     nativeTypes.Add(arrayElemIsCObject ? "global::System.IntPtr*" : arrayElemFq + "*");
                     nativeTypes.Add("int");
                     nativeTypes.Add("int");
@@ -371,12 +396,10 @@ namespace LuminaSharp
             }
             if (nativeRefReturn)
             {
-                // A CObject return goes through the per-object wrapper cache, so calling the same getter twice
-                // hands back the SAME managed instance (identity holds, no per-call allocation). Component
-                // (NativeStruct) returns must NOT -- they have no managed-instance slot. See IsCObjectRef.
-                string build = nativeRefReturnIsCObject
-                    ? "global::LuminaSharp.Wrapper<" + nativeRefRetType + ">.ForObject(__p)"
-                    : "global::LuminaSharp.NativeObjectMarshal.FromStructPointer<" + nativeRefRetType + ">(__p)";
+                // An object return goes through the per-object wrapper cache, so a repeated getter keeps identity.
+                string build = handleReturnBuild.Length > 0
+                    ? handleReturnBuild
+                    : "global::LuminaSharp.Wrapper<" + nativeRefRetType + ">.ForObject(__p)";
 
                 return pad + "global::System.IntPtr __p = " + field + "(" + coreArgs + ");\n"
                      + pad + "return " + build + ";\n";
@@ -546,35 +569,45 @@ namespace LuminaSharp
         return Widths.Count == 0 ? "0" : string.Join(" + ", Widths);
     }
 
-    // A C# wrapper over a native handle: a class deriving LuminaSharp.NativeObject / NativeStruct (the
-    // Reflector's opaque wrappers + the facades). Such a type marshals as its `Handle` (an arg) or is
-    // reconstructed from a returned handle. Blittable value-mirror structs are NOT native refs (no base).
+    // A class deriving LuminaSharp.NativeObject, which marshals as its Handle and is rebuilt from a returned one.
     private static bool IsNativeRef(ITypeSymbol type)
-    {
-        return NativeRefRoot(type) != null;
-    }
-
-    // True only for a CObject-backed wrapper (NativeObject root). NativeStruct wrappers -- component views --
-    // are NOT CObjects: they have no managed-instance slot, so reconstructing one through
-    // Wrapper<T>.ForObject would reinterpret component memory as a CObjectBase. Gates the ForObject call on
-    // returns exactly the way FBinding::bCObject gates it in the Reflector's property emitter.
-    private static bool IsCObjectRef(ITypeSymbol type)
-    {
-        return NativeRefRoot(type) == "NativeObject";
-    }
-
-    // The LuminaSharp wrapper root this type derives from ("NativeObject" / "NativeStruct"), or null.
-    private static string? NativeRefRoot(ITypeSymbol type)
     {
         for (INamedTypeSymbol? t = type as INamedTypeSymbol; t != null; t = t.BaseType)
         {
-            if ((t.Name == "NativeObject" || t.Name == "NativeStruct")
-                && t.ContainingNamespace?.ToDisplayString() == "LuminaSharp")
+            if (t.Name == "NativeObject" && t.ContainingNamespace?.ToDisplayString() == "LuminaSharp")
             {
-                return t.Name;
+                return true;
             }
         }
+        return false;
+    }
+
+    // A generated struct handle, or a nullable of one, which crosses as the address it views.
+    private static INamedTypeSymbol? StructHandleOf(ITypeSymbol type)
+    {
+        if (type is INamedTypeSymbol nullable && nullable.OriginalDefinition.SpecialType == SpecialType.System_Nullable_T)
+        {
+            type = nullable.TypeArguments[0];
+        }
+        if (type is INamedTypeSymbol named && named.TypeKind == TypeKind.Struct && ImplementsLuminaInterface(named, "INativeStruct"))
+        {
+            return named;
+        }
         return null;
+    }
+
+    private static bool IsComponentHandle(INamedTypeSymbol type) => ImplementsLuminaInterface(type, "IComponent");
+
+    private static bool ImplementsLuminaInterface(INamedTypeSymbol type, string name)
+    {
+        foreach (INamedTypeSymbol Interface in type.AllInterfaces)
+        {
+            if (Interface.Name == name && Interface.ContainingNamespace?.ToDisplayString() == "LuminaSharp")
+            {
+                return true;
+            }
+        }
+        return false;
     }
 
     // Span<T>/ReadOnlySpan<T> -> (T* pinned, int Length). T must be unmanaged (the generated `fixed` pin
@@ -603,6 +636,10 @@ namespace LuminaSharp
         if (type.SpecialType == SpecialType.System_Boolean)
         {
             return Kind.Bool;
+        }
+        if (type is INamedTypeSymbol { TypeKind: TypeKind.Struct } named && ImplementsLuminaInterface(named, "ISoftObjectReference"))
+        {
+            return Kind.SoftPath;
         }
         if (type.TypeKind == TypeKind.Enum)
         {

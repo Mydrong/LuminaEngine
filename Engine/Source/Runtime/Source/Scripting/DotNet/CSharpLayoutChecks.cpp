@@ -10,6 +10,7 @@
 #include "Core/Assertions/Assert.h"
 #include "Input/InputAction.h"
 #include "Scripting/DotNet/LayoutRegistry.h"
+#include "UI/RmlUiBridge.h"
 
 namespace Lumina
 {
@@ -21,11 +22,11 @@ namespace Lumina
     static_assert(sizeof(FMatrix4) == 64, "LuminaSharp FMatrix4 mirror size mismatch (update Matrix.cs).");
 
     // A field added on either side without the other silently misreads every action's state.
-    static_assert(sizeof(FInputActionState)              == 16, "LuminaSharp FInputActionState mirror size mismatch (update InputActionState.cs).");
-    static_assert(offsetof(FInputActionState, X)         == 0,  "InputActionState.X offset mismatch.");
-    static_assert(offsetof(FInputActionState, Y)         == 4,  "InputActionState.Y offset mismatch.");
-    static_assert(offsetof(FInputActionState, HeldTime)  == 8,  "InputActionState.HeldTime offset mismatch.");
-    static_assert(offsetof(FInputActionState, Flags)     == 12, "InputActionState.Flags offset mismatch.");
+    static_assert(sizeof(SInputActionState)              == 16, "LuminaSharp SInputActionState mirror size mismatch (update InputActionState.cs).");
+    static_assert(offsetof(SInputActionState, X)         == 0,  "InputActionState.X offset mismatch.");
+    static_assert(offsetof(SInputActionState, Y)         == 4,  "InputActionState.Y offset mismatch.");
+    static_assert(offsetof(SInputActionState, HeldTime)  == 8,  "InputActionState.HeldTime offset mismatch.");
+    static_assert(offsetof(SInputActionState, Flags)     == 12, "InputActionState.Flags offset mismatch.");
 
     // The hand-written C# mirror reproduces this padded layout for the by-value blit.
     static_assert(sizeof(FTransform)              == 48, "LuminaSharp FTransform mirror size mismatch (update Transform.cs).");
@@ -42,9 +43,12 @@ namespace Lumina
     LE_REGISTER_LAYOUT("FTransform",   FTransform);
     // Stops a field added on either side from silently shifting every element of an FName container.
     LE_REGISTER_LAYOUT("FName",        FName);
-    LE_REGISTER_LAYOUT("FInputActionState", FInputActionState);
+    LE_REGISTER_LAYOUT("SInputActionState", SInputActionState);
     LE_REGISTER_LAYOUT("FUIntVector2", FUIntVector2);
     LE_REGISTER_LAYOUT("FUIntVector3", FUIntVector3);
+    LE_REGISTER_LAYOUT("FUIArg",       RmlUi::FUIArg);
+    LE_REGISTER_LAYOUT("FUIDataSet",   RmlUi::FUIDataSet);
+    LE_REGISTER_LAYOUT("FUIDataEvent", RmlUi::FUIDataEvent);
     LE_REGISTER_LAYOUT("FIntVector2",  FIntVector2);
     LE_REGISTER_LAYOUT("FIntVector3",  FIntVector3);
 

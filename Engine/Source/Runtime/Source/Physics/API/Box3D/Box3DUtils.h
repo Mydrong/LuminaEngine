@@ -7,30 +7,30 @@
 
 namespace Lumina::Box3DUtils
 {
-    RUNTIME_API b3Filter MakeShapeFilter(const FCollisionProfile& Profile, int32 GroupIndex = 0);
+    RUNTIME_API b3Filter MakeShapeFilter(const SCollisionProfile& Profile, int32 GroupIndex = 0);
 
     // Shape user data carries the authored profile, since the broad-phase mask is widened for the callback.
-    RUNTIME_API void* PackProfileUserData(const FCollisionProfile& Profile, bool bCharacterProxy = false);
+    RUNTIME_API void* PackProfileUserData(const SCollisionProfile& Profile, bool bCharacterProxy = false);
     RUNTIME_API bool IsCharacterProxyUserData(void* UserData);
 
     // True when the engine's historical rule applies, where either side accepting is enough.
     RUNTIME_API bool UsesPermissiveCollisionFilter();
-    RUNTIME_API b3QueryFilter MakeQueryFilter(const FCollisionProfile& Profile);
+    RUNTIME_API b3QueryFilter MakeQueryFilter(const SCollisionProfile& Profile);
 
-    FORCEINLINE FCollisionProfile UnpackProfileUserData(void* UserData)
+    FORCEINLINE SCollisionProfile UnpackProfileUserData(void* UserData)
     {
         const uint64 Packed = (uint64)reinterpret_cast<uintptr_t>(UserData);
 
-        FCollisionProfile Profile;
+        SCollisionProfile Profile;
         Profile.Layer = (ECollisionProfiles)(uint16)(Packed & 0xFFFFull);
         Profile.Mask = (ECollisionProfiles)(uint16)((Packed >> 16) & 0xFFFFull);
         return Profile;
     }
 
     // Inline, since a shape id only means something to the image holding the box3d copy that made it.
-    FORCEINLINE bool ShouldProfileCollideWithShape(const FCollisionProfile& Profile, b3ShapeId ShapeId, bool bPermissive)
+    FORCEINLINE bool ShouldProfileCollideWithShape(const SCollisionProfile& Profile, b3ShapeId ShapeId, bool bPermissive)
     {
-        const FCollisionProfile Other = UnpackProfileUserData(b3Shape_GetUserData(ShapeId));
+        const SCollisionProfile Other = UnpackProfileUserData(b3Shape_GetUserData(ShapeId));
 
         // Strict mode already applied the other half of the pair test through the query filter itself.
         return bPermissive ? Profile.ShouldCollide(Other) : (Profile.Mask & Other.Layer) != (ECollisionProfiles)0;

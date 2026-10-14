@@ -99,8 +99,7 @@ LUMINA_DOTNET_EXPORT(int, ViewNextChunk)(void* StatePtr, uint32* OutEntities, vo
         // Written before the match is known, since a row the loop rejects is simply overwritten by the next.
         void** Row = OutPtrs + (size_t)Count * (size_t)NInclude;
 
-        // GetRaw resolves the same slot Contains would and reports absence by returning null, so asking both
-        // walked the sparse set twice per entity per storage. A tag has no payload and still needs Contains.
+        // GetRaw reports absence as null, so one probe answers both questions. A tag has no payload and still needs Contains.
         bool bMatches = true;
         for (int k = 0; k < N && bMatches; ++k)
         {
@@ -133,6 +132,17 @@ LUMINA_DOTNET_EXPORT(int, ViewNextChunk)(void* StatePtr, uint32* OutEntities, vo
     return Count;
 }
 
+// Each include's layout epoch, so a handle the view hands out can tell when its pool has moved.
+LUMINA_DOTNET_EXPORT(void, ViewIncludeEpochs)(void* StatePtr, const uint32** OutSlots, int NInclude)
+{
+    const FViewState* State = static_cast<const FViewState*>(StatePtr);
+    for (int i = 0; i < NInclude; ++i)
+    {
+        const bool bKnown = State != nullptr && i < (int)State->IncludeStorages.size();
+        OutSlots[i] = bKnown ? State->IncludeStorages[i]->GetLayoutEpoch() : nullptr;
+    }
+}
+
 // Frees the per-call view state allocated by ViewBegin.
 LUMINA_DOTNET_EXPORT(void, ViewEnd)(void* StatePtr)
 {
@@ -144,20 +154,9 @@ LUMINA_DOTNET_EXPORT(void, ViewEnd)(void* StatePtr)
     }
 }
 
-// Returns the world the context is bound to, so the managed side can build a view over it.
-LUMINA_DOTNET_EXPORT(uint64, SystemContext_GetWorld)(const FSystemContext* Ctx)
-{
-    if (Ctx == nullptr)
-    {
-        return 0;
-    }
-    CWorld* W = Ctx->GetRegistry().Ctx().Get<CWorld*>();
-    return reinterpret_cast<uint64>(W);
-}
-
 LUMINA_DOTNET_SIGNATURES(
     LUMINA_DOTNET_SIG(ViewBegin),
     LUMINA_DOTNET_SIG(ViewNextChunk),
-    LUMINA_DOTNET_SIG(ViewEnd),
-    LUMINA_DOTNET_SIG(SystemContext_GetWorld)
+    LUMINA_DOTNET_SIG(ViewIncludeEpochs),
+    LUMINA_DOTNET_SIG(ViewEnd)
 );

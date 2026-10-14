@@ -67,7 +67,7 @@ namespace Lumina
         // Both rejections are properties of the TYPE, so they resolve once per type instead of per instance.
         const uint32 NumTypes = (uint32)Types.size();
         TVector<uint8> TypeReady;
-        TVector<FAABB> TypeBounds;
+        TVector<SAABB> TypeBounds;
         TypeReady.assign(NumTypes, 0u);
         TypeBounds.resize(NumTypes);
 
@@ -79,7 +79,7 @@ namespace Lumina
                 continue;
             }
 
-            const FAABB& LocalBounds = Type.Mesh->GetAABB();
+            const SAABB& LocalBounds = Type.Mesh->GetAABB();
             if (LocalBounds.Max.x < LocalBounds.Min.x)
             {
                 continue;
@@ -115,7 +115,7 @@ namespace Lumina
             }
 
             const FMatrix4 Transform = Inst.GetMatrix();
-            const FAABB    WorldBox  = TypeBounds[Inst.TypeIndex].ToWorld(Transform);
+            const SAABB    WorldBox  = TypeBounds[Inst.TypeIndex].ToWorld(Transform);
             const FVector3 Center    = (WorldBox.Min + WorldBox.Max) * 0.5f;
 
             FFoliageBakedInstance& Baked = BakedInstances[Index];

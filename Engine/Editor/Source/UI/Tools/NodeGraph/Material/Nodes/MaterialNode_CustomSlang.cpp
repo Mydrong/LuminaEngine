@@ -238,14 +238,14 @@ namespace Lumina
 
             if (Inputs.empty())
             {
-                FCustomSlangPin& UV = Inputs.emplace_back();
+                SCustomSlangPin& UV = Inputs.emplace_back();
                 UV.Name    = "UV";
                 UV.Type    = EMaterialValueType::Float2;
                 UV.Default = ECustomSlangInputDefault::UV0;
             }
             if (Outputs.empty())
             {
-                FCustomSlangPin& Out = Outputs.emplace_back();
+                SCustomSlangPin& Out = Outputs.emplace_back();
                 Out.Name = "Out";
                 Out.Type = EMaterialValueType::Float3;
             }
@@ -257,10 +257,10 @@ namespace Lumina
     uint64 CMaterialExpression_CustomSlang::ComputeSignatureHash() const
     {
         size_t Seed = 0;
-        auto Mix = [&Seed](const TVector<FCustomSlangPin>& Pins, uint64 Salt)
+        auto Mix = [&Seed](const TVector<SCustomSlangPin>& Pins, uint64 Salt)
         {
             Hash::HashCombine(Seed, Salt);
-            for (const FCustomSlangPin& Pin : Pins)
+            for (const SCustomSlangPin& Pin : Pins)
             {
                 Hash::HashCombine(Seed, Pin.Name.Hash());
                 Hash::HashCombine(Seed, (uint64)Pin.Type);
@@ -314,7 +314,7 @@ namespace Lumina
         CustomInputPins.clear();
         CustomOutputPins.clear();
 
-        for (const FCustomSlangPin& Decl : Inputs)
+        for (const SCustomSlangPin& Decl : Inputs)
         {
             const EMaterialInputType T = ToMaterialInputType(Decl.Type);
             CMaterialInput* Pin = Cast<CMaterialInput>(CreatePin(CMaterialInput::StaticClass(), Decl.Name.c_str(), ENodePinDirection::Input));
@@ -324,7 +324,7 @@ namespace Lumina
             CustomInputPins.push_back(Pin);
         }
 
-        for (const FCustomSlangPin& Decl : Outputs)
+        for (const SCustomSlangPin& Decl : Outputs)
         {
             const EMaterialInputType T = ToMaterialInputType(Decl.Type);
             CMaterialOutput* Pin = Cast<CMaterialOutput>(CreatePin(CMaterialOutput::StaticClass(), Decl.Name.c_str(), ENodePinDirection::Output));
@@ -415,9 +415,9 @@ namespace Lumina
     {
         // Unique across BOTH directions, since an input sharing an output's name makes copy-back ambiguous.
         THashSet<FString> Seen;
-        auto CheckNames = [&](const TVector<FCustomSlangPin>& Pins, const char* Direction)
+        auto CheckNames = [&](const TVector<SCustomSlangPin>& Pins, const char* Direction)
         {
-            for (const FCustomSlangPin& Pin : Pins)
+            for (const SCustomSlangPin& Pin : Pins)
             {
                 const FString Name = Pin.Name.ToString();
                 if (!IsValidIdentifier(Name.c_str()))
@@ -562,7 +562,7 @@ namespace Lumina
         }
 
         // Outputs as zero-initialized locals the body assigns to.
-        for (const FCustomSlangPin& Out : Outputs)
+        for (const SCustomSlangPin& Out : Outputs)
         {
             const EMaterialInputType T = ToMaterialInputType(Out.Type);
             Compiler.AddRaw(FMaterialCompiler::GetHLSLTypeName(T) + " " + Out.Name.ToString() + " = " + ZeroLiteral(T) + ";\n");

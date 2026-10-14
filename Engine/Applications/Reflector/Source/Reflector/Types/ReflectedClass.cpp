@@ -60,6 +60,7 @@ namespace Lumina::Reflection
         EmitMetadataArrays(Writer);
         EmitPropertyTable(Writer);
         EmitFunctionTable(Writer);
+        EmitLayoutAsserts(Writer);
 
         Writer.Linef("static constexpr Lumina::FClassDesc Desc = { .StaticClass = &%s::StaticClass%s%s };",
             EmittedCppQualifiedName().c_str(), MemberTableFields().c_str(),

@@ -4,6 +4,7 @@
 #include "Core/Delegates/ScriptDelegate.h"
 #include "Core/Object/Class.h"
 #include "Memory/Memory.h"
+#include "Scripting/ScriptCallback.h"
 #include "World/ECS/CommandBus.h"
 #include "World/ECS/Registry.h"
 #include <algorithm>
@@ -16,9 +17,9 @@ namespace Lumina
 
         void FreeManagedPayload(const FGameplayMessagePayloadRef& Payload)
         {
-            if (Payload.Kind == EGameplayMessagePayload::Managed && Payload.Data != nullptr && GFreeManagedDelegateContext != nullptr)
+            if (Payload.Kind == EGameplayMessagePayload::Managed)
             {
-                GFreeManagedDelegateContext(const_cast<void*>(Payload.Data));
+                Scripting::FreeManagedHandle(const_cast<void*>(Payload.Data));
             }
         }
 

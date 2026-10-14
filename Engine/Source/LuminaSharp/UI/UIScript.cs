@@ -1,4 +1,5 @@
 using System;
+using JetBrains.Annotations;
 using System.Collections.Generic;
 using System.Reflection;
 using System.Runtime.CompilerServices;
@@ -7,6 +8,7 @@ using LuminaSharp;
 namespace LuminaSharp
 {
     // Fills a UIElement field or property with the element of this id, or of the member's own name, each time the document loads.
+    [MeansImplicitUse(ImplicitUseKindFlags.Access | ImplicitUseKindFlags.Assign)]
     [AttributeUsage(AttributeTargets.Field | AttributeTargets.Property, AllowMultiple = false)]
     public sealed class ElementAttribute : Attribute
     {

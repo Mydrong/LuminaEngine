@@ -151,7 +151,7 @@ namespace Lumina
 
     // A named object-valued input, letting the graph swap which asset a node samples at runtime.
     REFLECT()
-    struct FAnimGraphObjectParameter
+    struct SAnimGraphObjectParameter
     {
         GENERATED_BODY()
 
@@ -245,7 +245,7 @@ namespace Lumina
 
     // One bone of a bone mask; resolved to a skeleton index and baked into FAnimGraphBoneMask::Weights at compile.
     REFLECT()
-    struct FAnimGraphBoneMaskBone
+    struct SAnimGraphBoneMaskBone
     {
         GENERATED_BODY()
 
@@ -260,7 +260,7 @@ namespace Lumina
 
     // Editor-authored bone mask (named (bone, weight) list); the compiler resolves it into a runtime FAnimGraphBoneMask.
     REFLECT()
-    struct FAnimGraphBoneMaskDef
+    struct SAnimGraphBoneMaskDef
     {
         GENERATED_BODY()
 
@@ -270,7 +270,7 @@ namespace Lumina
 
         /** Per-bone weight entries; unlisted bones default to zero. */
         PROPERTY(Editable, Category = "Bone Mask")
-        TVector<FAnimGraphBoneMaskBone> Bones;
+        TVector<SAnimGraphBoneMaskBone> Bones;
     };
 
     // Compiled bone mask: dense per-bone weight array (skeleton bone count); the VM's BlendMasked op indexes it directly.
@@ -439,7 +439,7 @@ namespace Lumina
 
         /** Object-valued inputs; the runtime fills these so nodes can swap which asset they sample. */
         PROPERTY()
-        TVector<FAnimGraphObjectParameter> ObjectParameters;
+        TVector<SAnimGraphObjectParameter> ObjectParameters;
 
         /** Assets referenced by LoadObjectConst, so a static pin still flows through an object register. */
         PROPERTY()
@@ -455,7 +455,7 @@ namespace Lumina
 
         /** Editor-authored bone mask definitions; resolved into BoneMasks at compile. */
         PROPERTY(Editable, Category = "Bone Masks")
-        TVector<FAnimGraphBoneMaskDef> BoneMaskDefs;
+        TVector<SAnimGraphBoneMaskDef> BoneMaskDefs;
 
         /** Compiled per-bone weight arrays referenced by BlendMasked opcodes. */
         TVector<FAnimGraphBoneMask> BoneMasks;

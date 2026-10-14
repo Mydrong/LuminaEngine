@@ -8,7 +8,7 @@ namespace Lumina
 {
     /** A one-shot script callback, carried as the GCHandle owning its closure so it crosses by value. */
     REFLECT()
-    struct RUNTIME_API FScriptCallback
+    struct RUNTIME_API SScriptCallback
     {
         GENERATED_BODY()
 
@@ -20,14 +20,17 @@ namespace Lumina
 
     namespace Scripting
     {
-        /** Runs Callback once with Payload and frees its handle. Does nothing when nothing is bound. */
-        RUNTIME_API void InvokeScriptCallback(FScriptCallback Callback, uint64 Payload);
+        // Runs Callback once with Payload and frees its handle. Does nothing when nothing is bound.
+        RUNTIME_API uint64 InvokeScriptCallback(SScriptCallback Callback, uint64 Payload);
 
         // Runs Callback with Payload and keeps its handle, for a binding that fires more than once.
-        RUNTIME_API void InvokeScriptCallbackRepeating(FScriptCallback Callback, uint64 Payload);
+        RUNTIME_API uint64 InvokeScriptCallbackRepeating(SScriptCallback Callback, uint64 Payload);
 
         // Frees a repeating callback's handle; a one-shot one frees itself when it fires.
-        RUNTIME_API void ReleaseScriptCallback(FScriptCallback Callback);
+        RUNTIME_API void ReleaseScriptCallback(SScriptCallback Callback);
+
+        // Frees any GCHandle native was handed, whether it holds a callback, a payload or an object twin.
+        RUNTIME_API void FreeManagedHandle(void* Handle);
 
         // Packs a float payload, since the wire carries one uint64 and the closure knows its own shape.
         FORCEINLINE uint64 PackFloatPayload(float Value)
@@ -41,9 +44,9 @@ namespace Lumina
     /** Owns a repeating callback's handle, so whatever captured it releases on destruction. */
     struct RUNTIME_API FScriptCallbackOwner
     {
-        FScriptCallback Callback;
+        SScriptCallback Callback;
 
-        explicit FScriptCallbackOwner(FScriptCallback In)
+        explicit FScriptCallbackOwner(SScriptCallback In)
             : Callback(In)
         {
         }

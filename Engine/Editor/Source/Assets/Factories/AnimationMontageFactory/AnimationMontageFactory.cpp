@@ -62,35 +62,33 @@ namespace Lumina
         return bConfirm;
     }
 
+    void CAnimationMontageFactory::InitializeMontage(CAnimationMontage& Montage, CSkeleton* Skeleton, CAnimation* FirstClip)
+    {
+        Montage.Skeleton = Skeleton;
+
+        SAnimMontageSlotTrack& Track = Montage.SlotTracks.emplace_back();
+        Track.SlotName = "DefaultSlot";
+
+        if (FirstClip != nullptr)
+        {
+            SAnimMontageSegment& Segment = Track.Segments.emplace_back();
+            Segment.Animation = FirstClip;
+        }
+
+        SAnimMontageSection& Section = Montage.Sections.emplace_back();
+        Section.Name = "Default";
+        Section.StartTime = 0.0f;
+
+        Montage.EnsureNotifyTracks();
+    }
+
     CObject* CAnimationMontageFactory::CreateNew(const FName& Name, CPackage* Package)
     {
         CAnimationMontage* NewMontage = NewObject<CAnimationMontage>(Package, Name);
 
-        if (SelectedSkeletonGUID.IsValid())
-        {
-            if (CSkeleton* Skeleton = Cast<CSkeleton>(LoadObject<CObject>(SelectedSkeletonGUID)))
-            {
-                NewMontage->Skeleton = Skeleton;
-            }
-        }
-
-        SAnimMontageSlotTrack& Track = NewMontage->SlotTracks.emplace_back();
-        Track.SlotName = "DefaultSlot";
-
-        if (SelectedAnimationGUID.IsValid())
-        {
-            if (CAnimation* Animation = Cast<CAnimation>(LoadObject<CObject>(SelectedAnimationGUID)))
-            {
-                SAnimMontageSegment& Segment = Track.Segments.emplace_back();
-                Segment.Animation = Animation;
-            }
-        }
-
-        SAnimMontageSection& Section = NewMontage->Sections.emplace_back();
-        Section.Name = "Default";
-        Section.StartTime = 0.0f;
-
-        NewMontage->EnsureNotifyTracks();
+        CSkeleton* Skeleton = SelectedSkeletonGUID.IsValid() ? Cast<CSkeleton>(LoadObject<CObject>(SelectedSkeletonGUID)) : nullptr;
+        CAnimation* Animation = SelectedAnimationGUID.IsValid() ? Cast<CAnimation>(LoadObject<CObject>(SelectedAnimationGUID)) : nullptr;
+        InitializeMontage(*NewMontage, Skeleton, Animation);
 
         SelectedSkeletonGUID.Invalidate();
         SelectedAnimationGUID.Invalidate();

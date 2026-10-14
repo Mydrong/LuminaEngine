@@ -44,7 +44,7 @@ namespace Lumina
         StarvedLogCooldown = 0;
     }
 
-    FNavTileStreamer::FStats FNavTileStreamer::Update(FNavMesh& Mesh, const TVector<FNavTileData>& Tiles,
+    FNavTileStreamer::FStats FNavTileStreamer::Update(FNavMesh& Mesh, const TVector<SNavTileData>& Tiles,
         const TVector<FVector3>& FocusPoints, const FSettings& Settings)
     {
         LUMINA_PROFILE_SCOPE();
@@ -64,7 +64,7 @@ namespace Lumina
 
         for (int32 i = 0; i < (int32)Tiles.size(); ++i)
         {
-            const FNavTileData& Tile = Tiles[i];
+            const SNavTileData& Tile = Tiles[i];
             if (Tile.Blob.empty())
             {
                 continue;

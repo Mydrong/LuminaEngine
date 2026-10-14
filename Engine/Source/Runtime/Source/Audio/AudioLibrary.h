@@ -22,24 +22,24 @@ namespace Lumina
 
         /** A non-spatialized sound such as music or a UI cue. An invalid handle means it did not start. */
         FUNCTION()
-        static FAudioHandle PlaySound2D(CSoundBase* Sound, float Volume = 1.0f, float Pitch = 1.0f,
+        static SAudioHandle PlaySound2D(CSoundBase* Sound, float Volume = 1.0f, float Pitch = 1.0f,
             bool bLoop = false);
 
         /** Attenuated between MinDistance and MaxDistance around Location. */
         FUNCTION()
-        static FAudioHandle PlaySoundAtLocation(CSoundBase* Sound, FVector3 Location, float Volume = 1.0f,
+        static SAudioHandle PlaySoundAtLocation(CSoundBase* Sound, FVector3 Location, float Volume = 1.0f,
             float Pitch = 1.0f, float MinDistance = 1.0f, float MaxDistance = 50.0f, bool bLoop = false);
 
         /** Full control over bus, attenuation, priority, fades and occlusion. */
         FUNCTION()
-        static FAudioHandle PlaySoundEx(CSoundBase* Sound, FAudioPlayParams Params);
+        static SAudioHandle PlaySoundEx(CSoundBase* Sound, SAudioPlayParams Params);
 
         /** The engine defaults, so script starts from full volume on the SFX bus rather than from zeros. */
         FUNCTION()
-        static FAudioPlayParams DefaultPlayParams();
+        static SAudioPlayParams DefaultPlayParams();
 
         FUNCTION()
-        static void Stop(FAudioHandle Handle, bool bAllowFadeOut = false, float FadeSeconds = 0.5f);
+        static void Stop(SAudioHandle Handle, bool bAllowFadeOut = false, float FadeSeconds = 0.5f);
 
         FUNCTION()
         static void StopAll(bool bAllowFadeOut = false, float FadeSeconds = 0.5f);
@@ -47,78 +47,78 @@ namespace Lumina
         //~ One voice.
 
         FUNCTION()
-        static void SetVolume(FAudioHandle Handle, float Volume);
+        static void SetVolume(SAudioHandle Handle, float Volume);
 
         FUNCTION()
-        static void SetPitch(FAudioHandle Handle, float Pitch);
+        static void SetPitch(SAudioHandle Handle, float Pitch);
 
         FUNCTION()
-        static void SetLooping(FAudioHandle Handle, bool bLoop);
+        static void SetLooping(SAudioHandle Handle, bool bLoop);
 
         FUNCTION()
-        static void SetPaused(FAudioHandle Handle, bool bPaused);
+        static void SetPaused(SAudioHandle Handle, bool bPaused);
 
         FUNCTION()
-        static void SetPan(FAudioHandle Handle, float Pan);
+        static void SetPan(SAudioHandle Handle, float Pan);
 
         FUNCTION()
-        static void SetBus(FAudioHandle Handle, EAudioBus Bus);
+        static void SetBus(SAudioHandle Handle, EAudioBus Bus);
 
         FUNCTION()
-        static void FadeTo(FAudioHandle Handle, float Volume, float Seconds);
+        static void FadeTo(SAudioHandle Handle, float Volume, float Seconds);
 
         FUNCTION()
-        static void SeekToFrame(FAudioHandle Handle, uint64 Frame);
+        static void SeekToFrame(SAudioHandle Handle, uint64 Frame);
 
         FUNCTION()
-        static EAudioVoiceState GetVoiceState(FAudioHandle Handle);
+        static EAudioVoiceState GetVoiceState(SAudioHandle Handle);
 
         FUNCTION()
-        static uint64 GetPlaybackFrame(FAudioHandle Handle);
+        static uint64 GetPlaybackFrame(SAudioHandle Handle);
 
         //~ Spatialization.
 
         FUNCTION()
-        static void SetPosition(FAudioHandle Handle, FVector3 Position);
+        static void SetPosition(SAudioHandle Handle, FVector3 Position);
 
         FUNCTION()
-        static void SetVelocity(FAudioHandle Handle, FVector3 Velocity);
+        static void SetVelocity(SAudioHandle Handle, FVector3 Velocity);
 
         FUNCTION()
-        static void SetDirection(FAudioHandle Handle, FVector3 Direction);
+        static void SetDirection(SAudioHandle Handle, FVector3 Direction);
 
         FUNCTION()
-        static void SetMinMaxDistance(FAudioHandle Handle, float MinDistance, float MaxDistance);
+        static void SetMinMaxDistance(SAudioHandle Handle, float MinDistance, float MaxDistance);
 
         FUNCTION()
-        static void SetAttenuation(FAudioHandle Handle, SAudioAttenuation Attenuation);
+        static void SetAttenuation(SAudioHandle Handle, SAudioAttenuation Attenuation);
 
         FUNCTION()
-        static void SetOcclusion(FAudioHandle Handle, float Amount, float LowPassFrequency = 700.0f,
+        static void SetOcclusion(SAudioHandle Handle, float Amount, float LowPassFrequency = 700.0f,
             float VolumeAttenuation = 0.5f);
 
         FUNCTION()
-        static void SetLowPassCutoff(FAudioHandle Handle, float CutoffHz);
+        static void SetLowPassCutoff(SAudioHandle Handle, float CutoffHz);
 
         //~ Graph parameters, so a one shot fired without a component can still be driven.
 
         FUNCTION()
-        static bool SetGraphFloat(FAudioHandle Handle, const FName& Name, float Value);
+        static bool SetGraphFloat(SAudioHandle Handle, const FName& Name, float Value);
 
         FUNCTION()
-        static bool SetGraphInt(FAudioHandle Handle, const FName& Name, int32 Value);
+        static bool SetGraphInt(SAudioHandle Handle, const FName& Name, int32 Value);
 
         FUNCTION()
-        static bool SetGraphBool(FAudioHandle Handle, const FName& Name, bool Value);
+        static bool SetGraphBool(SAudioHandle Handle, const FName& Name, bool Value);
 
         FUNCTION()
-        static bool TriggerGraph(FAudioHandle Handle, const FName& Name);
+        static bool TriggerGraph(SAudioHandle Handle, const FName& Name);
 
         FUNCTION()
-        static float GetGraphFloatOutput(FAudioHandle Handle, const FName& Name);
+        static float GetGraphFloatOutput(SAudioHandle Handle, const FName& Name);
 
         FUNCTION()
-        static uint32 GetGraphTriggerCount(FAudioHandle Handle, const FName& Name);
+        static uint32 GetGraphTriggerCount(SAudioHandle Handle, const FName& Name);
 
         //~ The mix.
 

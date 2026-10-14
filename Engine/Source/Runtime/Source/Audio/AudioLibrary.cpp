@@ -22,11 +22,11 @@ namespace Lumina
             return (EAudioBus)Index;
         }
 
-        FAudioHandle PlayResolved(CSoundBase* Sound, const FAudioPlayParams& Params)
+        SAudioHandle PlayResolved(CSoundBase* Sound, const SAudioPlayParams& Params)
         {
             if (Sound == nullptr || !Sound->IsPlayable())
             {
-                return FAudioHandle::Invalid();
+                return SAudioHandle::Invalid();
             }
 
             // A graph played this way gets a voice handle but no instance, so it takes no parameters.
@@ -36,7 +36,7 @@ namespace Lumina
                 const uint32 SampleRate = DeviceInfo.SampleRate != 0 ? DeviceInfo.SampleRate : 48000;
 
                 TSharedPtr<FAudioGraphInstance> Instance = Graph->CreateInstance(SampleRate, 2);
-                return Instance ? Audio::Context().PlayAudioGraph(Instance, Params) : FAudioHandle::Invalid();
+                return Instance ? Audio::Context().PlayAudioGraph(Instance, Params) : SAudioHandle::Invalid();
             }
 
             if (CAudioStream* Stream = Cast<CAudioStream>(Sound))
@@ -44,23 +44,23 @@ namespace Lumina
                 return Audio::Context().PlayAudio(Stream->GetAudioData(), Params);
             }
 
-            return FAudioHandle::Invalid();
+            return SAudioHandle::Invalid();
         }
     }
 
-    FAudioHandle CAudioLibrary::PlaySound2D(CSoundBase* Sound, float Volume, float Pitch, bool bLoop)
+    SAudioHandle CAudioLibrary::PlaySound2D(CSoundBase* Sound, float Volume, float Pitch, bool bLoop)
     {
-        FAudioPlayParams Params;
+        SAudioPlayParams Params;
         Params.Volume = Volume;
         Params.Pitch = Pitch;
         Params.bLooping = bLoop;
         return PlayResolved(Sound, Params);
     }
 
-    FAudioHandle CAudioLibrary::PlaySoundAtLocation(CSoundBase* Sound, FVector3 Location, float Volume,
+    SAudioHandle CAudioLibrary::PlaySoundAtLocation(CSoundBase* Sound, FVector3 Location, float Volume,
         float Pitch, float MinDistance, float MaxDistance, bool bLoop)
     {
-        FAudioPlayParams Params;
+        SAudioPlayParams Params;
         Params.Volume = Volume;
         Params.Pitch = Pitch;
         Params.bLooping = bLoop;
@@ -71,18 +71,18 @@ namespace Lumina
         return PlayResolved(Sound, Params);
     }
 
-    FAudioHandle CAudioLibrary::PlaySoundEx(CSoundBase* Sound, FAudioPlayParams Params)
+    SAudioHandle CAudioLibrary::PlaySoundEx(CSoundBase* Sound, SAudioPlayParams Params)
     {
         Params.Bus = SafeBus(Params.Bus);
         return PlayResolved(Sound, Params);
     }
 
-    FAudioPlayParams CAudioLibrary::DefaultPlayParams()
+    SAudioPlayParams CAudioLibrary::DefaultPlayParams()
     {
-        return FAudioPlayParams();
+        return SAudioPlayParams();
     }
 
-    void CAudioLibrary::Stop(FAudioHandle Handle, bool bAllowFadeOut, float FadeSeconds)
+    void CAudioLibrary::Stop(SAudioHandle Handle, bool bAllowFadeOut, float FadeSeconds)
     {
         Audio::Context().StopSound(Handle,
             bAllowFadeOut ? EAudioStopMode::AllowFadeOut : EAudioStopMode::Immediate, FadeSeconds);
@@ -94,118 +94,118 @@ namespace Lumina
             bAllowFadeOut ? EAudioStopMode::AllowFadeOut : EAudioStopMode::Immediate, FadeSeconds);
     }
 
-    void CAudioLibrary::SetVolume(FAudioHandle Handle, float Volume)
+    void CAudioLibrary::SetVolume(SAudioHandle Handle, float Volume)
     {
         Audio::Context().SetVolume(Handle, Volume);
     }
 
-    void CAudioLibrary::SetPitch(FAudioHandle Handle, float Pitch)
+    void CAudioLibrary::SetPitch(SAudioHandle Handle, float Pitch)
     {
         Audio::Context().SetPitch(Handle, Pitch);
     }
 
-    void CAudioLibrary::SetLooping(FAudioHandle Handle, bool bLoop)
+    void CAudioLibrary::SetLooping(SAudioHandle Handle, bool bLoop)
     {
         Audio::Context().SetLooping(Handle, bLoop);
     }
 
-    void CAudioLibrary::SetPaused(FAudioHandle Handle, bool bPaused)
+    void CAudioLibrary::SetPaused(SAudioHandle Handle, bool bPaused)
     {
         Audio::Context().SetPaused(Handle, bPaused);
     }
 
-    void CAudioLibrary::SetPan(FAudioHandle Handle, float Pan)
+    void CAudioLibrary::SetPan(SAudioHandle Handle, float Pan)
     {
         Audio::Context().SetPan(Handle, Pan);
     }
 
-    void CAudioLibrary::SetBus(FAudioHandle Handle, EAudioBus Bus)
+    void CAudioLibrary::SetBus(SAudioHandle Handle, EAudioBus Bus)
     {
         Audio::Context().SetBus(Handle, SafeBus(Bus));
     }
 
-    void CAudioLibrary::FadeTo(FAudioHandle Handle, float Volume, float Seconds)
+    void CAudioLibrary::FadeTo(SAudioHandle Handle, float Volume, float Seconds)
     {
         Audio::Context().FadeTo(Handle, Volume, Seconds);
     }
 
-    void CAudioLibrary::SeekToFrame(FAudioHandle Handle, uint64 Frame)
+    void CAudioLibrary::SeekToFrame(SAudioHandle Handle, uint64 Frame)
     {
         Audio::Context().SeekToFrame(Handle, Frame);
     }
 
-    EAudioVoiceState CAudioLibrary::GetVoiceState(FAudioHandle Handle)
+    EAudioVoiceState CAudioLibrary::GetVoiceState(SAudioHandle Handle)
     {
         return Audio::Context().GetVoiceState(Handle);
     }
 
-    uint64 CAudioLibrary::GetPlaybackFrame(FAudioHandle Handle)
+    uint64 CAudioLibrary::GetPlaybackFrame(SAudioHandle Handle)
     {
         return Audio::Context().GetPlaybackFrame(Handle);
     }
 
-    void CAudioLibrary::SetPosition(FAudioHandle Handle, FVector3 Position)
+    void CAudioLibrary::SetPosition(SAudioHandle Handle, FVector3 Position)
     {
         Audio::Context().SetPosition(Handle, Position);
     }
 
-    void CAudioLibrary::SetVelocity(FAudioHandle Handle, FVector3 Velocity)
+    void CAudioLibrary::SetVelocity(SAudioHandle Handle, FVector3 Velocity)
     {
         Audio::Context().SetVelocity(Handle, Velocity);
     }
 
-    void CAudioLibrary::SetDirection(FAudioHandle Handle, FVector3 Direction)
+    void CAudioLibrary::SetDirection(SAudioHandle Handle, FVector3 Direction)
     {
         Audio::Context().SetDirection(Handle, Direction);
     }
 
-    void CAudioLibrary::SetMinMaxDistance(FAudioHandle Handle, float MinDistance, float MaxDistance)
+    void CAudioLibrary::SetMinMaxDistance(SAudioHandle Handle, float MinDistance, float MaxDistance)
     {
         Audio::Context().SetMinMaxDistance(Handle, MinDistance, MaxDistance);
     }
 
-    void CAudioLibrary::SetAttenuation(FAudioHandle Handle, SAudioAttenuation Attenuation)
+    void CAudioLibrary::SetAttenuation(SAudioHandle Handle, SAudioAttenuation Attenuation)
     {
         Audio::Context().SetAttenuation(Handle, Attenuation);
     }
 
-    void CAudioLibrary::SetOcclusion(FAudioHandle Handle, float Amount, float LowPassFrequency,
+    void CAudioLibrary::SetOcclusion(SAudioHandle Handle, float Amount, float LowPassFrequency,
         float VolumeAttenuation)
     {
         Audio::Context().SetOcclusion(Handle, Amount, LowPassFrequency, VolumeAttenuation);
     }
 
-    void CAudioLibrary::SetLowPassCutoff(FAudioHandle Handle, float CutoffHz)
+    void CAudioLibrary::SetLowPassCutoff(SAudioHandle Handle, float CutoffHz)
     {
         Audio::Context().SetLowPassCutoff(Handle, CutoffHz);
     }
 
-    bool CAudioLibrary::SetGraphFloat(FAudioHandle Handle, const FName& Name, float Value)
+    bool CAudioLibrary::SetGraphFloat(SAudioHandle Handle, const FName& Name, float Value)
     {
         return Audio::Context().SetGraphFloatParameter(Handle, Name, Value);
     }
 
-    bool CAudioLibrary::SetGraphInt(FAudioHandle Handle, const FName& Name, int32 Value)
+    bool CAudioLibrary::SetGraphInt(SAudioHandle Handle, const FName& Name, int32 Value)
     {
         return Audio::Context().SetGraphIntParameter(Handle, Name, Value);
     }
 
-    bool CAudioLibrary::SetGraphBool(FAudioHandle Handle, const FName& Name, bool Value)
+    bool CAudioLibrary::SetGraphBool(SAudioHandle Handle, const FName& Name, bool Value)
     {
         return Audio::Context().SetGraphBoolParameter(Handle, Name, Value);
     }
 
-    bool CAudioLibrary::TriggerGraph(FAudioHandle Handle, const FName& Name)
+    bool CAudioLibrary::TriggerGraph(SAudioHandle Handle, const FName& Name)
     {
         return Audio::Context().TriggerGraphParameter(Handle, Name);
     }
 
-    float CAudioLibrary::GetGraphFloatOutput(FAudioHandle Handle, const FName& Name)
+    float CAudioLibrary::GetGraphFloatOutput(SAudioHandle Handle, const FName& Name)
     {
         return Audio::Context().GetGraphFloatOutput(Handle, Name);
     }
 
-    uint32 CAudioLibrary::GetGraphTriggerCount(FAudioHandle Handle, const FName& Name)
+    uint32 CAudioLibrary::GetGraphTriggerCount(SAudioHandle Handle, const FName& Name)
     {
         return Audio::Context().GetGraphTriggerOutputCount(Handle, Name);
     }

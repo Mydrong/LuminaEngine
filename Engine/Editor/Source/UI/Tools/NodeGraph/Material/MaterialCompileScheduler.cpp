@@ -130,10 +130,7 @@ namespace Lumina
         if (Queue.PopFunctionRecompile(MaterialGUID))
         {
             OutRequest.Kind = ERequestKind::FunctionRecompile;
-            if (const FAssetData* Data = FAssetRegistry::Get().GetAssetByGUID(MaterialGUID))
-            {
-                OutRequest.Material = Cast<CMaterial>(FAssetManager::Get().LoadAssetSynchronous(Data->Path, MaterialGUID));
-            }
+            OutRequest.Material = Cast<CMaterial>(FAssetManager::Get().LoadSynchronous(MaterialGUID));
             return true;
         }
 

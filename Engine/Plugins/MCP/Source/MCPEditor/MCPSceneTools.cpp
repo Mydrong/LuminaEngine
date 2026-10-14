@@ -50,7 +50,7 @@ namespace Lumina::MCP
 
                 // The direct op table hands back the live pointer, which the meta trampoline will not.
                 const FComponentOps* Ops = FindComponentOps(FStringView(Reflected->GetName().ToString()));
-                void* Data = Ops != nullptr && Ops->Get != nullptr ? Ops->Get(Registry, Entity) : nullptr;
+                void* Data = Ops != nullptr ? Ops->Get(Registry, Entity) : nullptr;
 
                 if (Data == nullptr)
                 {
@@ -573,7 +573,7 @@ namespace Lumina::MCP
                     {
                         Reflected = Type;
                         Ops = FindComponentOps(FStringView(Reflected->GetName().ToString()));
-                        Data = Ops != nullptr && Ops->Get != nullptr ? Ops->Get(Registry, Entity) : nullptr;
+                        Data = Ops != nullptr ? Ops->Get(Registry, Entity) : nullptr;
                     }
                     else if (CEntityScript* Script =
                                  FindEntityScriptByName(Registry, Entity, FStringView(In.Component)))

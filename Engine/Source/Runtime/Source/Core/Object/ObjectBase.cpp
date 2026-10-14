@@ -34,6 +34,9 @@ namespace Lumina
         TVector<const FCompiledInTypes*> Modules;
         size_t                           NumRegistered = 0;
 
+        // Copied out of the module, since its table lives in a DLL that can be freed.
+        THashMap<FString, uint64>        LayoutHashes;
+
         // A default object can register types of its own, so the pass must not restart while it builds one.
         bool                             bRegistering = false;
     };
@@ -276,6 +279,17 @@ namespace Lumina
     FTypeRegistrar::FTypeRegistrar(const FCompiledInTypes& Types)
     {
         PendingTypes().Modules.push_back(&Types);
+        if (Types.Module != nullptr)
+        {
+            PendingTypes().LayoutHashes[FString(Types.Module)] = Types.LayoutHash;
+        }
+    }
+
+    uint64 FindModuleLayoutHash(FStringView Module)
+    {
+        const THashMap<FString, uint64>& Hashes = PendingTypes().LayoutHashes;
+        auto It = Hashes.find(FString(Module.data(), Module.size()));
+        return It != Hashes.end() ? It->second : 0;
     }
 
     size_t SnapshotPendingTypes()

@@ -1,104 +1,142 @@
 #pragma once
 
+#include "Containers/Span.h"
+#include "Containers/Function.h"
 #include "Containers/HashTable.h"
-#include "Containers/String.h"
+#include "Containers/Name.h"
+#include "Core/Math/Hash/Hash.h"
+#include "Core/Object/Cast.h"
+#include "Core/Object/ObjectMacros.h"
 #include "GUID/GUID.h"
-#include "PrimaryAssetId.h"
+#include "Memory/SmartPtr.h"
 #include "TaskSystem/FiberSync.h"
-#include "TaskSystem/Future.h"
-#include "Core/Profiler/AssetLoadTracker.h"
+#include "AssetManager.generated.h"
 
 
 namespace Lumina
 {
-	class CObject;
-	struct FAssetData;
+    class CObject;
+    struct FAssetLoad;
 
-	// Result of an async load.
-	using FAssetHandle = TFuture<CObject*>;
+    // An asset of a REFLECT(Group = ...) class, named by that group and its asset name.
+    REFLECT()
+    struct RUNTIME_API SAssetId
+    {
+        GENERATED_BODY()
 
-	// Loads objects from packages, deduplicating concurrent requests for the same asset. 
-	class RUNTIME_API FAssetManager final
-	{
-	public:
-		FAssetManager() = default;
-		LE_NO_COPYMOVE(FAssetManager);
+        PROPERTY(Editable)
+        FName Group;
 
-		static FAssetManager& Get();
+        PROPERTY(Editable)
+        FName Name;
 
-		// Kick off (or join) an async load. Returns the shared handle for this asset.
-		FAssetHandle LoadAssetAsync(const FFixedString& PackagePath, const FGuid& RequestedAsset);
-		
-		// Load now and return the object. Joins an in-flight async load (fiber-aware wait) if one exists,
-		// otherwise loads inline on the caller. nullptr on failure.
-		CObject*     LoadAssetSynchronous(const FFixedString& PackagePath, const FGuid& RequestedAsset);
+        NODISCARD bool IsValid() const { return !Group.IsNone() && !Name.IsNone(); }
+        bool operator==(const SAssetId& Other) const { return Group == Other.Group && Name == Other.Name; }
+    };
 
-		// Block until every in-flight async load has finished. Fiber-aware.
-		void FlushAsyncLoading();
+    NODISCARD FORCEINLINE uint64 GetTypeHash(const SAssetId& Id) noexcept
+    {
+        size_t Seed = GetTypeHash(Id.Group);
+        Hash::HashCombine(Seed, GetTypeHash(Id.Name));
+        return Seed;
+    }
 
-		// Finds the asset whose AssetName == Id.Name with EAssetFlags::Primary set; nullptr on miss.
-		FAssetData*  ResolvePrimaryAsset(const FPrimaryAssetId& Id) const;
+    // Keeps everything it loaded resident until its last copy goes, which is all unloading is.
+    class RUNTIME_API FAssetHandle
+    {
+    public:
 
-		CObject*     LoadPrimaryAssetSynchronous(const FPrimaryAssetId& Id);
-		
-		// Returns an invalid handle if the id doesn't resolve to a Primary asset.
-		FAssetHandle LoadPrimaryAssetAsync(const FPrimaryAssetId& Id);
+        NODISCARD bool IsValid() const { return State != nullptr; }
+        NODISCARD bool IsReady() const;
 
-		template<typename T>
-		TStrongObjectPtr<T> LoadPrimaryAssetSynchronous(const TPrimaryAssetId<T>& Id)
-		{
-			return TStrongObjectPtr<T>(static_cast<T*>(LoadPrimaryAssetSynchronous(static_cast<const FPrimaryAssetId&>(Id))));
-		}
+        // Loaded over requested, one once ready.
+        NODISCARD float GetProgress() const;
 
-	private:
+        // Fiber-aware.
+        void Wait() const;
 
-		FAssetHandle AcquireLoad(const FGuid& GUID, TPromise<CObject*>& OutPromise, bool& bShouldLoad);
-		static void  RecordRequest(const FFixedString& Path, double DurationMs, EAssetLoadOutcome Outcome);
-		void         PerformLoad(const FFixedString& Path, const FGuid& GUID, TPromise<CObject*> Promise);
-		void         DrainQueuedLoads();
+        // Runs on the game thread once everything has loaded, and right away there when it already has or nothing resolved.
+        void OnReady(TFunction<void(const FAssetHandle&)> Callback) const;
 
-		struct FQueuedLoad
-		{
-			FFixedString       Path;
-			FGuid              GUID;
-			TPromise<CObject*> Promise;
-		};
+        // In request order, the assets first and then what their bundle added. Null where a load failed.
+        NODISCARD uint32 Num() const;
+        NODISCARD CObject* Get(uint32 Index = 0) const;
 
-	private:
+        template<typename T>
+        NODISCARD T* Get(uint32 Index = 0) const { return Cast<T>(Get(Index)); }
 
-		FFiberMutex                          RequestMutex;
-		THashMap<FGuid, FAssetHandle>        InFlight; // asset GUID -> shared load handle, while loading
+        void Reset() { State.Reset(); }
 
-		// A streaming burst asks for hundreds of assets in one frame, so requests queue for one draining task instead of a task each.
-		TVector<FQueuedLoad>                 QueuedLoads;
-		bool                                 bDrainScheduled = false;
-	};
+    private:
 
+        friend class FAssetManager;
 
-	// TPrimaryAssetId<T> templated impls, out-of-line here because they need the full FAssetManager.
+        TSharedPtr<FAssetLoad> State;
+    };
 
-	template<typename T>
-	TStrongObjectPtr<T> TPrimaryAssetId<T>::LoadSynchronous() const
-	{
-		CObject* Obj = FAssetManager::Get().LoadPrimaryAssetSynchronous(static_cast<const FPrimaryAssetId&>(*this));
-		return TStrongObjectPtr<T>(static_cast<T*>(Obj));
-	}
+    // Owns nothing itself; an asset stays loaded while a handle, a component or anything else holds it.
+    class RUNTIME_API FAssetManager final
+    {
+    public:
 
-	template<typename T>
-	void TPrimaryAssetId<T>::LoadAsync(const TFunction<void(T*)>& Callback) const
-	{
-		FAssetHandle Handle = FAssetManager::Get().LoadPrimaryAssetAsync(static_cast<const FPrimaryAssetId&>(*this));
-		if (!Handle.IsValid())
-		{
-			if (Callback)
-			{
-				Callback(nullptr);
-			}
-			return;
-		}
-		if (Callback)
-		{
-			Handle.Then([Callback](CObject*& Obj) { Callback(static_cast<T*>(Obj)); });
-		}
-	}
+        FAssetManager();
+        LE_NO_COPYMOVE(FAssetManager);
+
+        static FAssetManager& Get();
+
+        // The assets, plus every soft reference their properties put in Bundle when one is named.
+        FAssetHandle Load(TSpan<const FGuid> Assets, FName Bundle = NAME_None);
+        FAssetHandle Load(const FGuid& Asset, FName Bundle = NAME_None);
+        // Invalid when the path or id resolves to nothing.
+        FAssetHandle Load(FStringView Path, FName Bundle = NAME_None);
+        FAssetHandle Load(const SAssetId& Id, FName Bundle = NAME_None);
+
+        // Every asset in the group, each with its Bundle when one is named.
+        FAssetHandle LoadGroup(FName Group, FName Bundle = NAME_None);
+
+        // Loads inline on the caller, or finds the object when an async load of it is already running.
+        CObject* LoadSynchronous(const FGuid& Asset);
+
+        // Answered from the registry, so nothing loads.
+        void GetGroups(TVector<FName>& Out);
+        void GetGroup(FName Group, TVector<SAssetId>& Out);
+        NODISCARD FGuid Resolve(const SAssetId& Id);
+
+        // The group a REFLECT(Group = ...) on the class or a base puts its assets in, or None.
+        NODISCARD FName GetGroupOfClass(FName ClassName);
+
+    private:
+
+        struct FWaiter
+        {
+            TSharedPtr<FAssetLoad> Load;
+            uint32                 Index = 0;
+        };
+
+        void Request(const FGuid& Asset, FWaiter Waiter);
+        void DrainQueuedLoads();
+        void PerformLoad(const FGuid& Asset);
+        // Called holding GroupMutex, so a reader never sees the tables half built.
+        void RebuildGroupsIfDirty();
+
+    private:
+
+        FFiberMutex                             RequestMutex;
+
+        // Everyone waiting on an asset that is loading, so a second request joins the first.
+        THashMap<FGuid, TVector<FWaiter>>       InFlight;
+
+        // A streaming burst asks for hundreds of assets in one frame, so they queue for one draining task.
+        TVector<FGuid>                          QueuedLoads;
+        bool                                    bDrainScheduled = false;
+
+        // Taken in this order, groups, then the registry, then classes, which is how a rebuild nests them.
+        FFiberMutex                             GroupMutex;
+        THashMap<FName, TVector<FGuid>>         GroupMembers;
+        THashMap<SAssetId, FGuid>               GroupIds;
+        std::atomic<bool>                       bGroupsDirty = true;
+
+        FFiberMutex                             ClassMutex;
+        THashMap<FName, FName>                  GroupOfClass;
+    };
 }

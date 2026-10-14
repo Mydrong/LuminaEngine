@@ -19,7 +19,7 @@ namespace Lumina
 
     // One raycast wheel. The mount point is where the suspension is fully compressed, and the ray reaches down from it.
     REFLECT()
-    struct RUNTIME_API FVehicleWheel
+    struct RUNTIME_API SVehicleWheel
     {
         GENERATED_BODY()
 
@@ -85,7 +85,7 @@ namespace Lumina
         GENERATED_BODY()
 
         PROPERTY(Editable, Category = "Vehicle")
-        TVector<FVehicleWheel> Wheels;
+        TVector<SVehicleWheel> Wheels;
 
         PROPERTY(Editable, Category = "Vehicle")
         EVehicleSteering Steering = EVehicleSteering::Wheels;
@@ -185,7 +185,7 @@ namespace Lumina
         void AddWheel(FVector3 Position, float Radius, float SuspensionTravel, bool bSteer, bool bDrive, bool bInHandbrake = false,
                       uint32 Visual = 0xFFFFFFFF)
         {
-            FVehicleWheel& Wheel = Wheels.emplace_back();
+            SVehicleWheel& Wheel = Wheels.emplace_back();
             Wheel.Position         = Position;
             Wheel.Radius           = Radius;
             Wheel.SuspensionTravel = SuspensionTravel;

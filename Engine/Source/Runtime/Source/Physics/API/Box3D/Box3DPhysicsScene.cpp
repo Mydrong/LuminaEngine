@@ -37,8 +37,8 @@ namespace Lumina::Physics
         // Box3D's native rule needs both sides to accept, so the engine's historical rule lives here instead.
         bool PermissivePairFilter(b3ShapeId ShapeA, b3ShapeId ShapeB, void*)
         {
-            const FCollisionProfile ProfileA = Box3DUtils::UnpackProfileUserData(b3Shape_GetUserData(ShapeA));
-            const FCollisionProfile ProfileB = Box3DUtils::UnpackProfileUserData(b3Shape_GetUserData(ShapeB));
+            const SCollisionProfile ProfileA = Box3DUtils::UnpackProfileUserData(b3Shape_GetUserData(ShapeA));
+            const SCollisionProfile ProfileB = Box3DUtils::UnpackProfileUserData(b3Shape_GetUserData(ShapeB));
             return ProfileA.ShouldCollide(ProfileB);
         }
 

@@ -9,6 +9,7 @@
 #include "Core/Object/ObjectMacros.h"
 #include "Physics/PhysicsTypes.h"
 #include "Lumina.h"
+#include "Core/Math/Quat/Quat.h"
 #include "RayCast.generated.h"
 
 namespace Lumina
@@ -19,7 +20,7 @@ namespace Lumina
     inline constexpr ECollisionProfiles AllCollisionProfiles = ECollisionProfiles::All;
 
     REFLECT()
-    struct FPhysicsBodyTarget
+    struct SPhysicsBodyTarget
     {
         GENERATED_BODY()
 
@@ -36,12 +37,70 @@ namespace Lumina
     };
 
     REFLECT()
+    enum class EQueryShapeType : uint8
+    {
+        Sphere,
+        Box,
+        Capsule,
+    };
+
+    // The volume a sweep or overlap tests, centered on the query position, a capsule running along its rotated up axis.
+    REFLECT()
+    struct SQueryShape
+    {
+        GENERATED_BODY()
+
+        PROPERTY()
+        EQueryShapeType Type = EQueryShapeType::Sphere;
+
+        // Meters, for a sphere and a capsule's caps.
+        PROPERTY()
+        float Radius = 0.0f;
+
+        // Half a capsule's straight section, so its full height is double the sum of HalfHeight and Radius.
+        PROPERTY()
+        float HalfHeight = 0.0f;
+
+        PROPERTY()
+        FVector3 HalfExtents = FVector3(0.0f);
+
+        PROPERTY()
+        FQuat Rotation = FQuat::Identity();
+
+        static SQueryShape Sphere(float Radius)
+        {
+            SQueryShape Shape;
+            Shape.Radius = Radius;
+            return Shape;
+        }
+
+        static SQueryShape Box(const FVector3& HalfExtents, const FQuat& Rotation)
+        {
+            SQueryShape Shape;
+            Shape.Type = EQueryShapeType::Box;
+            Shape.HalfExtents = HalfExtents;
+            Shape.Rotation = Rotation;
+            return Shape;
+        }
+
+        static SQueryShape Capsule(float Radius, float HalfHeight, const FQuat& Rotation)
+        {
+            SQueryShape Shape;
+            Shape.Type = EQueryShapeType::Capsule;
+            Shape.Radius = Radius;
+            Shape.HalfHeight = HalfHeight;
+            Shape.Rotation = Rotation;
+            return Shape;
+        }
+    };
+
+    REFLECT()
     struct SRayResult
     {
         GENERATED_BODY()
 
         PROPERTY()
-        FPhysicsBodyTarget Target;
+        SPhysicsBodyTarget Target;
 
         PROPERTY()
         uint32 Entity = ECS::NullEntity.Value;

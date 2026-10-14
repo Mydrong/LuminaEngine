@@ -39,7 +39,7 @@ namespace Lumina
         CMaterialInstance* CreateDynamicMaterialInstance(uint32 Slot);
 
         FUNCTION()
-        FAABB GetAABB() const;
+        SAABB GetAABB() const;
 
         /** How the animation pose updates relative to visibility (see EAnimUpdateMode). */
         PROPERTY(Editable, Category = "Animation")

@@ -32,14 +32,14 @@ namespace Lumina
             return;
         }
 
-        const TVector<FInputActionState>& States = Ctx->GetActionStates();
+        const TVector<SInputActionState>& States = Ctx->GetActionStates();
         const TVector<SInputEvent>& Events = Ctx->GetFrameEvents();
 
         static thread_local TVector<int32> ChangedActionIndices;
         ChangedActionIndices.clear();
         for (int32 i = 0; i < (int32)States.size(); ++i)
         {
-            const FInputActionState& State = States[i];
+            const SInputActionState& State = States[i];
             if (State.IsPressed() || State.IsReleased() || State.X != 0.0f || State.Y != 0.0f)
             {
                 ChangedActionIndices.push_back(i);

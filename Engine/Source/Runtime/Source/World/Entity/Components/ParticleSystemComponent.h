@@ -89,7 +89,7 @@ namespace Lumina
         // Per-instance overrides for asset-declared parameters; only diverging entries live here, reads
         // fall back to the asset.
         PROPERTY()
-        TVector<FParticleParameter> ParameterOverrides;
+        TVector<SParticleParameter> ParameterOverrides;
 
         /** Per-emitter sprite material overrides applied on top of the asset's, indexed by emitter. */
         PROPERTY(Editable, Category = "Particle System")
@@ -140,7 +140,7 @@ namespace Lumina
         TVector<FParticleScriptEmit> PendingEmits;
 
         // Hits the renderer read back for emitters that report collisions, replaced at every extract.
-        TVector<FParticleCollision> Collisions;
+        TVector<SParticleCollision> Collisions;
 
         //~ Begin User Parameters
         /** True if this component or its asset declares a parameter with the given name. */
@@ -198,13 +198,13 @@ namespace Lumina
 
         /** Resolve a parameter by name, preferring component overrides over the asset's default. Public
          *  because the per-frame module-slot resolve reads through it from outside the component. */
-        const FParticleParameter* FindParameter(const FName& Name) const;
+        const SParticleParameter* FindParameter(const FName& Name) const;
 
     private:
 
         // Get-or-create the override entry for (Name, type). Returns nullptr if the asset declares the
         // parameter with a different type (programmer error).
-        FParticleParameter* GetOrCreateOverride(FName Name, EParticleParameterType ExpectedType);
+        SParticleParameter* GetOrCreateOverride(FName Name, EParticleParameterType ExpectedType);
         //~ End User Parameters
     };
 }

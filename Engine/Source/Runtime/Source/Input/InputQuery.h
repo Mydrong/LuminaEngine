@@ -29,21 +29,21 @@ namespace Lumina::Input
 
     // Zeroed state when the world is not receiving input or the handle names no authored action, so a
     // caller never has to null-check before reading.
-    RUNTIME_API const FInputActionState& GetActionState(const CWorld* World, const FInputActionHandle& Action);
+    RUNTIME_API const SInputActionState& GetActionState(const CWorld* World, const SInputActionHandle& Action);
 
-    RUNTIME_API bool  IsActionDown    (const CWorld* World, const FInputActionHandle& Action);
-    RUNTIME_API bool  IsActionPressed (const CWorld* World, const FInputActionHandle& Action);
-    RUNTIME_API bool  IsActionReleased(const CWorld* World, const FInputActionHandle& Action);
-    RUNTIME_API bool  IsActionHeld    (const CWorld* World, const FInputActionHandle& Action);
-    RUNTIME_API bool  WasActionTapped (const CWorld* World, const FInputActionHandle& Action);
+    RUNTIME_API bool  IsActionDown    (const CWorld* World, const SInputActionHandle& Action);
+    RUNTIME_API bool  IsActionPressed (const CWorld* World, const SInputActionHandle& Action);
+    RUNTIME_API bool  IsActionReleased(const CWorld* World, const SInputActionHandle& Action);
+    RUNTIME_API bool  IsActionHeld    (const CWorld* World, const SInputActionHandle& Action);
+    RUNTIME_API bool  WasActionTapped (const CWorld* World, const SInputActionHandle& Action);
 
-    RUNTIME_API float GetActionAxis   (const CWorld* World, const FInputActionHandle& Action);
-    RUNTIME_API FVector2 GetActionAxis2D(const CWorld* World, const FInputActionHandle& Action);
-    RUNTIME_API float GetActionHeldTime(const CWorld* World, const FInputActionHandle& Action);
+    RUNTIME_API float GetActionAxis   (const CWorld* World, const SInputActionHandle& Action);
+    RUNTIME_API FVector2 GetActionAxis2D(const CWorld* World, const SInputActionHandle& Action);
+    RUNTIME_API float GetActionHeldTime(const CWorld* World, const SInputActionHandle& Action);
 
     // +1 while Positive is down, -1 while Negative is down, 0 when neither or both are. Holding both
     // cancels rather than latching whichever side is tested first.
-    RUNTIME_API float GetAxisPair(const CWorld* World, const FInputActionHandle& Positive, const FInputActionHandle& Negative);
+    RUNTIME_API float GetAxisPair(const CWorld* World, const SInputActionHandle& Positive, const SInputActionHandle& Negative);
 
     //~ Mapping layers. Push one to change what input means right now: a Menu layer that blocks lower makes
     //~ only its own actions fire, which is what a pause screen wants. Layers are authored on CInputSettings

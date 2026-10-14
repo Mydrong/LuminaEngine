@@ -125,7 +125,7 @@ namespace Lumina
 
         /** Collision layer/mask applied to every ragdoll body. */
         PROPERTY(Editable, Category = "Physics Asset")
-        FCollisionProfile CollisionProfile;
+        SCollisionProfile CollisionProfile;
 
         /** Simulated bodies, one per driven bone. */
         PROPERTY(Editable, Category = "Physics Asset")

@@ -21,7 +21,7 @@ namespace Lumina
 		uint32           Generation = 0;
 		IAudioSource*    Source = nullptr;
 		bool             bGenerated = false;
-		FAudioPlayParams Params;
+		SAudioPlayParams Params;
 	};
 
 	/** One listener's pose, published by the pump and sampled by the mixer once per block. */

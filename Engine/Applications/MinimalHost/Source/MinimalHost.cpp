@@ -113,7 +113,7 @@ int main(int ArgC, char** ArgV)
         Tone = Audio::Context().CreateProceduralStream(kToneRate, kToneChannels, kToneFrames);
         if (Tone)
         {
-            FAudioPlayParams Params;
+            SAudioPlayParams Params;
             Params.Volume = 0.6f;
             (void)Audio::Context().PlayProceduralStream(Tone, Params);
         }

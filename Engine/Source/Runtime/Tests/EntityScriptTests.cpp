@@ -12,7 +12,7 @@
 #include "World/World.h"
 #include "Core/Object/ObjectReinstancer.h"
 #include "Core/Reflection/Type/ObjectReferenceVisitor.h"
-#include "ScriptReshapeTestUtil.h"
+#include "ScriptTestUtil.h"
 #include "Scripting/ScriptableTest.h"
 #include "Scripting/ScriptStruct.h"
 #include "Core/Threading/Thread.h"
@@ -1182,6 +1182,53 @@ namespace
         Definition.bHasSchema     = true;
         return Definition;
     }
+}
+
+namespace
+{
+    // The two class stages of a reload, shells first so other types can name a class before it is laid out.
+    void ReloadClasses(const TVector<Scripting::FManagedTypeDefinition>& Definitions)
+    {
+        FScriptableRegistry::MintNewClasses(Definitions);
+        FScriptableRegistry::RefreshMintedClasses(Definitions);
+        RegisterPendingTypes();
+    }
+
+    uint32 FieldOffset(const char* ClassName, const char* FieldName)
+    {
+        CClass* Class = FindObject<CClass>(FName(ClassName));
+        FProperty* Property = Class != nullptr ? Class->GetProperty(FName(FieldName)) : nullptr;
+        return Property != nullptr ? Property->Offset : 0;
+    }
+}
+
+// A child shell is minted before its parent's block exists, so its own block has to start past the parent's once laid out.
+TEST(ScriptClassInheritance, ANewChildIsLaidOutPastANewParent)
+{
+    TVector<Scripting::FManagedTypeDefinition> Definitions;
+    Definitions.push_back(ScriptClassDefinition("Shell_GTestParent", "CEntityScript", "ParentValue"));
+    Definitions.push_back(ScriptClassDefinition("Shell_GTestChild", "Shell_GTestParent", "ChildValue"));
+    ReloadClasses(Definitions);
+
+    CClass* Parent = FindObject<CClass>(FName("Shell_GTestParent"));
+    ASSERT_NE(Parent, nullptr);
+    EXPECT_GE(FieldOffset("Shell_GTestChild", "ChildValue"), Parent->GetSize());
+    EXPECT_NE(FieldOffset("Shell_GTestChild", "ChildValue"), FieldOffset("Shell_GTestParent", "ParentValue"));
+
+    // A parent reshaped in the same reload that adds a child under it hands that child to the replacement.
+    TVector<Scripting::FManagedTypeDefinition> Second;
+    Second.push_back(ScriptClassDefinition("Shell_GTestParent", "CEntityScript", "WiderParentValue"));
+    Second.push_back(ScriptClassDefinition("Shell_GTestChild", "Shell_GTestParent", "ChildValue"));
+    Second.push_back(ScriptClassDefinition("Shell_GTestLateChild", "Shell_GTestParent", "LateValue"));
+    ReloadClasses(Second);
+
+    CClass* Replacement = FindObject<CClass>(FName("Shell_GTestParent"));
+    ASSERT_NE(Replacement, nullptr);
+    CClass* LateChild = FindObject<CClass>(FName("Shell_GTestLateChild"));
+    ASSERT_NE(LateChild, nullptr);
+    EXPECT_EQ(LateChild->GetSuperClass(), Replacement);
+    EXPECT_EQ(FindObject<CClass>(FName("Shell_GTestChild"))->GetSuperClass(), Replacement);
+    EXPECT_GE(FieldOffset("Shell_GTestLateChild", "LateValue"), Replacement->GetSize());
 }
 
 // The stress harness's crash. A removed parent with no instances of its own was freed while a subclass still linked to it.

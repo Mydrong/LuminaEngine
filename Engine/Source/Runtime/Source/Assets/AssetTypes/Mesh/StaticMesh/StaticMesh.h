@@ -16,7 +16,7 @@ namespace Lumina
 
         bool IsAsset() const override { return true; }
 
-        const FMeshSocket* FindSocket(const FName& SocketName) const { return FindSocketByName(Sockets, SocketName); }
+        const SMeshSocket* FindSocket(const FName& SocketName) const { return FindSocketByName(Sockets, SocketName); }
 
         // The default collision shape when it is loaded and holds collision, otherwise null.
         const CCollisionShape* GetDefaultCollisionShape() const;
@@ -26,7 +26,7 @@ namespace Lumina
 
         /** Named attach points relative to the mesh origin (BoneName unused). */
         PROPERTY(Editable, Category = "Sockets")
-        TVector<FMeshSocket> Sockets;
+        TVector<SMeshSocket> Sockets;
 
         // Simplified collision used by foliage, mesh colliders and navigation wherever they name no shape of their own.
         PROPERTY(Editable, Category = "Collision")

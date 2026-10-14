@@ -219,7 +219,7 @@ namespace Lumina
                 const FVector3 To(From.x + SolvedX * Lookahead, 0.0f, From.z + SolvedZ * Lookahead);
 
                 FNavQueryFilter   Filter;
-                FNavRaycastResult Hit;
+                SNavRaycastResult Hit;
                 if (NavMesh->Raycast(From, To, Filter, Hit) && Hit.bHit)
                 {
                     // The preferred velocity came off a navmesh path, so it is the safe thing to fall back to.

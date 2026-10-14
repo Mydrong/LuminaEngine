@@ -47,9 +47,9 @@ namespace Lumina
         return UIScripts::IsShown(this);
     }
 
-    FUIDocument CUIScript::GetDocument() const
+    SUIDocument CUIScript::GetDocument() const
     {
-        FUIDocument Result;
+        SUIDocument Result;
         Result.Handle = reinterpret_cast<uint64>(UIScripts::GetDocument(this));
         return Result;
     }
@@ -477,7 +477,7 @@ namespace Lumina::UIScripts
             for (FProperty* Property : Open.Script->GetClass()->GetProperties())
             {
                 if (!Property->HasMetadata("Element") || Property->GetType() != EPropertyTypeFlags::Struct
-                    || static_cast<const FStructProperty*>(Property)->GetStruct() != FUIElement::StaticStruct())
+                    || static_cast<const FStructProperty*>(Property)->GetStruct() != SUIElement::StaticStruct())
                 {
                     continue;
                 }
@@ -489,7 +489,7 @@ namespace Lumina::UIScripts
                     LOG_WARN("[UI] {}.{} found no element with id '{}' in '{}'.", Open.Script->GetClass()->GetName().c_str(),
                         Property->GetPropertyName().c_str(), Id.c_str(), Open.Path.c_str());
                 }
-                Property->GetValuePtr<FUIElement>(Open.Script)->Handle = reinterpret_cast<uint64>(Element);
+                Property->GetValuePtr<SUIElement>(Open.Script)->Handle = reinterpret_cast<uint64>(Element);
             }
         }
 

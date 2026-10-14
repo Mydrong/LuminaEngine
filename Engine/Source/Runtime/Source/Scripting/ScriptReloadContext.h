@@ -17,8 +17,7 @@ namespace Lumina
         Requested,
     };
 
-    /** Handed to CEntityScript::OnReloaded so a script can tell a fresh start from a reload and rebuild
-     *  whatever did not survive the old load context, its delegate bindings above all. */
+    /// Handed to OnReloaded, so a script can tell a fresh start from a reload and rebuild its delegate bindings.
     REFLECT()
     struct SScriptReloadContext
     {

@@ -75,7 +75,7 @@
             const FNetClientView& CV = CVKV.second;
             for (const auto& RKV : CV.Relevant)
             {
-                const ECS::FEntity E = Net->GuidTable.Find(FNetGUID{ RKV.first });
+                const ECS::FEntity E = Net->GuidTable.Find(SNetGUID{ RKV.first });
                 if (E == ECS::NullEntity || !Registry.IsValid(E)) { continue; }
                 STransformComponent* T = Registry.TryGet<STransformComponent>(E);
                 if (T == nullptr) { continue; }

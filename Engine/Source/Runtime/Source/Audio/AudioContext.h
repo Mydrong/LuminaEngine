@@ -45,64 +45,64 @@ namespace Lumina
 
 		// Asset-backed playback: the shared bytes are decoded on the audio pump and kept alive for the
 		// lifetime of the voice, so the caller's asset can be unloaded mid-playback.
-		NODISCARD virtual FAudioHandle PlayAudio(const TSharedPtr<FAudioData>& Data, const FAudioPlayParams& Params) = 0;
+		NODISCARD virtual SAudioHandle PlayAudio(const TSharedPtr<FAudioData>& Data, const SAudioPlayParams& Params) = 0;
 
 		// Loose-file playback (VFS path). Reads on the pump, so a large file briefly occupies a worker.
-		NODISCARD virtual FAudioHandle PlayFile(FStringView File, const FAudioPlayParams& Params) = 0;
+		NODISCARD virtual SAudioHandle PlayFile(FStringView File, const SAudioPlayParams& Params) = 0;
 
-		NODISCARD virtual FAudioHandle PlayProceduralStream(TSharedPtr<FProceduralAudioStream> Stream, const FAudioPlayParams& Params) = 0;
+		NODISCARD virtual SAudioHandle PlayProceduralStream(TSharedPtr<FProceduralAudioStream> Stream, const SAudioPlayParams& Params) = 0;
 
 		// Renders a compiled audio graph in the mixer, pulled on the device thread.
-		NODISCARD virtual FAudioHandle PlayAudioGraph(TSharedPtr<FAudioGraphInstance> Instance, const FAudioPlayParams& Params) = 0;
+		NODISCARD virtual SAudioHandle PlayAudioGraph(TSharedPtr<FAudioGraphInstance> Instance, const SAudioPlayParams& Params) = 0;
 
 		//~ Parameters on a graph voice addressed by its handle, so a one shot needs no held instance.
-		virtual bool SetGraphFloatParameter(FAudioHandle Handle, const FName& Name, float Value) = 0;
-		virtual bool SetGraphIntParameter(FAudioHandle Handle, const FName& Name, int32 Value) = 0;
-		virtual bool SetGraphBoolParameter(FAudioHandle Handle, const FName& Name, bool Value) = 0;
-		virtual bool TriggerGraphParameter(FAudioHandle Handle, const FName& Name) = 0;
+		virtual bool SetGraphFloatParameter(SAudioHandle Handle, const FName& Name, float Value) = 0;
+		virtual bool SetGraphIntParameter(SAudioHandle Handle, const FName& Name, int32 Value) = 0;
+		virtual bool SetGraphBoolParameter(SAudioHandle Handle, const FName& Name, bool Value) = 0;
+		virtual bool TriggerGraphParameter(SAudioHandle Handle, const FName& Name) = 0;
 
-		NODISCARD virtual float GetGraphFloatOutput(FAudioHandle Handle, const FName& Name) const = 0;
+		NODISCARD virtual float GetGraphFloatOutput(SAudioHandle Handle, const FName& Name) const = 0;
 
 		// Monotonic count of times a graph raised the named trigger output. Compare against a previous read.
-		NODISCARD virtual uint32 GetGraphTriggerOutputCount(FAudioHandle Handle, const FName& Name) const = 0;
+		NODISCARD virtual uint32 GetGraphTriggerOutputCount(SAudioHandle Handle, const FName& Name) const = 0;
 
-		virtual void StopSound(FAudioHandle Handle, EAudioStopMode Mode = EAudioStopMode::Immediate, float FadeSeconds = 0.5f) = 0;
+		virtual void StopSound(SAudioHandle Handle, EAudioStopMode Mode = EAudioStopMode::Immediate, float FadeSeconds = 0.5f) = 0;
 		virtual void StopAllSounds(EAudioStopMode Mode = EAudioStopMode::Immediate, float FadeSeconds = 0.5f) = 0;
 
-		virtual void SetVolume(FAudioHandle Handle, float Volume) = 0;
-		virtual void SetPitch(FAudioHandle Handle, float Pitch) = 0;
-		virtual void SetLooping(FAudioHandle Handle, bool bLooping) = 0;
-		virtual void SetPosition(FAudioHandle Handle, FVector3 Position) = 0;
-		virtual void SetVelocity(FAudioHandle Handle, FVector3 Velocity) = 0;
-		virtual void SetDirection(FAudioHandle Handle, FVector3 Direction) = 0;
-		virtual void SetAttenuation(FAudioHandle Handle, const SAudioAttenuation& Attenuation) = 0;
-		virtual void SetMinMaxDistance(FAudioHandle Handle, float MinDistance, float MaxDistance) = 0;
-		virtual void SetPan(FAudioHandle Handle, float Pan) = 0;
-		virtual void SetPaused(FAudioHandle Handle, bool bPaused) = 0;
-		virtual void SetBus(FAudioHandle Handle, EAudioBus Bus) = 0;
-		virtual void SetPriority(FAudioHandle Handle, uint8 Priority) = 0;
+		virtual void SetVolume(SAudioHandle Handle, float Volume) = 0;
+		virtual void SetPitch(SAudioHandle Handle, float Pitch) = 0;
+		virtual void SetLooping(SAudioHandle Handle, bool bLooping) = 0;
+		virtual void SetPosition(SAudioHandle Handle, FVector3 Position) = 0;
+		virtual void SetVelocity(SAudioHandle Handle, FVector3 Velocity) = 0;
+		virtual void SetDirection(SAudioHandle Handle, FVector3 Direction) = 0;
+		virtual void SetAttenuation(SAudioHandle Handle, const SAudioAttenuation& Attenuation) = 0;
+		virtual void SetMinMaxDistance(SAudioHandle Handle, float MinDistance, float MaxDistance) = 0;
+		virtual void SetPan(SAudioHandle Handle, float Pan) = 0;
+		virtual void SetPaused(SAudioHandle Handle, bool bPaused) = 0;
+		virtual void SetBus(SAudioHandle Handle, EAudioBus Bus) = 0;
+		virtual void SetPriority(SAudioHandle Handle, uint8 Priority) = 0;
 
 		// Amount is 0 (clear line of sight) to 1 (fully blocked). Drives a per-voice low-pass plus a
 		// gain multiplier; the caller is responsible for smoothing the value over time.
-		virtual void SetOcclusion(FAudioHandle Handle, float Amount, float LowPassFrequency, float VolumeAttenuation) = 0;
+		virtual void SetOcclusion(SAudioHandle Handle, float Amount, float LowPassFrequency, float VolumeAttenuation) = 0;
 
 		// Direct control of the per-voice low-pass, for effects that aren't occlusion (underwater, radio).
 		// Pass 0 to bypass the filter.
-		virtual void SetLowPassCutoff(FAudioHandle Handle, float CutoffHz) = 0;
+		virtual void SetLowPassCutoff(SAudioHandle Handle, float CutoffHz) = 0;
 
 		// Ramps the voice's volume to Volume over Seconds, the same volume SetVolume sets, which a later SetVolume overrides.
-		virtual void FadeTo(FAudioHandle Handle, float Volume, float Seconds) = 0;
+		virtual void FadeTo(SAudioHandle Handle, float Volume, float Seconds) = 0;
 
 		// Seeks a playing (non-procedural) sound to the given PCM frame.
-		virtual void SeekToFrame(FAudioHandle Handle, uint64 Frame) = 0;
+		virtual void SeekToFrame(SAudioHandle Handle, uint64 Frame) = 0;
 
-		NODISCARD virtual EAudioVoiceState GetVoiceState(FAudioHandle Handle) const = 0;
-		NODISCARD virtual uint64 GetPlaybackFrame(FAudioHandle Handle) const = 0;
+		NODISCARD virtual EAudioVoiceState GetVoiceState(SAudioHandle Handle) const = 0;
+		NODISCARD virtual uint64 GetPlaybackFrame(SAudioHandle Handle) const = 0;
 		NODISCARD virtual uint32 GetActiveVoiceCount() const = 0;
 		NODISCARD virtual uint32 GetMaxVoiceCount() const = 0;
 		NODISCARD virtual uint64 GetDroppedVoiceCount() const = 0;
 
-		NODISCARD bool IsPlaying(FAudioHandle Handle) const { return GetVoiceState(Handle) == EAudioVoiceState::Playing; }
+		NODISCARD bool IsPlaying(SAudioHandle Handle) const { return GetVoiceState(Handle) == EAudioVoiceState::Playing; }
 
 		virtual void UpdateListener(uint32 ListenerIndex, FVector3 Position, FQuat Rotation, FVector3 Velocity) = 0;
 		virtual void SetListenerEnabled(uint32 ListenerIndex, bool bEnabled) = 0;
@@ -155,10 +155,10 @@ namespace Lumina
 		void SetMasterVolume(float Volume) { SetBusVolume(EAudioBus::Master, Volume); }
 		NODISCARD float GetMasterVolume() const { return GetBusVolume(EAudioBus::Master); }
 
-		NODISCARD FAudioHandle PlayAudio2D(const TSharedPtr<FAudioData>& Data,
+		NODISCARD SAudioHandle PlayAudio2D(const TSharedPtr<FAudioData>& Data,
 			float Volume = 1.0f, float Pitch = 1.0f, bool bLooping = false, uint64 StartFrame = 0)
 		{
-			FAudioPlayParams Params;
+			SAudioPlayParams Params;
 			Params.Volume     = Volume;
 			Params.Pitch      = Pitch;
 			Params.bLooping   = bLooping;
@@ -166,11 +166,11 @@ namespace Lumina
 			return PlayAudio(Data, Params);
 		}
 
-		NODISCARD FAudioHandle PlayAudioAtLocation(const TSharedPtr<FAudioData>& Data, FVector3 Location,
+		NODISCARD SAudioHandle PlayAudioAtLocation(const TSharedPtr<FAudioData>& Data, FVector3 Location,
 			float Volume = 1.0f, float Pitch = 1.0f, float MinDistance = 1.0f, float MaxDistance = 50.0f,
 			bool bLooping = false, uint64 StartFrame = 0)
 		{
-			FAudioPlayParams Params;
+			SAudioPlayParams Params;
 			Params.Volume                   = Volume;
 			Params.Pitch                    = Pitch;
 			Params.bLooping                 = bLooping;
@@ -182,19 +182,19 @@ namespace Lumina
 			return PlayAudio(Data, Params);
 		}
 
-		NODISCARD FAudioHandle PlaySound2D(FStringView File, float Volume = 1.0f, float Pitch = 1.0f, bool bLooping = false)
+		NODISCARD SAudioHandle PlaySound2D(FStringView File, float Volume = 1.0f, float Pitch = 1.0f, bool bLooping = false)
 		{
-			FAudioPlayParams Params;
+			SAudioPlayParams Params;
 			Params.Volume   = Volume;
 			Params.Pitch    = Pitch;
 			Params.bLooping = bLooping;
 			return PlayFile(File, Params);
 		}
 
-		NODISCARD FAudioHandle PlaySoundAtLocation(FStringView File, FVector3 Location,
+		NODISCARD SAudioHandle PlaySoundAtLocation(FStringView File, FVector3 Location,
 			float Volume = 1.0f, float Pitch = 1.0f, float MinDistance = 1.0f, float MaxDistance = 50.0f, bool bLooping = false)
 		{
-			FAudioPlayParams Params;
+			SAudioPlayParams Params;
 			Params.Volume                   = Volume;
 			Params.Pitch                    = Pitch;
 			Params.bLooping                 = bLooping;

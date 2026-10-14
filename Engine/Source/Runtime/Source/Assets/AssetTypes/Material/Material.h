@@ -26,7 +26,7 @@ namespace Lumina
 {
     // One compiled stage of a shader set. Only stages that produced output are stored.
     REFLECT()
-    struct RUNTIME_API FMaterialStageBlob
+    struct RUNTIME_API SMaterialStageBlob
     {
         GENERATED_BODY()
 
@@ -39,7 +39,7 @@ namespace Lumina
 
     // The shader set for one static switch combination, owned by the root so every instance selecting it shares one.
     REFLECT()
-    struct RUNTIME_API FMaterialShaderPermutation
+    struct RUNTIME_API SMaterialShaderPermutation
     {
         GENERATED_BODY()
 
@@ -47,7 +47,7 @@ namespace Lumina
         uint64 Key = 0;
 
         PROPERTY()
-        TVector<FMaterialStageBlob> Stages;
+        TVector<SMaterialStageBlob> Stages;
 
         // Library entries minted from Stages, so never serialized.
         FShaderH Entries[(size_t)EMaterialShaderStage::Count] = {};
@@ -72,7 +72,7 @@ namespace Lumina
         CMaterial* GetMaterial() const override { return const_cast<CMaterial*>(this); }
         bool SetScalarValue(const FName& Name, const float Value) override;
         bool SetVectorValue(const FName& Name, const FVector4& Value) override;
-        bool GetParameterValue(EMaterialParameterType Type, const FName& Name, FMaterialParameter& Param) override;
+        bool GetParameterValue(EMaterialParameterType Type, const FName& Name, SMaterialParameter& Param) override;
         uint64 GetStaticSwitchKey() const override { return GetDefaultStaticSwitchKey(); }
         uint32 GetResolvedTextureSlot(uint32 Index) override { return ResolveTextureSlot(Index); }
         CTexture* GetTextureParameterTexture(const FName& Name, uint32 Index) override;
@@ -150,7 +150,7 @@ namespace Lumina
         static void CreateDefaultTerrainMaterial();
 
         // Compiles a rooted PBR material from a pixel-inputs snippet. The caller owns the root reference.
-        static CMaterial* CreateBuiltinMaterial(const FName& Name, const FString& PixelInputs, TSpan<const FMaterialParameter> InParameters = {});
+        static CMaterial* CreateBuiltinMaterial(const FName& Name, const FString& PixelInputs, TSpan<const SMaterialParameter> InParameters = {});
 
         // Content hash of every source a material template can reach.
         static uint64 GetShaderTemplateHash();
@@ -194,7 +194,7 @@ namespace Lumina
 
         // Declared by the graph, in the slot order the shader compiled.
         PROPERTY()
-        TVector<FMaterialParameter> Parameters;
+        TVector<SMaterialParameter> Parameters;
 
         // The default texture per texture parameter slot.
         PROPERTY()
@@ -206,19 +206,19 @@ namespace Lumina
 
         // Named compile-time branches, ordered by name with their key bits assigned.
         PROPERTY()
-        TVector<FMaterialStaticSwitch> StaticSwitches;
+        TVector<SMaterialStaticSwitch> StaticSwitches;
 
         // Grass species a terrain graph scatters, from its GrassOutput node. Empty for everything but terrain.
         PROPERTY()
-        TVector<FGrassOutput> GrassOutputs;
+        TVector<SGrassOutput> GrassOutputs;
 
         // The default shader set, compiled with every switch at its authored default.
         PROPERTY()
-        TVector<FMaterialStageBlob> Stages;
+        TVector<SMaterialStageBlob> Stages;
 
         // Every other switch combination an instance has asked for.
         PROPERTY()
-        TVector<FMaterialShaderPermutation> Permutations;
+        TVector<SMaterialShaderPermutation> Permutations;
 
         // GetShaderTemplateHash for the bytecode in memory, saved only by a cook or a legacy asset that still embeds its bytecode.
         PROPERTY()
@@ -243,8 +243,8 @@ namespace Lumina
 
     private:
 
-        FMaterialShaderPermutation* FindPermutation(uint64 Key);
-        const FMaterialShaderPermutation* FindPermutation(uint64 Key) const;
+        SMaterialShaderPermutation* FindPermutation(uint64 Key);
+        const SMaterialShaderPermutation* FindPermutation(uint64 Key) const;
 
         // The library name for one stage, unique per material and permutation.
         FName MakeStageEntryName(EMaterialShaderStage Stage, uint64 Key, bool bPermutation) const;
@@ -287,7 +287,7 @@ namespace Lumina
         // Latched once the async loads are issued, since Extract asks every frame until they land.
         bool bTextureLoadRequested = false;
 
-        THashMap<FName, FMaterialParameter> ParameterLookup;
+        THashMap<FName, SMaterialParameter> ParameterLookup;
     };
 
     // Re-uploads the texture bindings of every material that references ChangedTexture, or all of them when it is null, and returns how many changed.

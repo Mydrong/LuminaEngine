@@ -387,7 +387,7 @@ namespace Lumina
 
         // Physics-body grab. Held across frames: the spring needs the attach point that was picked on the
         // initial click, not whatever the ray hits as the body swings away.
-        FPhysicsBodyTarget                      GrabbedTarget;
+        SPhysicsBodyTarget                      GrabbedTarget;
         float                                   GrabDistance = 0.0f;
         FVector3                                GrabLocalOffset = FVector3(0.0f);
 

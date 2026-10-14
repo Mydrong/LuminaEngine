@@ -2,10 +2,10 @@
 #include "InstancedStruct.h"
 
 #include "Core/Reflection/Type/LuminaTypes.h"
-#include "Scripting/ScriptDataStruct.h"
+#include "Scripting/ScriptTypeRegistry.h"
+#include "Scripting/ScriptStruct.h"
 
 #include "Class.h"
-#include "Core/Object/ObjectIterator.h"
 #include "Memory/Memory.h"
 
 namespace Lumina
@@ -93,6 +93,11 @@ namespace Lumina
             return false;
         }
 
+        if (const CScriptStruct* Script = Cast<CScriptStruct>(Type); Script != nullptr && !Script->IsValueType())
+        {
+            return false;
+        }
+
         // A CDO is an instance OF a struct type, not a type, so it is never something to instance.
         return !Type->HasAnyFlag(OF_DefaultObject);
     }
@@ -108,12 +113,12 @@ namespace Lumina
         }
 
         ScriptStruct = InStruct;
-        TypeIdentity = DataStructIdentity(InStruct);
+        TypeIdentity = StructIdentity(InStruct);
         if (!TypeIdentity.IsNone())
         {
             ScriptTypePin = InStruct;
         }
-        SeededGeneration = FScriptDataStructRegistry::Get().GetGeneration();
+        SeededGeneration = FScriptStructRegistry::Get().GetGeneration();
         AllocateFor(InStruct);
         InStruct->InitializeStruct(InstanceMemory);
     }
@@ -187,7 +192,7 @@ namespace Lumina
             return;
         }
 
-        const uint64 Now = FScriptDataStructRegistry::Get().GetGeneration();
+        const uint64 Now = FScriptStructRegistry::Get().GetGeneration();
         if (Now == SeededGeneration)
         {
             return;
@@ -195,7 +200,7 @@ namespace Lumina
         SeededGeneration = Now;
 
         // A native type is the same object every run, so this only ever moves for a script type.
-        CStruct* Fresh = TypeIdentity.IsNone() ? ScriptStruct : ResolveDataStructByName(TypeIdentity);
+        CStruct* Fresh = TypeIdentity.IsNone() ? ScriptStruct : ResolveStructByName(TypeIdentity);
         if (Fresh == ScriptStruct)
         {
             return;
@@ -272,15 +277,6 @@ namespace Lumina
         });
     }
 
-    FName InstancedStructKey(CStruct* Type)
-    {
-        if (const FString* ScriptName = Type->Metadata.TryGetMetadata("ScriptTypeName"))
-        {
-            return FName(ScriptName->c_str());
-        }
-        return Type->GetName();
-    }
-
     CStruct* ResolveInstancedStructType(CStruct* MetaBase, const FName& Key)
     {
         if (Key.IsNone())
@@ -288,26 +284,8 @@ namespace Lumina
             return nullptr;
         }
         // A typed slot only takes its own hierarchy, since a reader casts the memory to that base.
-        if (CStruct* Found = FindObject<CStruct>(Key); IsInstancableStructType(Found) && (MetaBase == nullptr || Found->IsChildOf(MetaBase)))
-        {
-            return Found;
-        }
-        if (MetaBase != nullptr)
-        {
-            for (TObjectIterator<CStruct> It; It; ++It)
-            {
-                CStruct* Candidate = *It;
-                if (Candidate == MetaBase || !Candidate->IsChildOf(MetaBase) || !IsInstancableStructType(Candidate))
-                {
-                    continue;
-                }
-                if (const FString* Name = Candidate->Metadata.TryGetMetadata("ScriptTypeName"); Name && FName(Name->c_str()) == Key)
-                {
-                    return Candidate;
-                }
-            }
-        }
-        return nullptr;
+        CStruct* Found = ResolveStructByName(Key);
+        return IsInstancableStructType(Found) && (MetaBase == nullptr || Found->IsChildOf(MetaBase)) ? Found : nullptr;
     }
 
     void SerializeInstancedStruct(FArchive& Ar, FInstancedStruct& Value, CStruct* MetaBase)
@@ -328,7 +306,7 @@ namespace Lumina
         }
 
         CStruct* Type = Value.GetScriptStruct();
-        FName StructKey = Type ? InstancedStructKey(Type) : NAME_None;
+        FName StructKey = Type ? StructIdentity(Type) : NAME_None;
         Ar << StructKey;
 
         if (Type != nullptr)

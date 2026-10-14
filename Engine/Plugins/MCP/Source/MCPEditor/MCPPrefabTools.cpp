@@ -4,7 +4,6 @@
 #include "Agent/AgentAssetResolve.h"
 #include "Agent/AgentEntityToken.h"
 #include "Agent/AgentToolRegistry.h"
-#include "Assets/AssetRef.h"
 #include "Assets/AssetRegistry/AssetRegistry.h"
 #include "Assets/AssetTypes/Prefabs/Prefab.h"
 #include "Assets/AssetTypes/Prefabs/PrefabComponents.h"
@@ -191,11 +190,10 @@ namespace Lumina::MCP
                     Transform.SetRotationFromEuler(FVector3(In.Rotation.X, In.Rotation.Y, In.Rotation.Z));
                     Transform.SetScale(FVector3(In.Scale, In.Scale, In.Scale));
 
-                    FAssetRef Ref;
-                    Ref.Guid = In.Asset;
+                    TSoftObjectPtr<CPrefab> Ref;
                     if (CPackage* Package = Prefab->GetPackage())
                     {
-                        Ref.Path = FString(Package->GetPackagePath().c_str());
+                        Ref.SetPath(Package->GetPackagePath().c_str());
                     }
 
                     ECS::FEntity Root = ECS::NullEntity;

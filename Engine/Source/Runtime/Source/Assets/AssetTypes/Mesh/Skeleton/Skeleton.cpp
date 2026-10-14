@@ -28,7 +28,7 @@ namespace Lumina
     void CSkeleton::CollectSocketBones(TVector<int32>& OutBones) const
     {
         OutBones.clear();
-        for (const FMeshSocket& Socket : Sockets)
+        for (const SMeshSocket& Socket : Sockets)
         {
             const int32 Bone = SkeletonResource ? SkeletonResource->FindBoneIndex(Socket.BoneName) : Constants::kIndexNone;
             if (Bone != Constants::kIndexNone)
@@ -52,7 +52,7 @@ namespace Lumina
 
     int32 CSkeleton::FindSocketBoneIndex(const FName& SocketName) const
     {
-        const FMeshSocket* Socket = FindSocket(SocketName);
+        const SMeshSocket* Socket = FindSocket(SocketName);
         if (Socket == nullptr || !SkeletonResource)
         {
             return Constants::kIndexNone;

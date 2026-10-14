@@ -10,6 +10,8 @@
 namespace Lumina
 {
     class CClass;
+    class CPackage;
+    class CParticleEmitter;
     class CParticleSystem;
     class CParticleEmitterStack;
     class FParticleCompiler;
@@ -43,6 +45,18 @@ namespace Lumina
 
         // Null when the package never saved a stack for the emitter.
         EDITOR_API CParticleEmitterStack* FindStack(CParticleSystem* System, int32 EmitterIndex);
+
+        // A transient system holding only Emitter, so an emitter asset is edited, previewed and compiled the way a system's emitter is.
+        EDITOR_API TStrongObjectPtr<CParticleSystem> WrapEmitter(CParticleEmitter* Emitter);
+
+        // Copies the emitter and its authoring stack into Dest, where NAME_None picks the copy's name.
+        EDITOR_API CParticleEmitter* CopyEmitter(CParticleEmitter* Source, CPackage* Dest, FName EmitterName = NAME_None);
+
+        // Saves the emitter at EmitterIndex as a new emitter asset at Path, which the system then shares. Null on failure.
+        EDITOR_API CParticleEmitter* SaveEmitterAsAsset(CParticleSystem* System, int32 EmitterIndex, FStringView Path);
+
+        // Replaces the shared emitter asset at EmitterIndex with a copy the system owns.
+        EDITOR_API CParticleEmitter* MakeEmitterLocal(CParticleSystem* System, int32 EmitterIndex);
 
         // Every concrete module class, found by reflection so a plugin's modules are included.
         EDITOR_API TVector<CClass*> GetModuleTypes();

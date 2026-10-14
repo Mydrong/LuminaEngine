@@ -170,19 +170,24 @@ namespace Lumina::Physics
 
         EPhysicsBodyStatus GetBodyStatus(ECS::FEntity Entity) const override;
         bool TryGetBodyState(ECS::FEntity Entity, FPhysicsBodyState& Out) const override;
-        bool TryGetTargetState(const FPhysicsBodyTarget& Target, FPhysicsBodyState& Out) const override;
-        void AddForceAtTarget(const FPhysicsBodyTarget& Target, const FVector3& Force, const FVector3& Point) override;
-        FPhysicsBodyTarget MakeBodyTarget(uint32 Handle) const;
+        bool TryGetTargetState(const SPhysicsBodyTarget& Target, FPhysicsBodyState& Out) const override;
+        void AddForceAtTarget(const SPhysicsBodyTarget& Target, const FVector3& Force, const FVector3& Point) override;
+        SPhysicsBodyTarget MakeBodyTarget(uint32 Handle) const;
 
         TOptional<SRayResult> CastRay(const SRayCastSettings& Settings) override;
-        void CastSphere(const SSphereCastSettings& Settings, TVector<SRayResult>& OutHits) override;
-        TOptional<SRayResult> CastSphereClosest(const SSphereCastSettings& Settings) override;
         void CastRayAll(const SRayCastSettings& Settings, TVector<SRayResult>& OutHits) override;
+        bool CastRayAny(const SRayCastSettings& Settings) override;
+        TOptional<SRayResult> CastRayAgainst(ECS::FEntity Entity, const FVector3& Start, const FVector3& End) override;
+        void CastShapeAll(const SQueryShape& Shape, const FVector3& Start, const FVector3& End, ECollisionProfiles LayerMask,
+                          TSpan<const ECS::FEntity> IgnoreEntities, TVector<SRayResult>& OutHits) override;
+        TOptional<SRayResult> CastShapeClosest(const SQueryShape& Shape, const FVector3& Start, const FVector3& End,
+                                               ECollisionProfiles LayerMask, TSpan<const ECS::FEntity> IgnoreEntities) override;
+        int32 OverlapShape(const SQueryShape& Shape, const FVector3& Center, ECollisionProfiles LayerMask,
+                           TSpan<const ECS::FEntity> IgnoreEntities, TSpan<ECS::FEntity> OutEntities) override;
+        bool GetClosestPointOnBody(ECS::FEntity Entity, const FVector3& Point, FVector3& OutPoint) const override;
+        bool GetBodyBounds(ECS::FEntity Entity, SAABB& OutBounds) const override;
 
         int32 ResolveHitBoneIndex(ECS::FEntity Entity, b3BodyId BodyId) const;
-        int32 CollidePoint(const FVector3& Point, TSpan<const ECS::FEntity> IgnoreEntities, TSpan<ECS::FEntity> OutEntities) override;
-        int32 OverlapSphere(const FVector3& Center, float Radius, TSpan<const ECS::FEntity> IgnoreEntities, TSpan<ECS::FEntity> OutEntities) override;
-        int32 OverlapBox(const FVector3& Center, const FVector3& HalfExtents, const FQuat& Rotation, TSpan<const ECS::FEntity> IgnoreEntities, TSpan<ECS::FEntity> OutEntities) override;
 
         void OnCharacterComponentConstructed(ECS::FRegistry& Registry, ECS::FEntity Entity);
         void OnCharacterComponentDestroyed(ECS::FRegistry& Registry, ECS::FEntity Entity);
@@ -234,7 +239,7 @@ namespace Lumina::Physics
         void GetRagdollRootTransform(const FPhysicsRagdollHandle& Handle, FVector3& OutPosition, FQuat& OutRotation) override;
         uint32 AllocateRagdollGroupID() override { return NextRagdollGroupID++; }
 
-        uint32 CreateConstraint(const FConstraintDesc& Desc) override;
+        uint32 CreateConstraint(const SConstraintDesc& Desc) override;
         void DestroyConstraint(uint32 ConstraintID) override;
         void SetConstraintEnabled(uint32 ConstraintID, bool bEnabled) override;
         void SetConstraintMotor(uint32 ConstraintID, EConstraintMotorMode Mode, float Target) override;
@@ -274,7 +279,7 @@ namespace Lumina::Physics
     private:
 
         uint32 FindEntityBody(ECS::FEntity Entity) const;
-        b3BodyId ResolveTarget(const FPhysicsBodyTarget& Target) const;
+        b3BodyId ResolveTarget(const SPhysicsBodyTarget& Target) const;
         bool ReadBodyState(b3BodyId Body, FPhysicsBodyState& Out) const;
         void SynchronizeBodies();
         void SynchronizeBodyGroups();
@@ -331,7 +336,7 @@ namespace Lumina::Physics
         bool TryCreateComponentConstraint(ECS::FRegistry& Registry, ECS::FEntity Entity);
         void DrainPendingConstraints();
         void SynchronizeConstraints();
-        bool CommitConstraint(uint32 Handle, const FConstraintDesc& Desc);
+        bool CommitConstraint(uint32 Handle, const SConstraintDesc& Desc);
         void ApplyConstraintEnabled(uint32 ConstraintID, bool bEnabled);
         void ApplyConstraintMotor(uint32 ConstraintID, EConstraintMotorMode Mode, float Target);
         void MonitorBreakableConstraints(float Dt);
@@ -470,7 +475,7 @@ namespace Lumina::Physics
         {
             EBodyCommand Type;
             ECS::FEntity Entity = ECS::NullEntity;
-            FPhysicsBodyTarget Target;
+            SPhysicsBodyTarget Target;
             FVector3 Value = FVector3(0.0f);
             FVector3 Point = FVector3(0.0f);
             FVector3 Secondary = FVector3(0.0f);
@@ -542,7 +547,7 @@ namespace Lumina::Physics
         struct FBox3DConstraint
         {
             b3JointId               JointId{};
-            FConstraintDesc         Description;
+            SConstraintDesc         Description;
             uint64                  RevisionA = 0;
             uint64                  RevisionB = 0;
             bool                    bDestroy = false;

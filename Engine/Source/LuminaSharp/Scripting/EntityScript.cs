@@ -9,6 +9,9 @@ public partial class CEntityScript
     // Set when the managed instance is created, so dispatch reads cached labels and callback flags instead of reflecting.
     internal TypeDescription Description = null!;
 
+    internal override void OnScriptInstanceCreated(ScriptableRuntime Runtime, System.Runtime.InteropServices.GCHandle Handle)
+        => Runtime.EntityScripts.Adopt(this, Handle);
+
     // The native object owns both values and sets them once at attach, so the first real read is kept.
     private FEntity CachedEntity = FEntity.Null;
     private CWorld? CachedWorld;
@@ -55,25 +58,26 @@ public partial class CEntityScript
             {
                 return Kept;
             }
-            CachedTransform = World.GetComponent<STransformComponent>(Entity);
-            return CachedTransform;
+            STransformComponent Fetched = World.GetComponent<STransformComponent>(Entity);
+            CachedTransform = Fetched;
+            return Fetched;
         }
     }
 
     // The world subsystem of type T, which is where shared gameplay state belongs.
     protected T? GetSubsystem<T>() where T : NativeObject => World.GetSubsystem<T>();
 
-    protected T? GetScript<T>(FEntity Target) where T : CEntityScript
+    protected T? GetScript<T>(FEntity Target) where T : class
     {
         return World.GetScript<T>(Target);
     }
 
-    protected T? GetScript<T>() where T : CEntityScript
+    protected T? GetScript<T>() where T : class
     {
         return World.GetScript<T>(Entity);
     }
 
-    protected System.Collections.Generic.List<T> GetScripts<T>() where T : CEntityScript
+    protected System.Collections.Generic.List<T> GetScripts<T>() where T : class
     {
         return World.GetScripts<T>(Entity);
     }
@@ -83,13 +87,21 @@ public partial class CEntityScript
         return World.AddScript<T>(Entity);
     }
 
-    protected bool RemoveScript<T>() where T : CEntityScript
+    protected bool RemoveScript<T>() where T : class
     {
         return World.RemoveScript<T>(Entity);
     }
 
+    // The entity and world were set again by the level change, so the cached ones belong to a world that is gone.
+    partial void __BeforeScriptEvent_OnTraveled()
+    {
+        CachedEntity = FEntity.Null;
+        CachedWorld = null;
+        CachedTransform = null;
+    }
+
     // Feeds the script's SInputAction and SInputAxis bindings before its own OnAction runs.
-    partial void __BeforeScriptEvent_OnAction(FName Action, FInputActionState State)
+    partial void __BeforeScriptEvent_OnAction(FName Action, SInputActionState State)
     {
         if (Description == null || !Description.HasInputBindings)
         {
@@ -112,7 +124,7 @@ public partial class CEntityScript
     // Add (idempotently) and return this entity's SInputComponent so it can receive input. Call in OnReady.
     protected SInputComponent EnableInput()
     {
-        return World.GetOrEmplaceComponent<SInputComponent>(Entity) ?? World.GetComponent<SInputComponent>(Entity);
+        return World.GetOrEmplaceComponent<SInputComponent>(Entity);
     }
 
     // Remove this entity's SInputComponent, stopping OnInput and the input queries.

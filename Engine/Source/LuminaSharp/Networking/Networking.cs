@@ -1,4 +1,5 @@
 using System;
+using JetBrains.Annotations;
 using System.Collections.Generic;
 
 namespace LuminaSharp;
@@ -47,51 +48,31 @@ public static class Networking
     public static IReadOnlyList<Connection> Connections => GetConnections(Engine.World);
 
     // A host and a standalone world are always in session, and a client is once it has joined.
-    public static bool IsConnected => !Engine.World.IsClient || NetNative.IsJoined(Engine.World.WorldHandle) != 0;
+    public static bool IsConnected => !Engine.World.IsClient || Lumina.CNetworkLibrary.IsJoined(Engine.World);
 
     // The entity Connection owns, preferring one with a character controller, or FEntity.Null.
-    public static FEntity PawnOf(Connection Connection) => new(NetNative.GetOwnedPawn(Engine.World.WorldHandle, Connection.Id));
+    public static FEntity PawnOf(Connection Connection) => Lumina.CNetworkLibrary.GetOwnedPawn(Engine.World, Connection.Id);
 
     // This peer's own pawn, found by ownership.
     public static FEntity LocalPawn => PawnOf(Connection.Local);
 
     internal static uint LocalConnectionId(Lumina.CWorld World)
     {
-        return World.IsClient ? NetNative.GetLocalConnection(World.WorldHandle) : 0u;
+        return World.IsClient ? Lumina.CNetworkLibrary.GetLocalConnection(World) : 0u;
     }
 
-    internal static unsafe IReadOnlyList<Connection> GetConnections(Lumina.CWorld World)
+    internal static IReadOnlyList<Connection> GetConnections(Lumina.CWorld World)
     {
         if (!World.IsServer)
         {
             return Array.Empty<Connection>();
         }
 
-        Span<uint> Scratch = stackalloc uint[64];
-        int Total;
-        fixed (uint* Ids = Scratch)
+        uint[] Ids = Lumina.CNetworkLibrary.GetConnections(World);
+        var Result = new Connection[Ids.Length];
+        for (int Index = 0; Index < Ids.Length; ++Index)
         {
-            Total = NetNative.GetConnections(World.WorldHandle, (IntPtr)Ids, Scratch.Length);
-        }
-
-        uint[] Buffer;
-        if (Total > Scratch.Length)
-        {
-            Buffer = new uint[Total];
-            fixed (uint* Ids = Buffer)
-            {
-                Total = Math.Min(Total, NetNative.GetConnections(World.WorldHandle, (IntPtr)Ids, Buffer.Length));
-            }
-        }
-        else
-        {
-            Buffer = Scratch.Slice(0, Total).ToArray();
-        }
-
-        var Result = new Connection[Total];
-        for (int Index = 0; Index < Total; ++Index)
-        {
-            Result[Index] = new Connection(Buffer[Index]);
+            Result[Index] = new Connection(Ids[Index]);
         }
         return Result;
     }
@@ -112,9 +93,9 @@ public readonly struct EntityNetwork
     public static EntityNetwork Of(FEntity Entity) => new(Engine.World, Entity);
 
     // Needs an SNetworkComponent on the entity.
-    public bool IsNetworked => World.IsNetworked && NetNative.IsEntityNetworked(World.WorldHandle, Entity.Id) != 0;
+    public bool IsNetworked => World.IsNetworked && Lumina.CNetworkLibrary.IsEntityNetworked(World, Entity);
 
-    public Connection Owner => new(NetNative.GetOwner(World.WorldHandle, Entity.Id));
+    public Connection Owner => new(Lumina.CNetworkLibrary.GetOwner(World, Entity));
 
     // Always true in a standalone world, where nothing else could control it.
     public bool IsOwner => !IsNetworked || Owner.Id == Networking.LocalConnectionId(World);
@@ -123,69 +104,27 @@ public readonly struct EntityNetwork
     public bool IsProxy => IsNetworked && !IsOwner;
 
     // Host only, a client asking is refused.
-    public bool AssignOwnership(Connection Connection) => NetNative.SetOwner(World.WorldHandle, Entity.Id, Connection.Id) != 0;
+    public bool AssignOwnership(Connection Connection) => Lumina.CNetworkLibrary.SetOwner(World, Entity, Connection.Id);
 
     public bool DropOwnership() => AssignOwnership(Connection.Host);
 
-    public uint NetId => NetNative.EntityToNetId(World.WorldHandle, Entity.Id);
+    public uint NetId => Lumina.CNetworkLibrary.EntityToNetId(World, Entity);
 
     // Resends replicated component fields. A [Sync] field marks itself when written.
-    public void MarkDirty() => NetNative.MarkEntityDirty(World.WorldHandle, Entity.Id);
-}
-
-// Why a client's session with its host ended. Mirrors the native ENetLeaveReason.
-public enum ENetLeaveReason
-{
-    None = 0,
-
-    // The host could not be reached.
-    ConnectFailed = 1,
-
-    // The host never answered within the connect timeout.
-    TimedOut = 2,
-
-    // The session was up and the host went away.
-    HostClosed = 3,
-
-    // The host runs a different build.
-    ProtocolMismatch = 4,
-}
-
-// Session events for any script that implements it. The host hears clients come and go, and a client hears its own session.
-public interface INetworkListener
-{
-    // Host. A client finished joining.
-    void OnConnected(Connection Connection) { }
-
-    // Host. A client left, told before anything it owned changes hands.
-    void OnDisconnected(Connection Connection) { }
-
-    // Client. This peer finished joining its host.
-    void OnJoinedHost() { }
-
-    // Client. The session ended, or never came up, for Reason.
-    void OnLeftHost(ENetLeaveReason Reason) { }
-}
-
-[Flags]
-public enum SyncFlags : uint
-{
-    None = 0,
-
-    // The owning client writes it too. The write shows at once on the owner and goes to the host, which may refuse it through Validate.
-    FromOwner = 1u << 0,
+    public void MarkDirty() => Lumina.CNetworkLibrary.MarkEntityDirty(World, Entity);
 }
 
 // Replicated from the host to every client. A client's own write stays local until the host's next value lands.
+[MeansImplicitUse(ImplicitUseKindFlags.Access | ImplicitUseKindFlags.Assign)]
 [AttributeUsage(AttributeTargets.Field | AttributeTargets.Property, AllowMultiple = false)]
 public sealed class SyncAttribute : Attribute
 {
-    public SyncAttribute(SyncFlags Flags = SyncFlags.None)
+    public SyncAttribute(Lumina.ESyncFlags Flags = Lumina.ESyncFlags.None)
     {
         this.Flags = Flags;
     }
 
-    public SyncFlags Flags { get; }
+    public Lumina.ESyncFlags Flags { get; }
 
     // Written values snap to multiples of this, so a wobble smaller than it never reaches the wire. Numbers only.
     public double Quantize { get; set; }
@@ -209,56 +148,40 @@ public sealed class ChangeAttribute : Attribute
     public string Method { get; }
 }
 
-[Flags]
-public enum NetFlags : uint
-{
-    None = 0,
-
-    // May be dropped, for frequent cosmetic calls.
-    Unreliable = 1u << 0,
-
-    // Ignored on arrival unless the caller owns the entity or is the host.
-    OwnerOnly = 1u << 1,
-}
-
-public enum ERpcTarget : uint
-{
-    Broadcast = 0,
-    Host = 1,
-    Owner = 2,
-}
-
 // Mark a void method on an CEntityScript with one of these and calling it routes the call.
 public static class Rpc
 {
     public abstract class RpcAttribute : Attribute
     {
-        protected RpcAttribute(NetFlags Flags)
+        protected RpcAttribute(Lumina.ENetFlags Flags)
         {
             this.Flags = Flags;
         }
 
-        public NetFlags Flags { get; }
+        public Lumina.ENetFlags Flags { get; }
     }
 
     // Runs on the host and every client.
+    [MeansImplicitUse]
     [AttributeUsage(AttributeTargets.Method, AllowMultiple = false)]
     public sealed class BroadcastAttribute : RpcAttribute
     {
-        public BroadcastAttribute(NetFlags Flags = NetFlags.None) : base(Flags) { }
+        public BroadcastAttribute(Lumina.ENetFlags Flags = Lumina.ENetFlags.None) : base(Flags) { }
     }
 
+    [MeansImplicitUse]
     [AttributeUsage(AttributeTargets.Method, AllowMultiple = false)]
     public sealed class HostAttribute : RpcAttribute
     {
-        public HostAttribute(NetFlags Flags = NetFlags.None) : base(Flags) { }
+        public HostAttribute(Lumina.ENetFlags Flags = Lumina.ENetFlags.None) : base(Flags) { }
     }
 
     // Runs on whichever peer owns the entity.
+    [MeansImplicitUse]
     [AttributeUsage(AttributeTargets.Method, AllowMultiple = false)]
     public sealed class OwnerAttribute : RpcAttribute
     {
-        public OwnerAttribute(NetFlags Flags = NetFlags.None) : base(Flags) { }
+        public OwnerAttribute(Lumina.ENetFlags Flags = Lumina.ENetFlags.None) : base(Flags) { }
     }
 
     // The local connection when the call did not arrive from the network.

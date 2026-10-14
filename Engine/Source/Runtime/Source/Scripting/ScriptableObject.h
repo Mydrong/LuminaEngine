@@ -18,19 +18,7 @@ namespace Lumina
 
     namespace Scriptable
     {
-        /**
-         * The managed instance backing a C# subclass of a REFLECT(Scriptable) native class, created on first
-         * dispatch. Returns null for the class default object, when the .NET host is down, and when the
-         * managed type failed to instantiate.
-         *
-         * There is no per-instance bridge any more: the handle lives in the object's managed-instance slot
-         * (Core/Object/ManagedInstance.h), so it is created lazily, freed by ~CObjectBase, and drained with
-         * the rest of the table before a hot reload. "The slot is empty" is therefore the whole rebind
-         * condition -- after a reload the next dispatch simply builds an instance of the new generation's
-         * type, with no generation stamp to keep in step.
-         *
-         * Game thread only, like the rest of the scripting layer.
-         */
+        // The managed instance of a C# subclass, created on first use and null for the CDO or a down host. Game thread only.
         RUNTIME_API void* GetOrCreateInstance(CObject* Object);
 
         /** The managed instance to dispatch event Slot on, or null to leave the native body in place. */
@@ -56,7 +44,7 @@ namespace Lumina
         uint32   ShimSize = 0;
         uint32   ShimAlign = 0;
 
-        /** Per event, so an override dispatches through a typed generated call rather than reflection. */
+        // Per event, so an override dispatches through a typed generated call rather than reflection.
         TVector<FScriptableEventThunk> EventThunks;
     };
 
@@ -67,33 +55,31 @@ namespace Lumina
         static CScriptClass* Mint(FStringView TypeName, FStringView NativeBaseName,
                                   TSpan<const FString> OverriddenEvents = {});
 
-        /** Rebuilds the minted class's script overrides from the events the C# type declares it overrides. */
+        // Rebuilds the minted class's overrides from the events the C# type declares it overrides.
         static void ApplyScriptOverrides(CScriptClass* Minted, TSpan<const FString> OverriddenEvents);
 
-        static void RefreshMintedClasses(TSpan<const Scripting::FManagedTypeDefinition> Definitions);
+        static void RefreshMintedClasses(TSpan<const Scripting::FManagedTypeDefinition> Definitions, TSpan<const Scripting::FManagedTypeAlias> Aliases = {});
 
-        /**
-         * Records that a script class used to be called OldName and is now NewName, so a saved reference to
-         * the old name still resolves.
-         *
-         * Name to name, not name to CClass*, on purpose: a redirect is registered before the class it points
-         * at has necessarily been minted (the first reload after a rename gathers the aliases and the types
-         * in the same pass), and resolving lazily removes that ordering dependency entirely.
-         *
-         * Populated from the `[Alias]` attributes on C# script classes.
-         */
+        // Mints a class object for every C# class not seen before, without a layout, so other types can name it first.
+        static void MintNewClasses(TSpan<const Scripting::FManagedTypeDefinition> Definitions);
+
+        // A class by name, including one minted this reload that has not finished registering yet.
+        static CClass* FindClass(const FName& Name);
+
+        // An [Alias] from a C# type, kept name to name since the type it names may not be minted yet.
         static void RegisterClassRedirect(const FName& OldName, const FName& NewName);
 
-        /**
-         * The class for a serialized script class name, following any rename redirects.
-         *
-         * This is what makes a class rename non-destructive in BOTH directions that matter: a scene saved
-         * before the rename still loads, and a hot reload can move live instances onto the new class by
-         * round-tripping them through the same serializer.
-         *
-         * Returns null if neither the name nor anything it redirects to exists.
-         */
+        // Replaces every redirect, first in a reload so each later stage can follow a rename.
+        static void SetRedirects(TSpan<const Scripting::FManagedTypeAlias> Aliases);
+
+        // The class a stored name means after following rename redirects, or null when nothing answers to it.
         static CClass* ResolveClass(const FName& Name);
+
+        // The struct a stored name means, script structs included, after following rename redirects.
+        static CStruct* ResolveStruct(const FName& Name);
+
+        // Whether a chain of redirects leads from OldName to NewName.
+        static bool IsRenamedTo(const FName& OldName, const FName& NewName);
 
         // Every minted class whose name redirects elsewhere, so a reload can move its instances across.
         static void GatherRenamedClasses(THashSet<CClass*>& Out);

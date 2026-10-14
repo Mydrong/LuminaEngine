@@ -1,4 +1,5 @@
 ﻿#include "AnimationGraphEditorTool.h"
+#include "UI/Tools/AssetEditors/Animation/AnimPreview.h"
 
 #include <cfloat>
 #include "World/ECS/Registry.h"
@@ -10,8 +11,12 @@
 #include "Containers/StringFormat.h"
 #include "Tools/UI/ImGui/EditorColors.h"
 #include "Tools/UI/ImGui/ImGuiDragDrop.h"
+#include "UI/Tools/NodeGraph/Animation/Nodes/AnimGraphNode_BlendSpace.h"
 #include "UI/Tools/NodeGraph/Animation/Nodes/AnimGraphNode_ClipPlayer.h"
+#include "UI/Tools/NodeGraph/Animation/Nodes/AnimGraphNode_GetParameter.h"
+#include "Assets/AssetTypes/Animation/BlendSpace/BlendSpace.h"
 #include "Assets/AssetTypes/Animation/AnimationGraph/AnimationGraph.h"
+#include "Assets/AssetTypes/Mesh/SkeletalMesh/SkeletalMesh.h"
 #include "Assets/AssetTypes/Mesh/Skeleton/Skeleton.h"
 #include "Core/Math/Math.h"
 #include "Core/Object/Cast.h"
@@ -508,11 +513,12 @@ namespace Lumina
         }
 
         CAnimationGraph* Graph = Cast<CAnimationGraph>(Asset.Get());
-        const bool bHasPreview = Graph != nullptr
-            && Graph->Skeleton.IsValid()
-            && Graph->Skeleton->PreviewMesh.IsValid();
+        CSkeletalMesh* PreviewMesh = (Graph != nullptr && Graph->Skeleton.IsValid())
+            ? PreviewMeshSelection.Resolve(Graph->Skeleton.Get())
+            : nullptr;
+        const bool bHasPreview = PreviewMesh != nullptr;
 
-        const bool bMeshEntityValid = MeshEntity != ECS::NullEntity && World->IsValidEntity(MeshEntity);
+        bool bMeshEntityValid = MeshEntity != ECS::NullEntity && World->IsValidEntity(MeshEntity);
 
         // Skeleton cleared while the tool is open -> tear the preview down.
         if (!bHasPreview)
@@ -525,7 +531,13 @@ namespace Lumina
             return;
         }
 
-        CSkeletalMesh* PreviewMesh = Graph->Skeleton->PreviewMesh.Get();
+        // The scene claims a primitive's bone range only when it is new, so a swapped mesh needs a fresh entity.
+        if (bMeshEntityValid && World->GetComponent<SSkeletalMeshComponent>(MeshEntity).SkeletalMesh.Get() != PreviewMesh)
+        {
+            World->DestroyEntity(MeshEntity);
+            MeshEntity = ECS::NullEntity;
+            bMeshEntityValid = false;
+        }
 
         if (!bMeshEntityValid)
         {
@@ -539,13 +551,6 @@ namespace Lumina
             FQuat Rotation = Math::FindLookAtRotation(MeshTransform.GetLocation() + FVector3(0.0f, 0.85f, 0.0f), EditorTransform.GetLocation());
             EditorTransform.SetRotation(Rotation);
             return;
-        }
-
-        // Keeps the references current in case the preview mesh or graph asset changed underneath.
-        SSkeletalMeshComponent& MeshComp = World->GetComponent<SSkeletalMeshComponent>(MeshEntity);
-        if (MeshComp.SkeletalMesh.Get() != PreviewMesh)
-        {
-            MeshComp.SetSkeletalMesh(PreviewMesh);
         }
 
         SAnimationGraphComponent& GraphComp = World->GetComponent<SAnimationGraphComponent>(MeshEntity);
@@ -577,6 +582,9 @@ namespace Lumina
         {
             Compile();
         }
+
+        CAnimationGraph* Graph = Cast<CAnimationGraph>(Asset.Get());
+        PreviewMeshSelection.DrawMenu(Graph != nullptr ? Graph->Skeleton.Get() : nullptr);
     }
 
     void FAnimationGraphEditorTool::InitializeDockingLayout(ImGuiID InDockspaceID, const ImVec2& /*InDockspaceSize*/) const
@@ -661,6 +669,10 @@ namespace Lumina
                 {
                     SpawnClipPlayerNode(DroppedClip, ImGui::GetMousePos());
                 }
+                else if (CBlendSpace* DroppedBlendSpace = DragDrop::AcceptAsset<CBlendSpace>())
+                {
+                    SpawnBlendSpaceNode(DroppedBlendSpace, ImGui::GetMousePos());
+                }
                 ImGui::EndDragDropTarget();
             }
         }
@@ -679,10 +691,10 @@ namespace Lumina
             ImGui::TextColored(ImVec4(0.95f, 0.65f, 0.35f, 1.0f),
                 "No skeleton assigned -- set one on the graph asset to see a preview mesh.");
         }
-        else if (!Graph->Skeleton->PreviewMesh.IsValid())
+        else if (PreviewMeshSelection.Resolve(Graph->Skeleton.Get()) == nullptr)
         {
             ImGui::TextColored(ImVec4(0.95f, 0.65f, 0.35f, 1.0f),
-                "Skeleton has no preview mesh assigned.");
+                "No preview mesh. Pick one from the Preview Mesh menu.");
         }
     }
 
@@ -1258,6 +1270,87 @@ namespace Lumina
             ClipNode->Clip = Clip;
         }
 
+        FinishSpawnedNode(Node, ScreenPos);
+    }
+
+    void FAnimationGraphEditorTool::SpawnBlendSpaceNode(CBlendSpace* BlendSpace, ImVec2 ScreenPos)
+    {
+        if (BlendSpace == nullptr || GraphStack.empty() || GraphStack.back().Graph == nullptr)
+        {
+            return;
+        }
+
+        CEdNodeGraph* Canvas = GraphStack.back().Graph;
+        CAnimGraphNode_BlendSpace* Node = Cast<CAnimGraphNode_BlendSpace>(Canvas->CreateNode(CAnimGraphNode_BlendSpace::StaticClass()));
+        if (Node == nullptr)
+        {
+            return;
+        }
+
+        Node->BlendSpace = BlendSpace;
+
+        constexpr float kParameterNodeOffsetX = 260.0f;
+        constexpr float kParameterNodeSpacingY = 70.0f;
+        WireAxisParameter(BlendSpace->AxisX.Name, Node->XPin, ImVec2(ScreenPos.x - kParameterNodeOffsetX, ScreenPos.y));
+        if (BlendSpace->AxisCount == EBlendSpaceAxes::Two)
+        {
+            WireAxisParameter(BlendSpace->AxisY.Name, Node->YPin,
+                              ImVec2(ScreenPos.x - kParameterNodeOffsetX, ScreenPos.y + kParameterNodeSpacingY));
+        }
+
+        FinishSpawnedNode(Node, ScreenPos);
+    }
+
+    // An axis named like a scalar on the parameter struct is almost always meant to be driven by it.
+    void FAnimationGraphEditorTool::WireAxisParameter(FName AxisName, CEdNodeGraphPin* AxisPin, ImVec2 ScreenPos)
+    {
+        CAnimationGraph* Graph = Cast<CAnimationGraph>(Asset.Get());
+        CStruct* ParameterStruct = Graph != nullptr ? Graph->GetParameterStruct() : nullptr;
+        if (ParameterStruct == nullptr || AxisPin == nullptr || AxisName.IsNone())
+        {
+            return;
+        }
+
+        const FString AxisNameString = AxisName.ToString();
+        FName MatchedParameter;
+        ParameterStruct->ForEachProperty<FProperty>([&](FProperty* Property)
+        {
+            const EAnimParamValueType Type = AnimParamValueTypeFromProperty(Property);
+            if (!MatchedParameter.IsNone() || Type == EAnimParamValueType::Unresolved || Type == EAnimParamValueType::Object
+                || Property->HasSetterOrGetter())
+            {
+                return;
+            }
+
+            const FString PropertyName = Property->Name.ToString();
+            if (EqualsIgnoreCase(FStringView(PropertyName.c_str(), PropertyName.size()),
+                                 FStringView(AxisNameString.c_str(), AxisNameString.size())))
+            {
+                MatchedParameter = Property->Name;
+            }
+        });
+
+        if (MatchedParameter.IsNone())
+        {
+            return;
+        }
+
+        CEdNodeGraph* Canvas = GraphStack.back().Graph;
+        CAnimGraphNode_GetParameter* GetNode = Cast<CAnimGraphNode_GetParameter>(Canvas->CreateNode(CAnimGraphNode_GetParameter::StaticClass()));
+        if (GetNode == nullptr)
+        {
+            return;
+        }
+
+        GetNode->ParameterName = MatchedParameter;
+        Canvas->ConnectPins(GetNode->ValuePin, AxisPin);
+        Canvas->QueueNodePlacement(GetNode, ScreenPos);
+    }
+
+    void FAnimationGraphEditorTool::FinishSpawnedNode(CEdGraphNode* Node, ImVec2 ScreenPos)
+    {
+        CEdNodeGraph* Canvas = GraphStack.back().Graph;
+
         // Screen->canvas needs the node-editor context, which is only current inside DrawGraph.
         Canvas->QueueNodePlacement(Node, ScreenPos);
         Canvas->ValidateGraph();
@@ -1286,7 +1379,7 @@ namespace Lumina
         }
         if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
         {
-            ImGuiX::TextTooltip_Internal("List every animation clip, not just the ones authored against this graph's skeleton");
+            ImGuiX::TextTooltip_Internal("List every animation clip, not just the ones whose bones match this graph's skeleton");
         }
 
         if (Skeleton == nullptr && !bClipBrowserAnySkeleton)
@@ -1307,7 +1400,7 @@ namespace Lumina
             ClipEntries.clear();
 
             static const FName AnimationClassName = CAnimation::StaticClass()->GetName();
-            const FGuid SkeletonGUID = Skeleton != nullptr ? Skeleton->GetGUID() : FGuid();
+            THashMap<FGuid, bool> SkeletonVerdicts;
 
             for (const FAssetData* Data : AllAssets)
             {
@@ -1316,21 +1409,10 @@ namespace Lumina
                     continue;
                 }
 
-                if (!bClipBrowserAnySkeleton && Skeleton != nullptr)
+                if (!bClipBrowserAnySkeleton && Skeleton != nullptr
+                    && !AnimPreview::IsAssetCompatible(*Data, *Skeleton, SkeletonVerdicts))
                 {
-                    bool bReferencesSkeleton = false;
-                    for (const FAssetDependency& Dependency : Data->Dependencies)
-                    {
-                        if (Dependency.TargetGUID == SkeletonGUID)
-                        {
-                            bReferencesSkeleton = true;
-                            break;
-                        }
-                    }
-                    if (!bReferencesSkeleton)
-                    {
-                        continue;
-                    }
+                    continue;
                 }
 
                 FClipEntry Entry;
@@ -1350,7 +1432,7 @@ namespace Lumina
             ImGui::PushStyleColor(ImGuiCol_Text, EditorColors::TextMuted());
             ImGui::TextWrapped(bClipBrowserAnySkeleton
                 ? "No animation clips found in the project."
-                : "No clips reference this skeleton. Import an animation against it, or tick \"Any skeleton\".");
+                : "No clips match this skeleton's bones. Import an animation against it, or tick \"Any skeleton\".");
             ImGui::PopStyleColor();
             return;
         }

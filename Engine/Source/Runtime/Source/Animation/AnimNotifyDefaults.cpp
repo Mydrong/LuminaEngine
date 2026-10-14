@@ -59,7 +59,7 @@ namespace Lumina
             return;
         }
 
-        FAudioPlayParams Params{};
+        SAudioPlayParams Params{};
         Params.Volume      = Volume;
         Params.Pitch       = Pitch;
         Params.Bus         = Bus;

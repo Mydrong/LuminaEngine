@@ -3,7 +3,6 @@
 #include "Core/Object/ObjectMacros.h"
 #include "Core/Object/SoftObjectPtr.h"
 #include "Core/Object/SubclassOf.h"
-#include "Core/Engine/GameInstance.h"
 #include "Config/DeveloperSettings.h"
 #include "Containers/Vector.h"
 #include "Containers/String.h"
@@ -24,10 +23,6 @@ namespace Lumina
         // What the game window is titled, and the project name when left empty.
         PROPERTY(Editable, Category = "Project")
         FString GameDisplayName;
-
-        /** CGameInstance subclass to instantiate at runtime */
-        PROPERTY(Editable, Category = "Scripting")
-        TSubclassOf<CGameInstance> GameInstanceClass;
 
         /** World loaded when the standalone game starts. */
         PROPERTY(Editable, Category = "Maps")

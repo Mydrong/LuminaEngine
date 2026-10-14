@@ -20,9 +20,9 @@ namespace Lumina::Physics
         return Record != nullptr ? Record : CharacterBodies.Find(Entity);
     }
 
-    FPhysicsBodyTarget FBox3DPhysicsScene::MakeBodyTarget(uint32 Handle) const
+    SPhysicsBodyTarget FBox3DPhysicsScene::MakeBodyTarget(uint32 Handle) const
     {
-        FPhysicsBodyTarget Target;
+        SPhysicsBodyTarget Target;
         if (Handle < BodyHandles.size() && b3Body_IsValid(BodyHandles[Handle]))
         {
             Target.Scene = SceneIdentity;
@@ -32,7 +32,7 @@ namespace Lumina::Physics
         return Target;
     }
 
-    b3BodyId FBox3DPhysicsScene::ResolveTarget(const FPhysicsBodyTarget& Target) const
+    b3BodyId FBox3DPhysicsScene::ResolveTarget(const SPhysicsBodyTarget& Target) const
     {
         if (Target.Scene != SceneIdentity || Target.Slot >= BodyHandles.size()
             || BodyGenerations[Target.Slot] != Target.Generation)
@@ -64,7 +64,7 @@ namespace Lumina::Physics
         return ReadBodyState(ResolveBody(FindEntityBody(Entity)), Out);
     }
 
-    bool FBox3DPhysicsScene::TryGetTargetState(const FPhysicsBodyTarget& Target, FPhysicsBodyState& Out) const
+    bool FBox3DPhysicsScene::TryGetTargetState(const SPhysicsBodyTarget& Target, FPhysicsBodyState& Out) const
     {
         return ReadBodyState(ResolveTarget(Target), Out);
     }
@@ -222,7 +222,7 @@ namespace Lumina::Physics
         return EBodyCommandResult::Applied;
     }
 
-    void FBox3DPhysicsScene::AddForceAtTarget(const FPhysicsBodyTarget& Target, const FVector3& Force, const FVector3& Point)
+    void FBox3DPhysicsScene::AddForceAtTarget(const SPhysicsBodyTarget& Target, const FVector3& Force, const FVector3& Point)
     {
         FBodyCommand Command{ EBodyCommand::TargetForce };
         Command.Target = Target;

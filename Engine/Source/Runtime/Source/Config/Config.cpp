@@ -111,17 +111,6 @@ namespace Lumina
         SettingsFileLoaded.insert(Class);
     }
 
-    void FConfig::ReloadSettings(CClass* SettingsClass)
-    {
-        if (SettingsClass == nullptr)
-        {
-            return;
-        }
-        // Class-reference properties may now resolve to classes that did not exist at first load.
-        SettingsFileLoaded.erase(SettingsClass);
-        LoadSettingsForClass(SettingsClass);
-    }
-
     FString FConfig::GetSettingsSection(CClass* SettingsClass)
     {
         FString Name = SettingsClass->GetName().ToString();

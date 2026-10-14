@@ -26,12 +26,10 @@ namespace Lumina
     enum class EScriptTypeDirty : uint8
     {
         None     = 0,
-        /** The property set, order, or types differ, so the appended block has to be torn down and rebuilt. */
+        // The property set, order or types differ, so the appended block needs a new class.
         Layout   = BIT(0),
-        /** Editor-facing data only (tooltip, category, clamps). Reapplied in place. */
+        // Editor-facing data only, such as a tooltip or a clamp, reapplied in place.
         Metadata = BIT(1),
-        /** Declared initializers differ, so the CDO needs the new values replayed onto it. */
-        Defaults = BIT(2),
     };
 
     ENUM_CLASS_FLAGS(EScriptTypeDirty);

@@ -23,28 +23,27 @@ public readonly unsafe struct FInstancedStruct
     public bool IsValid => IsBound && Native.InstancedStructGetMemory(Address) != IntPtr.Zero;
 
     /// True when the stored value is T or derives from it.
-    public bool Is<T>() where T : NativeStruct
-        => IsBound && Native.InstancedStructIsA(Address, NativeTypeName.Of<T>()) != 0;
+    public bool Is<T>() where T : struct, INativeStruct<T>
+        => IsBound && Native.InstancedStructIsA(Address, T.NativeName) != 0;
 
-    /// A wrapper over the stored value, or null when it is not a T. Writes through it edit in place.
-    public T? Get<T>() where T : NativeStruct
+    /// A handle on the stored value, or null when it is not a T. Writes through it edit in place.
+    public T? Get<T>() where T : struct, INativeStruct<T>
     {
         if (!Is<T>())
         {
             return null;
         }
-        IntPtr Memory = Native.InstancedStructGetMemory(Address);
-        return Memory == IntPtr.Zero ? null : Wrapper<T>.Create(Memory);
+        return NativeStructs.FromAddressOrNull<T>(Native.InstancedStructGetMemory(Address));
     }
 
     /// Replaces the value with a fresh default-constructed T and returns the view of it.
-    public T? InitializeAs<T>() where T : NativeStruct
+    public T? InitializeAs<T>() where T : struct, INativeStruct<T>
     {
         if (!IsBound)
         {
             return null;
         }
-        Native.InstancedStructInitializeAs(Address, NativeTypeName.Of<T>());
+        Native.InstancedStructInitializeAs(Address, T.NativeName);
         return Get<T>();
     }
 
@@ -68,7 +67,7 @@ public readonly unsafe struct FInstancedStruct
 }
 
 /// A view over a native TInstancedStruct, whose stored value always derives from TBase.
-public readonly unsafe struct TInstancedStruct<TBase> where TBase : NativeStruct
+public readonly unsafe struct TInstancedStruct<TBase> where TBase : struct, INativeStruct<TBase>
 {
     private readonly FInstancedStruct Inner;
 
@@ -87,11 +86,11 @@ public readonly unsafe struct TInstancedStruct<TBase> where TBase : NativeStruct
     public TBase? Get() => Inner.Get<TBase>();
 
     /// The stored value viewed as a derived type, or null when it is something else.
-    public T? Get<T>() where T : NativeStruct => Inner.Get<T>();
+    public T? Get<T>() where T : struct, INativeStruct<T> => Inner.Get<T>();
 
-    public bool Is<T>() where T : NativeStruct => Inner.Is<T>();
+    public bool Is<T>() where T : struct, INativeStruct<T> => Inner.Is<T>();
 
-    public T? InitializeAs<T>() where T : NativeStruct => Inner.InitializeAs<T>();
+    public T? InitializeAs<T>() where T : struct, INativeStruct<T> => Inner.InitializeAs<T>();
 
     public void InitializeAs(string StructName) => Inner.InitializeAs(StructName);
 

@@ -220,7 +220,7 @@ namespace Lumina
 
     void FInputActionHandlePropertyCustomization::HandleExternalUpdate(const TSharedPtr<FPropertyHandle>& Property)
     {
-        FInputActionHandle ActualValue;
+        SInputActionHandle ActualValue;
         Property->GetValue(&ActualValue);
 
         // Reset-to-default, undo/redo and multi-select must win, or the next write puts our stale name back.

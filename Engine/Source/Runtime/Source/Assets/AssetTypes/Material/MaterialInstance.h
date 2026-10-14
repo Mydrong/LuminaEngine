@@ -18,7 +18,7 @@ namespace Lumina
 {
     // One parameter an instance diverges on. Only divergent parameters are stored.
     REFLECT()
-    struct RUNTIME_API FMaterialParameterOverride
+    struct RUNTIME_API SMaterialParameterOverride
     {
         GENERATED_BODY()
 
@@ -44,7 +44,7 @@ namespace Lumina
 
     // A static switch an instance flips. Absence is the inherit state, so it needs no enabled flag.
     REFLECT()
-    struct RUNTIME_API FMaterialStaticSwitchOverride
+    struct RUNTIME_API SMaterialStaticSwitchOverride
     {
         GENERATED_BODY()
 
@@ -77,7 +77,7 @@ namespace Lumina
         bool SetScalarValue(const FName& Name, const float Value) override;
         bool SetVectorValue(const FName& Name, const FVector4& Value) override;
         bool SetTextureValue(const FName& Name, CTexture* TextureValue) override;
-        bool GetParameterValue(EMaterialParameterType Type, const FName& Name, FMaterialParameter& Param) override;
+        bool GetParameterValue(EMaterialParameterType Type, const FName& Name, SMaterialParameter& Param) override;
         EMaterialShadingModel GetShadingModel() const override;
         uint64 GetStaticSwitchKey() const override;
         bool IsReadyForRender() const override;
@@ -99,9 +99,9 @@ namespace Lumina
         void RebuildUniformsFromOverrides();
 
         // The root's parameter table, which every level shares since an instance only overrides values.
-        const TVector<FMaterialParameter>& GetMaterialParams() const;
+        const TVector<SMaterialParameter>& GetMaterialParams() const;
 
-        const FMaterialParameterOverride* FindOverride(const FName& Name) const;
+        const SMaterialParameterOverride* FindOverride(const FName& Name) const;
 
         // Whether an override exists for Name and is enabled.
         bool IsOverrideEnabled(const FName& Name) const;
@@ -143,11 +143,11 @@ namespace Lumina
         EMaterialShadingModel ShadingModelOverride = EMaterialShadingModel::Lit;
 
         PROPERTY()
-        TVector<FMaterialParameterOverride> Overrides;
+        TVector<SMaterialParameterOverride> Overrides;
 
         // Switches this level diverges on, inherited down the chain like a parameter override.
         PROPERTY()
-        TVector<FMaterialStaticSwitchOverride> StaticSwitchOverrides;
+        TVector<SMaterialStaticSwitchOverride> StaticSwitchOverrides;
 
     private:
 
@@ -155,7 +155,7 @@ namespace Lumina
         template <typename TApply>
         bool SetOverride(EMaterialParameterType Type, const FName& Name, TApply&& Apply);
 
-        FMaterialParameterOverride& FindOrAddOverride(const FName& Name, EMaterialParameterType Type);
+        SMaterialParameterOverride& FindOrAddOverride(const FName& Name, EMaterialParameterType Type);
 
         // The details panel writes the parent field directly, so the registration that SetParentMaterial does is redone.
         void AdoptEditedParent();

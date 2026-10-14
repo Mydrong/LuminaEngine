@@ -96,6 +96,10 @@ namespace Lumina::Reflection
 
         // Reflected through a REFLECT'd `using`, so nothing declares the name and it has no injected body.
         bool                                                    bIsAlias = false;
+
+        // The compiled layout as clang computes it for the build target, or -1 when the type was incomplete.
+        int64_t                                                 NativeSize = -1;
+        int64_t                                                 NativeAlign = -1;
         EType                                                   Type = EType::Structure;
     };
 
@@ -160,6 +164,9 @@ namespace Lumina::Reflection
         void EmitMetadataArrays(FCodeWriter& Writer) const;
         void EmitPropertyTable(FCodeWriter& Writer) const;
         void DefinePropertyTable(FCodeWriter& Writer) const;
+
+        // Holds the real compiler to the clang layout the C# bindings bake in as constants.
+        void EmitLayoutAsserts(FCodeWriter& Writer) const;
 
         // The descriptor fields naming the tables above, empty for a table that was not emitted.
         std::string MemberTableFields() const;

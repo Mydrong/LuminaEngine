@@ -15,19 +15,14 @@ namespace Lumina
 {
     class CWorld;
 
-    // Throwaway type proving the REFLECT(Scriptable) reflected-virtual pipeline end to end: a C# class can
-    // subclass CScriptableTest and override these. The C++ defaults take over only when no managed override is
-    // bound. OnTest exercises value (int) marshalling; OnEchoWorld exercises object (CObject pointer) marshalling
-    // in BOTH directions (arg + return). Exercised by ScriptableTests.cpp and `script.scriptable_selftest`. Safe
-    // to delete once the object-marshalling path has another test (GameInstance now consumes the arg direction).
+    // Test type for the overridable-event pipeline, a C# subclass overriding OnTest and OnEchoWorld.
     REFLECT(Scriptable)
     class RUNTIME_API CScriptableTest : public CObject
     {
         GENERATED_BODY()
     public:
 
-        // A native reflected property, so the minted-property spike can prove that a property appended to a
-        // minted subclass coexists with one declared in C++ (chaining, offsets, tagged serialization).
+        // A native property, so a test proves one appended to a minted subclass coexists with it.
         PROPERTY()
         float NativeValue = 1.5f;
 
@@ -45,13 +40,13 @@ namespace Lumina
         // A reflected container, so the frame marshaller has a real vector slot to bind a C# view to.
         FUNCTION()
         virtual void OnAppendSum(TVector<float>& Values) { Values.push_back(0.0f); }
+
+        // A native inspector button, so the generated function table has metadata to carry.
+        FUNCTION(Button = "Reset Value", ToolTip = "Puts NativeValue back to its default")
+        void ResetNativeValue() { NativeValue = 1.5f; }
     };
 
-    /**
-     * Throwaway C++ entity script, proving the Phase 5 unification from the native side: it subclasses the
-     * SAME CEntityScript a C# script subclasses, and the driver ticks it through the same virtual calls with
-     * no language-specific path. Counters record what ran so a test can assert the lifecycle order.
-     */
+    /// Test C++ entity script, ticked by the same driver as a C# one, counting what ran so a test can assert the order.
     REFLECT()
     class RUNTIME_API CEntityScriptTest : public CEntityScript
     {
@@ -68,8 +63,7 @@ namespace Lumina
         void (*DetachHook)(CEntityScriptTest&, void*) = nullptr;
         void* HookContext = nullptr;
 
-        // A reflected CONTAINER property, so a clone/duplicate test can prove the copy is handed this
-        // member's address rather than the object base (which would land the array header on the vtable ptr).
+        // A container property, so a duplicate test proves the copy gets this member's address rather than the object base.
         PROPERTY()
         TVector<FName> Values;
 
@@ -142,8 +136,7 @@ namespace Lumina
         bool bReenterOnDestroy = false;
     };
 
-    // Throwaway world subsystem, gated off so discovery never puts one in a real world. The test flips the
-    // gate to prove CreateMissing honors ShouldCreate and runs the lifecycle in order.
+    // Test world subsystem, gated off so discovery never puts one in a real world.
     REFLECT()
     class RUNTIME_API CWorldSubsystemTest : public CWorldSubsystem
     {

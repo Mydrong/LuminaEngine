@@ -54,7 +54,7 @@ namespace Lumina
 
     EPropertyChangeOp FUIDocumentPropertyCustomization::DrawProperty(const TSharedPtr<FPropertyHandle>& Property, const FPropertyDrawArgs& Args)
     {
-        FUIDocumentRef* Ref = static_cast<FUIDocumentRef*>(Property->GetValuePtr());
+        SUIDocumentRef* Ref = static_cast<SUIDocumentRef*>(Property->GetValuePtr());
         if (Ref == nullptr)
         {
             return EPropertyChangeOp::None;

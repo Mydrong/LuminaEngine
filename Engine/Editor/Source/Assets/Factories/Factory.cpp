@@ -34,6 +34,20 @@ namespace Lumina
         Factories.push_back(Factory);
     }
 
+    CFactory* CFactoryRegistry::FindFactory(CClass* Class) const
+    {
+        CFactory* Found = nullptr;
+        for (CFactory* Factory : Factories)
+        {
+            CClass* AssetClass = Factory != nullptr ? Factory->GetAssetClass() : nullptr;
+            if (AssetClass != nullptr && Class->IsChildOf(AssetClass) && (Found == nullptr || AssetClass == Class))
+            {
+                Found = Factory;
+            }
+        }
+        return Found;
+    }
+
     void CFactory::PostCreateCDO()
     {
         CFactoryRegistry::Get().RegistryFactory(this);

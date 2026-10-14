@@ -38,10 +38,10 @@ namespace Lumina
         // world update, so every query within the frame sees one consistent snapshot.
         RUNTIME_API void UpdateContext(FInputContext& Context, float DeltaSeconds) const;
 
-        RUNTIME_API const FInputActionState& GetActionState(FName Name, const FInputContext& Context) const;
+        RUNTIME_API const SInputActionState& GetActionState(FName Name, const FInputContext& Context) const;
 
         // Handle overload: resolves the name only when the action table has been rebuilt since last time, so a steady-state query is an array read.
-        RUNTIME_API const FInputActionState& GetActionState(const FInputActionHandle& Handle, const FInputContext& Context) const;
+        RUNTIME_API const SInputActionState& GetActionState(const SInputActionHandle& Handle, const FInputContext& Context) const;
 
         RUNTIME_API bool  IsActionDown    (FName Name, const FInputContext& Context) const;
         RUNTIME_API bool  IsActionPressed (FName Name, const FInputContext& Context) const;

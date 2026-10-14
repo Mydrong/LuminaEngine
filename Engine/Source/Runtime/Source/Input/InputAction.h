@@ -144,12 +144,12 @@ namespace Lumina
 
     // A reference to an authored action, resolved once per settings change instead of hashed per query.
     REFLECT()
-    struct RUNTIME_API FInputActionHandle
+    struct RUNTIME_API SInputActionHandle
     {
         GENERATED_BODY()
 
-        FInputActionHandle() = default;
-        explicit FInputActionHandle(FName InName) : Name(InName) {}
+        SInputActionHandle() = default;
+        explicit SInputActionHandle(FName InName) : Name(InName) {}
 
         // Public so the property system can write it; the resolve re-checks it against CachedName.
         PROPERTY(Editable)
@@ -173,7 +173,7 @@ namespace Lumina
     // LuminaSharp.InputActionState: the script layer reads the whole array through a pointer instead of
     // crossing into native per action.
     REFLECT()
-    struct FInputActionState
+    struct SInputActionState
     {
         GENERATED_BODY()
 

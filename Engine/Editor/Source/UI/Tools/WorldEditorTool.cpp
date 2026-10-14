@@ -133,7 +133,7 @@ namespace Lumina
         }
 
         // The picked entity is itself a root, keep it.
-        if (Registry.HasAll<FSelectionRoot>(Entity))
+        if (Registry.HasAll<SSelectionRoot>(Entity))
         {
             return Entity;
         }
@@ -148,7 +148,7 @@ namespace Lumina
         const ECS::FHierarchy& Hierarchy = Registry.GetHierarchy();
         for (ECS::FEntity Parent = Hierarchy.GetParent(Entity); Parent != ECS::NullEntity; Parent = Hierarchy.GetParent(Parent))
         {
-            if (Registry.HasAll<FSelectionRoot>(Parent))
+            if (Registry.HasAll<SSelectionRoot>(Parent))
             {
                 return Parent;
             }
@@ -167,7 +167,7 @@ namespace Lumina
     // The editor world has no physics scene, so mesh AABBs are projected in software.
 
     // Project world AABB to screen rect (y-down, viewport pixels). Returns false if the box is behind near plane.
-    static bool ProjectAABBToScreenRect(const FAABB& WorldAABB, const FMatrix4& ViewProj,
+    static bool ProjectAABBToScreenRect(const SAABB& WorldAABB, const FMatrix4& ViewProj,
                                         const ImVec2& ViewportSize,
                                         ImVec2& OutMin, ImVec2& OutMax)
     {
@@ -209,7 +209,7 @@ namespace Lumina
     }
 
     // Slab ray-vs-AABB; OutT is along (possibly unnormalized) Dir. Returns true on hit in front of origin.
-    static bool RayVsAABB(const FVector3& Origin, const FVector3& Dir, const FAABB& Box, float& OutT)
+    static bool RayVsAABB(const FVector3& Origin, const FVector3& Dir, const SAABB& Box, float& OutT)
     {
         float TMin = 0.0f;
         float TMax = FLT_MAX;
@@ -306,7 +306,7 @@ namespace Lumina
 
         // Cheap whole-mesh cull against an inflated screen rect.
         ImVec2 BoxMin, BoxMax;
-        const FAABB WorldAABB = Mesh.GetAABB().ToWorld(MeshWorldMatrix);
+        const SAABB WorldAABB = Mesh.GetAABB().ToWorld(MeshWorldMatrix);
         if (!ProjectAABBToScreenRect(WorldAABB, ViewProj, ViewportSize, BoxMin, BoxMax))
         {
             return false;
@@ -563,7 +563,7 @@ namespace Lumina
 
             if (!bLocked)
             {
-                const bool bIsSelectionRoot = Registry.HasAll<FSelectionRoot>(Data.Entity);
+                const bool bIsSelectionRoot = Registry.HasAll<SSelectionRoot>(Data.Entity);
                 const char* RootLabel = bIsSelectionRoot
                     ? LE_ICON_TARGET " Unmark Selection Root"
                     : LE_ICON_TARGET " Mark as Selection Root";
@@ -571,11 +571,11 @@ namespace Lumina
                 {
                     if (bIsSelectionRoot)
                     {
-                        Registry.Remove<FSelectionRoot>(Data.Entity);
+                        Registry.Remove<SSelectionRoot>(Data.Entity);
                     }
                     else
                     {
-                        Registry.Emplace<FSelectionRoot>(Data.Entity);
+                        Registry.Emplace<SSelectionRoot>(Data.Entity);
                     }
                 }
                 ImGuiX::TextTooltip("{}", "Viewport clicks on any descendant will resolve up to this entity. Outliner clicks still select directly.");
@@ -1685,7 +1685,7 @@ namespace Lumina
 
                 // Padded AABB so the gizmo stays visible when the pivot is just outside the frustum but handles aren't.
                 const FVector3 PivotWorld = PivotTransformComponent.GetWorldLocation();
-                const FAABB PivotBounds(PivotWorld - FVector3(1.0f), PivotWorld + FVector3(1.0f));
+                const SAABB PivotBounds(PivotWorld - FVector3(1.0f), PivotWorld + FVector3(1.0f));
                 const bool bPivotVisible = CameraComponent.GetViewVolume().GetFrustum().IsInside(PivotBounds);
 
                 // Mid-drag stays drawn so ImGuizmo's release fires; otherwise bImGuizmoUsedOnce sticks and IsOver() blocks clicks.
@@ -2263,7 +2263,7 @@ namespace Lumina
 
                             if (const SStaticMeshComponent* Mesh = Registry.TryGet<SStaticMeshComponent>(Entity))
                             {
-                                FAABB WorldAABB = Mesh->GetAABB().ToWorld(Transform.GetWorldMatrix());
+                                SAABB WorldAABB = Mesh->GetAABB().ToWorld(Transform.GetWorldMatrix());
                                 if (!ProjectAABBToScreenRect(WorldAABB, ViewProj, ViewportSize, ProjMin, ProjMax))
                                 {
                                     return;
@@ -2477,16 +2477,16 @@ namespace Lumina
 
                 if (!bLastSelectedLocked)
                 {
-                    const bool bIsSelectionRoot = Registry.HasAll<FSelectionRoot>(LastSelected);
+                    const bool bIsSelectionRoot = Registry.HasAll<SSelectionRoot>(LastSelected);
                     if (ImGui::MenuItem(bIsSelectionRoot ? "Unmark Selection Root" : "Mark as Selection Root"))
                     {
                         if (bIsSelectionRoot)
                         {
-                            Registry.Remove<FSelectionRoot>(LastSelected);
+                            Registry.Remove<SSelectionRoot>(LastSelected);
                         }
                         else
                         {
-                            Registry.Emplace<FSelectionRoot>(LastSelected);
+                            Registry.Emplace<SSelectionRoot>(LastSelected);
                         }
                         ImGui::CloseCurrentPopup();
                     }
@@ -2958,6 +2958,11 @@ namespace Lumina
         if (!World->GetPackage())
         {
             PushSaveAsAssetModal();
+            return;
+        }
+
+        if (!World->GetPackage()->IsDirty())
+        {
             return;
         }
 
@@ -5628,7 +5633,7 @@ namespace Lumina
         }
 
         // Snapshot world-space AABBs once so per-entity raycast is a flat vector walk.
-        struct FCandidate { FAABB Box; };
+        struct FCandidate { SAABB Box; };
         TVector<FCandidate> Candidates;
         Registry.View<STransformComponent, SStaticMeshComponent>().ForEach(
             [&](ECS::FEntity Entity, STransformComponent& Transform, SStaticMeshComponent& Mesh)

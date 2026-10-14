@@ -1,17 +1,51 @@
 #pragma once
-
-#include "Assets/AssetRef.h"
+#include "Core/Object/ObjectMacros.h"
+#include "Containers/String.h"
+#include "GUID/GUID.h"
 #include "UIDocumentRef.generated.h"
 
 namespace Lumina
 {
+    class FNetArchive;
+
     // A rename-safe reference to an .rml document, which the details panel picks from the project's UI documents.
     REFLECT()
-    struct RUNTIME_API FUIDocumentRef : public FAssetRef
+    struct RUNTIME_API SUIDocumentRef
     {
         GENERATED_BODY()
 
-        FUIDocumentRef() = default;
-        explicit FUIDocumentRef(FStringView InPath) : FAssetRef(InPath) {}
+        // Last-known virtual path such as "/UI/HUD.rml", healed on resolve after a rename.
+        PROPERTY(Editable)
+        FString Path;
+
+        // Stable identity as GUID text, which the picker maintains.
+        PROPERTY()
+        FString Guid;
+
+        SUIDocumentRef() = default;
+        explicit SUIDocumentRef(FStringView InPath) : Path(InPath.data(), InPath.size()) {}
+
+        bool IsNull() const  { return Path.empty() && Guid.empty(); }
+        bool IsValid() const { return !IsNull(); }
+
+        FStringView GetPath() const { return FStringView(Path.c_str(), Path.size()); }
+        FGuid       GetGuid() const;
+
+        // GUID-first lookup that heals Path after a rename, and is safe on any thread and in cooked builds.
+        FStringView ResolvePath() const;
+
+        // Resolves, then reads the document text. False on a miss.
+        bool ReadText(FString& OutText) const;
+
+        // Editor assignment that derives the GUID, minting a sidecar when the document has none.
+        void SetPath(FStringView InPath);
+        void Set(FStringView InPath, const FGuid& InGuid);
+        void Reset() { Path.clear(); Guid.clear(); }
+
+        // A compact net index when the archive binds the document hooks, otherwise the full path and GUID.
+        void NetSerialize(FNetArchive& Ar);
+
+        bool operator==(const SUIDocumentRef& Other) const { return Path == Other.Path && Guid == Other.Guid; }
+        bool operator!=(const SUIDocumentRef& Other) const { return !(*this == Other); }
     };
 }

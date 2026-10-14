@@ -14,4 +14,15 @@ namespace Lumina
         }
         return System;
     }
+
+    CObject* CParticleEmitterFactory::CreateNew(const FName& Name, CPackage* Package)
+    {
+        CParticleEmitter* Emitter = NewObject<CParticleEmitter>(Package, Name);
+        if (Emitter != nullptr)
+        {
+            // The header every system sharing it shows, which would otherwise read just "Emitter".
+            Emitter->EmitterName = Name.c_str();
+        }
+        return Emitter;
+    }
 }

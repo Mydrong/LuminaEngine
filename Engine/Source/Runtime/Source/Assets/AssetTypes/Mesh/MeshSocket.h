@@ -11,7 +11,7 @@ namespace Lumina
     /** A named attach point on a mesh asset. Skeletal sockets ride a bone (BoneName); static mesh
      *  sockets sit relative to the mesh origin (BoneName unused). Gameplay resolves sockets by name. */
     REFLECT()
-    struct RUNTIME_API FMeshSocket
+    struct RUNTIME_API SMeshSocket
     {
         GENERATED_BODY()
 
@@ -28,9 +28,9 @@ namespace Lumina
         FTransform RelativeTransform;
     };
 
-    inline const FMeshSocket* FindSocketByName(const TVector<FMeshSocket>& Sockets, const FName& SocketName)
+    inline const SMeshSocket* FindSocketByName(const TVector<SMeshSocket>& Sockets, const FName& SocketName)
     {
-        for (const FMeshSocket& Socket : Sockets)
+        for (const SMeshSocket& Socket : Sockets)
         {
             if (Socket.SocketName == SocketName)
             {

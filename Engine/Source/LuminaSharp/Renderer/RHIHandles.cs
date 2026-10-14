@@ -73,11 +73,7 @@ public readonly struct FCmdListH : IEquatable<FCmdListH>
     public override int GetHashCode() => Handle.GetHashCode();
 }
 
-/// <summary>
-/// A device-addressable GPU memory pointer (the engine's <c>GPUPtr</c> = uint64). Allocate with
-/// <see cref="RHI.Malloc"/>, which returns an <see cref="FGPUAllocation"/> carrying this pointer, its
-/// CPU mapping and its size. Supports byte-offset arithmetic. Zero is the null/invalid pointer.
-/// </summary>
+/// <summary>The engine's GPUPtr, offset by bytes and null at zero, which <see cref="RHI.Malloc(ulong, ulong, EMemoryType)"/> returns inside an <see cref="FGPUAllocation"/>.</summary>
 [StructLayout(LayoutKind.Sequential)]
 [NativeLayout("RHI::GPUPtr")]
 public readonly struct GPUPtr : IEquatable<GPUPtr>

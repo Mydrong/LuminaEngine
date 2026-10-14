@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <fstream>
 #include <nlohmann/json.hpp>
+#include "Assets/AssetManager/AssetManager.h"
 #include "Assets/AssetRegistry/AssetRegistry.h"
 #include "Assets/AssetRegistry/AssetData.h"
 #include "Assets/AssetRegistry/CookRoot.h"
@@ -165,7 +166,9 @@ namespace Lumina
         {
             FAssetData* Data = FAssetRegistry::Get().GetAssetByPath(VirtualPath);
             const bool bMaterial = Data != nullptr && Data->AssetClass == CMaterial::StaticClass()->GetName();
-            const bool bParticleSystem = Data != nullptr && Data->AssetClass == CParticleSystem::StaticClass()->GetName();
+            // An emitter asset carries its own simulation shader, which systems sharing it reference rather than embed.
+            const bool bParticleSystem = Data != nullptr && (Data->AssetClass == CParticleSystem::StaticClass()->GetName()
+                                                          || Data->AssetClass == CParticleEmitter::StaticClass()->GetName());
 
             // Permutations are baked into the master at cook time, so its instances are inputs to its cooked bytes.
             TVector<FAssetData*> Instances;
@@ -245,19 +248,21 @@ namespace Lumina
 
             if (bParticleSystem)
             {
-                CParticleSystem* System = Cast<CParticleSystem>(Package->LoadObjectByName(Data->AssetName));
-                const int32 NumEmitters = System != nullptr ? (int32)System->Emitters.size() : 0;
+                CObject* Loaded = Package->LoadObjectByName(Data->AssetName);
+                CParticleEmitter* Standalone = Cast<CParticleEmitter>(Loaded);
+                const TStrongObjectPtr<CParticleSystem> System = Standalone != nullptr ? ParticleOps::WrapEmitter(Standalone) : TStrongObjectPtr<CParticleSystem>(Cast<CParticleSystem>(Loaded));
+                const int32 NumEmitters = System ? (int32)System->Emitters.size() : 0;
                 for (int32 Index = 0; Index < NumEmitters; ++Index)
                 {
                     const CParticleEmitter* Emitter = System->Emitters[Index].Get();
-                    if (Emitter == nullptr || !Emitter->NeedsShaderCompile())
+                    if (Emitter == nullptr || Emitter->GetPackage() != Package || !Emitter->NeedsShaderCompile())
                     {
                         continue;
                     }
 
                     // The cache had nothing for the current templates, and a game cannot compile, so the cook builds it now.
                     FParticleEmitterCompileOutput Output;
-                    if (ParticleOps::FindStack(System, Index) == nullptr || !ParticleOps::CompileEmitter(System, Index, Output))
+                    if (ParticleOps::FindStack(System.Get(), Index) == nullptr || !ParticleOps::CompileEmitter(System.Get(), Index, Output))
                     {
                         LogCooker(LogFunc, Format("  [warn] {} emitter {} has no simulation shader and could not be recompiled, so it will not simulate",
                             VirtualPath, Index).c_str());
@@ -701,7 +706,7 @@ namespace Lumina
             Result.ErrorMessage =
                 "No cook roots defined.\n"
                 "  Open Project Settings -> Maps -> Cook Roots and add at least one asset path,\n"
-                "  declare CookRoots in a plugin's .lplugin, or flag an asset EAssetFlags::Primary.";
+                "  declare CookRoots in a plugin's .lplugin, or put assets in a REFLECT(Group = ...) class.";
             return Result;
         }
 
@@ -713,15 +718,15 @@ namespace Lumina
 
         // FindByPredicate returns hash order, so sort by GUID before adding to keep the graph deterministic.
         {
-            TVector<FAssetData*> Primaries = FAssetRegistry::Get().FindByPredicate(
-                [](const FAssetData& D) { return HasFlag(D.Flags, EAssetFlags::Primary); });
-            Algo::Sort(Primaries,
+            TVector<FAssetData*> Grouped = FAssetRegistry::Get().FindByPredicate(
+                [](const FAssetData& D) { return !FAssetManager::Get().GetGroupOfClass(D.AssetClass).IsNone(); });
+            Algo::Sort(Grouped,
                 [](const FAssetData* A, const FAssetData* B) { return A->AssetGUID < B->AssetGUID; });
-            if (!Primaries.empty())
+            if (!Grouped.empty())
             {
-                LogCooker(LogFunc, Format("  Primary assets: {} -> implicit cook roots", Primaries.size()).c_str());
+                LogCooker(LogFunc, Format("  Grouped assets: {} -> implicit cook roots", Grouped.size()).c_str());
             }
-            for (const FAssetData* Data : Primaries)
+            for (const FAssetData* Data : Grouped)
             {
                 FCookRoot Root;
                 Root.Asset = FString(Data->Path.c_str(), Data->Path.size());

@@ -15,36 +15,36 @@ using namespace Lumina;
 
 namespace
 {
-    FMaterialStaticSwitch MakeSwitch(const char* Name, bool bDefault, uint8 Bit)
+    SMaterialStaticSwitch MakeSwitch(const char* Name, bool bDefault, uint8 Bit)
     {
-        FMaterialStaticSwitch Switch;
+        SMaterialStaticSwitch Switch;
         Switch.ParameterName = Name;
         Switch.bDefaultValue = bDefault;
         Switch.BitIndex      = Bit;
         return Switch;
     }
 
-    FMaterialParameter MakeScalar(const char* Name, uint16 Index)
+    SMaterialParameter MakeScalar(const char* Name, uint16 Index)
     {
-        FMaterialParameter Param;
+        SMaterialParameter Param;
         Param.ParameterName = Name;
         Param.Type          = EMaterialParameterType::Scalar;
         Param.Index         = Index;
         return Param;
     }
 
-    FMaterialParameter MakeVector(const char* Name, uint16 Index)
+    SMaterialParameter MakeVector(const char* Name, uint16 Index)
     {
-        FMaterialParameter Param;
+        SMaterialParameter Param;
         Param.ParameterName = Name;
         Param.Type          = EMaterialParameterType::Vector;
         Param.Index         = Index;
         return Param;
     }
 
-    const FMaterialParameter* Find(const TVector<FMaterialParameter>& Params, const char* Name)
+    const SMaterialParameter* Find(const TVector<SMaterialParameter>& Params, const char* Name)
     {
-        for (const FMaterialParameter& Param : Params)
+        for (const SMaterialParameter& Param : Params)
         {
             if (Param.ParameterName == FName(Name))
             {
@@ -60,7 +60,7 @@ TEST(MaterialPermutationSeed, ASeededParameterKeepsTheIndexTheUniformBlockAlread
 {
     FMaterialCompiler Compiler;
 
-    TVector<FMaterialParameter> Seed;
+    TVector<SMaterialParameter> Seed;
     Seed.push_back(MakeScalar("Roughness", 0));
     Seed.push_back(MakeScalar("Metallic", 1));
     Seed.push_back(MakeScalar("DetailStrength", 2));
@@ -76,7 +76,7 @@ TEST(MaterialPermutationSeed, ASeededParameterKeepsTheIndexTheUniformBlockAlread
     Compiler.DefineFloatParameter("N0", "Metallic", 0.0f);
     Compiler.DefineFloatParameter("N1", "Roughness", 0.0f);
 
-    TVector<FMaterialParameter> Out;
+    TVector<SMaterialParameter> Out;
     FMaterialUniforms           OutUniforms = {};
     Compiler.GetParameters(Out, OutUniforms);
 
@@ -92,7 +92,7 @@ TEST(MaterialPermutationSeed, ASeededParameterKeepsItsValueRatherThanTheNodeDefa
 {
     FMaterialCompiler Compiler;
 
-    TVector<FMaterialParameter> Seed;
+    TVector<SMaterialParameter> Seed;
     Seed.push_back(MakeScalar("Roughness", 0));
 
     FMaterialUniforms Uniforms = {};
@@ -101,7 +101,7 @@ TEST(MaterialPermutationSeed, ASeededParameterKeepsItsValueRatherThanTheNodeDefa
     Compiler.SeedManifest(Seed, Uniforms, {}, {});
     Compiler.DefineFloatParameter("N0", "Roughness", 0.125f);
 
-    TVector<FMaterialParameter> Out;
+    TVector<SMaterialParameter> Out;
     FMaterialUniforms           OutUniforms = {};
     Compiler.GetParameters(Out, OutUniforms);
 
@@ -115,7 +115,7 @@ TEST(MaterialPermutationSeed, APermutationOnlyParameterAppendsPastTheSeededSlots
 {
     FMaterialCompiler Compiler;
 
-    TVector<FMaterialParameter> Seed;
+    TVector<SMaterialParameter> Seed;
     Seed.push_back(MakeScalar("Roughness", 0));
     Seed.push_back(MakeScalar("Metallic", 1));
 
@@ -124,7 +124,7 @@ TEST(MaterialPermutationSeed, APermutationOnlyParameterAppendsPastTheSeededSlots
 
     Compiler.DefineFloatParameter("N0", "ParallaxDepth", 0.05f);
 
-    TVector<FMaterialParameter> Out;
+    TVector<SMaterialParameter> Out;
     FMaterialUniforms           OutUniforms = {};
     Compiler.GetParameters(Out, OutUniforms);
 
@@ -138,7 +138,7 @@ TEST(MaterialPermutationSeed, ScalarAndVectorSlotsAreCountedSeparately)
 {
     FMaterialCompiler Compiler;
 
-    TVector<FMaterialParameter> Seed;
+    TVector<SMaterialParameter> Seed;
     Seed.push_back(MakeScalar("Roughness", 0));
     Seed.push_back(MakeScalar("Metallic", 1));
     Seed.push_back(MakeVector("BaseTint", 0));
@@ -150,7 +150,7 @@ TEST(MaterialPermutationSeed, ScalarAndVectorSlotsAreCountedSeparately)
     Compiler.DefineFloat4Parameter("N0", "EmissiveTint", Value);
     Compiler.DefineFloatParameter("N1", "ParallaxDepth", 0.05f);
 
-    TVector<FMaterialParameter> Out;
+    TVector<SMaterialParameter> Out;
     FMaterialUniforms           OutUniforms = {};
     Compiler.GetParameters(Out, OutUniforms);
 
@@ -165,13 +165,13 @@ TEST(MaterialPermutationSeed, AnOverBudgetSeedEntryIsDropped)
 {
     FMaterialCompiler Compiler;
 
-    TVector<FMaterialParameter> Seed;
+    TVector<SMaterialParameter> Seed;
     Seed.push_back(MakeScalar("Corrupt", (uint16)(MAX_SCALARS + 4)));
 
     FMaterialUniforms Uniforms = {};
     Compiler.SeedManifest(Seed, Uniforms, {}, {});
 
-    TVector<FMaterialParameter> Out;
+    TVector<SMaterialParameter> Out;
     FMaterialUniforms           OutUniforms = {};
     Compiler.GetParameters(Out, OutUniforms);
 

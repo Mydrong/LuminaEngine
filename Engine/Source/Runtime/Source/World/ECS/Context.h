@@ -154,7 +154,7 @@ namespace Lumina::ECS
         {
             if (Entry.Info != nullptr && Entry.Info->Destruct != nullptr && !Entry.Info->bTriviallyDestructible)
             {
-                Entry.Info->Destruct(Entry.Data);
+                Entry.Info->Destruct(*Entry.Info, Entry.Data);
             }
             void* Block = Entry.Data;
             Memory::Free(Block);

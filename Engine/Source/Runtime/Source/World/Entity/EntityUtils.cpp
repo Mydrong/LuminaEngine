@@ -6,6 +6,7 @@
 #include "Components/DirtyComponent.h"
 #include "Components/EditorComponent.h"
 #include "Components/EntityTags.h"
+#include "Components/MissingComponents.h"
 #include "Components/PhysicsComponent.h"
 #include "Components/NameComponent.h"
 #include "Components/RelationshipComponent.h"
@@ -28,6 +29,7 @@
 #include "Components/Component.h"
 #include "Memory/SmartPtr.h"
 #include "Scripting/EntityScript.h"
+#include "Scripting/ScriptTypeRegistry.h"
 #include "World/World.h"
 #include "World/WorldContext.h"
 #include <atomic>
@@ -202,6 +204,7 @@ namespace Lumina::ECS::Utils
         {
             ECS::FSparseSet*   Set;
             CStruct*            Struct;
+            FName               Name;
         };
         TVector<FEntry> Entries;
 
@@ -218,7 +221,7 @@ namespace Lumina::ECS::Utils
 
                 if (CStruct* StructType = FindComponentStructByTypeId(Set.GetTypeInfo().TypeID))
                 {
-                    Entries.push_back({ &Set, StructType });
+                    Entries.push_back({ &Set, StructType, StructIdentity(StructType) });
                 }
             }
         }
@@ -352,6 +355,9 @@ namespace Lumina::ECS::Utils
                 return false;
             }
 
+            // Held after the loop, so a held-components entry read later for this entity cannot replace them.
+            TVector<SHeldValue> Unloaded;
+
             for (size_t i = 0; i < NumComponents; ++i)
             {
                 FName TypeName;
@@ -362,7 +368,7 @@ namespace Lumina::ECS::Utils
 
                 int64 ComponentStart = Ar.Tell();
 
-                if (CStruct* Struct = FindObject<CStruct>(TypeName))
+                if (CStruct* Struct = ResolveStructByName(TypeName))
                 {
                     LUMINA_PROFILE_SECTION_NAMED(Struct->GetName().c_str());
                     if (Struct == STagComponent::StaticStruct())
@@ -392,11 +398,30 @@ namespace Lumina::ECS::Utils
                 }
                 else
                 {
-                    LOG_WARN("[ECS] Entity {}: skipping unknown component '{}' ({} bytes). Disabled plugin? Save will drop this component.", (uint32)Entity, TypeName, ComponentSize);
+                    SHeldValue& Held = Unloaded.emplace_back();
+                    Held.TypeName = TypeName;
+                    if (Held.Data.Cut(Ar, ComponentSize))
+                    {
+                        LOG_WARN("[ECS] Entity {}: component type '{}' is not loaded; holding its {} bytes until it is.", (uint32)Entity, TypeName, ComponentSize);
+                    }
+                    else
+                    {
+                        Unloaded.pop_back();
+                        LOG_WARN("[ECS] Entity {}: skipping unknown component '{}' ({} bytes), which this archive cannot hold.", (uint32)Entity, TypeName, ComponentSize);
+                    }
                 }
 
                 int64 ComponentEnd = ComponentSize + ComponentStart;
                 Ar.Seek(ComponentEnd);
+            }
+
+            for (SHeldValue& Held : Unloaded)
+            {
+                MissingComponents::Hold(Registry, Entity, Move(Held));
+            }
+            if (Registry.TryGet<SMissingComponents>(Entity) != nullptr)
+            {
+                MissingComponents::Restore(Registry, Entity);
             }
         }
         
@@ -435,7 +460,7 @@ namespace Lumina::ECS::Utils
                 continue;
             }
 
-            FName Name = Entry.Struct->GetName();
+            FName Name = Entry.Name;
             Ar << Name;
 
             int64 ComponentStart = Ar.Tell();
@@ -1533,6 +1558,19 @@ namespace Lumina::ECS::Utils
             RemapEntityHandle(Value, Map, bClearUnmapped);
         };
         ForEachEntityRefOnEntity(Registry, Entity, Visit);
+    }
+
+    void RemapEntityReferences(CObject* Object, const THashMap<ECS::FEntity, ECS::FEntity>& Map, bool bClearUnmapped)
+    {
+        if (Object == nullptr || Object->GetClass() == nullptr)
+        {
+            return;
+        }
+        auto Visit = [&](uint32& Value)
+        {
+            RemapEntityHandle(Value, Map, bClearUnmapped);
+        };
+        ForEachEntityRefInStruct(Object->GetClass(), Object, Visit);
     }
 
     void CollectEntityReferences(ECS::FRegistry& Registry, ECS::FEntity Entity, TVector<ECS::FEntity>& Out)

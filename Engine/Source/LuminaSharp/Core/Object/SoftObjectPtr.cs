@@ -40,6 +40,8 @@ namespace Lumina
             this.Path = Path ?? "";
         }
 
+        public static implicit operator FSoftObjectPath(string Path) => new(Path);
+
         public readonly bool IsNull => string.IsNullOrEmpty(Path);
 
         public readonly bool IsValid => !IsNull;
@@ -52,25 +54,13 @@ namespace Lumina
         // True when the registry knows the path, without loading anything.
         public readonly bool TryResolve()
         {
-            return IsValid && Native.AssetExists(Path);
+            return IsValid && CAssetLibrary.Exists(Path);
         }
 
-        public readonly T? LoadSynchronous<T>() where T : NativeObject
-        {
-            return IsValid ? ObjectCore.LoadObject<T>(Path) : null;
-        }
+        public readonly T? LoadSynchronous<T>() where T : NativeObject => ObjectCore.LoadObject<T>(GetPath());
 
-        public readonly void LoadAsync<T>(Action<T?> Callback) where T : NativeObject
-        {
-            if (IsValid)
-            {
-                ObjectCore.AsyncLoadObject(Path, Callback);
-            }
-            else
-            {
-                Callback(null);
-            }
-        }
+        // An unset path still calls back, with null.
+        public readonly void LoadAsync<T>(Action<T?> Callback) where T : NativeObject => ObjectCore.AsyncLoadObject(GetPath(), Callback);
 
         void ISoftObjectReference.SetFromPath(string NewPath)
         {
@@ -87,6 +77,10 @@ namespace Lumina
         {
             this.Path = new FSoftObjectPath(Path);
         }
+
+        public static implicit operator TSoftObjectPtr<T>(string Path) => new(Path);
+
+        public static implicit operator FSoftObjectPath(TSoftObjectPtr<T> Reference) => Reference.Path;
 
         public readonly bool IsNull => Path.IsNull;
 

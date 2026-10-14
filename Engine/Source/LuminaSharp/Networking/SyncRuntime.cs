@@ -11,9 +11,9 @@ namespace LuminaSharp;
 public static class SyncRuntime
 {
     // Emitted into a [Sync] setter after the value actually changed. Native ignores it everywhere but on the host.
-    public static void MarkDirty(IntPtr Script)
+    public static void MarkDirty(Lumina.CEntityScript Script)
     {
-        NetNative.MarkScriptDirty(Script);
+        Script.MarkNetDirty();
     }
 
     // Emitted into a [Sync] setter carrying [Change], so the writer's own change runs the handler the same as an arriving one.
@@ -34,24 +34,24 @@ public static class SyncRuntime
     // Native sends the stored value through the field's FProperty, then validates, applies or corrects it on the host, as for C++.
     public static void Forward(Lumina.CEntityScript Script, string Field)
     {
-        IntPtr Handle = NativeObjectMarshal.ToHandle(Script);
-        IntPtr Property = FieldOf(Script.GetType(), Handle, Field);
+        IntPtr Property = FieldOf(Script, Field);
         if (Property != IntPtr.Zero)
         {
-            NetNative.SendSync(Handle, Property);
+            Script.ForwardSyncField(Property);
         }
     }
 
     private static readonly ConditionalWeakTable<Type, Dictionary<string, IntPtr>> Fields = new();
 
-    private static IntPtr FieldOf(Type Type, IntPtr Handle, string Field)
+    private static IntPtr FieldOf(Lumina.CEntityScript Script, string Field)
     {
+        Type Type = Script.GetType();
         Dictionary<string, IntPtr> ByName = Fields.GetValue(Type, _ => new Dictionary<string, IntPtr>(StringComparer.Ordinal));
         lock (ByName)
         {
             if (!ByName.TryGetValue(Field, out IntPtr Property))
             {
-                Property = NetNative.FindSyncField(Handle, Field);
+                Property = Script.FindSyncField(Field);
                 if (Property == IntPtr.Zero)
                 {
                     Native.Log(ELogLevel.Error, $"[Net] {Type.Name}.{Field} is not a native Sync FromOwner field, so the owner's writes stay local.");

@@ -96,6 +96,10 @@ namespace Lumina
         PROPERTY()
         bool bCompiled = false;
 
+        // Path of the emitter asset this system shares, or empty when the emitter belongs to the system.
+        PROPERTY()
+        FString SharedAsset;
+
         // Editable emitter settings such as SpawnRate, MaxParticles, BurstCount and Material, as JSON.
         PROPERTY()
         FString Settings;
@@ -207,6 +211,35 @@ namespace Lumina
         // Emitter index, as particle.describe reports it.
         PROPERTY()
         int32 Emitter = 0;
+    };
+
+    REFLECT()
+    struct MCPEDITOR_API SAddParticleEmitterAssetParams
+    {
+        GENERATED_BODY()
+
+        PROPERTY()
+        FString System;
+
+        // GUID of the emitter asset to share.
+        PROPERTY()
+        FString Asset;
+    };
+
+    REFLECT()
+    struct MCPEDITOR_API SSaveParticleEmitterAssetParams
+    {
+        GENERATED_BODY()
+
+        PROPERTY()
+        FString System;
+
+        PROPERTY()
+        int32 Emitter = 0;
+
+        // Virtual path of the new asset, such as /Game/Content/Effects/E_Sparks.lasset.
+        PROPERTY()
+        FString Path;
     };
 
     REFLECT()

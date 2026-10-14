@@ -6,35 +6,19 @@ using LuminaSharp.ScriptProperties;
 
 namespace LuminaSharp;
 
-/// <summary>
-/// The container view types a <c>[Property]</c> may be declared as, as one table.
-///
-/// This is the runtime-reflection half of what <c>ScriptPropertyClassifier</c> decides over Roslyn symbols.
-/// It cannot be the same code -- the classifier is shared with a netstandard2.0 analyzer that cannot reference
-/// these types, and matching them there means matching display names. So the two halves meet at
-/// <see cref="EScriptAccess"/> and are held together by <see cref="Validate"/>, which runs before the first
-/// type is described and fails loudly if they have come apart.
-///
-/// One table rather than a chain of ifs per question, because the three questions asked about these types --
-/// "is it a view?", "what is its element?", "what are its key and value?" -- were each answered by their own
-/// list, and a view taught to one list and not another is not a compile error, just a property that silently
-/// describes wrong.
-/// </summary>
+// The container view types a [Property] may be, one table answering every question about them, which Validate holds to the shared classifier.
 internal static class ScriptPropertyViews
 {
-    /// <summary>One view type: the open generic definition, how the classifier reports it, and the arity
-    /// native sees on the wire.</summary>
+    // One view type, its open generic definition, how the classifier reports it, and its arity.
     private readonly struct FView
     {
         public readonly Type Definition;
         public readonly EScriptAccess Access;
 
-        /// <summary>The metadata name the shared classifier matches this type by. Cross-checked against
-        /// <see cref="Type.FullName"/> so moving or renaming the type cannot silently stop matching.</summary>
+        // The name the shared classifier matches this type by, checked against Type.FullName so a rename cannot silently stop matching.
         public readonly string MetadataName;
 
-        /// <summary>Fixed element type for a view whose element is not a type argument, else null -- take it
-        /// from the type arguments. Nothing needs it today; kept because a future view might.</summary>
+        // The element type of a view whose element is not a type argument, else null.
         public readonly Type? FixedElement;
 
         public FView(Type Definition, EScriptAccess Access, string MetadataName, Type? FixedElement = null)
@@ -48,9 +32,7 @@ internal static class ScriptPropertyViews
 
     private static readonly FView[] Views =
     {
-        // One list view for every element flavour: a plain value, an FString, or a TStrongObjectPtr<T>. The element
-        // type is the type argument in all three cases -- TVector routes the per-slot read/write through
-        // ElementMarshal, so there is nothing to special-case here either.
+        // One list view for every element kind, since TVector routes each slot through ElementMarshal.
         new(typeof(TVector<>), EScriptAccess.ListView,
             ScriptPropertyTypeNames.TVectorMetadata),
 
@@ -74,8 +56,7 @@ internal static class ScriptPropertyViews
         return null;
     }
 
-    /// <summary>True for a type that IS a view over native storage rather than a managed value, so a
-    /// get-only member of it is still a real property.</summary>
+    // True for a type viewing native storage, so a get-only member of it is still a real property.
     public static bool IsView(Type Type) => Find(Type) != null;
 
     public static bool TryGetAccess(Type Type, out EScriptAccess Access)
@@ -90,8 +71,7 @@ internal static class ScriptPropertyViews
         return true;
     }
 
-    /// <summary>The element type of a list view, or false if <paramref name="Type"/> is not one (a map is
-    /// not; ask <see cref="TryGetKeyValue"/>).</summary>
+    // The element type of a list view, false for anything else including a map.
     public static bool TryGetElementType(Type Type, out Type? ElementType)
     {
         ElementType = null;
@@ -118,18 +98,7 @@ internal static class ScriptPropertyViews
         return true;
     }
 
-    /// <summary>
-    /// Proves this table still describes the same types the shared classifier matches. Two ways it can come
-    /// apart, and neither is a compile error on its own:
-    ///
-    /// 1. A view kind is added to the classifier and not here -- the rewriter emits an accessor for it, and
-    ///    the schema this side reports never mentions it, so native mints nothing to back it.
-    /// 2. One of these types is renamed or moved -- <c>typeof</c> follows it, the classifier's display-string
-    ///    match does not, and every property of that type quietly becomes "unsupported".
-    ///
-    /// Throws rather than logging: both are engine bugs a developer just introduced, and both produce
-    /// properties that silently do not work if allowed to run.
-    /// </summary>
+    // Throws if this table and the shared classifier have come apart, since either drift leaves properties silently broken.
     public static void Validate()
     {
         if (bValidated)

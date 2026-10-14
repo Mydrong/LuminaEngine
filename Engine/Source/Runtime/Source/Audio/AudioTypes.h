@@ -141,7 +141,7 @@ namespace Lumina
 
 	/** Identifies one playing voice. Index is the context's voice slot, Generation disambiguates reuse. */
 	REFLECT()
-	struct FAudioHandle
+	struct SAudioHandle
 	{
 		GENERATED_BODY()
 
@@ -153,17 +153,17 @@ namespace Lumina
 
 		constexpr bool IsValid() const { return Generation != 0; }
 
-		constexpr bool operator==(const FAudioHandle& Other) const
+		constexpr bool operator==(const SAudioHandle& Other) const
 		{
 			return Generation == Other.Generation && Index == Other.Index;
 		}
 
-		constexpr bool operator!=(const FAudioHandle& Other) const
+		constexpr bool operator!=(const SAudioHandle& Other) const
 		{
 			return !(*this == Other);
 		}
 
-		static constexpr FAudioHandle Invalid() { return FAudioHandle{}; }
+		static constexpr SAudioHandle Invalid() { return SAudioHandle{}; }
 	};
 
 	/** Published per voice slot so the game thread can query a voice without touching the mixer. */
@@ -177,7 +177,7 @@ namespace Lumina
 
 	/** Everything needed to start a voice. Passed by value into the pump's pending-play queue. */
 	REFLECT()
-	struct FAudioPlayParams
+	struct SAudioPlayParams
 	{
 		GENERATED_BODY()
 

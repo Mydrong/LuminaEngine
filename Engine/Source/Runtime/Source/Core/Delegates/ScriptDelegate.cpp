@@ -3,11 +3,10 @@
 #include "Core/Assertions/Assert.h"
 #include "Core/Threading/Atomic.h"
 #include "Containers/HashTable.h"
+#include "Scripting/ScriptCallback.h"
 
 namespace Lumina
 {
-    void (*GFreeManagedDelegateContext)(void* Context) = nullptr;
-
     namespace
     {
         size_t GLiveManagedBindings = 0;
@@ -25,10 +24,13 @@ namespace Lumina
         void FreeManagedListener(void* Context)
         {
             --GLiveManagedBindings;
-            if (GFreeManagedDelegateContext != nullptr)
-            {
-                GFreeManagedDelegateContext(Context);
-            }
+            Scripting::FreeManagedHandle(Context);
+        }
+
+        // The context is the callback's token, and the payload pointer crosses as its value.
+        void InvokeManagedListener(void* Context, const void* Payload)
+        {
+            Scripting::InvokeScriptCallbackRepeating(SScriptCallback{ reinterpret_cast<uint64>(Context) }, reinterpret_cast<uint64>(Payload));
         }
     }
 
@@ -214,6 +216,11 @@ namespace Lumina
             }
         }
         Listeners.resize(Write);
+    }
+
+    uint64 FScriptDelegateBase::BindManaged(SScriptCallback Callback)
+    {
+        return BindManaged(&InvokeManagedListener, reinterpret_cast<void*>(Callback.Token));
     }
 
     uint64 FScriptDelegateBase::BindManaged(FThunk Thunk, void* Context)

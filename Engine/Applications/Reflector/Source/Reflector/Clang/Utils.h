@@ -117,6 +117,33 @@ namespace Lumina::ClangUtils
         return str;
     }
 
+    // The comment attached to a declaration as plain text, ignoring //~ section banners.
+    inline std::string GetBriefComment(const CXCursor& Cursor)
+    {
+        const FScopedCXString Raw(clang_Cursor_getRawCommentText(Cursor));
+        if (Raw.View().starts_with("//~"))
+        {
+            return {};
+        }
+        const FScopedCXString Brief(clang_Cursor_getBriefCommentText(Cursor));
+        return std::string(Brief.View());
+    }
+
+    inline std::string EscapeStringLiteral(std::string_view Text)
+    {
+        std::string Result;
+        Result.reserve(Text.size());
+        for (const char Char : Text)
+        {
+            if (Char == '\\' || Char == '"')
+            {
+                Result += '\\';
+            }
+            Result += Char;
+        }
+        return Result;
+    }
+
     inline uint32_t GetCursorLineNumber(const CXCursor& Cr)
     {
         uint32_t Line = 0;

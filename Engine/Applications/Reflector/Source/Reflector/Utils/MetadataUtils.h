@@ -9,6 +9,19 @@ struct FMetadataPair
     std::string Value;
 };
 
+// The value stored under Key, or null when there is none.
+inline const std::string* FindMetadata(const std::vector<FMetadataPair>& Metadata, std::string_view Key)
+{
+    for (const FMetadataPair& Pair : Metadata)
+    {
+        if (Pair.Key == Key)
+        {
+            return &Pair.Value;
+        }
+    }
+    return nullptr;
+}
+
 class FMetadataParser
 {
 public:

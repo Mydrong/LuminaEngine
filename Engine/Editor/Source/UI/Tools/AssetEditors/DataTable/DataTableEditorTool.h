@@ -35,13 +35,14 @@ namespace Lumina
 
         void OnInitialize() override;
         void OnPostUndoRedo() override;
-        void OnDeinitialize(const FUpdateContext& UpdateContext) override {}
+        void OnDeinitialize(const FUpdateContext& UpdateContext) override;
         void InitializeDockingLayout(ImGuiID InDockspaceID, const ImVec2& InDockspaceSize) const override;
 
     private:
 
         void DrawTableWindow(bool bFocused);
         void DrawRowDetailsWindow(bool bFocused);
+        void RefreshRowBindings();
 
         void DrawToolbar();
         void DrawGrid();
@@ -77,6 +78,7 @@ namespace Lumina
         void CommitCellEdit();
 
         TUniquePtr<FPropertyTable> RowPropertyTable;
+        FDelegateHandle ScriptsWillReloadHandle;
 
         /** Text-convertible properties of the row struct, supers first. Column 0 of the grid is the
          *  row name and is not in this list. */
@@ -85,6 +87,7 @@ namespace Lumina
         /** Row struct the cached columns and property table were built for. Anything else means the
          *  table's type changed underneath us and both must be rebuilt. */
         CStruct* BoundRowStruct = nullptr;
+        uint64 BoundScriptDataGeneration = ~0ull;
 
         /** Row memory the details panel is currently pointed at; the rows vector reallocates on
          *  add/remove, so this is re-checked rather than assumed. */

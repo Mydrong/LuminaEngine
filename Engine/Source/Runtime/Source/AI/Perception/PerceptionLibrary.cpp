@@ -48,10 +48,10 @@ namespace Lumina
         return Index >= 0 && (Comp->PerceivedTargets[Index].ActiveSenses & (uint8)Senses) != 0;
     }
 
-    FNavPoint CPerceptionLibrary::GetLastKnownLocation(CWorld* World, ECS::FEntity Perceiver,
+    SNavPoint CPerceptionLibrary::GetLastKnownLocation(CWorld* World, ECS::FEntity Perceiver,
         ECS::FEntity Target)
     {
-        FNavPoint Result;
+        SNavPoint Result;
         if (World == nullptr)
         {
             return Result;
@@ -167,7 +167,7 @@ namespace Lumina
         }
         if (!AffiliationTag.IsNone())
         {
-            FGameplayTag Tag;
+            SGameplayTag Tag;
             Tag.TagName = AffiliationTag;
             Source.AffiliationTags.AddTag(Tag);
         }
@@ -179,7 +179,7 @@ namespace Lumina
         {
             return;
         }
-        FGameplayTag Detectable;
+        SGameplayTag Detectable;
         Detectable.TagName = Tag;
         World->GetOrEmplaceComponent<SPerceptionComponent>(Perceiver).DetectableTags.AddTag(Detectable);
     }

@@ -87,10 +87,10 @@ namespace Lumina
         /** Auto-bake debounce: bake once bounds/settings settle and differ from what's baked. */
         FVector3                                AutoPrevCenter   = FVector3(FLT_MAX);
         FVector3                                AutoPrevExtents  = FVector3(FLT_MAX);
-        FNavBuildSettings                       AutoPrevSettings;
+        SNavBuildSettings                       AutoPrevSettings;
         FVector3                                AutoBuiltCenter  = FVector3(FLT_MAX);
         FVector3                                AutoBuiltExtents = FVector3(FLT_MAX);
-        FNavBuildSettings                       AutoBuiltSettings;
+        SNavBuildSettings                       AutoBuiltSettings;
         float                                   AutoSettleTimer  = 0.0f;
         bool                                    bAutoBuiltValid  = false;
 
@@ -160,7 +160,7 @@ namespace Lumina
 
         /** Voxelization, agent, and tiling parameters fed to Recast. */
         PROPERTY(Editable, Category = "NavMesh|Build")
-        FNavBuildSettings Settings;
+        SNavBuildSettings Settings;
 
         /** Re-bake automatically when the bounds/settings change (e.g. placed or moved in the editor). */
         PROPERTY(Editable, Category = "NavMesh|Build")
@@ -187,7 +187,7 @@ namespace Lumina
 
         /** Baked tile blobs (empty = non-walkable tile). Serialized. */
         PROPERTY(Category = "NavMesh|Baked")
-        TVector<FNavTileData> Tiles;
+        TVector<SNavTileData> Tiles;
 
         /** Bake origin (= bounds min). */
         PROPERTY(Category = "NavMesh|Baked")

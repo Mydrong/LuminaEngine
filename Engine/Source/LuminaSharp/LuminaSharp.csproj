@@ -13,6 +13,10 @@
     <Deterministic>true</Deterministic>
     <Configurations>Debug;Development;Shipping</Configurations>
 
+    <!-- LuminaSharp.xml beside the dll carries the reflected C++ comments into script IntelliSense. -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1570;CS1572;CS1573;CS1574;CS1587;CS1591</NoWarn>
+
     <!-- Loaded into a collectible load context, so it must carry its own dependency manifest. -->
     <EnableDynamicLoading>true</EnableDynamicLoading>
 

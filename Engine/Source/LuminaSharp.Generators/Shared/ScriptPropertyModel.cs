@@ -29,7 +29,10 @@ internal static class ScriptPropertyClassifier
     {
         if (Type.TypeKind == TypeKind.Enum)
         {
-            return FScriptPropertyClassification.Of(EScriptAccess.Enum);
+            return HasMirrorAttribute(Type) || IsReflected(Type)
+                ? FScriptPropertyClassification.Of(EScriptAccess.Enum)
+                : FScriptPropertyClassification.Reject(
+                    $"'{Display(Type)}' is an enum declared in script, and native stores it by its reflected type. Mark it [Reflect].");
         }
         if (Type.SpecialType == SpecialType.System_String)
         {
@@ -52,6 +55,10 @@ internal static class ScriptPropertyClassifier
         if (DerivesFromNativeObject(Type))
         {
             return FScriptPropertyClassification.Of(EScriptAccess.Object);
+        }
+        if (IsStructHandle(Type) && IsEngineMirror(Type))
+        {
+            return FScriptPropertyClassification.Of(EScriptAccess.NativeStruct);
         }
 
         // Stays a managed field: it owns the script's subscriptions and polled state, which native cannot hold.
@@ -137,10 +144,16 @@ internal static class ScriptPropertyClassifier
     // A primitive is its bytes everywhere, and a mirror's size is checked against native at startup.
     private static bool IsEngineMirror(ITypeSymbol Type)
     {
-        if (Type.SpecialType != SpecialType.None || Type.TypeKind == TypeKind.Enum)
-        {
-            return true;
-        }
+        return Type.SpecialType != SpecialType.None || Type.TypeKind == TypeKind.Enum || HasMirrorAttribute(Type);
+    }
+
+    private static bool IsReflected(ITypeSymbol Type)
+    {
+        return Type.GetAttributes().Any(Attribute => Attribute.AttributeClass?.ToDisplayString() == ScriptPropertyTypeNames.ReflectAttribute);
+    }
+
+    private static bool HasMirrorAttribute(ITypeSymbol Type)
+    {
         foreach (AttributeData Attribute in Type.GetAttributes())
         {
             string? Name = Attribute.AttributeClass?.ToDisplayString();
@@ -161,6 +174,10 @@ internal static class ScriptPropertyClassifier
         {
             return $"'{Display(Type)}' cannot back a property. {SupportedTypesHelp}";
         }
+        if (!IsReflected(Type))
+        {
+            return $"'{Display(Type)}' is a struct declared in script, and native stores it by its reflected type. Mark it [Reflect].";
+        }
 
         bool bAnyField = false;
         foreach (ISymbol Member in Type.GetMembers())
@@ -179,7 +196,12 @@ internal static class ScriptPropertyClassifier
                      + "accessor would run off the end of the storage. Mark it, or move it out of the struct.";
             }
 
-            EScriptAccess MemberAccess = Classify(Field.Type).Access;
+            FScriptPropertyClassification FieldClass = Classify(Field.Type);
+            if (!FieldClass.IsSupported)
+            {
+                return $"'{Display(Type)}' has the field '{Field.Name}', and {FieldClass.Rejection}";
+            }
+            EScriptAccess MemberAccess = FieldClass.Access;
             if (MemberAccess is EScriptAccess.String or EScriptAccess.MarshalledStruct)
             {
                 bMarshalled = true;
@@ -253,6 +275,10 @@ internal static class ScriptPropertyClassifier
         if (Classification.Access == EScriptAccess.Blittable)
         {
             return null;
+        }
+        if (!Classification.IsSupported)
+        {
+            return $"the {Position} type is refused, because {Classification.Rejection}";
         }
 
         // An enum slot is its underlying type's width now, so the stride matches and it packs like a number.
@@ -366,6 +392,13 @@ internal static class ScriptPropertyClassifier
         return false;
     }
 
+    // A struct handle views native memory, so a member of its type is the embedded struct rather than a copy of its bytes.
+    public static bool IsStructHandle(ITypeSymbol Type)
+    {
+        return Type.TypeKind == TypeKind.Struct
+            && Type.AllInterfaces.Any(Interface => Interface.ToDisplayString() == ScriptPropertyTypeNames.NativeStruct);
+    }
+
     private static string Display(ITypeSymbol Type) => Type.ToDisplayString();
 
     /// <summary>The fallback explanation, for a type that matches nothing at all.</summary>
@@ -385,6 +418,7 @@ internal enum EScriptAccess
     String,
     AssetPath,
     Object,
+    NativeStruct,
     ObjectPtr,
     ListView,
     MapView,
@@ -455,12 +489,14 @@ internal readonly struct FScriptPropertyClassification
 internal static class ScriptPropertyTypeNames
 {
     public const string NativeObject = "LuminaSharp.NativeObject";
+    public const string NativeStruct = "LuminaSharp.INativeStruct";
     public const string SoftObjectReference = "LuminaSharp.ISoftObjectReference";
     public const string InputBinding = "LuminaSharp.SInputBinding";
 
     // What marks a struct as an engine mirror of a native type, so reading it as raw bytes is sound.
     public const string NativeTypeAttribute = "LuminaSharp.NativeTypeAttribute";
     public const string NativeLayoutAttribute = "LuminaSharp.NativeLayoutAttribute";
+    public const string ReflectAttribute = "LuminaSharp.ReflectAttribute";
 
     public const string PropertyAttribute = "LuminaSharp.PropertyAttribute";
     public const string SerializeAttribute = "LuminaSharp.SerializeAttribute";

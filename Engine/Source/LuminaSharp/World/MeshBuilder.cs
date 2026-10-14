@@ -35,59 +35,30 @@ public class MeshBuilder
         Indices.Clear();
     }
 
-    // Winding is fixed up from Outward, since the engine treats cross(B - A, C - A) facing out as the front.
-    public void Quad(FVector3 A, FVector3 B, FVector3 C, FVector3 D, FVector3 Outward, FVector4 Color)
-    {
-        FVector3 Normal = FVector3.Cross(B - A, C - A);
-        if (FVector3.Dot(Normal, Outward) < 0.0f)
-        {
-            (B, D) = (D, B);
-            Normal = -Normal;
-        }
+    public void Quad(FVector3 A, FVector3 B, FVector3 C, FVector3 D, FVector3 Outward, FVector4 Color) => Fan(Outward, Color, A, B, C, D);
 
-        Normal = Normal.NormalizedOr(Outward.NormalizedOr(FVector3.Up));
+    public void Triangle(FVector3 A, FVector3 B, FVector3 C, FVector3 Outward, FVector4 Color) => Fan(Outward, Color, A, B, C);
+
+    // A convex polygon fanned from its first corner, wound so cross(B - A, C - A) faces Outward, which the engine treats as the front.
+    private void Fan(FVector3 Outward, FVector4 Color, params ReadOnlySpan<FVector3> Corners)
+    {
+        FVector3 Normal = FVector3.Cross(Corners[1] - Corners[0], Corners[2] - Corners[0]);
+        bool bFlip = FVector3.Dot(Normal, Outward) < 0.0f;
+        Normal = (bFlip ? -Normal : Normal).NormalizedOr(Outward.NormalizedOr(FVector3.Up));
+
         int Base = Positions.Count;
-        Positions.Add(A);
-        Positions.Add(B);
-        Positions.Add(C);
-        Positions.Add(D);
-        for (int Corner = 0; Corner < 4; ++Corner)
+        foreach (FVector3 Corner in Corners)
         {
+            Positions.Add(Corner);
             Normals.Add(Normal);
             Colors.Add(Color);
         }
-
-        Indices.Add(Base);
-        Indices.Add(Base + 1);
-        Indices.Add(Base + 2);
-        Indices.Add(Base);
-        Indices.Add(Base + 2);
-        Indices.Add(Base + 3);
-    }
-
-    public void Triangle(FVector3 A, FVector3 B, FVector3 C, FVector3 Outward, FVector4 Color)
-    {
-        FVector3 Normal = FVector3.Cross(B - A, C - A);
-        if (FVector3.Dot(Normal, Outward) < 0.0f)
+        for (int Corner = 1; Corner + 1 < Corners.Length; ++Corner)
         {
-            (B, C) = (C, B);
-            Normal = -Normal;
+            Indices.Add(Base);
+            Indices.Add(Base + (bFlip ? Corner + 1 : Corner));
+            Indices.Add(Base + (bFlip ? Corner : Corner + 1));
         }
-
-        Normal = Normal.NormalizedOr(Outward.NormalizedOr(FVector3.Up));
-        int Base = Positions.Count;
-        Positions.Add(A);
-        Positions.Add(B);
-        Positions.Add(C);
-        for (int Corner = 0; Corner < 3; ++Corner)
-        {
-            Normals.Add(Normal);
-            Colors.Add(Color);
-        }
-
-        Indices.Add(Base);
-        Indices.Add(Base + 1);
-        Indices.Add(Base + 2);
     }
 
     public void Box(FVector3 Center, FVector3 Half, FVector4 Color) => Box(Center, Half, Color, FQuat.Identity);

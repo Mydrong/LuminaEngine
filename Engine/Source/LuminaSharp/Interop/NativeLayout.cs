@@ -13,3 +13,18 @@ public sealed class NativeLayoutAttribute : Attribute
         this.NativeType = NativeType;
     }
 }
+
+// Stamped by the reflector on every assembly that compiles a module's bindings, with the layout hash the native module registers.
+[AttributeUsage(AttributeTargets.Assembly, AllowMultiple = true)]
+public sealed class NativeModuleLayoutAttribute : Attribute
+{
+    public string Module { get; }
+
+    public ulong Hash { get; }
+
+    public NativeModuleLayoutAttribute(string Module, ulong Hash)
+    {
+        this.Module = Module;
+        this.Hash = Hash;
+    }
+}

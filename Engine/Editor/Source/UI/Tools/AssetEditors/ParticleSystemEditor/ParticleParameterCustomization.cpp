@@ -7,7 +7,7 @@ namespace Lumina
 {
     static const char* ParameterTypeNames[] = { "Float", "Int", "Bool", "Vec2", "Vec3", "Vec4", "Color" };
 
-    static void ResetValueStorage(FParticleParameter& Param)
+    static void ResetValueStorage(SParticleParameter& Param)
     {
         Param.Scalar  = 0.0f;
         Param.Integer = 0;

@@ -182,6 +182,13 @@ public static class ReflectionStep
                 Action.PrerequisiteItems.Add(Header);
             }
 
+            // The bindings are shared across configurations, so a stamp another configuration wrote reruns the reflector to re-emit them.
+            string LayoutStamp = GetLayoutStampPath(Target, Module);
+            if (File.Exists(LayoutStamp))
+            {
+                Action.PrerequisiteItems.Add(FileItem.Get(LayoutStamp));
+            }
+
             // Only the owner declares the shared engine files; two claimants would each regenerate the other's.
             bool bOwnsOutput = Target.Directories.IsEngineOwned(Module.Rules.ModuleDirectory) == bIsEngineTarget;
 
@@ -207,6 +214,15 @@ public static class ReflectionStep
         }
 
         return new ReflectionActions { Generate = Action, Inputs = InputActions };
+    }
+
+    // Must match MakeLayoutStampPath in Reflector/CodeGeneration/CodeGenerator.cpp.
+    private static string GetLayoutStampPath(BuildTarget Target, BuildModule Module)
+    {
+        string Directory = Module.Rules.bRouteCSharpTypeBindings && !string.IsNullOrEmpty(Module.Rules.CSharpBindingsDirectory)
+            ? Module.Rules.CSharpBindingsDirectory
+            : Path.Combine(Target.Directories.OutputRoot, "Intermediates", "CSharpBindings", Module.Name);
+        return Path.Combine(Directory, Module.Name + ".Layout.generated.cs");
     }
 
     /// <summary>An .inl/.ipp is an include fragment, so parsing it as its own file misreads X-macro bodies.</summary>

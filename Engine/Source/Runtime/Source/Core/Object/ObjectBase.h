@@ -190,6 +190,9 @@ namespace Lumina
         uint32                    NumStructs = 0;
         const FClassConstructor*  Classes = nullptr;
         uint32                    NumClasses = 0;
+        const char*               Module = nullptr;
+        // The reflector's hash of every size and offset it laid out, which the module's C# bindings carry too.
+        uint64                    LayoutHash = 0;
     };
 
     // Queues a module's types from its static initializer, so they are built once the reflection system is up.
@@ -197,6 +200,9 @@ namespace Lumina
     {
         RUNTIME_API explicit FTypeRegistrar(const FCompiledInTypes& Types);
     };
+
+    // The layout hash the named module registered, or zero when no loaded module has that name.
+    RUNTIME_API uint64 FindModuleLayoutHash(FStringView Module);
 
     RUNTIME_API void InitializeCObjectSystem();
     RUNTIME_API void ShutdownCObjectSystem();

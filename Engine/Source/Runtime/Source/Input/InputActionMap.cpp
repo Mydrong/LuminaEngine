@@ -398,19 +398,19 @@ namespace Lumina
 
     void FInputActionMap::UpdateContext(FInputContext& Context, float DeltaSeconds) const
     {
-        TVector<FInputActionState>& States = Context.GetMutableActionStates();
+        TVector<SInputActionState>& States = Context.GetMutableActionStates();
 
         // Carrying a stale HeldTime onto a different action would fire a phantom release next frame.
         if (Context.GetActionsSerial() != Serial || States.size() != Actions.size())
         {
-            States.assign(Actions.size(), FInputActionState());
+            States.assign(Actions.size(), SInputActionState());
             Context.SetActionsSerial(Serial);
         }
 
         for (size_t Index = 0; Index < Actions.size(); ++Index)
         {
             const SInputAction& Action = Actions[Index];
-            FInputActionState& State = States[Index];
+            SInputActionState& State = States[Index];
             const bool bWasDown = State.IsDown();
 
             float X = 0.0f;
@@ -429,12 +429,12 @@ namespace Lumina
             const float HeldTime = bDown ? (bWasDown ? State.HeldTime + DeltaSeconds : 0.0f) : 0.0f;
 
             uint32 Flags = 0;
-            if (bDown)               { Flags |= FInputActionState::Flag_Down; }
-            if (bDown && !bWasDown)  { Flags |= FInputActionState::Flag_Pressed; }
-            if (!bDown && bWasDown)  { Flags |= FInputActionState::Flag_Released; }
-            if (bDown && HeldTime >= Action.HoldTime) { Flags |= FInputActionState::Flag_Held; }
+            if (bDown)               { Flags |= SInputActionState::Flag_Down; }
+            if (bDown && !bWasDown)  { Flags |= SInputActionState::Flag_Pressed; }
+            if (!bDown && bWasDown)  { Flags |= SInputActionState::Flag_Released; }
+            if (bDown && HeldTime >= Action.HoldTime) { Flags |= SInputActionState::Flag_Held; }
             // Tap is decided on the release frame from the press duration we are about to discard.
-            if (!bDown && bWasDown && State.HeldTime <= Action.TapTime) { Flags |= FInputActionState::Flag_Tapped; }
+            if (!bDown && bWasDown && State.HeldTime <= Action.TapTime) { Flags |= SInputActionState::Flag_Tapped; }
 
             State.X = X;
             State.Y = Y;
@@ -443,9 +443,9 @@ namespace Lumina
         }
     }
 
-    const FInputActionState& FInputActionMap::GetActionState(FName Name, const FInputContext& Context) const
+    const SInputActionState& FInputActionMap::GetActionState(FName Name, const FInputContext& Context) const
     {
-        static const FInputActionState Empty;
+        static const SInputActionState Empty;
 
         const int32 Index = FindActionIndex(Name);
         if (Index == Constants::kIndexNone)
@@ -454,7 +454,7 @@ namespace Lumina
         }
 
         // The context has not been updated against this action table yet, so Empty is the safe default.
-        const TVector<FInputActionState>& States = Context.GetActionStates();
+        const TVector<SInputActionState>& States = Context.GetActionStates();
         if (Context.GetActionsSerial() != Serial || Index >= int32(States.size()))
         {
             return Empty;
@@ -462,9 +462,9 @@ namespace Lumina
         return States[Index];
     }
 
-    const FInputActionState& FInputActionMap::GetActionState(const FInputActionHandle& Handle, const FInputContext& Context) const
+    const SInputActionState& FInputActionMap::GetActionState(const SInputActionHandle& Handle, const FInputContext& Context) const
     {
-        static const FInputActionState Empty;
+        static const SInputActionState Empty;
 
         // A details-panel edit does not bump the serial, so a serial-only check answers stale.
         if (Handle.CachedSerial != Serial || Handle.CachedName != Handle.Name)
@@ -479,7 +479,7 @@ namespace Lumina
             return Empty;
         }
 
-        const TVector<FInputActionState>& States = Context.GetActionStates();
+        const TVector<SInputActionState>& States = Context.GetActionStates();
         if (Context.GetActionsSerial() != Serial || Handle.CachedIndex >= int32(States.size()))
         {
             return Empty;

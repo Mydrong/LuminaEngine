@@ -13,7 +13,7 @@ namespace Lumina::Box3DUtils
         return !CVarStrictCollisionFilter.GetValue();
     }
 
-    b3Filter MakeShapeFilter(const FCollisionProfile& Profile, int32 GroupIndex)
+    b3Filter MakeShapeFilter(const SCollisionProfile& Profile, int32 GroupIndex)
     {
         b3Filter Filter = b3DefaultFilter();
         Filter.categoryBits = (uint64)Profile.Layer;
@@ -28,7 +28,7 @@ namespace Lumina::Box3DUtils
     // character may be told to ignore.
     static constexpr uint64 CharacterProxyBit = 1ull << 32;
 
-    void* PackProfileUserData(const FCollisionProfile& Profile, bool bCharacterProxy)
+    void* PackProfileUserData(const SCollisionProfile& Profile, bool bCharacterProxy)
     {
         uint64 Packed = (uint64)Profile.Layer | ((uint64)Profile.Mask << 16);
         if (bCharacterProxy)
@@ -43,7 +43,7 @@ namespace Lumina::Box3DUtils
         return ((uint64)reinterpret_cast<uintptr_t>(UserData) & CharacterProxyBit) != 0;
     }
 
-    b3QueryFilter MakeQueryFilter(const FCollisionProfile& Profile)
+    b3QueryFilter MakeQueryFilter(const SCollisionProfile& Profile)
     {
         b3QueryFilter Filter = b3DefaultQueryFilter();
         Filter.categoryBits = (uint64)Profile.Layer;

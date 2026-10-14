@@ -165,6 +165,23 @@ namespace Lumina
 
         RUNTIME_API void RebuildSyncTrack();
 
+        // Lands a clip authored on one skeleton onto another whose bind pose differs, such as a second FBX with its own axis and unit conversion.
+        struct FRetargetFix
+        {
+            int32 Bone            = 0;
+            int32 CompressedIndex = 0;
+
+            // Root bones carry the file's axis and unit conversion, so the clip value is re-parented by TargetBind * inverse(SourceBind).
+            bool     bRoot = false;
+            FMatrix4 RootCorrection;
+            FVector3 SourceBindT;
+            FQuat    SourceBindR;
+            FVector3 SourceBindS;
+
+            // Other bones keep the clip's rotation and scale its translation to the target's bone length.
+            float TranslationScale = 1.0f;
+        };
+
         // Resolved once per (skeleton, bind generation) and never mutated after, so sampling inside ParallelFor needs no lock.
         struct FResolvedSkeleton
         {
@@ -184,9 +201,16 @@ namespace Lumina
 
             // Compressed bones with at least one animated track, the only ones sampling still decodes.
             TVector<int32>  AnimatedBones;
+
+            // Identifies the clip's own skeleton and both bind poses the fixes below were measured against.
+            uint64 SourceKey = 0;
+
+            // Where the clip's own skeleton and this one disagree in bind pose, empty when they agree.
+            TVector<FRetargetFix> RetargetFixes;
         };
 
-        RUNTIME_API const FResolvedSkeleton* GetResolvedSkeleton(const FSkeletonResource* Skeleton);
+        // Source is the skeleton the clip was authored against, and null or equal to Skeleton when no retarget is needed.
+        RUNTIME_API const FResolvedSkeleton* GetResolvedSkeleton(const FSkeletonResource* Skeleton, const FSkeletonResource* Source = nullptr);
 
         void BuildConstantOverlay(FResolvedSkeleton& Resolved, int32 NumBones) const;
 
@@ -284,6 +308,9 @@ namespace Lumina
         /** Samples a single bone's local TRS at Time, falling back to its bind-pose value for untouched channels. */
         void SampleBoneLocal(float Time, FSkeletonResource* RESTRICT InSkeleton, int32 BoneIndex,
                              FVector3& OutT, FQuat& OutR, FVector3& OutS) const;
+
+        // The skeleton this clip was authored against, which sampling compares binds with when posing another.
+        const FSkeletonResource* GetSourceSkeletonResource() const;
 
         float GetDuration() const { return AnimationResource->Duration; }
         FAnimationResource* GetAnimationResource() const { return AnimationResource.get(); }

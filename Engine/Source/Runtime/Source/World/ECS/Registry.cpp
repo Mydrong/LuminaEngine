@@ -83,6 +83,44 @@ namespace Lumina::ECS
         return Types.size();
     }
 
+    void FComponentTypeRegistry::Relayout(FComponentTypeID TypeID, const FComponentTypeInfo& Info, FMigrateComponentValue Migrate)
+    {
+        ASSERT(TypeID < Types.size());
+        FComponentTypeInfo& Stored = *Types[TypeID];
+        Stored = Info;
+        Stored.TypeID = TypeID;
+        Stored.bRuntimeLayout = true;
+
+        FScopeLock Lock(PoolLock);
+        for (FSparseSet* Pool : RuntimeLayoutPools)
+        {
+            if (Pool->GetTypeID() == TypeID)
+            {
+                Pool->Relayout(Stored, Migrate);
+            }
+        }
+    }
+
+    void FComponentTypeRegistry::TrackPool(FSparseSet* Pool)
+    {
+        FScopeLock Lock(PoolLock);
+        RuntimeLayoutPools.push_back(Pool);
+    }
+
+    void FComponentTypeRegistry::UntrackPool(FSparseSet* Pool)
+    {
+        FScopeLock Lock(PoolLock);
+        for (size_t Index = 0; Index < RuntimeLayoutPools.size(); ++Index)
+        {
+            if (RuntimeLayoutPools[Index] == Pool)
+            {
+                RuntimeLayoutPools[Index] = RuntimeLayoutPools.back();
+                RuntimeLayoutPools.pop_back();
+                return;
+            }
+        }
+    }
+
 
 
     // Slots past EntityRecords.size() up to NextAppendIndex are handed out but not yet stored, so a reservation never reallocates the records a reader may be walking.
@@ -473,6 +511,56 @@ namespace Lumina::ECS
         // Joins the walk so a destroy detaches from it too, but never the by-type-id index, which one pool owns.
         ActiveStorages.push_back(Raw);
         return Raw;
+    }
+
+    FSparseSet& FRegistry::AssureStorage(FComponentTypeID TypeID)
+    {
+        if (TypeID >= StoragesByTypeID.size() || StoragesByTypeID[TypeID] == nullptr)
+        {
+            CreateStorage(TypeID);
+        }
+        return *StoragesByTypeID[TypeID];
+    }
+
+    void* FRegistry::GetOrEmplaceRaw(FComponentTypeID TypeID, FEntity Entity)
+    {
+        FSparseSet& Storage = AssureStorage(TypeID);
+        if (Storage.Contains(Entity))
+        {
+            return Storage.GetRaw(Entity);
+        }
+        void* Value = Storage.EmplaceDefaultRaw(Entity);
+        Storage.Signals.OnConstruct.Broadcast(*this, Entity);
+        return Value;
+    }
+
+    void* FRegistry::EmplaceOrReplaceRaw(FComponentTypeID TypeID, FEntity Entity, const void* Source)
+    {
+        FSparseSet& Storage = AssureStorage(TypeID);
+        const bool bExisted = Storage.Contains(Entity);
+        void* Value = Storage.EmplaceCopyRaw(Entity, Source);
+        (bExisted ? Storage.Signals.OnUpdate : Storage.Signals.OnConstruct).Broadcast(*this, Entity);
+        return Value;
+    }
+
+    bool FRegistry::RemoveRaw(FComponentTypeID TypeID, FEntity Entity)
+    {
+        FSparseSet* Storage = FindStorage(TypeID);
+        if (Storage == nullptr || !Storage->Contains(Entity))
+        {
+            return false;
+        }
+        Storage->Signals.OnDestroy.Broadcast(*this, Entity);
+        return Storage->RemoveEntity(Entity);
+    }
+
+    void FRegistry::PatchRaw(FComponentTypeID TypeID, FEntity Entity)
+    {
+        FSparseSet* Storage = FindStorage(TypeID);
+        if (Storage != nullptr && !Storage->IsTagOnly() && Storage->Contains(Entity))
+        {
+            Storage->Signals.OnUpdate.Broadcast(*this, Entity);
+        }
     }
 
     void FRegistry::CreateStorage(FComponentTypeID TypeID)

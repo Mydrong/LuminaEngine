@@ -108,7 +108,7 @@ namespace Lumina
         if (PreviewHandle.IsValid() && Audio::HasDevice()
             && Audio::Context().GetVoiceState(PreviewHandle) == EAudioVoiceState::Free)
         {
-            PreviewHandle = FAudioHandle::Invalid();
+            PreviewHandle = SAudioHandle::Invalid();
             PreviewInstance.reset();
         }
     }
@@ -295,7 +295,7 @@ namespace Lumina
             return;
         }
 
-        FAudioPlayParams Params;
+        SAudioPlayParams Params;
         Params.Volume = 1.0f;
         Params.Bus    = EAudioBus::UI;
 
@@ -327,7 +327,7 @@ namespace Lumina
             Audio::Context().StopSound(PreviewHandle, EAudioStopMode::Immediate);
         }
 
-        PreviewHandle = FAudioHandle::Invalid();
+        PreviewHandle = SAudioHandle::Invalid();
         PreviewInstance.reset();
         PreviewParameters.clear();
     }

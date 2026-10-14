@@ -340,7 +340,7 @@ namespace Lumina
                     }
 
                     Transition->MigrateLegacyCondition();
-                    for (const FAnimTransitionCondition& Condition : Transition->Conditions)
+                    for (const SAnimTransitionCondition& Condition : Transition->Conditions)
                     {
                         if (Condition.ConditionSource == EAnimTransitionSource::Parameter && !Condition.ParameterName.IsNone())
                         {

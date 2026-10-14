@@ -1202,7 +1202,7 @@ namespace Lumina
                 Entry.Prim.Mesh = Mesh;
                 const FMeshletData& MeshletData = Mesh->GetMeshResource().MeshletData;
                 Entry.ContentId = MakeContentId(Mesh, MeshletData.VertexPositions.size(), MeshletData.MeshletTriangles.size());
-                const FAABB& Local = Mesh->GetAABB();
+                const SAABB& Local = Mesh->GetAABB();
                 const FVector3 Corners[8] = {
                     {Local.Min.x, Local.Min.y, Local.Min.z}, {Local.Max.x, Local.Min.y, Local.Min.z},
                     {Local.Min.x, Local.Max.y, Local.Min.z}, {Local.Max.x, Local.Max.y, Local.Min.z},
@@ -1557,7 +1557,7 @@ namespace Lumina
                 const bool bChangedThisTick =
                     !Math::IsNearlyEqual(Comp.Center, RT.AutoPrevCenter) ||
                     !Math::IsNearlyEqual(WExt, RT.AutoPrevExtents) ||
-                    std::memcmp(&Comp.Settings, &RT.AutoPrevSettings, sizeof(FNavBuildSettings)) != 0;
+                    std::memcmp(&Comp.Settings, &RT.AutoPrevSettings, sizeof(SNavBuildSettings)) != 0;
                 RT.AutoPrevCenter   = Comp.Center;
                 RT.AutoPrevExtents  = WExt;
                 RT.AutoPrevSettings = Comp.Settings;
@@ -1574,7 +1574,7 @@ namespace Lumina
                         !RT.bAutoBuiltValid ||
                         !Math::IsNearlyEqual(Comp.Center, RT.AutoBuiltCenter) ||
                         !Math::IsNearlyEqual(WExt, RT.AutoBuiltExtents) ||
-                        std::memcmp(&Comp.Settings, &RT.AutoBuiltSettings, sizeof(FNavBuildSettings)) != 0;
+                        std::memcmp(&Comp.Settings, &RT.AutoBuiltSettings, sizeof(SNavBuildSettings)) != 0;
                     const bool bIdle = !RT.ActiveBake && !RT.PendingInit;
 
                     if (RT.AutoSettleTimer >= 0.25f && bDiffersFromBuilt && bIdle)
@@ -1600,7 +1600,7 @@ namespace Lumina
 
                 // Tally non-empty tiles so a zero-walkable bake is loud (usually bounds miss geometry).
                 int32 NonEmptyTiles = 0;
-                for (const FNavTileData& T : Out.Tiles)
+                for (const SNavTileData& T : Out.Tiles)
                 {
                     if (!T.Blob.empty()) ++NonEmptyTiles;
                 }
@@ -1677,7 +1677,7 @@ namespace Lumina
             {
                 // Tiles can persist with every blob empty, and Detour cannot be handed nothing.
                 const bool bAnyWalkableTile = Algo::AnyOf(Comp.Tiles,
-                    [](const FNavTileData& Tile) { return !Tile.Blob.empty(); });
+                    [](const SNavTileData& Tile) { return !Tile.Blob.empty(); });
                 if (!bAnyWalkableTile)
                 {
                     LOG_ERROR("NavMesh has {} tiles but none carry walkable geometry, so there is nothing to hydrate. "
@@ -1709,7 +1709,7 @@ namespace Lumina
                     : Math::Max(1, TileCount);
 
                 // Copy tiles so worker owns its data; Comp.Tiles stays serialized source of truth.
-                TVector<FNavTileData> TilesCopy;
+                TVector<SNavTileData> TilesCopy;
                 if (!bStreaming)
                 {
                     TilesCopy = Comp.Tiles;
@@ -1800,7 +1800,7 @@ namespace Lumina
 
                 // Persist into Comp.Tiles BEFORE the runtime mesh hand-off, or PIE clones/saves init from empty.
                 bool bUpdatedExisting = false;
-                for (FNavTileData& T : Comp.Tiles)
+                for (SNavTileData& T : Comp.Tiles)
                 {
                     if (T.X == Job->TileX && T.Y == Job->TileY)
                     {
@@ -1811,7 +1811,7 @@ namespace Lumina
                 }
                 if (!bUpdatedExisting)
                 {
-                    FNavTileData NewTile;
+                    SNavTileData NewTile;
                     NewTile.X = Job->TileX;
                     NewTile.Y = Job->TileY;
                     NewTile.Blob = Job->ResultBlob;
@@ -2125,7 +2125,7 @@ namespace Lumina
                 FVector3                BakeMax;
                 FVector3                GatherMin;
                 FVector3                GatherMax;
-                FNavBuildSettings       Settings;
+                SNavBuildSettings       Settings;
                 FNavBuildOutput         Layout;
             };
             auto Snap = MakeShared<FInputSnapshot>();
@@ -2200,7 +2200,7 @@ namespace Lumina
                 const int32 EmittedTris = (int32)(Input.Indices.size() / 3);
 
                 PlatformTime::FStopwatch BakeWatch;
-                TVector<FNavTileData> Baked;
+                TVector<SNavTileData> Baked;
                 NavMeshBuilder::BakeTiles(Input, Snap->Layout, Coords, Baked);
                 if (bLogRebakeTimings)
                 {
@@ -2428,7 +2428,7 @@ namespace Lumina
             return Mesh && Mesh->ProjectPoint(World, Extents, Filter, Out);
         }
 
-        bool Raycast(const FSystemContext& Context, const FVector3& Start, const FVector3& End, const FNavQueryFilter& Filter, FNavRaycastResult& Out, FName Agent)
+        bool Raycast(const FSystemContext& Context, const FVector3& Start, const FVector3& End, const FNavQueryFilter& Filter, SNavRaycastResult& Out, FName Agent)
         {
             FNavMesh* Mesh = FirstReadyNavMesh(Context, Agent);
             return Mesh && Mesh->Raycast(Start, End, Filter, Out);
@@ -2491,7 +2491,7 @@ namespace Lumina
             return Mesh && Mesh->ProjectPoint(Point, Extents, Filter, Out);
         }
 
-        bool Raycast(CWorld* World, const FVector3& Start, const FVector3& End, FNavRaycastResult& Out, FName Agent)
+        bool Raycast(CWorld* World, const FVector3& Start, const FVector3& End, SNavRaycastResult& Out, FName Agent)
         {
             FNavMesh* Mesh = FirstReadyNavMeshFromWorld(World, Agent);
             FNavQueryFilter Filter;
@@ -2500,7 +2500,7 @@ namespace Lumina
 
         bool IsWalkableLine(CWorld* World, const FVector3& From, const FVector3& To, FName Agent)
         {
-            FNavRaycastResult Result;
+            SNavRaycastResult Result;
             return Raycast(World, From, To, Result, Agent) && !Result.bHit;
         }
 

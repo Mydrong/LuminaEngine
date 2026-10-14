@@ -6,121 +6,38 @@ using System.Runtime.InteropServices;
 
 namespace LuminaSharp;
 
-/// <summary>
-/// Hosts live managed instances of C# subclasses of <c>REFLECT(Scriptable)</c> native CObjects. Generic over
-/// any Scriptable type, with no per-type hosting code: native creates the CObject (a minted CClass), this
-/// runtime instantiates the matching C# subclass and pairs it to the native object via a GCHandle.
-///
-/// It keeps no handle list of its own. Each handle lives in its native object's managed-instance slot
-/// (Core/Object/ManagedInstance.h), which frees it when the object dies and drains the whole table before the
-/// collectible ALC unloads -- so there is exactly one owner and no second bookkeeping to keep in step.
-/// Per-instance dispatch is driven directly by the Reflector-generated native shim, not from here.
-/// </summary>
+// Pairs each native object of a minted class with an instance of its C# subclass, the handle living in the object's managed-instance slot.
 internal sealed class ScriptableRuntime
 {
     private const byte AbstractFlag = 1;
 
     private readonly TypeLibrary Library;
+    private readonly IReadOnlyDictionary<string, string> SourcePaths;
 
     // EntityScripts are created here but resolved and destroyed through EntityScriptRuntime's handle set.
-    private readonly EntityScriptRuntime EntityScripts;
+    internal EntityScriptRuntime EntityScripts { get; }
 
     // Cached per user type: the names of the ScriptEvents that type overrides, joined once.
-    private readonly Dictionary<Type, string> OverriddenEventsByType = new();
+    private readonly Dictionary<Type, List<string>> OverriddenEventsByType = new();
 
-    public ScriptableRuntime(TypeLibrary Library, EntityScriptRuntime EntityScripts)
+    public ScriptableRuntime(TypeLibrary Library, EntityScriptRuntime EntityScripts,
+        IReadOnlyDictionary<string, string> SourcePaths)
     {
         this.Library = Library;
         this.EntityScripts = EntityScripts;
+        this.SourcePaths = SourcePaths;
     }
 
     public IReadOnlyCollection<string> TypeNames => Library.ScriptableTypeNames;
 
-    /// <summary>Reports each discovered Scriptable C# type as (full name, native base class name, the names
-    /// of the events it overrides) to a native sink, so the host can mint a CClass deriving from that native
-    /// base. The native base name is the <c>[NativeType]</c> name of the nearest <c>[ScriptableType]</c>
-    /// wrapper in the base chain. Overrides are named rather than numbered: the host turns each into a real
-    /// function on the minted class, so there is no index to agree on and no ceiling to hit.</summary>
-    public unsafe void Enumerate(IntPtr Sink, IntPtr Context)
+    // The C# parent's name when that class is minted too, else the native class the script derives from.
+    internal string? NativeBaseOf(Type Type)
     {
-        if (Sink == IntPtr.Zero)
-        {
-            return;
-        }
-
-        var Add = (delegate* unmanaged[Stdcall]<IntPtr, byte*, int, byte*, int, byte*, int, byte, byte*, int, void>)Sink;
-        Span<byte> NameScratch = stackalloc byte[256];
-        Span<byte> BaseScratch = stackalloc byte[256];
-        Span<byte> OverrideScratch = stackalloc byte[1024];
-        Span<byte> MetaScratch = stackalloc byte[512];
-        // Parents first, since a class is minted under its C# parent and stacks its block after that parent's.
-        foreach (Type Type in Library.ScriptableTypes.OrderBy(Depth))
-        {
-            string FullName = NativeTypeName.Of(Type);
-            Type? MintedParent = Library.MintedParentOf(Type);
-            string? NativeBase = MintedParent != null ? NativeTypeName.Of(MintedParent) : ScriptableNativeBaseName(Type);
-            if (NativeBase == null)
-            {
-                continue;
-            }
-
-            Interop.FInteropString Name = new(FullName, NameScratch);
-            Interop.FInteropString Base = new(NativeBase, BaseScratch);
-            Interop.FInteropString Overrides = new(GetOverriddenEvents(Type), OverrideScratch);
-            Interop.FInteropString Meta = new(GetClassMeta(Type), MetaScratch);
-            try
-            {
-                Add(Context, Name.Pointer, Name.Length, Base.Pointer, Base.Length,
-                    Overrides.Pointer, Overrides.Length, (byte)(Type.IsAbstract ? AbstractFlag : 0),
-                    Meta.Pointer, Meta.Length);
-            }
-            finally
-            {
-                Meta.Free();
-                Overrides.Free();
-                Name.Free();
-                Base.Free();
-            }
-        }
+        Type? MintedParent = Library.MintedParentOf(Type);
+        return MintedParent != null ? NativeTypeName.Of(MintedParent) : (TypeLibrary.NativeClassBaseOf(Type) is { } Native ? NativeTypeName.Of(Native) : null);
     }
 
-    /// <summary>Reports each (prior name, current name) pair from the <c>[Alias]</c> attributes on script
-    /// classes, so the host can record where a renamed class went. Separate from <see cref="Enumerate"/>
-    /// rather than folded into it because that sink's arity is part of the native ABI.</summary>
-    public unsafe void EnumerateAliases(IntPtr Sink, IntPtr Context)
-    {
-        if (Sink == IntPtr.Zero)
-        {
-            return;
-        }
-
-        var Add = (delegate* unmanaged[Stdcall]<IntPtr, byte*, int, byte*, int, void>)Sink;
-        Span<byte> OldScratch = stackalloc byte[256];
-        Span<byte> NewScratch = stackalloc byte[256];
-        foreach (KeyValuePair<string, string> Pair in Library.ClassAliases)
-        {
-            Interop.FInteropString Old = new(Pair.Key, OldScratch);
-            Interop.FInteropString New = new(Pair.Value, NewScratch);
-            try
-            {
-                Add(Context, Old.Pointer, Old.Length, New.Pointer, New.Length);
-            }
-            finally
-            {
-                Old.Free();
-                New.Free();
-            }
-        }
-    }
-
-    /// <summary>Instantiates the named Scriptable subclass, pairs it to the already-created native object, and
-    /// returns a STRONG GCHandle (IntPtr.Zero on failure).
-    ///
-    /// The caller stores the handle in the native object's managed-instance slot
-    /// (Core/Object/ManagedInstance.h), which is its only owner: the object's destructor frees it, and the
-    /// script teardown contract drains the whole table before the collectible ALC unloads. Strong rather than
-    /// weak because this instance holds user state for as long as the native object lives -- letting the GC
-    /// take it between dispatches would silently reset the script's fields.</summary>
+    // Creates the C# instance for a native object as a strong handle the object's managed-instance slot owns, strong since it holds the script's state.
     public IntPtr Create(string TypeName, ulong NativePtr)
     {
         Type? Type = Library.GetScriptable(TypeName);
@@ -141,60 +58,31 @@ internal sealed class ScriptableRuntime
         GCHandle Allocated = GCHandle.Alloc(Instance);
 
         // The one point every script instance passes through, and it runs before the dispatch that created it.
-        if (Instance is Lumina.CEntityScript Script)
-        {
-            PrepareEntityScript(Script, TypeName, Type);
-            EntityScripts.Adopt(Allocated);
-        }
+        Instance.OnScriptInstanceCreated(this, Allocated);
         return GCHandle.ToIntPtr(Allocated);
     }
 
-    // Description must be set before any dispatch: OnAction and the profiler labels both read it.
-    private void PrepareEntityScript(Lumina.CEntityScript Script, string TypeName, Type Type)
-    {
-        Script.Description = Library.Describe(Type);
-
-        // Defensive: the driver always SetOwner's before the first dispatch that creates this instance.
-        if (Script.Entity.IsNull)
-        {
-            return;
-        }
-
-        try
-        {
-            Script.Description.EnsureInputComponent(Script);
-        }
-        catch (Exception Exception)
-        {
-            Native.Log(ELogLevel.Error, $"CEntityScript component injection threw: {Exception}");
-        }
-    }
-
-    /// <summary>
-    /// Runs a type's declared [Property] initializers into its class default object, once, at mint time.
-    ///
-    /// The CDO deliberately never keeps a managed instance -- it is never dispatched to -- so one is created
-    /// here, bound just long enough for the generated <c>__ApplyScriptDefaults</c> to write through its
-    /// accessors into the CDO's native block, and then dropped. Every later instance is copied from that
-    /// block by CClass::ConstructScriptProperties, which is how a script gets defaults at all: a minted class
-    /// has no C++ constructor to carry them.
-    /// </summary>
+    // Runs a type's C# initializers into the defaults native copies every instance from, the one way any minted type gets defaults.
     public void ApplyDefaults(string TypeName, ulong NativeDefaultObject)
     {
-        // A script data table row has no class default object, so its initializers land in the minted struct's defaults block.
-        if (Library.GetDataStruct(TypeName) is { } Row)
+        nint Defaults = new IntPtr(unchecked((long)NativeDefaultObject));
+        if (Library.GetScriptStruct(TypeName) is { } Row)
         {
-            if (Activator.CreateInstance(Row.Type) is NativeStruct RowInstance)
+            try
             {
-                RowInstance.BindNativeHandle(new IntPtr(unchecked((long)NativeDefaultObject)));
-                try
+                // A struct living in native memory writes through its own accessors, and a plain value is constructed and written whole.
+                if (Row.Type.GetMethod("__ApplyScriptDefaults", BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public) is { } Apply)
                 {
-                    RowInstance.ApplyScriptDefaults();
+                    Apply.Invoke(null, new object[] { new NativeRef(Defaults) });
                 }
-                catch (Exception Exception)
+                else
                 {
-                    Native.Log(ELogLevel.Error, $"Script defaults for '{TypeName}' threw: {Exception.Message}");
+                    ScriptStructLayout.WriteBoxed(Row.Type, Defaults, Activator.CreateInstance(Row.Type));
                 }
+            }
+            catch (Exception Exception)
+            {
+                Native.Log(ELogLevel.Error, $"Script defaults for '{TypeName}' threw: {(Exception.InnerException ?? Exception).Message}");
             }
             return;
         }
@@ -206,7 +94,7 @@ internal sealed class ScriptableRuntime
             return;
         }
 
-        Instance.BindNativeHandle(new IntPtr(unchecked((long)NativeDefaultObject)));
+        Instance.BindNativeHandle(Defaults);
         try
         {
             Instance.ApplyScriptDefaults();
@@ -217,40 +105,44 @@ internal sealed class ScriptableRuntime
         }
     }
 
-    // The REFLECT specifiers for the minted class as lines of key, tab, value, nearest declaration first.
-    private string GetClassMeta(Type Type)
+    // The REFLECT specifiers for the minted class, nearest declaration first, so a subclass overrides what it inherits.
+    internal List<KeyValuePair<string, string>> ClassMeta(Type Type)
     {
-        var Lines = new System.Text.StringBuilder();
+        var Meta = new List<KeyValuePair<string, string>>();
         var Written = new HashSet<string>();
+        void Add(string Key, string Value)
+        {
+            if (Written.Add(Key))
+            {
+                Meta.Add(new KeyValuePair<string, string>(Key, Value));
+            }
+        }
+
+        if (SourcePaths.TryGetValue(Type.FullName ?? Type.Name, out string? SourcePath))
+        {
+            Add("SourceFile", SourcePath);
+        }
         foreach (Type Declaring in Library.ChainUpToMintedParent(Type))
         {
             if (Declaring.GetCustomAttribute<ReflectAttribute>(inherit: false) is { } Reflect)
             {
                 foreach (KeyValuePair<string, string> Specifier in Reflect.Specifiers())
                 {
-                    AppendMeta(Lines, Written, Specifier.Key, Specifier.Value);
+                    Add(Specifier.Key, Specifier.Value);
                 }
             }
-            foreach (ClassMetaAttribute Meta in Declaring.GetCustomAttributes<ClassMetaAttribute>(inherit: false))
+            foreach (ClassMetaAttribute Declared in Declaring.GetCustomAttributes<ClassMetaAttribute>(inherit: false))
             {
-                AppendMeta(Lines, Written, Meta.Key, Meta.Value);
+                Add(Declared.Key, Declared.Value);
             }
         }
-        return Lines.ToString();
-    }
-
-    private static void AppendMeta(System.Text.StringBuilder Lines, HashSet<string> Written, string Key, string Value)
-    {
-        if (Written.Add(Key))
-        {
-            Lines.Append(Key).Append('\t').Append(Value.Replace('\n', ' ').Replace('\t', ' ')).Append('\n');
-        }
+        return Meta;
     }
 
     // An override moves the method's DeclaringType out of LuminaSharp.dll, which is what identifies one.
-    private string GetOverriddenEvents(Type Type)
+    internal IReadOnlyList<string> OverriddenEvents(Type Type)
     {
-        if (OverriddenEventsByType.TryGetValue(Type, out string? Cached))
+        if (OverriddenEventsByType.TryGetValue(Type, out List<string>? Cached))
         {
             return Cached;
         }
@@ -267,9 +159,8 @@ internal sealed class ScriptableRuntime
             }
         }
 
-        string Joined = string.Join(';', Names);
-        OverriddenEventsByType[Type] = Joined;
-        return Joined;
+        OverriddenEventsByType[Type] = Names;
+        return Names;
     }
 
     // An event the script leaves alone still dispatches when its declaring class names it in a [DispatchWhen] that accepts the script.
@@ -283,29 +174,5 @@ internal sealed class ScriptableRuntime
         MethodInfo? Predicate = Declaring.GetMethod(When.Predicate, BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic,
             new[] { typeof(TypeLibrary), typeof(Type) });
         return Predicate != null && Predicate.Invoke(null, new object[] { Library, ScriptType }) is true;
-    }
-
-    private static int Depth(Type Type)
-    {
-        int Count = 0;
-        for (Type? Base = Type.BaseType; Base != null; Base = Base.BaseType)
-        {
-            ++Count;
-        }
-        return Count;
-    }
-
-    // The [NativeType] name of the nearest [ScriptableType]-marked wrapper above Type, or null if none.
-    private static string? ScriptableNativeBaseName(Type Type)
-    {
-        for (Type? Base = Type.BaseType; Base != null; Base = Base.BaseType)
-        {
-            if (Base.GetCustomAttribute<ScriptableTypeAttribute>(inherit: false) != null)
-            {
-                NativeTypeAttribute? Native = Base.GetCustomAttribute<NativeTypeAttribute>(inherit: false);
-                return Native?.Name ?? Base.Name;
-            }
-        }
-        return null;
     }
 }

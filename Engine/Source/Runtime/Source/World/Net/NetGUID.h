@@ -11,21 +11,21 @@ namespace Lumina
 {
     // Stable, peer-agnostic network identity for an entity. 0 == invalid.
     REFLECT()
-    struct RUNTIME_API FNetGUID
+    struct RUNTIME_API SNetGUID
     {
         GENERATED_BODY()
 
         PROPERTY(ReadOnly, NoSerialize)
         uint32 Value = 0;
 
-        constexpr FNetGUID() = default;
-        constexpr explicit FNetGUID(uint32 InValue) : Value(InValue) {}
+        constexpr SNetGUID() = default;
+        constexpr explicit SNetGUID(uint32 InValue) : Value(InValue) {}
 
         constexpr bool IsValid() const { return Value != 0; }
-        constexpr bool operator==(const FNetGUID& Other) const { return Value == Other.Value; }
-        constexpr bool operator!=(const FNetGUID& Other) const { return Value != Other.Value; }
+        constexpr bool operator==(const SNetGUID& Other) const { return Value == Other.Value; }
+        constexpr bool operator!=(const SNetGUID& Other) const { return Value != Other.Value; }
 
-        static constexpr FNetGUID Invalid() { return FNetGUID{}; }
+        static constexpr SNetGUID Invalid() { return SNetGUID{}; }
     };
 
     // Stable (pre-placed, deterministically assigned) NetGUIDs occupy [1, NetGUID_DynamicStart);
@@ -40,7 +40,7 @@ namespace Lumina
         THashMap<uint32, ECS::FEntity> GuidToEntity;
         uint32                    NextDynamic = NetGUID_DynamicStart;
 
-        void Register(FNetGUID Guid, ECS::FEntity Entity)
+        void Register(SNetGUID Guid, ECS::FEntity Entity)
         {
             if (Guid.IsValid())
             {
@@ -48,7 +48,7 @@ namespace Lumina
             }
         }
 
-        void Unregister(FNetGUID Guid)
+        void Unregister(SNetGUID Guid)
         {
             if (Guid.IsValid())
             {
@@ -56,12 +56,12 @@ namespace Lumina
             }
         }
 
-        NODISCARD ECS::FEntity Find(FNetGUID Guid) const
+        NODISCARD ECS::FEntity Find(SNetGUID Guid) const
         {
             auto It = GuidToEntity.find(Guid.Value);
             return It != GuidToEntity.end() ? It->second : ECS::NullEntity;
         }
 
-        NODISCARD FNetGUID AllocateDynamic() { return FNetGUID{ NextDynamic++ }; }
+        NODISCARD SNetGUID AllocateDynamic() { return SNetGUID{ NextDynamic++ }; }
     };
 }

@@ -63,6 +63,9 @@ namespace Lumina
         /** Cook-graph edge classification, Soft for an FSoftObjectPath and Hard for a direct pointer. */
         EDependencyType Type = EDependencyType::Hard;
 
+        // The bundles whose properties reference this import, so the registry can load a bundle without its owner.
+        TVector<FName> Bundles;
+
         FORCEINLINE friend FArchive& operator << (FArchive& Ar, FObjectImport& Data)
         {
             Ar << Data.ObjectGUID;
@@ -71,6 +74,10 @@ namespace Lumina
             if (Ar.IsReading())
             {
                 Data.Type = static_cast<EDependencyType>(T);
+            }
+            if (Ar.GetFileVersion() >= (int32)ELuminaEngineVersion::ASSET_BUNDLES)
+            {
+                Ar << Data.Bundles;
             }
             return Ar;
         }

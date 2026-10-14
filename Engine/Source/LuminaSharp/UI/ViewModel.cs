@@ -1,10 +1,12 @@
 using System;
+using JetBrains.Annotations;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 
 namespace LuminaSharp;
 
 // Exposes a value, a collection of [Bind] items or a data-event-* command to RML, and a writable value is two-way.
+[MeansImplicitUse(ImplicitUseKindFlags.Access | ImplicitUseKindFlags.Assign)]
 [AttributeUsage(AttributeTargets.Property | AttributeTargets.Field | AttributeTargets.Method, Inherited = true)]
 public sealed class BindAttribute : Attribute
 {
@@ -22,6 +24,7 @@ public sealed class BindAttribute : Attribute
 /// <c>data-event-click="MethodName()"</c> (or any other <c>data-event-*</c>). The method runs on the game
 /// thread when the event fires.
 /// </summary>
+[MeansImplicitUse]
 [AttributeUsage(AttributeTargets.Method, Inherited = true)]
 public sealed class BindCommandAttribute : Attribute
 {

@@ -52,7 +52,7 @@ namespace Lumina
             }
     
             FMeshResource& Resource = StaticMesh->GetMeshResource();
-            const FAABB& BoundingBox = StaticMesh->GetAABB();
+            const SAABB& BoundingBox = StaticMesh->GetAABB();
             
             ImGuiX::Font::PushFont(ImGuiX::Font::EFont::Large);
             ImGui::SeparatorText("Mesh Statistics");
@@ -426,7 +426,7 @@ namespace Lumina
         float FloorY = MeshTransform.GetLocation().y + StaticMesh->GetAABB().Min.y;
         CreateFloorPlane(FloorY);
 
-        const FAABB Bounds = StaticMesh->GetAABB();
+        const SAABB Bounds = StaticMesh->GetAABB();
         const FVector3 Center = MeshTransform.GetLocation() + Bounds.GetCenter();
         const float Radius = Math::Max(Math::Length(Bounds.GetSize() * 0.5f), 0.5f);
         SetOrbitTarget(Center, Radius * 3.0f);
@@ -460,7 +460,7 @@ namespace Lumina
 
         if (bShowAABB)
         {
-            FAABB AABB = StaticMeshComponent.StaticMesh->GetAABB().ToWorld(Transform.GetWorldMatrix());
+            SAABB AABB = StaticMeshComponent.StaticMesh->GetAABB().ToWorld(Transform.GetWorldMatrix());
             World->GetDebugInterface()->DrawBox(AABB.GetCenter(), AABB.GetSize() * 0.5f, FQuat(1, 0, 0, 0), FColor::Green);
         }
 
@@ -495,7 +495,7 @@ namespace Lumina
                         Hi = Math::Max(Hi, BoxHi);
                     }
 
-                    FAABB SurfaceAABB;
+                    SAABB SurfaceAABB;
                     SurfaceAABB.Min = Lo;
                     SurfaceAABB.Max = Hi;
                     SurfaceAABB     = SurfaceAABB.ToWorld(Transform.GetWorldMatrix());
@@ -509,7 +509,7 @@ namespace Lumina
             const FMatrix4 EntityMatrix = Transform.GetWorldMatrix();
             constexpr float AxisLength = 0.18f;
 
-            for (const FMeshSocket& Socket : StaticMeshComponent.StaticMesh->Sockets)
+            for (const SMeshSocket& Socket : StaticMeshComponent.StaticMesh->Sockets)
             {
                 const FMatrix4 SocketMatrix = EntityMatrix * Socket.RelativeTransform.GetMatrix();
                 const FVector3 Position = FVector3(SocketMatrix[3]);
@@ -654,7 +654,7 @@ namespace Lumina
                     SocketName = FName(Numbered.c_str());
                 }
 
-                FMeshSocket& Socket = Mesh->Sockets.emplace_back();
+                SMeshSocket& Socket = Mesh->Sockets.emplace_back();
                 Socket.SocketName = SocketName;
 
                 Asset->GetPackage()->MarkDirty();

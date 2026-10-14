@@ -74,6 +74,9 @@ namespace Lumina
         // A reference sweep (delete, replace) rewrote at least one object this one points at, so state derived from it is stale.
         RUNTIME_API virtual void OnReferencesReplaced() {}
 
+        // A reload that reshaped this object's class built it to replace Previous, whose values it already carries.
+        RUNTIME_API virtual void OnReinstanced(CObject& Previous) {}
+
         RUNTIME_API virtual bool Rename(const FName& NewName, CPackage* NewPackage = nullptr);
 
         /** Templates a new object from this one; copies reflected properties only. */

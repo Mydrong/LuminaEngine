@@ -22,16 +22,6 @@ namespace Lumina
 
         CScriptEnum() = default;
 
-        /**
-         * The C# type name this was minted from.
-         *
-         * Kept because the engine-side NAME is not a reliable identity: reflected type names share one flat
-         * space, so a script enum colliding with a native one is minted under a generated name instead. That
-         * used to discard the C# identity outright, leaving saved data that referenced it with nothing to
-         * redirect through.
-         */
-        FName ScriptTypeName;
-
         /** The C# underlying integer type, which is the width a field of this enum reserves. */
         EPropertyTypeFlags UnderlyingType = EPropertyTypeFlags::Int32;
     };

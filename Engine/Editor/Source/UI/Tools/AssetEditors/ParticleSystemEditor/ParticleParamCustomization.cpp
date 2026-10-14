@@ -218,7 +218,7 @@ namespace Lumina
             }
             else
             {
-                for (const FParticleParameter& Param : System->UserParameters)
+                for (const SParticleParameter& Param : System->UserParameters)
                 {
                     if (Param.Name.IsNone())
                     {
@@ -250,7 +250,7 @@ namespace Lumina
                 ImGui::Separator();
                 if (ImGui::Selectable("New Parameter From Value"))
                 {
-                    FParticleParameter& New = System->UserParameters.emplace_back();
+                    SParticleParameter& New = System->UserParameters.emplace_back();
                     New.Name   = MakeUniqueParameterName(*System, Prop != nullptr ? Prop->GetPropertyName() : FName());
                     New.Type   = InputType;
                     New.Scalar = Value.Constant.x;

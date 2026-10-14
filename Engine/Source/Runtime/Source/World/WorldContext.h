@@ -9,7 +9,6 @@
 namespace Lumina
 {
     class CWorld;
-    class CGameInstance;
 
     REFLECT()
     enum class ENetMode : uint8
@@ -41,9 +40,6 @@ namespace Lumina
 
         // PIE-only: the editor-side source world this was duplicated from.
         TWeakObjectPtr<CWorld>  SourceWorld;
-
-        // Set in Phase 2 once CGameInstance exists; survives world transitions.
-        CGameInstance*          GameInstance    = nullptr;
 
         // Edge state for the render-skip diagnostic, so a legitimately throttled world logs once.
         bool                    bWarnedRenderSkip = false;

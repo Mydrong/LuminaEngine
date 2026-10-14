@@ -191,7 +191,7 @@ TEST_F(PhysicsSceneLifecycle, ConstraintsWaitForBothPendingBodies)
 {
     const ECS::FEntity A = Spawn(-2.0f);
     const ECS::FEntity B = Spawn(2.0f, false);
-    Physics::FConstraintDesc Desc;
+    Physics::SConstraintDesc Desc;
     Desc.BodyA = A;
     Desc.BodyB = B;
     const uint32 Constraint = Scene->CreateConstraint(Desc);
@@ -241,3 +241,84 @@ TEST_F(PhysicsSceneLifecycle, RagdollRequestsOwnTemporaryPoseDataAndFilterByOwne
     EXPECT_EQ(Scene->GetBodyCount(), 0u);
 }
 
+
+// A sweep's radius reaches bodies the bare ray along the same line misses.
+TEST_F(PhysicsSceneLifecycle, ShapeSweepsReachPastTheRayLine)
+{
+    const ECS::FEntity Entity = Spawn();
+    Scene->Update(0.0);
+
+    const FVector3 Start(0.6f, 0.0f, -3.0f);
+    const FVector3 End(0.6f, 0.0f, 3.0f);
+    EXPECT_FALSE(Scene->CastRay(Ray(0.6f)).has_value());
+
+    for (const SQueryShape& Shape : { SQueryShape::Sphere(0.2f), SQueryShape::Box(FVector3(0.2f), FQuat::Identity()),
+                                      SQueryShape::Capsule(0.2f, 0.5f, FQuat::Identity()) })
+    {
+        const TOptional<SRayResult> Hit = Scene->CastShapeClosest(Shape, Start, End, ECollisionProfiles::All, {});
+        ASSERT_TRUE(Hit.has_value()) << "shape " << (int)Shape.Type;
+        EXPECT_EQ(Hit->Entity, Entity.Value);
+        EXPECT_LT(Hit->Location.z, 0.0f) << "the sweep touches the near side of the sphere";
+
+        TVector<SRayResult> All;
+        Scene->CastShapeAll(Shape, Start, End, ECollisionProfiles::All, {}, All);
+        EXPECT_EQ(All.size(), 1u);
+    }
+}
+
+TEST_F(PhysicsSceneLifecycle, AnyHitAndSingleEntityRays)
+{
+    const ECS::FEntity Near = Spawn(0.0f);
+    const ECS::FEntity Far = Spawn(3.0f);
+    Scene->Update(0.0);
+
+    SRayCastSettings Along;
+    Along.Start = FVector3(-5.0f, 0.0f, 0.0f);
+    Along.End = FVector3(5.0f, 0.0f, 0.0f);
+    EXPECT_TRUE(Scene->CastRayAny(Along));
+    Along.IgnoreEntities.push_back(Near);
+    Along.IgnoreEntities.push_back(Far);
+    EXPECT_FALSE(Scene->CastRayAny(Along)) << "both blockers are ignored";
+
+    const TOptional<SRayResult> Hit = Scene->CastRayAgainst(Far, Along.Start, Along.End);
+    ASSERT_TRUE(Hit.has_value()) << "the near body in front does not block a ray aimed at one entity";
+    EXPECT_EQ(Hit->Entity, Far.Value);
+    EXPECT_NEAR(Hit->Location.x, 2.5f, 0.05f);
+    EXPECT_FALSE(Scene->CastRayAgainst(Far, FVector3(-5.0f, 2.0f, 0.0f), FVector3(5.0f, 2.0f, 0.0f)).has_value());
+}
+
+TEST_F(PhysicsSceneLifecycle, OverlapsFollowShapeRotationAndLayerMask)
+{
+    const ECS::FEntity Entity = Spawn();
+    Scene->Update(0.0);
+
+    ECS::FEntity Found[4];
+    const FVector3 Above(0.0f, 1.2f, 0.0f);
+    EXPECT_EQ(Scene->OverlapShape(SQueryShape::Capsule(0.1f, 1.0f, FQuat::Identity()), Above, ECollisionProfiles::All, {}, Found), 1)
+        << "a standing capsule reaches down into the sphere";
+    EXPECT_EQ(Found[0], Entity);
+
+    const FQuat Lying = Math::FromAxisAngle(FVector3(0.0f, 0.0f, 1.0f), Math::HalfPi<float>());
+    EXPECT_EQ(Scene->OverlapShape(SQueryShape::Capsule(0.1f, 1.0f, Lying), Above, ECollisionProfiles::All, {}, Found), 0)
+        << "the same capsule lying down stays above it";
+
+    EXPECT_EQ(Scene->OverlapShape(SQueryShape::Sphere(1.0f), FVector3(0.0f), (ECollisionProfiles)0, {}, Found), 0)
+        << "an empty layer mask matches nothing";
+}
+
+TEST_F(PhysicsSceneLifecycle, ClosestPointAndBoundsMeasureTheColliders)
+{
+    const ECS::FEntity Entity = Spawn();
+    Scene->Update(0.0);
+
+    FVector3 Closest;
+    ASSERT_TRUE(Scene->GetClosestPointOnBody(Entity, FVector3(3.0f, 0.0f, 0.0f), Closest));
+    EXPECT_NEAR(Closest.x, 0.5f, 0.01f);
+
+    SAABB Bounds;
+    ASSERT_TRUE(Scene->GetBodyBounds(Entity, Bounds));
+    EXPECT_NEAR(Bounds.Min.x, -0.5f, 0.05f);
+    EXPECT_NEAR(Bounds.Max.y, 0.5f, 0.05f);
+
+    EXPECT_FALSE(Scene->GetBodyBounds(ECS::NullEntity, Bounds));
+}

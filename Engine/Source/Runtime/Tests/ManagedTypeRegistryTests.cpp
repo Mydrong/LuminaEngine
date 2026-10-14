@@ -25,7 +25,7 @@ namespace
 
         void UnloadAborted() override { Log->push_back(FString(Name) + "::UnloadAborted"); }
 
-        void Compile(TSpan<const FManagedTypeDefinition> Definitions) override
+        void Compile(TSpan<const FManagedTypeDefinition> Definitions, TSpan<const FManagedTypeAlias>) override
         {
             Log->push_back(FString(Name));
             SeenCount = Definitions.size();
@@ -129,17 +129,19 @@ TEST(ManagedTypeRegistry, CompilingWithNoStagesOrNoTypesIsHarmless)
     EXPECT_EQ(Only.SeenCount, 0u);
 }
 
-// Classes before data structs, because a struct's schema can name a class the first stage mints. Asserted
-// here because the position is a real constraint rather than a preference.
+// Each position is a real constraint, since a struct field may name a class shell and a class may hold a struct by value.
 TEST(ManagedTypeRegistry, TheBuiltInStagesAreRegisteredInTheOrderTheyMustRun)
 {
     FManagedTypeRegistry::Get().ResetForTesting();
     RegisterBuiltInManagedTypeStages();
 
     const TSpan<IManagedTypeCompiler* const> Stages = FManagedTypeRegistry::Get().GetStages();
-    ASSERT_EQ(Stages.size(), 2u);
-    EXPECT_STREQ(Stages[0]->GetName(), "ScriptableClasses");
-    EXPECT_STREQ(Stages[1]->GetName(), "DataStructs");
+    ASSERT_EQ(Stages.size(), 5u);
+    EXPECT_STREQ(Stages[0]->GetName(), "Redirects");
+    EXPECT_STREQ(Stages[1]->GetName(), "Enums");
+    EXPECT_STREQ(Stages[2]->GetName(), "ClassShells");
+    EXPECT_STREQ(Stages[3]->GetName(), "Structs");
+    EXPECT_STREQ(Stages[4]->GetName(), "ScriptableClasses");
 }
 
 // Reverse, because a stage built on an earlier one has to come down before the thing it was built from.

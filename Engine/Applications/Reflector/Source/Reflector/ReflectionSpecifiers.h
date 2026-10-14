@@ -53,14 +53,14 @@ namespace Lumina::Reflection
     X(Cosmetic,             Flag,   Runtime,   "A script, system or world subsystem that runs only where something is drawn or played, never on a dedicated server, a bot or a headless process. Inherited, and spelled [Reflect(Cosmetic = true)] in C#.") \
     X(ConfigFile,           Value,  Runtime,   "Backs the class with the named config file. The config system loads and saves its properties there.") \
     X(DataModel,            Value,  Runtime,   "The name a UI document's data-model attribute uses for this class. The class name without its C prefix when absent.") \
-    X(UIDocument,           Value,  Runtime,   "The .rml a UI script shows when its Document property is empty.") \
+    X(UIDocument,           Value,  Runtime,   "The .rml a UI script shows when its Document property is empty.")     X(Group,                Value,  Runtime,   "Puts every asset of the class and its subclasses in the named asset group, found and loaded by name through FAssetManager.") \
     X(Category,             Value,  Editor,    "Groups the type under a named heading in the component picker and the settings list.") \
     X(DisplayName,          Value,  Editor,    "Overrides the label shown for the type in editor UI.") \
     X(ToolTip,              Value,  Editor,    "Hover text for the type. Filled from the declaration's doc comment when not written by hand.") \
     X(HideInComponentList,  Flag,   Editor,    "Hides the component from the scene editor's add-component list.") \
     X(HideInDetails,        Flag,   Editor,    "Hides the type from the details panel.") \
     X(NotPlaceable,         Flag,   Editor,    "Excludes the class from the node graph's placeable node registry.") \
-    X(Scriptable,           Flag,   Script,    "Emits a C# subclassable wrapper. Every reflected virtual on the class becomes overridable from C#.") \
+    X(Scriptable,           Flag,   Script,    "Every reflected virtual on the class becomes overridable from a C# subclass. Any reflected class can be subclassed in C# without it.") \
     X(ScriptFastCalls,      Flag,   Script,    "Applies SuppressGCTransition to every binding on the type. FUNCTION(NoSuppressGCTransition) opts one back out.") \
     X(CSharpValueMirror,    Flag,   Script,    "The type has a hand-written blittable C# value struct. The emitter marshals it by value and generates no wrapper.") \
     X(NoCSharp,             Flag,   Script,    "Suppresses C# binding generation for the type.") \
@@ -76,13 +76,13 @@ namespace Lumina::Reflection
     X(Replicated,           Flag,   Runtime,   "Alias of Sync.") \
     X(Change,               Value,  Runtime,   "A FUNCTION() run whenever the Sync field changes, or a Bind field is changed by its UI, taking nothing or (Old, New).") \
     X(Bind,                 Either, Runtime,   "Exposes the value to a UI document as {{ Name }} and the data-* views, under this name or its own. A struct binds its members and a TVector binds for data-for.") \
-    X(Element,              Either, Runtime,   "Fills an FUIElement with the element of this id, or of the property's name, each time the script's UI document loads.") \
+    X(Element,              Either, Runtime,   "Fills an SUIElement with the element of this id, or of the property's name, each time the script's UI document loads.") \
     X(Rate,                 Number,  Runtime,   "The most times a second the host sends the Sync field. A change sooner than that waits for the next slot.") \
     X(Quantize,             Number,  Runtime,   "Snaps a numeric Sync field to multiples of this step, so a smaller wobble never reaches the wire.") \
     X(Validate,             Value,  Runtime,   "For a Sync = FromOwner field, a FUNCTION() taking the proposed value and returning whether the host accepts it.") \
     X(DuplicateTransient,   Flag,   Runtime,   "Resets the property to its default when the owning object is duplicated.") \
     X(SaveGame,             Flag,   Runtime,   "Writes the property into save games, its whole value included. A SaveGame field marked NoSerialize is saved in games but kept out of levels and assets.") \
-    X(StructBase,           Value,  Runtime,   "Constrains a bare FInstancedStruct to structs deriving from the named base.") \
+    X(StructBase,           Value,  Runtime,   "Constrains a bare FInstancedStruct to structs deriving from the named base.")     X(Bundle,               Value,  Runtime,   "Soft references inside the property load with their owner when this bundle is asked for. Several bundles separate with a comma.") \
     X(Editable,             Flag,   Editor,    "Shows the property in the details panel and allows editing.") \
     X(ReadOnly,             Flag,   Editor,    "Shows the property in the details panel with editing disabled. Do not combine with Editable.") \
     X(Category,             Value,  Editor,    "Groups the property under a named heading. Nested headings separate with a pipe.") \
@@ -100,7 +100,7 @@ namespace Lumina::Reflection
     X(RawJson,              Flag,   Editor,    "Marks a string property in an agent tool's parameters as carrying any JSON value, which the tool server encodes as text before the struct is read.") \
     X(Picker,               Value,  Editor,    "Draws a name or string property as the named picker, resolved from the editor picker registry. Built in kinds are Bone, Socket, Curve, Parameter, ObjectParameter and InputAction.") \
     X(AssetType,            Value,  Editor,    "Restricts an asset reference picker to the named asset class.") \
-    X(RowType,              Value,  Editor,    "Restricts a data table row handle picker to the named row struct.") \
+    X(RowType,              Value,  Editor,    "Restricts a data table row handle picker to the named row struct.")     X(Group,                Value,  Editor,    "Restricts an SAssetId picker to the named asset group.") \
     X(NoReorder,            Flag,   Editor,    "Removes the drag handles from an array property.") \
     X(NoResize,             Flag,   Editor,    "Removes the add and remove buttons from an array property.") \
     X(DefaultCollapsed,     Flag,   Editor,    "Draws a struct or instanced struct property collapsed on first open.") \
@@ -115,11 +115,13 @@ namespace Lumina::Reflection
 
 #define LUMINA_FUNCTION_SPECIFIERS(X) \
     X(ToolTip,                  Value, Editor, "Hover text for the function. Filled from the declaration's doc comment when not written by hand.") \
+    X(Button,                   Either, Editor, "Draws a parameterless function as a button in the object's inspector, labeled with the value when one is given.") \
     X(Rpc,                      Value, Runtime, "Broadcast, Host or Owner, the C++ spelling of C# [Rpc.*]. The body starts with NET_RPC(...) passing its parameters.") \
     X(NetFlags,                 Value, Runtime, "Unreliable and OwnerOnly, joined with |, the C++ spelling of C# NetFlags.") \
     X(Bind,                     Flag,  Runtime, "A command a UI document runs from data-event-*, or a computed {{ value }} when it takes nothing and returns one.") \
     X(SuppressGCTransition,     Flag,  Script, "Skips the GC transition on the generated C# call. Only valid on a short leaf function that never calls back into managed code.") \
-    X(NoSuppressGCTransition,   Flag,  Script, "Opts one function back out of a type-wide REFLECT(ScriptFastCalls).")
+    X(NoSuppressGCTransition,   Flag,  Script, "Opts one function back out of a type-wide REFLECT(ScriptFastCalls).") \
+    X(ScriptInternal,           Flag,  Script, "Binds the generated C# method as internal, for plumbing only a typed C# helper calls.")
 
 #define LUMINA_SCRIPT_EXPORT_SPECIFIERS(X) \
     X(Class,                Value, Script, "Required. The C# static class the free function binds to, optionally namespaced.") \
@@ -128,8 +130,7 @@ namespace Lumina::Reflection
     // Injected by the scripting layer at runtime, never authored in a macro, so validation skips them.
 #define LUMINA_RUNTIME_INJECTED_METADATA(X) \
     X(Aliases,            Value, Runtime, "Prior C# type names for a script type, written by the host so renamed scripts still resolve.") \
-    X(ScriptTypeName,     Value, Runtime, "The C# type name behind a script-backed struct, stable across reloads unlike its object name.") \
-    X(ScriptInstanceBase, Flag,  Runtime, "Marks the generated base struct of a script type so pickers offer the concrete subtypes instead.") \
+    X(ScriptTypeName,     Value, Runtime, "The C# type name behind a script struct, which it keeps when a reshape renames it aside.") \
     X(UpdatePhase,        Value, Runtime, "PrePhysics or PostPhysics, from a C# [Reflect(UpdatePhase)], the side of the physics step a minted script class ticks on.")
 
     struct FSpecifierInfo

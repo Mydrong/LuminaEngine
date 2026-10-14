@@ -5,15 +5,15 @@ namespace LuminaSharp;
 public readonly struct UIDocument
 {
     internal readonly ulong World;
-    internal readonly Lumina.FUIDocument Handle;
+    internal readonly Lumina.SUIDocument Handle;
 
-    internal UIDocument(ulong World, Lumina.FUIDocument Handle)
+    internal UIDocument(ulong World, Lumina.SUIDocument Handle)
     {
         this.World = World;
         this.Handle = Handle;
     }
 
-    public UIDocument(Lumina.CWorld World, Lumina.FUIDocument Handle)
+    public UIDocument(Lumina.CWorld World, Lumina.SUIDocument Handle)
         : this(World.WorldHandle, Handle)
     {
     }

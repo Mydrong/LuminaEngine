@@ -27,7 +27,7 @@ namespace Lumina
 
         // The .rml this script shows. Empty uses the class's REFLECT(UIDocument = ...).
         PROPERTY(Editable, Category = "UI")
-        FUIDocumentRef Document;
+        SUIDocumentRef Document;
 
         // Show the document as soon as it loads. Off keeps it hidden until Show().
         PROPERTY(Editable, Category = "UI")
@@ -50,7 +50,7 @@ namespace Lumina
         bool IsShown() const;
 
         FUNCTION()
-        FUIDocument GetDocument() const;
+        SUIDocument GetDocument() const;
 
         // Runs after every load, including a reload from an edited .rml, once PROPERTY(Element) members point at the new elements.
         FUNCTION()

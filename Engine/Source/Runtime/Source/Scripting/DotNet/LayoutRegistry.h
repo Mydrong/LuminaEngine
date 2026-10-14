@@ -2,10 +2,7 @@
 
 #include "Platform/GenericPlatform.h"
 
-// Cross-language layout registry. Each native type that has a hand-written C# blittable mirror registers its
-// sizeof under a string key (matching the C#'s [NativeLayout("key")]); at bootstrap the managed LayoutValidator
-// queries LuminaSharp_Layout_GetSize(key) and compares it to Unsafe.SizeOf<T>(), aborting C# on any mismatch.
-// Registration is decentralized: each domain .cpp self-registers its types at module load via LE_REGISTER_LAYOUT.
+// The size of every native type with a hand-written C# mirror, registered with LE_REGISTER_LAYOUT and checked by the managed LayoutValidator at boot.
 
 namespace Lumina::DotNet
 {

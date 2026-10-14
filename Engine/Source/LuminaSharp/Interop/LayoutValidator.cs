@@ -5,34 +5,13 @@ using System.Text;
 
 namespace LuminaSharp;
 
-/// <summary>
-/// Cross-language layout safety net. At bootstrap every <see cref="NativeLayoutAttribute">[NativeLayout]</see>
-/// mirror's managed size (<c>Unsafe.SizeOf&lt;T&gt;()</c>) is compared against the real native <c>sizeof</c>
-/// reported by the engine.
-/// </summary>
+// Compares every [NativeLayout] mirror's managed size with the native one at boot.
 internal static unsafe partial class LayoutValidator
 {
-    /// <summary>Native size for a registered key, or -1 if the native side doesn't know it (also a failure).</summary>
-    [NativeCall("LuminaSharp_Layout_GetSize")]
-    private static partial int NativeSize(string Name);
-
-    /// <summary>Native (int)EPropertyTypeFlags for a plain enumerator name ("Int8".."InstancedStruct"), or -1.</summary>
-    [NativeCall("LuminaSharp_PropertyType_Value")]
-    private static partial int PropertyTypeNativeValue(string Name);
-
-    /// <summary>Native EPropertyTypeFlags::Count (the member total, including None).</summary>
-    [NativeCall("LuminaSharp_PropertyType_Count")]
-    private static partial int PropertyTypeNativeCount();
-
-    /// <summary>Native Lumina::EPropertyFlags bit for a flag name ("Replicated"), or -1 if unknown.</summary>
-    [NativeCall("LuminaSharp_PropertyFlag_Value")]
-    private static partial int PropertyFlagNativeValue(string Name);
-
     private static readonly MethodInfo SizeOf =
         typeof(Unsafe).GetMethod(nameof(Unsafe.SizeOf), BindingFlags.Public | BindingFlags.Static)!;
 
-    // Namespaces where every non-enum value struct is a native mirror and MUST carry [NativeLayout]. Catches a
-    // newly-added RHI struct that someone forgot to register, before it can become a silent interop hole.
+    // Namespaces where every value struct is a native mirror and must carry [NativeLayout].
     private static readonly string[] StrictNamespaces = { "LuminaSharp.Rendering" };
 
     /// <summary>Validate every mirror. Returns true if all match; otherwise logs each offender and returns false.</summary>
@@ -73,7 +52,7 @@ internal static unsafe partial class LayoutValidator
             }
 
             int ManagedSize = (int)SizeOf.MakeGenericMethod(Type).Invoke(null, null)!;
-            int NativeBytes = NativeSize(Attribute.NativeType);
+            int NativeBytes = Lumina.CScriptInteropLibrary.GetMirrorSize(Attribute.NativeType);
 
             if (NativeBytes < 0)
             {
@@ -89,26 +68,23 @@ internal static unsafe partial class LayoutValidator
             }
         }
 
-        // The reflected EPropertyType enum is a hand-written mirror of native EPropertyTypeFlags; the script
-        // schema wire sends its values as kind bytes, so a drift would silently misread every property. Check
-        // each enumerator's integer value against native and the total member count.
+        // EPropertyType mirrors native kinds sent as bytes on the schema wire, so each value and the member count are checked.
         Array PropertyTypes = Enum.GetValues(typeof(EPropertyType));
         foreach (EPropertyType Value in PropertyTypes)
         {
-            int NativeValue = PropertyTypeNativeValue(Value.ToString());
+            int NativeValue = Lumina.CScriptInteropLibrary.GetPropertyTypeValue(Value.ToString());
             if (NativeValue != (int)Value)
             {
                 Failures.Append($"\n  - EPropertyType.{Value} is {(int)Value} in C# but native reports {NativeValue}.");
             }
         }
-        int NativeTypeCount = PropertyTypeNativeCount();
+        int NativeTypeCount = Lumina.CScriptInteropLibrary.GetPropertyTypeCount();
         if (NativeTypeCount != PropertyTypes.Length)
         {
             Failures.Append($"\n  - EPropertyType has {PropertyTypes.Length} members in C# but native EPropertyTypeFlags has {NativeTypeCount}.");
         }
 
-        // The EPropertyFlags mirror. A wrong bit here does not crash: it produces a field that quietly stops
-        // replicating, or serializes when it was meant to be editor-only, so it is worth the startup check.
+        // A wrong EPropertyFlags bit silently stops a field replicating or saving, so each is checked at startup.
         int FlagsChecked = 0;
         foreach (EPropertyFlags Value in Enum.GetValues(typeof(EPropertyFlags)))
         {
@@ -117,7 +93,7 @@ internal static unsafe partial class LayoutValidator
                 continue;
             }
 
-            int NativeValue = PropertyFlagNativeValue(Value.ToString());
+            int NativeValue = Lumina.CScriptInteropLibrary.GetPropertyFlagValue(Value.ToString());
             if (NativeValue != (int)Value)
             {
                 Failures.Append($"\n  - EPropertyFlags.{Value} is {(int)Value} in C# but native reports {NativeValue}.");
@@ -133,13 +109,15 @@ internal static unsafe partial class LayoutValidator
                 continue;
             }
 
-            int NativeValue = PropertyFlagNativeValue(Value.ToString());
+            int NativeValue = Lumina.CScriptInteropLibrary.GetPropertyFlagValue(Value.ToString());
             if (NativeValue != (int)Value)
             {
                 Failures.Append($"\n  - EScriptParamFlags.{Value} is {(int)Value} in C# but native reports {NativeValue}.");
             }
             ++FlagsChecked;
         }
+
+        ValidateModules(typeof(LayoutValidator).Assembly, Failures);
 
         if (Failures.Length > 0)
         {
@@ -149,5 +127,18 @@ internal static unsafe partial class LayoutValidator
 
         Debug.Log($"Interop layout validated: {Validated} native mirrors + {PropertyTypes.Length} EPropertyType + {FlagsChecked} EPropertyFlags members match native.");
         return true;
+    }
+
+    // A module that is not loaded has nothing to disagree with, so only a loaded module with another hash fails.
+    internal static void ValidateModules(Assembly Assembly, StringBuilder Failures)
+    {
+        foreach (NativeModuleLayoutAttribute Stamp in Assembly.GetCustomAttributes<NativeModuleLayoutAttribute>())
+        {
+            ulong NativeHash = Lumina.CScriptInteropLibrary.GetModuleLayoutHash(Stamp.Module);
+            if (NativeHash != 0 && NativeHash != Stamp.Hash)
+            {
+                Failures.Append($"\n  - {Assembly.GetName().Name}: the '{Stamp.Module}' bindings were generated for another build of that module (0x{Stamp.Hash:X16} vs native 0x{NativeHash:X16}). Rebuild so the reflector regenerates them.");
+            }
+        }
     }
 }

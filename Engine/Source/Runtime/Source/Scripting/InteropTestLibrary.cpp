@@ -80,14 +80,14 @@ namespace Lumina
         return Name;
     }
 
-    FUIElement CInteropTestLibrary::MakeHandle(uint64 Value)
+    SUIElement CInteropTestLibrary::MakeHandle(uint64 Value)
     {
-        FUIElement Handle;
+        SUIElement Handle;
         Handle.Handle = Value;
         return Handle;
     }
 
-    uint64 CInteropTestLibrary::ReadHandle(FUIElement Handle)
+    uint64 CInteropTestLibrary::ReadHandle(SUIElement Handle)
     {
         return Handle.Handle;
     }
@@ -116,7 +116,7 @@ namespace Lumina
         GMakeNameCalls = 0;
     }
 
-    float CInteropTestLibrary::ReadOpaqueValue(const FInteropOpaqueStruct& Opaque)
+    float CInteropTestLibrary::ReadOpaqueValue(const SInteropOpaqueStruct& Opaque)
     {
         return Opaque.Value + (float)Opaque.Label.length();
     }

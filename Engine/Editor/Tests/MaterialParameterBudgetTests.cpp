@@ -17,9 +17,9 @@ namespace
         return FName(Format("{}{}", Prefix, Index));
     }
 
-    TVector<FMaterialParameter> ExportedParameters(const FMaterialCompiler& Compiler)
+    TVector<SMaterialParameter> ExportedParameters(const FMaterialCompiler& Compiler)
     {
-        TVector<FMaterialParameter> Params;
+        TVector<SMaterialParameter> Params;
         FMaterialUniforms Uniforms{};
         Compiler.GetParameters(Params, Uniforms);
         return Params;
@@ -49,9 +49,9 @@ TEST(MaterialParameterBudget, AScalarPastTheBudgetIsRefusedRatherThanClamped)
     EXPECT_TRUE(Compiler.HasErrors());
     EXPECT_EQ(Compiler.GetErrors().size(), (size_t)4);
 
-    const TVector<FMaterialParameter> Params = ExportedParameters(Compiler);
+    const TVector<SMaterialParameter> Params = ExportedParameters(Compiler);
     EXPECT_EQ(Params.size(), (size_t)MAX_SCALARS);
-    for (const FMaterialParameter& Param : Params)
+    for (const SMaterialParameter& Param : Params)
     {
         EXPECT_LT(Param.Index, MAX_SCALARS);
     }
@@ -83,9 +83,9 @@ TEST(MaterialParameterBudget, AVectorPastTheBudgetIsRefusedRatherThanClamped)
 
     EXPECT_TRUE(Compiler.HasErrors());
 
-    const TVector<FMaterialParameter> Params = ExportedParameters(Compiler);
+    const TVector<SMaterialParameter> Params = ExportedParameters(Compiler);
     EXPECT_EQ(Params.size(), (size_t)MAX_VECTORS);
-    for (const FMaterialParameter& Param : Params)
+    for (const SMaterialParameter& Param : Params)
     {
         EXPECT_LT(Param.Index, MAX_VECTORS);
     }
@@ -103,9 +103,9 @@ TEST(MaterialParameterBudget, ATexturePastTheBudgetBindsNoSlot)
     EXPECT_EQ(Compiler.BindTextureParameter("OverBudget", nullptr), Constants::kIndexNone);
     EXPECT_TRUE(Compiler.HasErrors());
 
-    const TVector<FMaterialParameter> Params = ExportedParameters(Compiler);
+    const TVector<SMaterialParameter> Params = ExportedParameters(Compiler);
     EXPECT_EQ(Params.size(), (size_t)MAX_TEXTURES);
-    for (const FMaterialParameter& Param : Params)
+    for (const SMaterialParameter& Param : Params)
     {
         EXPECT_LT(Param.Index, MAX_TEXTURES);
     }

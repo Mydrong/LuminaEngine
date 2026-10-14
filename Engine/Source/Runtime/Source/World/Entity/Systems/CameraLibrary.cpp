@@ -70,7 +70,7 @@ namespace Lumina
         }
     }
 
-    uint32 CCameraLibrary::PlayShake(CWorld* World, FCameraShakeParams Params)
+    uint32 CCameraLibrary::PlayShake(CWorld* World, SCameraShakeParams Params)
     {
         return World != nullptr
             ? SCameraSystem::PlayCameraShake(ECS::GetWorldRegistry(*World), Params)
@@ -79,7 +79,7 @@ namespace Lumina
 
     uint32 CCameraLibrary::PlayImpactShake(CWorld* World, float Intensity, float Duration)
     {
-        FCameraShakeParams Params;
+        SCameraShakeParams Params;
         Params.LocationAmplitude = FVector3(Intensity * 0.04f, Intensity * 0.04f, Intensity * 0.02f);
         Params.RotationAmplitude = FVector3(Intensity * 1.5f, Intensity * 1.5f, Intensity * 0.6f);
         Params.Frequency = 18.0f;
@@ -116,9 +116,9 @@ namespace Lumina
         return FVector2((float)Extent.x, (float)Extent.y);
     }
 
-    FScreenProjection CCameraLibrary::WorldToScreen(CWorld* World, FVector3 WorldLocation)
+    SScreenProjection CCameraLibrary::WorldToScreen(CWorld* World, FVector3 WorldLocation)
     {
-        FScreenProjection Result;
+        SScreenProjection Result;
         const FResolvedSceneView* View = ViewOf(World);
         const FVector2 Viewport = GetViewportSize(World);
         if (View == nullptr || Viewport.x <= 0.0f || Viewport.y <= 0.0f)
@@ -130,9 +130,9 @@ namespace Lumina
         return Result;
     }
 
-    FWorldRay CCameraLibrary::ScreenToWorldRay(CWorld* World, FVector2 ScreenPosition)
+    SWorldRay CCameraLibrary::ScreenToWorldRay(CWorld* World, FVector2 ScreenPosition)
     {
-        FWorldRay Result;
+        SWorldRay Result;
         const FResolvedSceneView* View = ViewOf(World);
         const FVector2 Viewport = GetViewportSize(World);
         if (View == nullptr || Viewport.x <= 0.0f || Viewport.y <= 0.0f)
@@ -145,7 +145,7 @@ namespace Lumina
         return Result;
     }
 
-    FWorldRay CCameraLibrary::ViewportCenterRay(CWorld* World)
+    SWorldRay CCameraLibrary::ViewportCenterRay(CWorld* World)
     {
         const FVector2 Viewport = GetViewportSize(World);
         return ScreenToWorldRay(World, FVector2(Viewport.x * 0.5f, Viewport.y * 0.5f));
@@ -153,7 +153,7 @@ namespace Lumina
 
     FVector3 CCameraLibrary::DeprojectScreenToWorld(CWorld* World, FVector2 ScreenPosition, float WorldDistance)
     {
-        const FWorldRay Ray = ScreenToWorldRay(World, ScreenPosition);
+        const SWorldRay Ray = ScreenToWorldRay(World, ScreenPosition);
         return Ray.bValid ? (Ray.Origin + Ray.Direction * WorldDistance) : FVector3(0.0f);
     }
 
@@ -183,7 +183,7 @@ namespace Lumina
             return false;
         }
 
-        const FScreenProjection Projected = WorldToScreen(World, Point);
+        const SScreenProjection Projected = WorldToScreen(World, Point);
         const FVector2 Viewport = GetViewportSize(World);
         if (!Projected.bOnScreen || Projected.Depth <= 0.0f)
         {

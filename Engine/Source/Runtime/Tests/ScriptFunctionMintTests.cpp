@@ -13,6 +13,7 @@
 #include "Scripting/ScriptStruct.h"
 #include "Scripting/ScriptableObject.h"
 #include "Scripting/ScriptableTest.h"
+#include "ScriptTestUtil.h"
 
 using namespace Lumina;
 
@@ -42,15 +43,6 @@ namespace
         }
     }
 
-    Scripting::FScriptExportField ScalarField(const char* Name, EPropertyTypeFlags Kind)
-    {
-        Scripting::FScriptExportField Field;
-        Field.Name = FName(Name);
-        Field.Type = MakeShared<Scripting::FScriptExportType>();
-        Field.Type->Kind = Kind;
-        return Field;
-    }
-
     Scripting::FScriptExportField EnumField(const char* Name, const char* EnumName, EPropertyTypeFlags Underlying)
     {
         Scripting::FScriptExportField Field;
@@ -59,8 +51,7 @@ namespace
         Field.Type->Kind = EPropertyTypeFlags::Enum;
         Field.Type->EnumName = FName(EnumName);
         Field.Type->EnumUnderlying = Underlying;
-        Field.Type->EnumEntries.push_back({FName("Zero"), 0});
-        Field.Type->EnumEntries.push_back({FName("One"), 1});
+        ScriptTest::PublishEnum(EnumName, Underlying, { {FName("Zero"), 0}, {FName("One"), 1} });
         return Field;
     }
 
@@ -82,7 +73,7 @@ namespace
 
     // The order the real mint path uses: append properties, mint functions, then link through the CDO.
     FMinted MintClassWithFunction(const char* ClassName, const Scripting::FScriptExportSchema& ParamSchema,
-                                  int32 ReturnIndex)
+                                  int32 ReturnIndex, const Scripting::FScriptExportMeta& Meta = {})
     {
         FMinted Result;
 
@@ -98,7 +89,7 @@ namespace
 
         // One property, so the class gets the anchored layout record whose arena the parameters live in.
         Scripting::FScriptExportSchema Properties;
-        Properties.Fields.push_back(ScalarField("Anchor", EPropertyTypeFlags::Int32));
+        Properties.Fields.push_back(ScriptTest::ScalarField("Anchor", EPropertyTypeFlags::Int32));
         Scripting::AppendScriptPropertiesToClass(Result.Class, Properties);
 
         CScriptStruct* Record = Cast<CScriptStruct>(Result.Class->LayoutRecord.Get());
@@ -108,7 +99,7 @@ namespace
         }
 
         Result.Function = Scripting::MintScriptFunction(*Result.Class, *Record, FName("Add"),
-            ParamSchema, ReturnIndex, &TestScriptThunk);
+            ParamSchema, ReturnIndex, &TestScriptThunk, EFunctionFlags::None, Meta);
 
         Result.Class->GetDefaultObject();
         return Result;
@@ -118,9 +109,9 @@ namespace
 TEST(ScriptFunctionMint, AScriptDeclaredFunctionBecomesAReflectedOne)
 {
     Scripting::FScriptExportSchema Params;
-    Params.Fields.push_back(ScalarField("A", EPropertyTypeFlags::Int32));
-    Params.Fields.push_back(ScalarField("B", EPropertyTypeFlags::Int32));
-    Params.Fields.push_back(ScalarField("ReturnValue", EPropertyTypeFlags::Int32));
+    Params.Fields.push_back(ScriptTest::ScalarField("A", EPropertyTypeFlags::Int32));
+    Params.Fields.push_back(ScriptTest::ScalarField("B", EPropertyTypeFlags::Int32));
+    Params.Fields.push_back(ScriptTest::ScalarField("ReturnValue", EPropertyTypeFlags::Int32));
 
     const FMinted Minted = MintClassWithFunction("ScriptFn_Basic", Params, 2);
     ASSERT_NE(Minted.Class, nullptr);
@@ -133,12 +124,50 @@ TEST(ScriptFunctionMint, AScriptDeclaredFunctionBecomesAReflectedOne)
     EXPECT_TRUE(Minted.Function->HasReturn());
 }
 
+// What the inspector reads for a [Button], kept by the function once the schema it came from is gone.
+TEST(ScriptFunctionMint, MetadataOutlivesTheSchemaItCameFrom)
+{
+    FMinted Minted;
+    {
+        Scripting::FScriptExportMeta Meta;
+        Meta.Set(FName("Button"), "Do It");
+        Meta.Set(FName("ToolTip"), "Runs the thing");
+        Minted = MintClassWithFunction("ScriptFn_Button", Scripting::FScriptExportSchema(), -1, Meta);
+    }
+    ASSERT_NE(Minted.Function, nullptr);
+
+    EXPECT_TRUE(Minted.Function->HasMetadata("button")) << "keys match without regard to case, like a property's";
+    EXPECT_EQ(FString(Minted.Function->GetMetadata("Button").c_str()), FString("Do It"));
+    EXPECT_EQ(FString(Minted.Function->GetMetadata("ToolTip").c_str()), FString("Runs the thing"));
+    EXPECT_FALSE(Minted.Function->HasMetadata("Missing"));
+    EXPECT_TRUE(Minted.Function->GetArguments().empty()) << "a button takes nothing, which is what lets the inspector call it";
+
+    const int32 Before = GThunkCalls;
+    FFunctionFrame Frame(*Minted.Function);
+    Frame.Invoke(Minted.Class->GetDefaultObject());
+    EXPECT_EQ(GThunkCalls, Before + 1) << "the inspector's call reaches the function's thunk";
+}
+
+// The C++ spelling of the same thing, carried by the generated function table.
+TEST(ScriptFunctionMint, AGeneratedFunctionCarriesItsMetadata)
+{
+    RegisterPendingTypes();
+    const FFunction* Button = CScriptableTest::StaticClass()->FindFunction("ResetNativeValue");
+    ASSERT_NE(Button, nullptr);
+    EXPECT_EQ(FString(Button->GetMetadata("Button").c_str()), FString("Reset Value"));
+    EXPECT_EQ(FString(Button->GetMetadata("ToolTip").c_str()), FString("Puts NativeValue back to its default"));
+
+    const FFunction* Plain = CScriptableTest::StaticClass()->FindFunction("OnTest");
+    ASSERT_NE(Plain, nullptr);
+    EXPECT_FALSE(Plain->HasMetadata("Button"));
+}
+
 // A parameter is not a member: it must not turn up in the class's property list.
 TEST(ScriptFunctionMint, ParametersDoNotBecomeMembersOfTheClass)
 {
     Scripting::FScriptExportSchema Params;
-    Params.Fields.push_back(ScalarField("A", EPropertyTypeFlags::Int32));
-    Params.Fields.push_back(ScalarField("ReturnValue", EPropertyTypeFlags::Int32));
+    Params.Fields.push_back(ScriptTest::ScalarField("A", EPropertyTypeFlags::Int32));
+    Params.Fields.push_back(ScriptTest::ScalarField("ReturnValue", EPropertyTypeFlags::Int32));
 
     const FMinted Minted = MintClassWithFunction("ScriptFn_NotMembers", Params, 1);
     ASSERT_NE(Minted.Class, nullptr);
@@ -152,9 +181,9 @@ TEST(ScriptFunctionMint, ParametersDoNotBecomeMembersOfTheClass)
 TEST(ScriptFunctionMint, TheFrameIsLaidOutWithoutOverlap)
 {
     Scripting::FScriptExportSchema Params;
-    Params.Fields.push_back(ScalarField("Small", EPropertyTypeFlags::UInt8));
-    Params.Fields.push_back(ScalarField("Wide", EPropertyTypeFlags::Double));
-    Params.Fields.push_back(ScalarField("ReturnValue", EPropertyTypeFlags::Int32));
+    Params.Fields.push_back(ScriptTest::ScalarField("Small", EPropertyTypeFlags::UInt8));
+    Params.Fields.push_back(ScriptTest::ScalarField("Wide", EPropertyTypeFlags::Double));
+    Params.Fields.push_back(ScriptTest::ScalarField("ReturnValue", EPropertyTypeFlags::Int32));
 
     const FMinted Minted = MintClassWithFunction("ScriptFn_Layout", Params, 2);
     ASSERT_NE(Minted.Function, nullptr);
@@ -178,9 +207,9 @@ TEST(ScriptFunctionMint, TheFrameIsLaidOutWithoutOverlap)
 TEST(ScriptFunctionMint, CallingItReachesTheThunkThroughAFrame)
 {
     Scripting::FScriptExportSchema Params;
-    Params.Fields.push_back(ScalarField("A", EPropertyTypeFlags::Int32));
-    Params.Fields.push_back(ScalarField("B", EPropertyTypeFlags::Int32));
-    Params.Fields.push_back(ScalarField("ReturnValue", EPropertyTypeFlags::Int32));
+    Params.Fields.push_back(ScriptTest::ScalarField("A", EPropertyTypeFlags::Int32));
+    Params.Fields.push_back(ScriptTest::ScalarField("B", EPropertyTypeFlags::Int32));
+    Params.Fields.push_back(ScriptTest::ScalarField("ReturnValue", EPropertyTypeFlags::Int32));
 
     const FMinted Minted = MintClassWithFunction("ScriptFn_Invoke", Params, 2);
     ASSERT_NE(Minted.Function, nullptr);
@@ -245,8 +274,8 @@ TEST(ScriptFunctionMint, ANarrowEnumParameterOccupiesItsUnderlyingWidth)
 {
     Scripting::FScriptExportSchema Params;
     Params.Fields.push_back(EnumField("Channel", "ScriptFn_ChannelEnum", EPropertyTypeFlags::UInt8));
-    Params.Fields.push_back(ScalarField("After", EPropertyTypeFlags::Int32));
-    Params.Fields.push_back(ScalarField("ReturnValue", EPropertyTypeFlags::Int32));
+    Params.Fields.push_back(ScriptTest::ScalarField("After", EPropertyTypeFlags::Int32));
+    Params.Fields.push_back(ScriptTest::ScalarField("ReturnValue", EPropertyTypeFlags::Int32));
 
     const FMinted Minted = MintClassWithFunction("ScriptFn_NarrowEnum", Params, 2);
     ASSERT_NE(Minted.Function, nullptr);
@@ -277,7 +306,7 @@ TEST(ScriptFunctionMint, ANativeStructParameterReportsTheStructsOwnSize)
 {
     Scripting::FScriptExportSchema Params;
     Params.Fields.push_back(NativeStructField("Where", "FVector3"));
-    Params.Fields.push_back(ScalarField("ReturnValue", EPropertyTypeFlags::Int32));
+    Params.Fields.push_back(ScriptTest::ScalarField("ReturnValue", EPropertyTypeFlags::Int32));
 
     const FMinted Minted = MintClassWithFunction("ScriptFn_NativeStruct", Params, 1);
     ASSERT_NE(Minted.Function, nullptr);

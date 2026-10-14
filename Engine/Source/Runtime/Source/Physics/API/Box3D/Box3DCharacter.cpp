@@ -60,7 +60,7 @@ namespace Lumina::Physics
 
             b3Pos               Origin{};
             b3BodyId            IgnoreBody{};
-            FCollisionProfile   Profile{};
+            SCollisionProfile   Profile{};
             bool                bPermissive = true;
             bool                bCollideWithCharacters = true;
         };

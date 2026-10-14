@@ -11,7 +11,7 @@ namespace Lumina
 	struct FAudioCommand
 	{
 		EAudioCommandType Type = EAudioCommandType::StopSound;
-		FAudioHandle Handle;
+		SAudioHandle Handle;
 
 		float ValueA = 0.0f;
 		float ValueB = 0.0f;
@@ -27,7 +27,7 @@ namespace Lumina
 		EAudioStopMode StopMode = EAudioStopMode::Immediate;
 		SAudioAttenuation Attenuation;
 
-		static FAudioCommand Make(EAudioCommandType Type, FAudioHandle Handle)
+		static FAudioCommand Make(EAudioCommandType Type, SAudioHandle Handle)
 		{
 			FAudioCommand Cmd;
 			Cmd.Type   = Type;
@@ -35,7 +35,7 @@ namespace Lumina
 			return Cmd;
 		}
 
-		static FAudioCommand MakeStop(FAudioHandle Handle, EAudioStopMode Mode, float FadeSeconds)
+		static FAudioCommand MakeStop(SAudioHandle Handle, EAudioStopMode Mode, float FadeSeconds)
 		{
 			FAudioCommand Cmd = Make(EAudioCommandType::StopSound, Handle);
 			Cmd.StopMode = Mode;
@@ -45,20 +45,20 @@ namespace Lumina
 
 		static FAudioCommand MakeStopAll(EAudioStopMode Mode, float FadeSeconds)
 		{
-			FAudioCommand Cmd = Make(EAudioCommandType::StopAll, FAudioHandle::Invalid());
+			FAudioCommand Cmd = Make(EAudioCommandType::StopAll, SAudioHandle::Invalid());
 			Cmd.StopMode = Mode;
 			Cmd.ValueA   = FadeSeconds;
 			return Cmd;
 		}
 
-		static FAudioCommand MakeFloat(EAudioCommandType Type, FAudioHandle Handle, float Value)
+		static FAudioCommand MakeFloat(EAudioCommandType Type, SAudioHandle Handle, float Value)
 		{
 			FAudioCommand Cmd = Make(Type, Handle);
 			Cmd.ValueA = Value;
 			return Cmd;
 		}
 
-		static FAudioCommand MakeFloat2(EAudioCommandType Type, FAudioHandle Handle, float A, float B)
+		static FAudioCommand MakeFloat2(EAudioCommandType Type, SAudioHandle Handle, float A, float B)
 		{
 			FAudioCommand Cmd = Make(Type, Handle);
 			Cmd.ValueA = A;
@@ -66,42 +66,42 @@ namespace Lumina
 			return Cmd;
 		}
 
-		static FAudioCommand MakeBool(EAudioCommandType Type, FAudioHandle Handle, bool Value)
+		static FAudioCommand MakeBool(EAudioCommandType Type, SAudioHandle Handle, bool Value)
 		{
 			FAudioCommand Cmd = Make(Type, Handle);
 			Cmd.bValue = Value;
 			return Cmd;
 		}
 
-		static FAudioCommand MakeVector(EAudioCommandType Type, FAudioHandle Handle, const FVector3& Value)
+		static FAudioCommand MakeVector(EAudioCommandType Type, SAudioHandle Handle, const FVector3& Value)
 		{
 			FAudioCommand Cmd = Make(Type, Handle);
 			Cmd.Vector = Value;
 			return Cmd;
 		}
 
-		static FAudioCommand MakeAttenuation(FAudioHandle Handle, const SAudioAttenuation& Value)
+		static FAudioCommand MakeAttenuation(SAudioHandle Handle, const SAudioAttenuation& Value)
 		{
 			FAudioCommand Cmd = Make(EAudioCommandType::SetAttenuation, Handle);
 			Cmd.Attenuation = Value;
 			return Cmd;
 		}
 
-		static FAudioCommand MakeSeekToFrame(FAudioHandle Handle, uint64 Frame)
+		static FAudioCommand MakeSeekToFrame(SAudioHandle Handle, uint64 Frame)
 		{
 			FAudioCommand Cmd = Make(EAudioCommandType::SeekToFrame, Handle);
 			Cmd.FrameValue = Frame;
 			return Cmd;
 		}
 
-		static FAudioCommand MakeSetBus(FAudioHandle Handle, EAudioBus Bus)
+		static FAudioCommand MakeSetBus(SAudioHandle Handle, EAudioBus Bus)
 		{
 			FAudioCommand Cmd = Make(EAudioCommandType::SetBus, Handle);
 			Cmd.Bus = Bus;
 			return Cmd;
 		}
 
-		static FAudioCommand MakeSetPriority(FAudioHandle Handle, uint8 Priority)
+		static FAudioCommand MakeSetPriority(SAudioHandle Handle, uint8 Priority)
 		{
 			FAudioCommand Cmd = Make(EAudioCommandType::SetPriority, Handle);
 			Cmd.ByteValue = Priority;
@@ -110,7 +110,7 @@ namespace Lumina
 
 		static FAudioCommand MakeUpdateListener(uint32 ListenerIndex, const FVector3& Position, const FQuat& Rotation, const FVector3& Velocity)
 		{
-			FAudioCommand Cmd = Make(EAudioCommandType::UpdateListener, FAudioHandle::Invalid());
+			FAudioCommand Cmd = Make(EAudioCommandType::UpdateListener, SAudioHandle::Invalid());
 			Cmd.ByteValue = (uint8)ListenerIndex;
 			Cmd.Vector    = Position;
 			Cmd.VectorB   = Velocity;

@@ -49,197 +49,194 @@ namespace Lumina
         return UIScripts::IsShown(Script);
     }
 
-    FUIDocument CUILibrary::GetScriptDocument(CEntityScript* Script)
+    SUIDocument CUILibrary::GetScriptDocument(CEntityScript* Script)
     {
-        return FromPtr<FUIDocument>(UIScripts::GetDocument(Script));
+        return FromPtr<SUIDocument>(UIScripts::GetDocument(Script));
     }
 
-    FUIDocument CUILibrary::LoadDocument(CWorld* World, const FString& Path)
+    SUIDocument CUILibrary::LoadDocument(CWorld* World, const FString& Path)
     {
-        return FromPtr<FUIDocument>(RmlUi::LoadScreenDocument(World, Path));
+        return FromPtr<SUIDocument>(RmlUi::LoadScreenDocument(World, Path));
     }
 
-    FUIDocument CUILibrary::LoadDocumentFromMemory(CWorld* World, const FString& Rml, const FString& SourceUrl)
+    SUIDocument CUILibrary::LoadDocumentFromMemory(CWorld* World, const FString& Rml, const FString& SourceUrl)
     {
-        return FromPtr<FUIDocument>(RmlUi::LoadScreenDocumentFromMemory(World, Rml, SourceUrl));
+        return FromPtr<SUIDocument>(RmlUi::LoadScreenDocumentFromMemory(World, Rml, SourceUrl));
     }
 
-    void CUILibrary::UnloadDocument(CWorld* World, FUIDocument Document)
+    void CUILibrary::UnloadDocument(CWorld* World, SUIDocument Document)
     {
         RmlUi::UnloadScreenDocument(World, AsPtr(Document));
     }
 
-    void CUILibrary::ShowDocument(FUIDocument Document, bool bModal, bool bAutoFocus)
+    void CUILibrary::ShowDocument(SUIDocument Document, bool bModal, bool bAutoFocus)
     {
         RmlUi::ShowDocument(AsPtr(Document), bModal, bAutoFocus);
     }
 
-    void CUILibrary::HideDocument(FUIDocument Document)
+    void CUILibrary::HideDocument(SUIDocument Document)
     {
         RmlUi::HideDocument(AsPtr(Document));
     }
 
-    void CUILibrary::BringDocumentToFront(FUIDocument Document)
+    void CUILibrary::BringDocumentToFront(SUIDocument Document)
     {
         RmlUi::PullDocumentToFront(AsPtr(Document));
     }
 
-    FUIElement CUILibrary::GetDocumentRoot(FUIDocument Document)
+    SUIElement CUILibrary::GetDocumentRoot(SUIDocument Document)
     {
-        return FromPtr<FUIElement>(RmlUi::GetDocumentRoot(AsPtr(Document)));
+        return FromPtr<SUIElement>(RmlUi::GetDocumentRoot(AsPtr(Document)));
     }
 
-    FUIElement CUILibrary::GetElementById(FUIDocument Document, const FString& Id)
+    SUIElement CUILibrary::GetElementById(SUIDocument Document, const FString& Id)
     {
-        return FromPtr<FUIElement>(RmlUi::DocumentGetElementById(AsPtr(Document), Id));
+        return FromPtr<SUIElement>(RmlUi::DocumentGetElementById(AsPtr(Document), Id));
     }
 
-    FUIElement CUILibrary::QuerySelector(FUIElement Element, const FString& Selector)
+    SUIElement CUILibrary::QuerySelector(SUIElement Element, const FString& Selector)
     {
-        return FromPtr<FUIElement>(RmlUi::ElementQuerySelector(AsPtr(Element), Selector));
+        return FromPtr<SUIElement>(RmlUi::ElementQuerySelector(AsPtr(Element), Selector));
     }
 
-    void CUILibrary::SetInnerRml(FUIElement Element, const FString& Rml)
+    void CUILibrary::SetInnerRml(SUIElement Element, const FString& Rml)
     {
         RmlUi::ElementSetInnerRml(AsPtr(Element), Rml);
     }
 
-    FString CUILibrary::GetInnerRml(FUIElement Element)
+    FString CUILibrary::GetInnerRml(SUIElement Element)
     {
         return RmlUi::ElementGetInnerRml(AsPtr(Element));
     }
 
-    void CUILibrary::SetAttribute(FUIElement Element, const FString& Name, const FString& Value)
+    void CUILibrary::SetAttribute(SUIElement Element, const FString& Name, const FString& Value)
     {
         RmlUi::ElementSetAttribute(AsPtr(Element), Name, Value);
     }
 
-    FString CUILibrary::GetAttribute(FUIElement Element, const FString& Name)
+    FString CUILibrary::GetAttribute(SUIElement Element, const FString& Name)
     {
         return RmlUi::ElementGetAttribute(AsPtr(Element), Name);
     }
 
-    void CUILibrary::SetProperty(FUIElement Element, const FString& Name, const FString& Value)
+    void CUILibrary::SetProperty(SUIElement Element, const FString& Name, const FString& Value)
     {
         RmlUi::ElementSetProperty(AsPtr(Element), Name, Value);
     }
 
-    void CUILibrary::RemoveProperty(FUIElement Element, const FString& Name)
+    void CUILibrary::RemoveProperty(SUIElement Element, const FString& Name)
     {
         RmlUi::ElementRemoveProperty(AsPtr(Element), Name);
     }
 
-    void CUILibrary::SetClass(FUIElement Element, const FString& Class, bool bActive)
+    void CUILibrary::SetClass(SUIElement Element, const FString& Class, bool bActive)
     {
         RmlUi::ElementSetClass(AsPtr(Element), Class, bActive);
     }
 
-    bool CUILibrary::IsClassSet(FUIElement Element, const FString& Class)
+    bool CUILibrary::IsClassSet(SUIElement Element, const FString& Class)
     {
         return RmlUi::ElementIsClassSet(AsPtr(Element), Class);
     }
 
-    void CUILibrary::FocusElement(FUIElement Element)
+    void CUILibrary::FocusElement(SUIElement Element)
     {
         RmlUi::ElementFocus(AsPtr(Element));
     }
 
-    void CUILibrary::BlurElement(FUIElement Element)
+    void CUILibrary::BlurElement(SUIElement Element)
     {
         RmlUi::ElementBlur(AsPtr(Element));
     }
 
-    void CUILibrary::ClickElement(FUIElement Element)
+    void CUILibrary::ClickElement(SUIElement Element)
     {
         RmlUi::ElementClick(AsPtr(Element));
     }
 
-    FVector4 CUILibrary::GetElementBox(FUIElement Element)
+    FVector4 CUILibrary::GetElementBox(SUIElement Element)
     {
         float XYWH[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
         RmlUi::ElementGetBox(AsPtr(Element), XYWH);
         return FVector4(XYWH[0], XYWH[1], XYWH[2], XYWH[3]);
     }
 
-    FUIEventListener CUILibrary::AddEventListener(CWorld* World, FUIElement Element, const FString& EventType)
+    SUIEventListener CUILibrary::AddEventListener(CWorld* World, SUIElement Element, const FString& EventType)
     {
-        return FromPtr<FUIEventListener>(RmlUi::AddElementEventListener(World, AsPtr(Element), EventType));
+        return FromPtr<SUIEventListener>(RmlUi::AddElementEventListener(World, AsPtr(Element), EventType));
     }
 
-    void CUILibrary::RemoveEventListener(CWorld* World, FUIEventListener Listener)
+    void CUILibrary::RemoveEventListener(CWorld* World, SUIEventListener Listener)
     {
         RmlUi::RemoveElementEventListener(World, AsPtr(Listener));
     }
 
-    uint64 CUILibrary::GetEventListenerDelegate(FUIEventListener Listener)
+    uint64 CUILibrary::GetEventListenerDelegate(SUIEventListener Listener)
     {
         return reinterpret_cast<uint64>(RmlUi::GetElementEventListenerDelegate(AsPtr(Listener)));
     }
 
-    FUIDataModel CUILibrary::CreateDataModel(CWorld* World, const FString& Name, uint64 Context,
-        uint64 SetThunk, uint64 EventThunk)
+    SUIDataModel CUILibrary::CreateDataModel(CWorld* World, const FString& Name, SScriptCallback OnSet, SScriptCallback OnEvent)
     {
-        return FromPtr<FUIDataModel>(RmlUi::CreateDataModel(World, Name, reinterpret_cast<void*>(Context),
-            reinterpret_cast<RmlUi::FManagedDataSetThunk>(SetThunk),
-            reinterpret_cast<RmlUi::FManagedDataEventThunk>(EventThunk)));
+        return FromPtr<SUIDataModel>(RmlUi::CreateDataModel(World, Name, OnSet, OnEvent));
     }
 
-    void CUILibrary::DestroyDataModel(FUIDataModel Model)
+    void CUILibrary::DestroyDataModel(SUIDataModel Model)
     {
         RmlUi::DestroyDataModel(AsPtr(Model));
     }
 
-    int32 CUILibrary::BindScalar(FUIDataModel Model, const FString& Name, EUIVarType Type)
+    int32 CUILibrary::BindScalar(SUIDataModel Model, const FString& Name, EUIVarType Type)
     {
         return RmlUi::DataModelBindScalar(AsPtr(Model), Name, (int32)Type);
     }
 
-    void CUILibrary::BindCommand(FUIDataModel Model, const FString& Name, int32 CommandId)
+    void CUILibrary::BindCommand(SUIDataModel Model, const FString& Name, int32 CommandId)
     {
         RmlUi::DataModelBindCommand(AsPtr(Model), Name, CommandId);
     }
 
-    void CUILibrary::SetNumber(FUIDataModel Model, int32 Field, double Value)
+    void CUILibrary::SetNumber(SUIDataModel Model, int32 Field, double Value)
     {
         RmlUi::DataModelSetNumber(AsPtr(Model), Field, Value);
     }
 
-    void CUILibrary::SetString(FUIDataModel Model, int32 Field, const FString& Value)
+    void CUILibrary::SetString(SUIDataModel Model, int32 Field, const FString& Value)
     {
         RmlUi::DataModelSetString(AsPtr(Model), Field, Value);
     }
 
-    void CUILibrary::MarkDirty(FUIDataModel Model, int32 Field)
+    void CUILibrary::MarkDirty(SUIDataModel Model, int32 Field)
     {
         RmlUi::DataModelDirty(AsPtr(Model), Field);
     }
 
-    void CUILibrary::MarkAllDirty(FUIDataModel Model)
+    void CUILibrary::MarkAllDirty(SUIDataModel Model)
     {
         RmlUi::DataModelDirtyAll(AsPtr(Model));
     }
 
-    int32 CUILibrary::BindList(FUIDataModel Model, const FString& Name)
+    int32 CUILibrary::BindList(SUIDataModel Model, const FString& Name)
     {
         return RmlUi::DataModelBindList(AsPtr(Model), Name);
     }
 
-    int32 CUILibrary::BindListMember(FUIDataModel Model, int32 ListField, const FString& MemberName)
+    int32 CUILibrary::BindListMember(SUIDataModel Model, int32 ListField, const FString& MemberName)
     {
         return RmlUi::DataModelBindListMember(AsPtr(Model), ListField, MemberName);
     }
 
-    void CUILibrary::ResizeList(FUIDataModel Model, int32 ListField, int32 RowCount)
+    void CUILibrary::ResizeList(SUIDataModel Model, int32 ListField, int32 RowCount)
     {
         RmlUi::DataModelListResize(AsPtr(Model), ListField, RowCount);
     }
 
-    void CUILibrary::SetListCell(FUIDataModel Model, int32 ListField, int32 Row, int32 Col, const FString& Value)
+    void CUILibrary::SetListCell(SUIDataModel Model, int32 ListField, int32 Row, int32 Col, const FString& Value)
     {
         RmlUi::DataModelListSetCell(AsPtr(Model), ListField, Row, Col, Value);
     }
 
-    void CUILibrary::MarkListDirty(FUIDataModel Model, int32 ListField)
+    void CUILibrary::MarkListDirty(SUIDataModel Model, int32 ListField)
     {
         RmlUi::DataModelListDirty(AsPtr(Model), ListField);
     }

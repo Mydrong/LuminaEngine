@@ -110,7 +110,7 @@ namespace Lumina::Physics
             return nullptr;
         }
 
-        const FCollisionProfile Profile = Desc.FallbackProfile;
+        const SCollisionProfile Profile = Desc.FallbackProfile;
 
         TVector<FRagdollBodyDef> Defs;
         THashMap<int32, int32> BoneToBody;

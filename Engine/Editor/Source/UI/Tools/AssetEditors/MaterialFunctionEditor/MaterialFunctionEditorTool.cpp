@@ -157,7 +157,7 @@ namespace Lumina
         {
             ImGui::TextDisabled("  (none)");
         }
-        for (const FMaterialFunctionInput& In : Fn->GetInputs())
+        for (const SMaterialFunctionInput& In : Fn->GetInputs())
         {
             ImGui::BulletText("%s : %s", In.Name.c_str(), ValueTypeName(In.Type));
         }
@@ -171,7 +171,7 @@ namespace Lumina
         {
             ImGui::TextDisabled("  (none)");
         }
-        for (const FMaterialFunctionOutput& Out : Fn->GetOutputs())
+        for (const SMaterialFunctionOutput& Out : Fn->GetOutputs())
         {
             ImGui::BulletText("%s : %s", Out.Name.c_str(), ValueTypeName(Out.Type));
         }
@@ -217,7 +217,7 @@ namespace Lumina
         Fn->Inputs.reserve(InputNodes.size());
         for (CMaterialExpression_FunctionInput* In : InputNodes)
         {
-            FMaterialFunctionInput Decl;
+            SMaterialFunctionInput Decl;
             Decl.Name         = In->InputName;
             Decl.Type         = In->InputType;
             Decl.DefaultValue = In->DefaultValue;
@@ -229,7 +229,7 @@ namespace Lumina
         Fn->Outputs.reserve(OutputNodes.size());
         for (CMaterialFunctionOutput* Out : OutputNodes)
         {
-            FMaterialFunctionOutput Decl;
+            SMaterialFunctionOutput Decl;
             Decl.Name        = Out->OutputName;
             Decl.Type        = Out->OutputType;
             Decl.Description  = Out->Description;

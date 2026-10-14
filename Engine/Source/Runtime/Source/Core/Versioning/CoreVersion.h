@@ -105,6 +105,12 @@ enum class ELuminaEngineVersion : uint32
 	// One position grid per mesh, static vertices stored once behind per-meshlet refs, and skinned vertices on the same grid.
 	MESHLET_SHARED_VERTICES,
 
+	// An entity script whose class was not loaded is written after the live ones with the names and objects its bytes refer to.
+	PORTABLE_HELD_SCRIPTS,
+
+	// A soft import lists the asset bundles that reference it.
+	ASSET_BUNDLES,
+
 	AUTOMATIC_VERSION_PLUS_ONE,
 	AUTOMATIC_VERSION = AUTOMATIC_VERSION_PLUS_ONE - 1
 };

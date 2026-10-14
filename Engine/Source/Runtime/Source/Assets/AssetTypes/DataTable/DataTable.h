@@ -1,7 +1,7 @@
 ﻿#pragma once
 
 #include "Containers/Vector.h"
-#include "Scripting/ScriptDataStruct.h"
+#include "Scripting/ScriptTypeRegistry.h"
 #include "Containers/Name.h"
 #include "Core/Object/Object.h"
 #include "Core/Object/ObjectMacros.h"
@@ -91,7 +91,12 @@ namespace Lumina
         RUNTIME_API NODISCARD int32 GetRowStructSize() const;
 
         /** Row memory as RowStruct, or null when the name is unknown. */
+        FUNCTION(ScriptInternal)
         RUNTIME_API NODISCARD const void* FindRow(const FName& RowName) const;
+
+        // Row memory at Index, or null when out of range or the row does not hold the table's row type.
+        FUNCTION(ScriptInternal)
+        RUNTIME_API NODISCARD const void* GetRowMemoryAt(int32 Index) const;
 
         // FindRow starting from a remembered index, which is checked by name and refreshed when the row moved.
         RUNTIME_API NODISCARD const void* FindRowHinted(const FName& RowName, int32& InOutIndex) const;
@@ -116,7 +121,7 @@ namespace Lumina
 
         /** Resolution result for RowStructName. Not serialized: reflection objects live at different
          *  addresses each run, and a stale pointer here would outlive its module. */
-        FDataStructResolveCache RowStructCache;
+        FStructResolveCache RowStructCache;
     };
 
     /** Typed lookup. Returns null unless the table's row type actually is T -- a mismatched cast here
@@ -151,6 +156,7 @@ namespace Lumina
         NODISCARD CStruct* GetRowStruct() const;
 
         // Null when the handle is empty or the name is not in the table.
+        FUNCTION(ScriptInternal)
         NODISCARD const void* GetRowMemory() const;
 
         NODISCARD bool IsValid() const { return GetRowMemory() != nullptr; }

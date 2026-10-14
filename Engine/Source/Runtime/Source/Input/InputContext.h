@@ -93,8 +93,8 @@ namespace Lumina
 
         // This frame's evaluated action states, indexed like FInputActionMap::GetAllActions(). Sized and
         // filled by FInputActionMap::UpdateContext once per frame; every query reads this snapshot.
-        const TVector<FInputActionState>& GetActionStates() const { return ActionStates; }
-        TVector<FInputActionState>&       GetMutableActionStates() { return ActionStates; }
+        const TVector<SInputActionState>& GetActionStates() const { return ActionStates; }
+        TVector<SInputActionState>&       GetMutableActionStates() { return ActionStates; }
 
         // Pushed mapping layers, innermost last. Names rather than resolved pointers, so re-authoring the
         // settings cannot leave the stack pointing at freed entries.
@@ -149,7 +149,7 @@ namespace Lumina
         TArray<Input::EMouseState, (uint32)EMouseKey::Num>  MouseStates = {};
 
         TVector<FName>                 InputLayers;
-        TVector<FInputActionState>     ActionStates;
+        TVector<SInputActionState>     ActionStates;
         uint32                         ActionsSerial = 0;
         TVector<SInputEvent>           FrameEvents;
     };

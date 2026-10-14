@@ -25,15 +25,11 @@ namespace Lumina
 namespace Lumina::Scripting
 {
 
-    // One element of a script-minted container: how big it is, and -- through Inner -- how to bring one up,
-    // tear it down and copy it. There is deliberately no per-kind switch here: every one of those three
-    // operations is the inner FProperty's own (ConstructValue / DestructValue / CopyCompleteValue), so
-    // supporting a new element type means teaching that property type and changing nothing in this file.
+    // One element of a container a C# type declares, built, destroyed and copied through its inner property.
     struct FScriptArrayElementDesc
     {
         uint32                Size = 0;
-        CStruct*              NativeStruct = nullptr;
-        const CScriptStruct*  ScriptStruct = nullptr;
+        CField*               ElementType = nullptr;  // the reflected struct or enum the element names, if any
         const FProperty*      Inner = nullptr;
         FVectorOps            Ops{};
 
@@ -70,9 +66,7 @@ namespace Lumina::Scripting
         LE_NO_COPYMOVE(FScriptDynamicOptional);
     };
 
-    // Key/value element description for a script-minted map. The Key/Value reuse the array element desc (size,
-    // lifecycle kind, inner FProperty, construct/destruct/copy). Pairs are packed [key][pad][value][pad] with a
-    // 16-byte alignment so any key/value type stays aligned inside the (16-byte-aligned) backing buffer.
+    // A map's key and value, packed per pair at 16-byte alignment so any key or value stays aligned in the buffer.
     struct FScriptMapElementDesc
     {
         FScriptArrayElementDesc  Key;
@@ -89,9 +83,7 @@ namespace Lumina::Scripting
         void CopyPair(void* Dst, const void* Src) const;
     };
 
-    // A script map's runtime backing: packed key/value pairs in a byte buffer, with linear find-by-key via the
-    // key property's Identical (no hashing needed; script/config maps are small and this is an editor/serialize
-    // path, not a hot loop). The C# instance keeps a real Dictionary<K,V>; this mirrors it for the FMapProperty.
+    // A map a C# type declares, packed pairs found by the key property's Identical, which suits the small maps scripts hold.
     struct FScriptDynamicMap
     {
         TVector<uint8>                   Bytes;
@@ -105,7 +97,7 @@ namespace Lumina::Scripting
 
 namespace Lumina
 {
-    // Runtime-minted CStruct mirroring one C# script type's [Property] layout with real FProperties.
+    // A struct minted from a C# type's schema, or the record of the block a C# class appends to its native base.
     class CScriptStruct : public CStruct
     {
         DECLARE_CLASS(Lumina, CScriptStruct, CStruct, "/Types/Engine", RUNTIME_API)
@@ -115,10 +107,10 @@ namespace Lumina
 
         CScriptStruct() = default;
 
-        RUNTIME_API bool BuildFromSchema(const Scripting::FScriptExportSchema& Schema,
-            const TVector<Scripting::FScriptPropertyEntry>* DefaultValues = nullptr);
+        // Base, when given, is the struct this one extends; its fields come first and its own struct ops build them.
+        RUNTIME_API bool BuildFromSchema(const Scripting::FScriptExportSchema& Schema, CStruct* Base = nullptr);
 
-        /** Result of laying a schema out onto some other struct or class. */
+        // The block a schema was laid out as onto some other struct or class.
         struct FEmittedLayout
         {
             TVector<FProperty*> Properties;     ///< every property emitted, in layout order
@@ -126,11 +118,7 @@ namespace Lumina
             uint32              Alignment = 1;  ///< the block's required alignment
         };
 
-        // The record owning the emitted properties' element descriptions, so it must outlive every instance of Target.
-        //
-        // Collector, when given, takes the emitted properties instead of Target's member list. A call frame is
-        // laid out the same way an instance is but its slots are parameters, and a parameter that landed in the
-        // member list would show up as a field of the type.
+        // Collector takes the properties instead of Target's member list, for a call frame whose slots are parameters.
         RUNTIME_API FEmittedLayout EmitLayoutInto(CStruct* Target, uint32 BaseOffset,
             const Scripting::FScriptExportSchema& Schema, TVector<FProperty*>* Collector = nullptr);
 
@@ -140,10 +128,7 @@ namespace Lumina
         RUNTIME_API void DestructIn(void* Buffer) const;
         RUNTIME_API void CopyInto(void* Dst, const void* Src) const;
 
-        // True once any field owns storage, or once there are defaults worth seeding: either way a zeroed
-        // buffer is not a valid instance of this layout.
         bool RequiresValueLifecycle() const override { return bRequiresLifecycle; }
-
 
         void InitializeStruct(void* Dest) const override
         {
@@ -162,70 +147,32 @@ namespace Lumina
         // Resets every [SkipHotReload] field in Buffer to the layout default; called on a hot-reload rebind.
         RUNTIME_API void ResetHotReloadFields(void* Buffer) const;
 
+        // A reload reshaped the C# type, so a newer struct holds its name and values of this one are migrated by field name.
+        NODISCARD bool IsSuperseded() const { return bSuperseded; }
+        void MarkSuperseded() { bSuperseded = true; }
+
+        // A class's layout record or a superseded type describes memory but is not a type anything stores a value of.
+        NODISCARD bool IsValueType() const { return !bSuperseded && !bClassLayoutRecord; }
+        void MarkClassLayoutRecord() { bClassLayoutRecord = true; }
+
+        NODISCARD TSpan<FProperty* const> GetOwnProperties() const { return OwnProperties; }
+        NODISCARD CStruct* GetNativeBase() const { return NativeBase; }
+
         void OnDestroy() override;
 
     private:
 
         struct FFieldPlan;
-        struct FKindResolver;
-        struct FKindResolvers;
-
-    public:
-
-        /** The footprint a kind's value occupies, plus whatever type had to be resolved or minted for it. */
-        struct FKindLayout
-        {
-            uint32         Size   = 0;
-            uint32         Align  = 1;
-            CStruct*       Native = nullptr;   // a Struct naming a native type
-            CScriptStruct* Script = nullptr;   // a minted sub-struct, or an InstancedStruct's candidate base
-        };
-
-    private:
-
-        /** Null for a kind a schema cannot express as a value, which is how a container element is refused. */
-        static const FKindResolver* FindKindResolver(EPropertyTypeFlags Kind);
-
-        /**
-         * The two questions asked of every export kind -- how big is it, and what FProperty represents it --
-         * each answered in ONE place.
-         *
-         * A kind is reachable two ways: as a field of the layout, and as the element of a container field.
-         * Those used to be four hand-kept if-chains (plan/create x field/element), which is two chances per
-         * kind for the size path and the property path to disagree about what a kind means. They are now
-         * these two functions, with the field and element paths differing only in what they do with the
-         * answer: a field also gets an alignment and the author's [Property] metadata, an element is packed
-         * at its size and carries only the kind's own tag.
-         *
-         * Container kinds are deliberately absent. A Vector or a Map is only ever a field -- native has no
-         * nested-container property -- so ResolvePlan handles those before asking, and ResolveKindLayout
-         * refusing them is exactly what enforces the rule for elements.
-         */
-        bool ResolveKindLayout(const Scripting::FScriptExportType& Type, const FName& DiagName, FKindLayout& Out);
-        FProperty* MakeForKind(const FPropertyOwner& Owner, const FName& FieldName, uint32 Offset,
-            const Scripting::FScriptExportType& Type, CStruct* Resolved);
 
         bool ResolvePlan(const Scripting::FScriptExportField& Field, FFieldPlan& Out);
         FProperty* CreateProperty(CStruct* Target, const FFieldPlan& Plan, uint32 Offset, TVector<FProperty*>* Collector);
         bool ResolveElement(const Scripting::FScriptExportType& Type, const FName& DiagName, Scripting::FScriptArrayElementDesc& Out);
         FProperty* CreateElement(void* ArrayOwner, const Scripting::FScriptExportType& Type, Scripting::FScriptArrayElementDesc& Desc);
-        CScriptStruct* MintSubStruct(const Scripting::FScriptExportType& Type);
-
-        // An empty marker the candidate sub-structs derive from, so the picker enumerates this field's
-        // candidates via IsChildOf. Tagged ScriptInstanceBase so the picker hides it.
-        CScriptStruct* MintInstanceBase(const FName& BaseName);
-
-        // One selectable concrete type for an Instance field. A sub-CScriptStruct deriving from Base,
-        // tagged with its stable C# type name in ScriptTypeName metadata.
-        CScriptStruct* MintInstanceCandidate(const Scripting::FScriptExportInstanceCandidate& Candidate, CScriptStruct* Base);
-
-        CScriptEnum* MintEnum(const Scripting::FScriptExportType& Type);
         void FreeRuntimeData();
 
     public:
 
-        /** The schema this record emitted, kept so the next reload can say WHAT changed rather than only
-         *  that something did. Lives here because the record already outlives the properties it emitted. */
+        // The schema this record emitted, so the next reload can tell a layout change from a metadata one.
         const Scripting::FScriptExportSchema& GetAppliedSchema() const { return AppliedSchema; }
         void SetAppliedSchema(const Scripting::FScriptExportSchema& InSchema) { AppliedSchema = InSchema; }
 
@@ -235,19 +182,17 @@ namespace Lumina
 
         uint8*                                          Defaults = nullptr;
         bool                                           bRequiresLifecycle = false;
-        TVector<TStrongObjectPtr<CScriptStruct>>       SubStructs;
-        TVector<TStrongObjectPtr<CScriptEnum>>         MintedEnums;
+        bool                                           bSuperseded = false;
+        bool                                           bClassLayoutRecord = false;
 
-        // Keyed by type shape, so many fields of one type share a single mint within this layout.
-        THashMap<FString, CScriptStruct*>              SubStructsByKey;
-        THashMap<FString, CScriptEnum*>                EnumsByKey;
+        // The fields this struct declares, without the base's, which its own struct ops look after.
+        TVector<FProperty*>                            OwnProperties;
+        CStruct*                                       NativeBase = nullptr;
 
         TVector<Scripting::FScriptArrayElementDesc*>   ElementDescs;
         TVector<Scripting::FScriptMapElementDesc*>     MapDescs;
         TVector<Scripting::FScriptOptionalDesc*>       OptionalDescs;
         bool                                           bRuntimeFreed = false;
-
-
     };
 
 }
@@ -260,38 +205,19 @@ namespace Lumina::Scripting
     /** Drops a minted class's layout records. Only safe once the class has no live instances. */
     RUNTIME_API void ForgetScriptClassLayout(CScriptClass* Target);
 
-    /**
-     * Resets every `[SkipHotReload]` script property on Object to its class default.
-     *
-     * Called after a hot reload has restored an instance's authored values, for the fields whose author
-     * asked NOT to carry them: a value you tune at edit time but want back at its default whenever you
-     * iterate. The class default object is the source, which is where the C# declared initializers live.
-     *
-     * A no-op for a class with no appended properties, or before its CDO exists.
-     */
+    // Resets every [SkipHotReload] property on Object to its class default after a reload carried the rest across.
     RUNTIME_API void ResetSkipHotReloadProperties(CObject* Object);
 
-    /**
-     * What differs between the block Target currently carries and Schema.
-     *
-     * Replaces a single "matches / does not match" answer, which forced a full rebuild for any edit at all
-     * and so made a metadata-only change either rebuild the class or, because a rebuild refuses while
-     * instances are live, silently not take. Each flag has its own remedy: Layout rebuilds, Metadata is
-     * reapplied in place, Defaults is replayed onto the CDO.
-     */
+    // What differs between Target's block and Schema, a layout change needing a new class and a metadata one reapplied in place.
     RUNTIME_API EScriptTypeDirty DiffScriptClassLayout(const CScriptClass* Target, const FScriptExportSchema& Schema);
 
-    /**
-     * Reapplies editor-facing metadata from Schema onto the properties Target already carries, without
-     * touching the layout. Valid only when DiffScriptClassLayout reported no Layout change, since it matches
-     * fields to properties by position.
-     */
+    // What changed between a block laid out from Applied, whose properties are Emitted, and Schema.
+    RUNTIME_API EScriptTypeDirty DiffScriptLayout(const FScriptExportSchema& Applied, TSpan<FProperty* const> Emitted, const FScriptExportSchema& Schema);
+
+    // Reapplies Schema's metadata to Target's properties by position, so only valid when the layout is unchanged.
     RUNTIME_API void RefreshScriptPropertyMetadata(CScriptClass* Target, const FScriptExportSchema& Schema);
 
-    // Identity of one exported type's shape, so a type used by many fields is minted once.
-    RUNTIME_API FString DescribeScriptTypeSignature(const FScriptExportType& Type);
-
-    /** True when Target's appended block already matches Schema, so a hot reload needs no rebuild. */
+    // True when Target's appended block already matches Schema, so a hot reload needs no rebuild.
     RUNTIME_API bool ScriptClassLayoutMatches(const CScriptClass* Target, const FScriptExportSchema& Schema);
 
 }

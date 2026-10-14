@@ -106,7 +106,7 @@ namespace Lumina::Physics
     struct FSeatProbe
     {
         b3BodyId            IgnoreBody{};
-        FCollisionProfile   Profile{};
+        SCollisionProfile   Profile{};
         bool                bPermissive = true;
         b3Vec3              Point{};
         bool                bHit = false;
@@ -133,7 +133,7 @@ namespace Lumina::Physics
     }
 
     inline EMoverSeatResult TrySeatMoverOnGround(b3WorldId WorldId, const b3Capsule& Mover, b3Vec3 Desired,
-                                          b3QueryFilter Filter, const FCollisionProfile& Profile, float SearchDistance,
+                                          b3QueryFilter Filter, const SCollisionProfile& Profile, float SearchDistance,
                                           b3BodyId IgnoreBody, b3Vec3& OutPosition)
     {
         OutPosition = Desired;

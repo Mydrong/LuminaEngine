@@ -11,9 +11,9 @@ namespace Lumina
     namespace
     {
         // The component stores serializable name-backed tags, so an id has to be resolved to one first.
-        FGameplayTag TagFromId(uint32 TagId)
+        SGameplayTag TagFromId(uint32 TagId)
         {
-            FGameplayTag Tag;
+            SGameplayTag Tag;
             const FString Name = FGameplayTagRegistry::Get().GetName(TagId);
             if (!Name.empty())
             {
@@ -45,7 +45,7 @@ namespace Lumina
         }
 
         FGameplayTagRegistry& Registry = FGameplayTagRegistry::Get();
-        for (const FGameplayTag& Owned : Tags->Tags.Tags)
+        for (const SGameplayTag& Owned : Tags->Tags.Tags)
         {
             Out.push_back(Registry.RequestTag(FStringView(Owned.TagName.c_str())));
         }
@@ -87,7 +87,7 @@ namespace Lumina
         {
             return;
         }
-        const FGameplayTag Tag = TagFromId(TagId);
+        const SGameplayTag Tag = TagFromId(TagId);
         if (Tag.IsValid())
         {
             World->GetOrEmplaceComponent<SGameplayTagComponent>(Entity).Tags.AddTag(Tag);
@@ -114,7 +114,7 @@ namespace Lumina
             return false;
         }
         FGameplayTagRegistry& Registry = FGameplayTagRegistry::Get();
-        for (const FGameplayTag& Owned : Comp->Tags.Tags)
+        for (const SGameplayTag& Owned : Comp->Tags.Tags)
         {
             if (Registry.Matches(Registry.RequestTag(FStringView(Owned.TagName.c_str())), TagId))
             {
@@ -132,7 +132,7 @@ namespace Lumina
             return false;
         }
         FGameplayTagRegistry& Registry = FGameplayTagRegistry::Get();
-        for (const FGameplayTag& Owned : Comp->Tags.Tags)
+        for (const SGameplayTag& Owned : Comp->Tags.Tags)
         {
             if (Registry.RequestTag(FStringView(Owned.TagName.c_str())) == TagId)
             {

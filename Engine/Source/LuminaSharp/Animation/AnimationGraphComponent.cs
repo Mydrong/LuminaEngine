@@ -4,18 +4,17 @@ using LuminaSharp;
 namespace Lumina;
 
 // Typed access to an animation graph's parameter block, which the graph asset names as a reflected struct.
-public unsafe partial class SAnimationGraphComponent
+public readonly unsafe partial struct SAnimationGraphComponent
 {
     // Named for the C++ accessor, since the reflected Parameters field now binds under its own name.
-    public T? GetParameters<T>() where T : NativeStruct
+    public T? GetParameters<T>() where T : struct, INativeStruct<T>
     {
-        IntPtr Memory = NativeBindings.AnimGraphParameterMemory(Handle, typeof(T).Name);
-        return Memory == IntPtr.Zero ? null : Wrapper<T>.Create(Memory);
+        return NativeStructs.FromAddressOrNull<T>(GetParameterMemoryAs(T.NativeName));
     }
 
-    public T RequireParameters<T>() where T : NativeStruct
+    public T RequireParameters<T>() where T : struct, INativeStruct<T>
     {
         return GetParameters<T>() ?? throw new InvalidOperationException(
-            $"Animation graph parameter block is not a {typeof(T).Name}.");
+            $"Animation graph parameter block is not a {T.NativeName}.");
     }
 }

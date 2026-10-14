@@ -97,11 +97,11 @@ namespace Lumina
 
     bool FNavMesh::Initialize(const FVector3& InOrigin, float InTileWorldSize, int32 MaxResidentTiles, int32 MaxPolysPerTile)
     {
-        TVector<FNavTileData> None;
+        TVector<SNavTileData> None;
         return Initialize(InOrigin, InTileWorldSize, MaxResidentTiles, MaxPolysPerTile, std::move(None));
     }
 
-    bool FNavMesh::Initialize(const FVector3& InOrigin, float InTileWorldSize, int32 MaxResidentTiles, int32 MaxPolysPerTile, TVector<FNavTileData>&& Tiles)
+    bool FNavMesh::Initialize(const FVector3& InOrigin, float InTileWorldSize, int32 MaxResidentTiles, int32 MaxPolysPerTile, TVector<SNavTileData>&& Tiles)
     {
         Shutdown();
 
@@ -144,7 +144,7 @@ namespace Lumina
         int32 Skipped = 0;
         int32 Rejected = 0;
         int32 Stale = 0;
-        for (FNavTileData& Tile : Tiles)
+        for (SNavTileData& Tile : Tiles)
         {
             if (Tile.Blob.empty())
             {
@@ -806,7 +806,7 @@ namespace Lumina
 #endif
     }
 
-    bool FNavMesh::Raycast(const FVector3& Start, const FVector3& End, const FNavQueryFilter& Filter, FNavRaycastResult& Out) const
+    bool FNavMesh::Raycast(const FVector3& Start, const FVector3& End, const FNavQueryFilter& Filter, SNavRaycastResult& Out) const
     {
         Out = {};
         Out.Point = End;

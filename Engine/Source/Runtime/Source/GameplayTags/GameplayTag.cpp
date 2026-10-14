@@ -14,19 +14,19 @@ namespace Lumina
         }
     }
 
-    bool FGameplayTag::MatchesTag(const FGameplayTag& Other) const
+    bool SGameplayTag::MatchesTag(const SGameplayTag& Other) const
     {
         return FGameplayTagRegistry::Get().Matches(IdOf(TagName), IdOf(Other.TagName));
     }
 
-    bool FGameplayTag::MatchesTagExact(const FGameplayTag& Other) const
+    bool SGameplayTag::MatchesTagExact(const SGameplayTag& Other) const
     {
         return !TagName.IsNone() && TagName == Other.TagName;
     }
 
-    FGameplayTag FGameplayTag::GetParent() const
+    SGameplayTag SGameplayTag::GetParent() const
     {
-        FGameplayTag Parent;
+        SGameplayTag Parent;
         const uint32 ParentId = FGameplayTagRegistry::Get().GetParent(IdOf(TagName));
         if (ParentId != 0)
         {
@@ -35,7 +35,7 @@ namespace Lumina
         return Parent;
     }
 
-    void FGameplayTagContainer::AddTag(const FGameplayTag& Tag)
+    void SGameplayTagContainer::AddTag(const SGameplayTag& Tag)
     {
         if (Tag.IsValid() && !HasTagExact(Tag))
         {
@@ -43,7 +43,7 @@ namespace Lumina
         }
     }
 
-    void FGameplayTagContainer::RemoveTag(const FGameplayTag& Tag)
+    void SGameplayTagContainer::RemoveTag(const SGameplayTag& Tag)
     {
         for (auto It = Tags.begin(); It != Tags.end(); ++It)
         {
@@ -55,23 +55,23 @@ namespace Lumina
         }
     }
 
-    bool FGameplayTagContainer::HasTag(const FGameplayTag& Tag) const
+    bool SGameplayTagContainer::HasTag(const SGameplayTag& Tag) const
     {
-        return Algo::AnyOf(Tags, [&Tag](const FGameplayTag& Owned) { return Owned.MatchesTag(Tag); });
+        return Algo::AnyOf(Tags, [&Tag](const SGameplayTag& Owned) { return Owned.MatchesTag(Tag); });
     }
 
-    bool FGameplayTagContainer::HasTagExact(const FGameplayTag& Tag) const
+    bool SGameplayTagContainer::HasTagExact(const SGameplayTag& Tag) const
     {
         return Algo::Contains(Tags, Tag);
     }
 
-    bool FGameplayTagContainer::HasAny(const FGameplayTagContainer& Other) const
+    bool SGameplayTagContainer::HasAny(const SGameplayTagContainer& Other) const
     {
-        return Algo::AnyOf(Other.Tags, [this](const FGameplayTag& Tag) { return HasTag(Tag); });
+        return Algo::AnyOf(Other.Tags, [this](const SGameplayTag& Tag) { return HasTag(Tag); });
     }
 
-    bool FGameplayTagContainer::HasAll(const FGameplayTagContainer& Other) const
+    bool SGameplayTagContainer::HasAll(const SGameplayTagContainer& Other) const
     {
-        return Algo::AllOf(Other.Tags, [this](const FGameplayTag& Tag) { return HasTag(Tag); });
+        return Algo::AllOf(Other.Tags, [this](const SGameplayTag& Tag) { return HasTag(Tag); });
     }
 }

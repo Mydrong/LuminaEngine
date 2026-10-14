@@ -153,8 +153,17 @@ namespace Lumina
                     });
                     View.ValueTable->SetFinishEditCallback([this](const FPropertyChangedEvent&) { NestedChangeOp = EPropertyChangeOp::Finished; });
 
-                    DotNet::GatherScriptButtons(Script->GetClass()->GetName().ToString(), View.Buttons);
-                    View.SourceFile = DotNet::FindScriptSourceFile(Script->GetClass()->GetName().ToString());
+                    View.Buttons.clear();
+                    for (const FFunction* Function : Script->GetClass()->GetFunctions())
+                    {
+                        if (Function->HasMetadata("Button") && Function->GetArguments().empty())
+                        {
+                            View.Buttons.push_back(Function);
+                        }
+                    }
+                    View.SourceFile = Script->GetClass()->HasMeta("SourceFile")
+                        ? Script->GetClass()->GetMeta("SourceFile")
+                        : DotNet::FindScriptSourceFile(Script->GetClass()->GetName().ToString());
 
                     View.BoundScript = Script;
                     View.BoundClass = Script->GetClass();
@@ -173,9 +182,10 @@ namespace Lumina
                     const float Right = ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x;
                     for (int32 ButtonIndex = 0; ButtonIndex < (int32)View.Buttons.size(); ++ButtonIndex)
                     {
-                        const Scripting::FScriptButton& Button = View.Buttons[ButtonIndex];
-                        const FString& Label = Button.Label.empty() ? Button.Method : Button.Label;
-                        const FString Text = Lumina::Format("{} {}", LE_ICON_PLAY_CIRCLE, Label);
+                        const FFunction& Button = *View.Buttons[ButtonIndex];
+                        const FCStringView Label = Button.GetMetadata("Button");
+                        const FString Text = Lumina::Format("{} {}", LE_ICON_PLAY_CIRCLE,
+                            Label.empty() ? Button.GetFunctionName().ToString() : FString(Label.data(), Label.size()));
                         const float Width = ImGui::CalcTextSize(Text.c_str()).x + ImGui::GetStyle().FramePadding.x * 2.0f;
 
                         // Wrapped by hand, since a row of actions should use the width it has and then break.
@@ -186,14 +196,12 @@ namespace Lumina
 
                         if (ImGui::Button(Text.c_str()))
                         {
-                            if (void* Instance = Scriptable::GetOrCreateInstance(Script))
-                            {
-                                DotNet::InvokeScriptButton(Instance, Button.Method);
-                            }
+                            FFunctionFrame Frame(Button);
+                            Frame.Invoke(Script);
                         }
-                        if (!Button.Tooltip.empty() && ImGui::IsItemHovered())
+                        if (const FCStringView Tooltip = Button.GetMetadata("ToolTip"); !Tooltip.empty() && ImGui::IsItemHovered())
                         {
-                            ImGui::SetTooltip("%s", Button.Tooltip.c_str());
+                            ImGui::SetTooltip("%s", Tooltip.c_str());
                         }
                     }
                 }

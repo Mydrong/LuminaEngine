@@ -101,7 +101,7 @@ namespace Lumina
 
     int32 CAnimationGraph::FindObjectParameterIndex(const FName& Name) const
     {
-        return Algo::IndexOf(ObjectParameters, Name, &FAnimGraphObjectParameter::Name);
+        return Algo::IndexOf(ObjectParameters, Name, &SAnimGraphObjectParameter::Name);
     }
 
     void CAnimationGraph::LinkParameters()

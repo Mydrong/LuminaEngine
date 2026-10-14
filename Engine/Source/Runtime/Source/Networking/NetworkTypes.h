@@ -4,6 +4,8 @@
 #include "Core/LuminaMacros.h"
 #include "Containers/String.h"
 #include "Containers/Vector.h"
+#include "Core/Object/ObjectMacros.h"
+#include "NetworkTypes.generated.h"
 
 namespace Lumina
 {
@@ -33,7 +35,7 @@ namespace Lumina
         UnreliableSequenced, // No guarantee, but late packets are dropped (sequenced).
     };
 
-    // Who a script RPC runs on. Mirrors LuminaSharp.Networking.ERpcTarget.
+    // Who a script RPC runs on.
     enum class ERpcTarget : uint8
     {
         Broadcast = 0, // the host and every client
@@ -41,7 +43,8 @@ namespace Lumina
         Owner     = 2, // the entity's owning connection only
     };
 
-    // Why a client's session with its host ended. Mirrors LuminaSharp.ENetLeaveReason.
+    // Why a client's session with its host ended.
+    REFLECT()
     enum class ENetLeaveReason : uint8
     {
         None             = 0,
@@ -51,7 +54,8 @@ namespace Lumina
         ProtocolMismatch = 4, // the host runs a different build
     };
 
-    // How an RPC travels. Mirrors LuminaSharp.NetFlags and is spelled the same in FUNCTION(NetFlags = ...).
+    // How an RPC travels, spelled the same in FUNCTION(NetFlags = ...).
+    REFLECT(BitMask)
     enum class ENetFlags : uint8
     {
         None       = 0,
@@ -61,7 +65,8 @@ namespace Lumina
 
     ENUM_CLASS_FLAGS(ENetFlags);
 
-    // Who may write a Sync field. Mirrors LuminaSharp.SyncFlags and is spelled the same in PROPERTY(Sync = ...).
+    // Who may write a Sync field, spelled the same in PROPERTY(Sync = ...).
+    REFLECT(BitMask)
     enum class ESyncFlags : uint8
     {
         None      = 0,

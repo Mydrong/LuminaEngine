@@ -22,9 +22,6 @@ internal sealed class FScriptStructLayout
 
 internal static unsafe partial class ScriptStructLayout
 {
-    [NativeCall("LuminaSharp_ScriptValueLayout")]
-    private static partial long NativeValueLayout(int Kind, string StructName);
-
     // Weak, so a hot reload's old struct types are not pinned.
     private static readonly ConditionalWeakTable<Type, FScriptStructLayout> Layouts = new();
 
@@ -44,7 +41,7 @@ internal static unsafe partial class ScriptStructLayout
     // A struct declared in script whose fields reach a string, which is what keeps it from being read in place.
     public static bool NeedsMarshalling(Type Type)
     {
-        return IsScriptStruct(Type) && Of(Type).bMarshalled;
+        return IsScriptValueStruct(Type) && Of(Type).bMarshalled;
     }
 
     public static FScriptStructLayout Of(Type Type)
@@ -52,7 +49,7 @@ internal static unsafe partial class ScriptStructLayout
         return Layouts.GetValue(Type, Build);
     }
 
-    private static bool IsScriptStruct(Type Type)
+    private static bool IsScriptValueStruct(Type Type)
     {
         return Type.IsValueType && !Type.IsPrimitive && !Type.IsEnum && Type != typeof(FString) && Type != typeof(FEntity)
             && NativeNameOf(Type) == null && Nullable.GetUnderlyingType(Type) == null;
@@ -119,7 +116,7 @@ internal static unsafe partial class ScriptStructLayout
 
     private static (int Size, int Alignment) NativeLayoutOf(EPropertyType Kind, string StructName)
     {
-        long Packed = NativeValueLayout((int)Kind, StructName);
+        long Packed = CScriptInteropLibrary.GetValueLayout((int)Kind, StructName);
         if (Packed < 0)
         {
             throw new InvalidOperationException($"Native has no layout for {Kind} '{StructName}'.");

@@ -17,38 +17,6 @@ using namespace Lumina;
 namespace
 {
     constexpr int32 kNameTableVersion = (int32)ELuminaEngineVersion::PACKAGE_NAME_TABLE;
-
-    // stands in for FPackageSaver and FPackageLoader, which need a CPackage behind them
-    class FNameMapWriter : public FMemoryWriter
-    {
-    public:
-        explicit FNameMapWriter(TVector<uint8>& InBytes) : FMemoryWriter(InBytes) {}
-
-        using FArchive::operator<<;
-        FArchive& operator<<(FName& Value) override
-        {
-            SerializePackageName(*this, Value, &Map, nullptr);
-            return *this;
-        }
-
-        FPackageNameMap Map;
-    };
-
-    class FNameMapReader : public FMemoryReader
-    {
-    public:
-        FNameMapReader(const TVector<uint8>& InBytes, const FPackageNameTable& InTable)
-            : FMemoryReader(InBytes), Table(&InTable) {}
-
-        using FArchive::operator<<;
-        FArchive& operator<<(FName& Value) override
-        {
-            SerializePackageName(*this, Value, nullptr, Table);
-            return *this;
-        }
-
-        const FPackageNameTable* Table;
-    };
 }
 
 TEST(PackageNameTable, ANameSurvivesTheSlotRoundTrip)
@@ -61,14 +29,14 @@ TEST(PackageNameTable, ANameSurvivesTheSlotRoundTrip)
     FPackageNameTable Table;
 
     {
-        FNameMapWriter Writer(Stream);
+        FPackageContainerWriter Writer(Stream);
         for (FName& Name : Written)
         {
             Writer << Name;
         }
 
         FMemoryWriter TableWriter(TableBytes);
-        Writer.Map.Serialize(TableWriter);
+        Writer.GetNameMap().Serialize(TableWriter);
     }
 
     {
@@ -78,7 +46,8 @@ TEST(PackageNameTable, ANameSurvivesTheSlotRoundTrip)
 
     EXPECT_EQ(Table.Num(), 4u) << "a name used twice must take one slot";
 
-    FNameMapReader Reader(Stream, Table);
+    FPackageContainerReader Reader(Stream);
+    Reader.SetNameTable(&Table);
     for (const FName& Expected : Written)
     {
         FName Read;
@@ -97,14 +66,14 @@ TEST(PackageNameTable, ANameWithTwoNumericSuffixesKeepsBoth)
     FPackageNameTable Table;
 
     {
-        FNameMapWriter Writer(Stream);
+        FPackageContainerWriter Writer(Stream);
         for (FName& Name : Written)
         {
             Writer << Name;
         }
 
         FMemoryWriter TableWriter(TableBytes);
-        Writer.Map.Serialize(TableWriter);
+        Writer.GetNameMap().Serialize(TableWriter);
     }
 
     {
@@ -112,7 +81,8 @@ TEST(PackageNameTable, ANameWithTwoNumericSuffixesKeepsBoth)
         Table.Serialize(TableReader);
     }
 
-    FNameMapReader Reader(Stream, Table);
+    FPackageContainerReader Reader(Stream);
+    Reader.SetNameTable(&Table);
     for (const FName& Expected : Written)
     {
         FName Read;
@@ -131,13 +101,13 @@ TEST(PackageNameTable, ANumberedNameSharesItsBaseSlot)
     FPackageNameTable Table;
 
     {
-        FNameMapWriter Writer(Stream);
+        FPackageContainerWriter Writer(Stream);
         for (FName& Name : Written)
         {
             Writer << Name;
         }
         FMemoryWriter TableWriter(TableBytes);
-        Writer.Map.Serialize(TableWriter);
+        Writer.GetNameMap().Serialize(TableWriter);
     }
 
     {
@@ -147,7 +117,8 @@ TEST(PackageNameTable, ANumberedNameSharesItsBaseSlot)
 
     EXPECT_EQ(Table.Num(), 1u) << "the number is not part of the interned text";
 
-    FNameMapReader Reader(Stream, Table);
+    FPackageContainerReader Reader(Stream);
+    Reader.SetNameTable(&Table);
     for (const FName& Expected : Written)
     {
         FName Read;

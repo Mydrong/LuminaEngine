@@ -4,23 +4,15 @@
 #include "Core/Reflection/Type/LuminaTypes.h"
 #include "Core/Object/InstancedStruct.h"
 #include "Core/Object/ObjectCore.h"
-#include "Scripting/ScriptDataStruct.h"
+#include "Scripting/ScriptTypeRegistry.h"
 #include "Scripting/ScriptStruct.h"
+#include "ScriptTestUtil.h"
 
 using namespace Lumina;
 using namespace Lumina::Scripting;
 
 namespace
 {
-    FScriptExportField ScalarField(const char* Name, EPropertyTypeFlags Kind)
-    {
-        FScriptExportField Field;
-        Field.Name = FName(Name);
-        Field.Type = MakeShared<FScriptExportType>();
-        Field.Type->Kind = Kind;
-        return Field;
-    }
-
     // A standalone layout, which is what a script reload mints fresh for every live type.
     CScriptStruct* BuildLayout(const FScriptExportSchema& Schema)
     {
@@ -37,15 +29,15 @@ namespace
 TEST(InstancedStructMigration, ReorderedFieldsMigrateByNameNotByOffset)
 {
     FScriptExportSchema Before;
-    Before.Fields.push_back(ScalarField("Alpha", EPropertyTypeFlags::Int32));
-    Before.Fields.push_back(ScalarField("Beta", EPropertyTypeFlags::Float));
-    Before.Fields.push_back(ScalarField("Gamma", EPropertyTypeFlags::Int32));
+    Before.Fields.push_back(ScriptTest::ScalarField("Alpha", EPropertyTypeFlags::Int32));
+    Before.Fields.push_back(ScriptTest::ScalarField("Beta", EPropertyTypeFlags::Float));
+    Before.Fields.push_back(ScriptTest::ScalarField("Gamma", EPropertyTypeFlags::Int32));
 
     // Same names, deliberately different order, which is what inserting a field upstream produces.
     FScriptExportSchema After;
-    After.Fields.push_back(ScalarField("Gamma", EPropertyTypeFlags::Int32));
-    After.Fields.push_back(ScalarField("Alpha", EPropertyTypeFlags::Int32));
-    After.Fields.push_back(ScalarField("Beta", EPropertyTypeFlags::Float));
+    After.Fields.push_back(ScriptTest::ScalarField("Gamma", EPropertyTypeFlags::Int32));
+    After.Fields.push_back(ScriptTest::ScalarField("Alpha", EPropertyTypeFlags::Int32));
+    After.Fields.push_back(ScriptTest::ScalarField("Beta", EPropertyTypeFlags::Float));
 
     CScriptStruct* Old = BuildLayout(Before);
     CScriptStruct* New = BuildLayout(After);
@@ -76,12 +68,12 @@ TEST(InstancedStructMigration, ReorderedFieldsMigrateByNameNotByOffset)
 TEST(InstancedStructMigration, ARetypedFieldIsSkippedRatherThanReinterpreted)
 {
     FScriptExportSchema Before;
-    Before.Fields.push_back(ScalarField("Value", EPropertyTypeFlags::Int32));
-    Before.Fields.push_back(ScalarField("Kept", EPropertyTypeFlags::Int32));
+    Before.Fields.push_back(ScriptTest::ScalarField("Value", EPropertyTypeFlags::Int32));
+    Before.Fields.push_back(ScriptTest::ScalarField("Kept", EPropertyTypeFlags::Int32));
 
     FScriptExportSchema After;
-    After.Fields.push_back(ScalarField("Value", EPropertyTypeFlags::Float));
-    After.Fields.push_back(ScalarField("Kept", EPropertyTypeFlags::Int32));
+    After.Fields.push_back(ScriptTest::ScalarField("Value", EPropertyTypeFlags::Float));
+    After.Fields.push_back(ScriptTest::ScalarField("Kept", EPropertyTypeFlags::Int32));
 
     CScriptStruct* Old = BuildLayout(Before);
     CScriptStruct* New = BuildLayout(After);
@@ -112,12 +104,12 @@ TEST(InstancedStructMigration, ARetypedFieldIsSkippedRatherThanReinterpreted)
 TEST(InstancedStructMigration, AddedAndRemovedFieldsAreHandled)
 {
     FScriptExportSchema Before;
-    Before.Fields.push_back(ScalarField("Survives", EPropertyTypeFlags::Int32));
-    Before.Fields.push_back(ScalarField("Removed", EPropertyTypeFlags::Int32));
+    Before.Fields.push_back(ScriptTest::ScalarField("Survives", EPropertyTypeFlags::Int32));
+    Before.Fields.push_back(ScriptTest::ScalarField("Removed", EPropertyTypeFlags::Int32));
 
     FScriptExportSchema After;
-    After.Fields.push_back(ScalarField("Added", EPropertyTypeFlags::Int32));
-    After.Fields.push_back(ScalarField("Survives", EPropertyTypeFlags::Int32));
+    After.Fields.push_back(ScriptTest::ScalarField("Added", EPropertyTypeFlags::Int32));
+    After.Fields.push_back(ScriptTest::ScalarField("Survives", EPropertyTypeFlags::Int32));
 
     CScriptStruct* Old = BuildLayout(Before);
     CScriptStruct* New = BuildLayout(After);
@@ -148,12 +140,12 @@ TEST(InstancedStructMigration, AddedAndRemovedFieldsAreHandled)
 TEST(InstancedStructMigration, StorageOwningFieldsDeepCopy)
 {
     FScriptExportSchema Schema;
-    Schema.Fields.push_back(ScalarField("Pad", EPropertyTypeFlags::Int32));
-    Schema.Fields.push_back(ScalarField("Text", EPropertyTypeFlags::String));
+    Schema.Fields.push_back(ScriptTest::ScalarField("Pad", EPropertyTypeFlags::Int32));
+    Schema.Fields.push_back(ScriptTest::ScalarField("Text", EPropertyTypeFlags::String));
 
     FScriptExportSchema Reordered;
-    Reordered.Fields.push_back(ScalarField("Text", EPropertyTypeFlags::String));
-    Reordered.Fields.push_back(ScalarField("Pad", EPropertyTypeFlags::Int32));
+    Reordered.Fields.push_back(ScriptTest::ScalarField("Text", EPropertyTypeFlags::String));
+    Reordered.Fields.push_back(ScriptTest::ScalarField("Pad", EPropertyTypeFlags::Int32));
 
     CScriptStruct* Old = BuildLayout(Schema);
     CScriptStruct* New = BuildLayout(Reordered);
@@ -183,7 +175,7 @@ TEST(InstancedStructMigration, StorageOwningFieldsDeepCopy)
 TEST(InstancedStructMigration, ValueOutlivesItsTypesRegistryRef)
 {
     FScriptExportSchema Schema;
-    Schema.Fields.push_back(ScalarField("Text", EPropertyTypeFlags::String));
+    Schema.Fields.push_back(ScriptTest::ScalarField("Text", EPropertyTypeFlags::String));
 
     TStrongObjectPtr<CScriptStruct> RegistryRef = BuildLayout(Schema);
     ASSERT_TRUE(RegistryRef.IsValid());
@@ -205,7 +197,7 @@ TEST(InstancedStructMigration, ValueOutlivesItsTypesRegistryRef)
     FInstancedStruct Value;
     Value.InitializeAs(MigratedRef.Get());
     MigratedRef = nullptr;
-    FScriptDataStructRegistry::Get().Clear();
+    FScriptStructRegistry::Get().Clear();
 
     // The type is gone from the registry, so the value migrates to nothing, destroying its old contents on the way.
     EXPECT_FALSE(Value.IsValid());

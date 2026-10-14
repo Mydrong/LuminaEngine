@@ -261,9 +261,9 @@ namespace Lumina
         MouseZ      = 0.0;
         CachedModifierState = 0;
         // Without this a focus regain fires a spurious Released callback.
-        for (FInputActionState& State : ActionStates)
+        for (SInputActionState& State : ActionStates)
         {
-            State = FInputActionState();
+            State = SInputActionState();
         }
         FrameEvents.clear();
     }

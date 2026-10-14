@@ -43,10 +43,10 @@ namespace Lumina
         FinishSettledJobs();
         LaunchJobs();
 
-        if (InFlight.empty() && SystemsNeedingSave > 0)
+        if (InFlight.empty() && AssetsNeedingSave > 0)
         {
-            ImGuiX::Notifications::NotifyInfo("{0} particle system(s) recompiled into the artifact cache. Save them once to drop the bytecode from their assets.", SystemsNeedingSave);
-            SystemsNeedingSave = 0;
+            ImGuiX::Notifications::NotifyInfo("{0} particle asset(s) recompiled into the artifact cache. Save them once to drop the bytecode from their assets.", AssetsNeedingSave);
+            AssetsNeedingSave = 0;
         }
     }
 
@@ -125,7 +125,6 @@ namespace Lumina
     void FParticleCompileScheduler::Finish(FJob& Job)
     {
         CParticleSystem* System = Job.System.Get();
-        bool bNeedsSave = false;
         bool bFailed = false;
         for (size_t i = 0; i < Job.Emitters.size(); ++i)
         {
@@ -144,19 +143,17 @@ namespace Lumina
             }
 
             // A template edit alone only refreshed the artifact cache, so the asset stays clean for source control.
-            bNeedsSave |= Emitter != nullptr && (Emitter->bLoadedEmbeddedBinaries || Emitter->CompiledCodeHash != Job.CodeHashesBefore[i]);
+            CPackage* Package = Emitter != nullptr ? Emitter->GetPackage() : nullptr;
+            if (Package != nullptr && (Emitter->bLoadedEmbeddedBinaries || Emitter->CompiledCodeHash != Job.CodeHashesBefore[i]))
+            {
+                AssetsNeedingSave += Package->IsDirty() ? 0 : 1;
+                Package->MarkDirty();
+            }
         }
 
         if (bFailed)
         {
             ImGuiX::Notifications::NotifyError("Particle system '{0}' failed to recompile", System->GetName().c_str());
-        }
-
-        CPackage* Package = System->GetPackage();
-        if (bNeedsSave && Package != nullptr)
-        {
-            Package->MarkDirty();
-            ++SystemsNeedingSave;
         }
     }
 }

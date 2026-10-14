@@ -77,10 +77,10 @@ namespace Lumina::DefaultScene
             FVector3 Emissive = FVector3(0.0f);
         };
 
-        FMaterialParameter MakeParameter(const char* Name, EMaterialParameterType Type, EShowcaseParameter Index,
+        SMaterialParameter MakeParameter(const char* Name, EMaterialParameterType Type, EShowcaseParameter Index,
                                          float ScalarDefault, const FVector4& VectorDefault)
         {
-            FMaterialParameter Parameter;
+            SMaterialParameter Parameter;
             Parameter.ParameterName = Name;
             Parameter.Type          = Type;
             Parameter.Index         = (uint16)Index;
@@ -98,7 +98,7 @@ namespace Lumina::DefaultScene
             PixelInputs += "\tMaterial.Metallic  = GetMaterialScalar(MaterialIndex, 0);\n";
             PixelInputs += "\tMaterial.Roughness = GetMaterialScalar(MaterialIndex, 1);\n";
 
-            const FMaterialParameter Parameters[] =
+            const SMaterialParameter Parameters[] =
             {
                 MakeParameter("BaseColor", EMaterialParameterType::Vector, EShowcaseParameter::BaseColor, 0.0f, FVector4(0.8f, 0.8f, 0.8f, 1.0f)),
                 MakeParameter("Emissive",  EMaterialParameterType::Vector, EShowcaseParameter::Emissive,  0.0f, FVector4(0.0f)),

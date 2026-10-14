@@ -19,7 +19,7 @@ namespace Lumina
         TVector<FSourceVertex> Vertices;
         TVector<uint32>  Indices;
         FVector3        Center = FVector3(0.0f);   // local-space centroid, used as the launch pivot
-        FAABB            Bounds;
+        SAABB            Bounds;
 
         friend FArchive& operator<<(FArchive& Ar, FFracturePiece& P)
         {
@@ -36,7 +36,7 @@ namespace Lumina
     struct FFractureData
     {
         TVector<FFracturePiece> Pieces;
-        FAABB                   SourceBounds;
+        SAABB                   SourceBounds;
 
         FORCEINLINE bool IsEmpty() const { return Pieces.empty(); }
 

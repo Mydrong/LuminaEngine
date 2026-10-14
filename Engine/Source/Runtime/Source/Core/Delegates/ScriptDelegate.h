@@ -9,9 +9,7 @@
 
 namespace Lumina
 {
-    // Installed by the .NET host; releases the GCHandle behind one managed listener. A managed bind hands
-    // its handle to the delegate, so retiring the listener is what frees it, here or in the destructor.
-    RUNTIME_API extern void (*GFreeManagedDelegateContext)(void* Context);
+    struct SScriptCallback;
 
     /** Managed bindings alive process-wide. */
     RUNTIME_API size_t GetLiveManagedBindingCount();
@@ -27,9 +25,6 @@ namespace Lumina
 
         using FThunk = void(*)(void* Context, const void* Payload);
 
-        // The name the .NET bridge binds against.
-        using FManagedThunk = FThunk;
-
         FScriptDelegateBase() = default;
         RUNTIME_API ~FScriptDelegateBase();
 
@@ -44,7 +39,10 @@ namespace Lumina
         // Unbinds by id wherever the listener now lives, so a binding outlives its delegate being relocated.
         RUNTIME_API static bool UnbindManagedAnywhere(const void* LastKnownAddress, uint64 Id);
 
-        // Registers a managed listener; returns an id used to unbind. Game thread only.
+        // Registers a managed listener, which the delegate owns and releases when it retires. Game thread only.
+        RUNTIME_API uint64 BindManaged(SScriptCallback Callback);
+
+        // The same with the invoke step supplied, which is what lets a test drive a listener with no .NET host.
         RUNTIME_API uint64 BindManaged(FThunk Thunk, void* Context);
 
         // Removes a managed listener by id. Reentrancy-safe.

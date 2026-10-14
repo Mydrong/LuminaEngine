@@ -36,7 +36,7 @@ namespace Lumina
         }
 
         const FName Key(Pin->GetPinName());
-        for (const FAnimGraphPinDefault& Entry : PinDefaults)
+        for (const SAnimGraphPinDefault& Entry : PinDefaults)
         {
             if (Entry.PinName == Key)
             {
@@ -54,7 +54,7 @@ namespace Lumina
         }
 
         const FName Key(Pin->GetPinName());
-        for (FAnimGraphPinDefault& Entry : PinDefaults)
+        for (SAnimGraphPinDefault& Entry : PinDefaults)
         {
             if (Entry.PinName == Key)
             {
@@ -63,7 +63,7 @@ namespace Lumina
             }
         }
 
-        FAnimGraphPinDefault NewEntry;
+        SAnimGraphPinDefault NewEntry;
         NewEntry.PinName = Key;
         NewEntry.Value   = Value;
         PinDefaults.push_back(NewEntry);

@@ -15,6 +15,7 @@
 
 namespace Lumina
 {
+	class CObject;
 	class CStruct;
 }
 
@@ -185,6 +186,7 @@ namespace Lumina::ECS::Utils
 
 	// Remaps every reflected entity field through Map, leaving hierarchy links alone. Unmapped ids stay unless bClearUnmapped.
 	RUNTIME_API void RemapEntityReferences(ECS::FRegistry& Registry, ECS::FEntity Entity, const THashMap<ECS::FEntity, ECS::FEntity>& Map, bool bClearUnmapped);
+	RUNTIME_API void RemapEntityReferences(CObject* Object, const THashMap<ECS::FEntity, ECS::FEntity>& Map, bool bClearUnmapped);
 
 	// Appends every non-null entity RemapEntityReferences would rewrite, duplicates included.
 	RUNTIME_API void CollectEntityReferences(ECS::FRegistry& Registry, ECS::FEntity Entity, TVector<ECS::FEntity>& Out);

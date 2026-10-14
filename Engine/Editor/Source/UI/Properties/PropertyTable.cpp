@@ -10,6 +10,7 @@
 #include "Core/Reflection/PropertyCustomization/PropertyCustomization.h"
 #include "Core/Reflection/Type/LuminaTypes.h"
 #include "Scripting/DotNet/DotNetHost.h"
+#include "Scripting/ScriptTypeRegistry.h"
 #include "Core/Reflection/Type/Properties/ArrayProperty.h"
 #include "Core/Reflection/Type/Properties/EnumProperty.h"
 #include "Core/Reflection/Type/Properties/MapProperty.h"
@@ -1885,17 +1886,12 @@ namespace Lumina
         BuildMemberRows(StructProperty->GetStruct(), PropertyHandle->GetValuePtr(), PropertyHandle->GetDefaultValuePtr());
     }
 
-    // The C# type name from ScriptTypeName when present, otherwise the struct's own name.
     static const char* InstancedStructLabel(const CStruct* Type)
     {
-        if (const FString* ScriptName = Type->Metadata.TryGetMetadata("ScriptTypeName"))
-        {
-            return ScriptName->c_str();
-        }
-        return Type->GetName().c_str();
+        return StructIdentity(Type).c_str();
     }
 
-    // A None entry sits at index 0, and ScriptInstanceBase markers are hidden.
+    // A None entry sits at index 0.
     static CStruct* DrawInstancedStructTypePicker(const char* StrId, CStruct* Base, CStruct* Current, bool& bOutChanged)
     {
         bOutChanged = false;
@@ -1904,7 +1900,7 @@ namespace Lumina
         for (TObjectIterator<CStruct> It; It; ++It)
         {
             CStruct* Candidate = *It;
-            if (Candidate->Metadata.HasMetadata("ScriptInstanceBase") || !IsInstancableStructType(Candidate))
+            if (!IsInstancableStructType(Candidate))
             {
                 continue;
             }

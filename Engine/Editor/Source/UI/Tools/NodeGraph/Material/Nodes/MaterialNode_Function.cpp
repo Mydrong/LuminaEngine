@@ -148,7 +148,7 @@ namespace Lumina
 
         for (size_t Index = 0; Index < InputCount; ++Index)
         {
-            const FMaterialFunctionInput& Input = Fn->GetInputs()[Index];
+            const SMaterialFunctionInput& Input = Fn->GetInputs()[Index];
             const CMaterialInput* Pin = FunctionInputPins[Index];
             if (Pin == nullptr || Pin->GetPinName() != Input.Name.c_str() || CachedInputTypes[Index] != Input.Type)
             {
@@ -158,7 +158,7 @@ namespace Lumina
 
         for (size_t Index = 0; Index < OutputCount; ++Index)
         {
-            const FMaterialFunctionOutput& Output = Fn->GetOutputs()[Index];
+            const SMaterialFunctionOutput& Output = Fn->GetOutputs()[Index];
             const CMaterialOutput* Pin = FunctionOutputPins[Index];
             if (Pin == nullptr || Pin->GetPinName() != Output.Name.c_str() || CachedOutputTypes[Index] != Output.Type)
             {
@@ -217,7 +217,7 @@ namespace Lumina
 
         if (CMaterialFunction* Fn = Function.Get())
         {
-            for (const FMaterialFunctionInput& In : Fn->GetInputs())
+            for (const SMaterialFunctionInput& In : Fn->GetInputs())
             {
                 const EMaterialInputType T = ToMaterialInputType(In.Type);
                 CMaterialInput* Pin = Cast<CMaterialInput>(CreatePin(CMaterialInput::StaticClass(), In.Name.c_str(), ENodePinDirection::Input));
@@ -228,7 +228,7 @@ namespace Lumina
                 CachedInputTypes.push_back(In.Type);
             }
 
-            for (const FMaterialFunctionOutput& Out : Fn->GetOutputs())
+            for (const SMaterialFunctionOutput& Out : Fn->GetOutputs())
             {
                 const EMaterialInputType T = ToMaterialInputType(Out.Type);
                 CMaterialOutput* Pin = Cast<CMaterialOutput>(CreatePin(CMaterialOutput::StaticClass(), Out.Name.c_str(), ENodePinDirection::Output));
@@ -372,7 +372,7 @@ namespace Lumina
         TVector<CMaterialOutput*> BoundInputOutputs;
         for (size_t i = 0; i < FunctionInputPins.size() && i < Fn->GetInputs().size(); ++i)
         {
-            const FMaterialFunctionInput& Decl = Fn->GetInputs()[i];
+            const SMaterialFunctionInput& Decl = Fn->GetInputs()[i];
             CMaterialInput* ArgPin = FunctionInputPins[i];
 
             FMaterialCompiler::FInputValue Arg = Compiler.GetTypedInputValue(ArgPin, VecLiteral(Decl.Type, Decl.DefaultValue));
@@ -455,7 +455,7 @@ namespace Lumina
         // Expose each declared output as a typed local that this call node's output pin reads from.
         for (size_t j = 0; j < FunctionOutputPins.size() && j < Fn->GetOutputs().size(); ++j)
         {
-            const FMaterialFunctionOutput& Decl = Fn->GetOutputs()[j];
+            const SMaterialFunctionOutput& Decl = Fn->GetOutputs()[j];
             CMaterialOutput* OutPin = FunctionOutputPins[j];
             const FString OutVar = CallPrefix + "out_" + Format("{}", j);
             const EMaterialInputType DeclType = ToMaterialInputType(Decl.Type);

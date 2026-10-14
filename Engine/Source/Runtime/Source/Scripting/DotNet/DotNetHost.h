@@ -11,20 +11,13 @@ namespace Lumina
     class CObject;
     class CScriptStruct;
     class CWorld;
-    namespace Scripting { struct FScriptExportSchema; struct FScriptPropertyEntry; struct FScriptButton; }
+    namespace Scripting { struct FScriptExportSchema; }
 }
 
-// FDotNetHost embeds CoreCLR (via the bundled runtime under External/DotNet) and
-// loads the LuminaSharp managed bootstrap. Phase 1: boot + ABI handshake only.
+// Embeds CoreCLR from the bundled runtime under External/DotNet and drives the LuminaSharp managed side.
 namespace Lumina::DotNet
 {
-    // Bumped whenever the native<->managed boundary ABI changes.
-    // v4: LoadScripts takes per-unit assembly buckets (FSourceAssembly).
-    // v5: native->managed exports resolved by name (ResolveManagedExport) instead of a mirrored struct/hash.
-    // v6: managed system-descriptor sink carries declared read/write component-ops tokens (parallel C# systems).
-    // v7: delegate properties replace hardcoded collision/perception dispatch; adds OnNativeDelegateDestroyed.
-    // v13 dropped the C# entity system bridge, since a C# system is now a CEntitySystem subclass.
-    // v15 drops OnNativeDelegateDestroyed; a delegate owns its managed bindings and frees them itself.
+    // Bumped whenever the native to managed boundary changes.
     inline constexpr int32 GAbiVersion = 15;
 
     // Boots the embedded runtime and runs the managed handshake.
@@ -50,8 +43,7 @@ namespace Lumina::DotNet
     // Latches a reload for the next frame start, since a reload destroys objects the frame may be using.
     RUNTIME_API void RequestScriptReload();
 
-    /** Disk path of the .cs file declaring TypeName, matched on the file stem against the script roots.
-     *  Empty when nothing matches, which is the case for a C++ script or a type sharing a file. */
+    // The .cs file declaring TypeName, matched on the file stem, or empty for a C++ script or a type sharing a file.
     RUNTIME_API FString FindScriptSourceFile(FStringView TypeName);
 
     // One script file, by the stem a script class is named after and the folder it sits in under its script root.
@@ -66,23 +58,13 @@ namespace Lumina::DotNet
     // Every script file in one pass over the script roots, which is what a picker filing scripts into folders needs.
     RUNTIME_API void GatherScriptSourceFolders(TVector<FScriptSourceFolder>& Out);
 
-    /**
-     * Reports that a file under a watched source tree changed, and latches a reload if it was one of ours.
-     *
-     * Owns both halves of the policy a caller would otherwise hard-code: which extensions are script sources,
-     * and how long to wait for the burst to end. A single edit reaches an editor as several inotify events,
-     * and a tool that writes a tree produces a great many, so the request is held open for a quiet period
-     * rather than fired per event. Thread-safe: watcher threads call this directly.
-     */
+    // Latches a reload for a changed script source, held open for a quiet period since one edit arrives as several events. Thread-safe.
     RUNTIME_API void NotifyScriptSourceChanged(FStringView Path);
 
-    // Services a latched request once its quiet period has elapsed. Called from the engine's frame start,
-    // never from inside a draw.
+    // Services a latched reload once its quiet period has passed, from the frame start and never inside a draw.
     RUNTIME_API void ProcessPendingScriptReload();
 
-    // Cooked-game variant of ReloadScripts: loads the prebuilt script DLLs the packager staged under
-    // <exeDir>/DotNet/Scripts/ (driven by scripts.manifest.json) instead of compiling .cs from disk. No
-    // Roslyn, no .csproj generation. Safe to call when no manifest exists (no-op).
+    // Loads the prebuilt script DLLs a cooked game ships under DotNet/Scripts instead of compiling, a no-op without a manifest.
     RUNTIME_API void LoadCookedScripts();
 
     RUNTIME_API void GenerateScriptProjects();
@@ -96,8 +78,7 @@ namespace Lumina::DotNet
         TVector<FString> References;     // absolute third-party assemblies to stage beside the unit DLL
     };
 
-    // Recompiles scripts (so every unit's DLL is freshly emitted) and returns the unit graph for the packager
-    // to stage under DotNet/Scripts/ + scripts.manifest.json. Editor-side; no-op if scripting is disabled.
+    // Recompiles optimized and returns the unit graph the packager stages, restoring a debuggable build after. Editor only.
     RUNTIME_API void GatherScriptUnitsForPackaging(TVector<FPackagedScriptUnit>& Out);
 
     // Disk paths of every .cs the script units compile, listed without reading them.
@@ -105,24 +86,10 @@ namespace Lumina::DotNet
 
     RUNTIME_API bool IsInitialized();
 
-    // Resolves a native->managed export by name to its raw function pointer, or nullptr if unknown / scripting
-    // is disabled. Engine exports are stable for the process; script/plugin exports (a C# [ManagedExport] in a
-    // plugin's scripts) change per generation, so a caller that holds one must re-resolve when
-    // GetScriptGeneration() changes (its pointer dangles once the old generation unloads). Game thread only.
+    // A managed export by name, or null. A script assembly's export dies with its generation, so re-resolve when the generation changes. Game thread only.
     RUNTIME_API void* ResolveManagedExport(FStringView Name);
 
-    /**
-     * One managed engine export, named where it is used and resolved on first call.
-     *
-     * The alternative -- and what the host used to do for every export -- is a field in one central struct
-     * plus a typedef plus a line in a bootstrap resolve block, so a subsystem could not add a managed entry
-     * point without editing the host. Declaring the export beside its caller costs one line and nothing in
-     * the host at all.
-     *
-     * Only for exports in LuminaSharp.dll, which is loaded for the life of the process, so a resolved pointer
-     * stays valid across script reloads. A SCRIPT assembly's export dies with its generation and must be
-     * resolved per use instead of held here.
-     */
+    // A LuminaSharp export declared beside its caller and resolved on first call, which holds since that assembly never unloads.
     template<typename TSignature>
     class TManagedExport
     {
@@ -180,84 +147,14 @@ namespace Lumina::DotNet
     
     RUNTIME_API int32 GetScriptGeneration();
     
-    // Entity-script lifecycle and ticking are NOT here: a C# script is a CEntityScript CObject dispatched
-    // through the Reflector's ScriptEvent virtuals, so the managed side no longer owns any of it.
+    //~ C# subclasses of reflected native classes, each minted as a CClass whose objects bind a managed instance.
 
-    //~ Scriptable CObjects: a C# subclass of a REFLECT(Scriptable) native CObject. The Reflector mints a CClass
-    //  per discovered C# subclass; native creates the CObject (a minted CClass) and binds the managed instance.
-
-    // One discovered C# Scriptable subclass and the class it derives from, its C# parent when that is minted too.
-    struct FScriptableTypeDesc
-    {
-        FString TypeName;
-        FString NativeBaseName;
-        bool    bAbstract = false;
-        // Which ScriptEvents the C# subclass overrides. Type-uniform, so it is carried on the minted CClass
-        // rather than per instance (CClass::ScriptOverrides); bit i == the wrapper's [ScriptEvent(i)].
-        /** Names of the ScriptEvents this type overrides. A list rather than a mask: an override is found
-         *  by name like any other function, so there is no index to agree on and no ceiling to hit. */
-        TVector<FString> OverriddenEvents;
-        // The class's REFLECT specifiers from its C# [Reflect], as key and value.
-        TVector<std::pair<FString, FString>> ClassMeta;
-    };
-
-    // One `[Alias]` on a C# script class: the name it used to have, and the name it has now.
-    struct FScriptableAlias
-    {
-        FString OldName;
-        FString NewName;
-    };
-
-    // Reports every loaded C# Scriptable subclass + its native base. Drives runtime CClass minting + editor picker.
-    RUNTIME_API void GatherScriptableTypes(TVector<FScriptableTypeDesc>& Out);
-
-    // Reports every prior->current script class name pair, so the host can record where a renamed class went.
-    RUNTIME_API void GatherScriptableAliases(TVector<FScriptableAlias>& Out);
-
-    //~ Script data structs: a C# type marked [DataTableRow] or any other ScriptStructBase marker.
-    //  Discovered on its own pass whether or not anything references it, and minted as a CScriptStruct whose
-    //  super is the named native struct, so it is accepted anywhere that base is.
-
-    // One discovered C# data type: its StableId (the simple type name, the identity an asset stores) plus the
-    // native struct it derives from.
-    struct FScriptStructTypeDesc
-    {
-        FString ScriptTypeName;
-        FString NativeBaseName;
-    };
-
-    // Reports every loaded C# data type + its native base. Drives CScriptStruct minting + the editor pickers.
     /** One crossing per type for everything the reload stages need, so no stage gathers for itself. */
-    RUNTIME_API void GatherManagedTypeDefinitions(TVector<Scripting::FManagedTypeDefinition>& Out);
+    RUNTIME_API void GatherManagedTypeDefinitions(TVector<Scripting::FManagedTypeDefinition>& OutTypes, TVector<Scripting::FManagedTypeAlias>& OutAliases);
 
-    RUNTIME_API void GatherScriptStructTypes(TVector<FScriptStructTypeDesc>& Out);
-
-    // Reads one data type's member schema, addressed by StableId. False when the type is unknown.
-    RUNTIME_API bool GatherScriptStructSchema(FStringView ScriptTypeName, Scripting::FScriptExportSchema& OutSchema,
-        TVector<Scripting::FScriptPropertyEntry>& OutDefaults);
-
-    // Instantiates the named C# Scriptable subclass and pairs it to an already-created native object
-    // (NativePtr). Returns a strong GCHandle, or nullptr on failure. The caller stores it in the object.s
-    // managed-instance slot, which owns it from then on -- there is no matching Destroy: ~CObjectBase frees
-    // the slot, and the teardown contract drains the whole table before the ALC unloads.
+    // Creates the C# subclass instance for a native object, as a strong handle the object's managed-instance slot then owns.
     RUNTIME_API void* CreateScriptable(FStringView TypeName, uint64 NativePtr);
 
-    /** Runs a script type's declared [Property] initializers into its class default object. Once per type at
-     *  mint, after the CDO exists; every instance is then copied from it. */
+    // Runs a type's C# initializers into its defaults once at mint, every instance being copied from them.
     RUNTIME_API void ApplyScriptableDefaults(FStringView TypeName, void* DefaultObject);
-
-    //~ Exported [Property] schema bridge (editor inspector + serialization). Game thread only.
-
-    // Builds the [Property] schema + default values for a C# script type; false if the type isn't loaded.
-    RUNTIME_API bool GatherScriptSchema(FStringView ScriptClass, Scripting::FScriptExportSchema& OutSchema, TVector<Scripting::FScriptPropertyEntry>& OutDefaults);
-
-    // Gathers the [Button] methods exposed on a C# script type (via managed reflection). Empty if the type
-    // isn't loaded or declares no buttons.
-    RUNTIME_API void GatherScriptButtons(FStringView ScriptClass, TVector<Scripting::FScriptButton>& OutButtons);
-
-    // Invokes a parameterless [Button] method by name on a live script Instance. Returns false if scripting
-    // is down or Instance is null. The method runs synchronously on the calling (game) thread.
-    RUNTIME_API bool InvokeScriptButton(void* Instance, FStringView Method);
-
-    // Applies per-instance values onto a live script Instance; schema-drift fields are skipped.
 }

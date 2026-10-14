@@ -31,7 +31,7 @@ namespace LuminaInteropBench
     using Lumina::int32;
     using Lumina::uint64;
     using Lumina::FVector3;
-    using Lumina::FScriptCallback;
+    using Lumina::SScriptCallback;
     using Lumina::CInteropTestLibrary;
 
     volatile uint64 GInteropBenchSink = 0;
@@ -196,7 +196,7 @@ namespace LuminaInteropBench
         double BestMap = -1.0;
         if (MapLookup != nullptr)
         {
-            Lumina::FInteropOpaqueStruct Opaque;
+            Lumina::SInteropOpaqueStruct Opaque;
             BestMap = 1e30;
             for (int32 Attempt = 0; Attempt < kRepeats; ++Attempt)
             {
@@ -361,7 +361,7 @@ namespace LuminaInteropBench
         Bone.Name = Lumina::FName("Bone");
         Bone.Type = Lumina::MakeShared<Lumina::Scripting::FScriptExportType>();
         Bone.Type->Kind = Lumina::EPropertyTypeFlags::Struct;
-        Bone.Type->NativeName = Lumina::FName("FAnimGraphBoneMaskBone");
+        Bone.Type->NativeName = Lumina::FName("SAnimGraphBoneMaskBone");
         ViewParams.Fields.push_back(Bone);
         Lumina::Scripting::FScriptExportField Weight;
         Weight.Name = Lumina::FName("Weight");
@@ -444,12 +444,12 @@ namespace LuminaInteropBench
             {
                 for (int32 i = 0; i < CallbackIterations; ++i)
                 {
-                    FScriptCallback Once;
+                    SScriptCallback Once;
                     Once.Token = Bind();
                     Scripting::InvokeScriptCallback(Once, (uint64)i);
                 }
             });
-            ReportRow("FScriptCallback bind, fire and free", Callback, Native);
+            ReportRow("SScriptCallback bind, fire and free", Callback, Native);
         }
 
         SUCCEED();

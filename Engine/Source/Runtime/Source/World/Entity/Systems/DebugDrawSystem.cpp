@@ -19,20 +19,25 @@ namespace Lumina
 
     void SDebugDrawSystem::Configure()
     {
+        #if !defined(LE_SHIPPING)
         RequireUpdate(EUpdateStage::FrameStart, EUpdatePriority::Highest);
         RequireUpdate(EUpdateStage::Paused, EUpdatePriority::Highest);
         Reads<SCameraComponent>();
+        #endif
     }
 
     void SDebugDrawSystem::OnStartup()
     {
+        #if !defined(LE_SHIPPING)
         const FSystemContext& Context = GetContext();
 
         Context.GetRegistry().Ctx().Emplace<FDebugDrawState>();
+        #endif
     }
 
     void SDebugDrawSystem::OnUpdate()
     {
+        #if !defined(LE_SHIPPING)
         const FSystemContext& Context = GetContext();
 
         FDebugDrawState& State = Context.GetRegistry().Ctx().Get<FDebugDrawState>();
@@ -68,25 +73,32 @@ namespace Lumina
             State.ViewOrigin = Camera->GetPosition();
             State.bHasView   = true;
         }
+        #endif
     }
 
     void SDebugDrawSystem::OnTeardown()
     {
+        #if !defined(LE_SHIPPING)
         const FSystemContext& Context = GetContext();
 
         Context.GetRegistry().Ctx().Erase<FDebugDrawState>();
+        #endif
     }
 
     namespace DebugDraw
     {
         const FDebugDrawState* GetState(CWorld* World)
         {
+            #if !defined(LE_SHIPPING)
             if (World == nullptr)
             {
                 return nullptr;
             }
 
             return ECS::GetWorldRegistry(*World).Ctx().Find<FDebugDrawState>();
+            #else
+            return nullptr;
+            #endif
         }
 
         FImmediateLineRenderer* GetLines(CWorld* World)
@@ -103,6 +115,7 @@ namespace Lumina
 
         bool ShouldDraw(const FDebugDrawState& State, const FVector3& Center, float Radius)
         {
+            #if !defined(LE_SHIPPING)
             if (!State.bEnabled || !State.bHasView)
             {
                 return false;
@@ -125,10 +138,14 @@ namespace Lumina
             }
 
             return State.Frustum.IntersectsSphere(Center, Radius);
+            #else
+            return false;
+            #endif
         }
 
-        bool ShouldDraw(const FDebugDrawState& State, const FAABB& Bounds)
+        bool ShouldDraw(const FDebugDrawState& State, const SAABB& Bounds)
         {
+            #if !defined(LE_SHIPPING)
             if (!State.bEnabled || !State.bHasView)
             {
                 return false;
@@ -154,6 +171,9 @@ namespace Lumina
             }
 
             return State.Frustum.IsInside(Bounds);
+            #else
+            return false;
+            #endif
         }
     }
 }

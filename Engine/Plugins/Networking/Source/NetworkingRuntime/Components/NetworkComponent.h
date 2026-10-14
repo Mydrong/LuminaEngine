@@ -43,7 +43,7 @@ namespace Lumina
 
         /** Stable network identity, resolved per peer. */
         PROPERTY(ReadOnly, NoSerialize, Category = "Networking|Debug")
-        FNetGUID NetGUID;
+        SNetGUID NetGUID;
 
         /** This peer's role. Authority on the server, proxy on clients. */
         PROPERTY(ReadOnly, NoSerialize, Category = "Networking|Debug")

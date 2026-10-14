@@ -254,13 +254,13 @@ TEST(NavMeshBuild, RaycastSeparatesClearLinesFromWalls)
 
     FNavQueryFilter Filter;
 
-    FNavRaycastResult Clear;
+    SNavRaycastResult Clear;
     ASSERT_TRUE(Mesh->Raycast(FVector3(-8.0f, 0.0f, 0.0f), FVector3(8.0f, 0.0f, 0.0f), Filter, Clear));
     EXPECT_FALSE(Clear.bHit);
     EXPECT_FLOAT_EQ(Clear.T, 1.0f);
 
     // Walking off the edge of the plane has to stop at the boundary.
-    FNavRaycastResult Blocked;
+    SNavRaycastResult Blocked;
     ASSERT_TRUE(Mesh->Raycast(FVector3(0.0f, 0.0f, 0.0f), FVector3(40.0f, 0.0f, 0.0f), Filter, Blocked));
     EXPECT_TRUE(Blocked.bHit);
     EXPECT_LT(Blocked.T, 1.0f);
@@ -320,7 +320,7 @@ TEST(NavMeshBuild, TileBlobKeepsItsLinkArrayEightByteAligned)
     ASSERT_TRUE(NavMeshBuilder::BakeSync(MakeGroundPlane(20.0f), Out));
 
     int32 Checked = 0;
-    for (const FNavTileData& Tile : Out.Tiles)
+    for (const SNavTileData& Tile : Out.Tiles)
     {
         if (Tile.Blob.empty())
         {
@@ -340,7 +340,7 @@ TEST(NavMeshBuild, StaleTileBlobIsRejectedRatherThanRead)
     // Truncating leaves magic and version intact, which is all dtNavMesh::addTile checks. A blob
     // baked against a different Detour layout gets through the same gap.
     int32 Corrupted = 0;
-    for (FNavTileData& Tile : Out.Tiles)
+    for (SNavTileData& Tile : Out.Tiles)
     {
         if (!Tile.Blob.empty())
         {
@@ -361,12 +361,12 @@ TEST(NavMeshBuild, QueriesSurviveConcurrentRetiling)
     FNavBuildOutput Out;
     ASSERT_TRUE(NavMeshBuilder::BakeSync(MakeGroundPlane(20.0f), Out));
 
-    TVector<FNavTileData> Baked = Out.Tiles;
+    TVector<SNavTileData> Baked = Out.Tiles;
     auto Mesh = MakeUnique<FNavMesh>();
     ASSERT_TRUE(Mesh->Initialize(Out.Origin, Out.TileWorldSize, Out.MaxTiles, Out.MaxPolysPerTile, std::move(Out.Tiles)));
 
-    const FNavTileData* Victim = nullptr;
-    for (const FNavTileData& Tile : Baked)
+    const SNavTileData* Victim = nullptr;
+    for (const SNavTileData& Tile : Baked)
     {
         if (!Tile.Blob.empty())
         {
@@ -426,7 +426,7 @@ TEST(NavMeshBuild, TilesPageOutAndBackIn)
     FNavBuildOutput Out;
     ASSERT_TRUE(NavMeshBuilder::BakeSync(MakeGroundPlane(20.0f), Out));
 
-    TVector<FNavTileData> Baked = Out.Tiles;
+    TVector<SNavTileData> Baked = Out.Tiles;
     auto Mesh = MakeUnique<FNavMesh>();
     ASSERT_TRUE(Mesh->Initialize(Out.Origin, Out.TileWorldSize, Out.MaxTiles, Out.MaxPolysPerTile, std::move(Out.Tiles)));
 
@@ -434,7 +434,7 @@ TEST(NavMeshBuild, TilesPageOutAndBackIn)
     ASSERT_GT(Resident, 1);
 
     int32 Removed = 0;
-    for (const FNavTileData& Tile : Baked)
+    for (const SNavTileData& Tile : Baked)
     {
         if (Tile.Blob.empty())
         {
@@ -448,7 +448,7 @@ TEST(NavMeshBuild, TilesPageOutAndBackIn)
     ASSERT_GT(Removed, 0);
     EXPECT_EQ(Mesh->GetResidentTileCount(), 0);
 
-    for (const FNavTileData& Tile : Baked)
+    for (const SNavTileData& Tile : Baked)
     {
         if (!Tile.Blob.empty())
         {
@@ -486,7 +486,7 @@ namespace
         {
             return false;
         }
-        for (const FNavTileData& Tile : Fx.Out.Tiles)
+        for (const SNavTileData& Tile : Fx.Out.Tiles)
         {
             if (!Tile.Blob.empty())
             {
@@ -633,7 +633,7 @@ TEST(NavMeshBuild, BatchRebakeReproducesTheFullBake)
     ASSERT_GT(Full.Tiles.size(), 2u);
 
     TVector<FNavTileCoord> Coords;
-    for (const FNavTileData& Tile : Full.Tiles)
+    for (const SNavTileData& Tile : Full.Tiles)
     {
         Coords.push_back(FNavTileCoord{ Tile.X, Tile.Y });
     }
@@ -641,7 +641,7 @@ TEST(NavMeshBuild, BatchRebakeReproducesTheFullBake)
     FNavBuildOutput Layout = Full;
     Layout.Tiles.clear();
 
-    TVector<FNavTileData> Batch;
+    TVector<SNavTileData> Batch;
     NavMeshBuilder::BakeTiles(Copy, Layout, Coords, Batch);
     ASSERT_EQ(Batch.size(), Full.Tiles.size());
 
@@ -662,7 +662,7 @@ TEST(NavMeshBuild, BatchRebakeIgnoresTilesItWasNotAskedFor)
     ASSERT_TRUE(NavMeshBuilder::BakeSync(std::move(In), Full));
 
     // One tile in the middle of the grid, so it has neighbours on every side to be confused with.
-    const FNavTileData& Target = Full.Tiles[Full.Tiles.size() / 2];
+    const SNavTileData& Target = Full.Tiles[Full.Tiles.size() / 2];
 
     FNavBuildOutput Layout = Full;
     Layout.Tiles.clear();
@@ -670,7 +670,7 @@ TEST(NavMeshBuild, BatchRebakeIgnoresTilesItWasNotAskedFor)
     TVector<FNavTileCoord> Coords;
     Coords.push_back(FNavTileCoord{ Target.X, Target.Y });
 
-    TVector<FNavTileData> Batch;
+    TVector<SNavTileData> Batch;
     NavMeshBuilder::BakeTiles(Copy, Layout, Coords, Batch);
 
     ASSERT_EQ(Batch.size(), 1u);
@@ -694,7 +694,7 @@ namespace
         {
             return false;
         }
-        for (const FNavTileData& Tile : Fx.Out.Tiles)
+        for (const SNavTileData& Tile : Fx.Out.Tiles)
         {
             if (!Tile.Blob.empty())
             {
@@ -702,7 +702,7 @@ namespace
             }
         }
 
-        TVector<FNavTileData> Seed = Fx.Out.Tiles;
+        TVector<SNavTileData> Seed = Fx.Out.Tiles;
         Fx.Mesh = MakeUnique<FNavMesh>();
         if (!Fx.Mesh->Initialize(Fx.Out.Origin, Fx.Out.TileWorldSize, Budget, Fx.Out.MaxPolysPerTile, std::move(Seed)))
         {
@@ -761,8 +761,8 @@ TEST(NavMeshBuild, TileChangeIsReportedOnlyForOverlappingBounds)
 
     const uint64 Before = Fx.Mesh->GetTopologyEpoch();
 
-    const FNavTileData* Changed = nullptr;
-    for (const FNavTileData& Tile : Fx.Out.Tiles)
+    const SNavTileData* Changed = nullptr;
+    for (const SNavTileData& Tile : Fx.Out.Tiles)
     {
         if (!Tile.Blob.empty())
         {
@@ -796,7 +796,7 @@ TEST(NavMeshBuild, ChangeRingOverflowReportsChanged)
 
     const uint64 Before = Fx.Mesh->GetTopologyEpoch();
 
-    const FNavTileData& Target = Fx.Out.Tiles[Fx.Out.Tiles.size() / 2];
+    const SNavTileData& Target = Fx.Out.Tiles[Fx.Out.Tiles.size() / 2];
     for (int32 i = 0; i < 600; ++i)
     {
         Fx.Mesh->RemoveTile(Target.X + 1000 + i, Target.Y + 1000);
@@ -933,7 +933,7 @@ TEST(NavMeshBuild, WorldSizedPlaneIsWalkableInEveryTile)
     ASSERT_GT(Out.TilesX * Out.TilesY, 2000) << "grid too small to exercise the world-sized path";
 
     int32 Empty = 0;
-    for (const FNavTileData& Tile : Out.Tiles)
+    for (const SNavTileData& Tile : Out.Tiles)
     {
         if (Tile.Blob.empty())
         {
@@ -973,7 +973,7 @@ TEST(NavMeshBuild, LargeRaisedMeshLeavesNoRingOfEmptyTiles)
         for (int32 X = 0; X < Out.TilesX; ++X)
         {
             bool bFound = false;
-            for (const FNavTileData& Tile : Out.Tiles)
+            for (const SNavTileData& Tile : Out.Tiles)
             {
                 if (Tile.X == X && Tile.Y == Y)
                 {

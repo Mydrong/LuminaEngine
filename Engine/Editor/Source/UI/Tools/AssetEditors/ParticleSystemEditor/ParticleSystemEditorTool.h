@@ -6,12 +6,14 @@
 #include "Core/Object/ObjectHandleTyped.h"
 #include "Particles/ParticleModule.h"
 #include "UI/Tools/AssetEditors/AssetEditorTool.h"
+#include "UI/Widgets/CategorizedPicker.h"
 
 namespace Lumina
 {
     class CParticleEmitter;
     class CParticleEmitterStack;
     class CParticleModule;
+    class CParticleSystem;
 
     class FParticleSystemEditorTool : public FAssetEditorTool
     {
@@ -55,7 +57,14 @@ namespace Lumina
 
     private:
 
+        // The system being edited, or for an emitter asset a transient one holding just that emitter.
+        CParticleSystem* GetSystem() const { return System.Get(); }
+        bool IsEmitterAsset() const;
+
         void DrawStack();
+        void DrawAddEmitterButtons();
+        // Saving an inline emitter as an asset, or making a shared one local again.
+        void DrawEmitterAssetMenu(int32 EmitterIndex, CParticleEmitter* Emitter);
         void DrawEmitterSection(int32 EmitterIndex);
         void DrawStackSection(int32 EmitterIndex, EParticleModuleStage Stage, const char* Label);
         void DrawAddModulePopup(int32 EmitterIndex, EParticleModuleStage Stage);
@@ -124,6 +133,10 @@ namespace Lumina
         // Stage and emitter whose "+ Add Module" popup is open this frame.
         EParticleModuleStage    PendingAddStage   = EParticleModuleStage::Spawn;
         int32                   PendingAddEmitter = 0;
+
+        TStrongObjectPtr<CParticleSystem> System;
+
+        FCategorizedPicker      EmitterAssetPicker;
 
         // Parallel to the asset's Emitters, one authoring stack each. Rebuilt by SyncEmitterStacks rather
         // than maintained at every mutation site, so an emitter added anywhere still gets a stack.

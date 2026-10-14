@@ -1,5 +1,6 @@
 ﻿#pragma once
 
+#include "UI/Tools/AssetEditors/Animation/AnimPreview.h"
 #include "World/ECS/Registry.h"
 
 
@@ -19,6 +20,8 @@ namespace Lumina
 {
     class CAnimationGraphNodeGraph;
     class CAnimStateTransition;
+    class CBlendSpace;
+    class CEdGraphNode;
     class CEdNodeGraph;
     class CEdNodeGraphPin;
     class CEnum;
@@ -111,6 +114,9 @@ namespace Lumina
 
         // Spawns a Play Animation Clip node for Clip on the active canvas, positioned at ScreenPos.
         void SpawnClipPlayerNode(CAnimation* Clip, ImVec2 ScreenPos);
+        void SpawnBlendSpaceNode(CBlendSpace* BlendSpace, ImVec2 ScreenPos);
+        void WireAxisParameter(FName AxisName, CEdNodeGraphPin* AxisPin, ImVec2 ScreenPos);
+        void FinishSpawnedNode(CEdGraphNode* Node, ImVec2 ScreenPos);
 
     private:
 
@@ -212,6 +218,8 @@ namespace Lumina
         int32                                   ClipCacheAssetCount = -1;
         ImGuiTextFilter                         ClipFilter;
         bool                                    bClipBrowserAnySkeleton = false;
+
+        FPreviewMeshSelection                   PreviewMeshSelection;
 
         // Screen-space center of the graph canvas, refreshed each draw; double-clicking a clip in
         // the browser drops its node here (there's no cursor position to spawn at).

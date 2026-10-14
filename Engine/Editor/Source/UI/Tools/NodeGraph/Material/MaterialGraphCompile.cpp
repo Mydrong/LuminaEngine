@@ -85,14 +85,14 @@ namespace Lumina
                     continue;
                 }
 
-                for (const FGrassOutputEntry& Entry : GrassNode->Entries)
+                for (const SGrassOutputEntry& Entry : GrassNode->Entries)
                 {
                     if (Entry.GrassType == nullptr)
                     {
                         continue;
                     }
 
-                    FGrassOutput Output;
+                    SGrassOutput Output;
                     Output.GrassType    = Entry.GrassType;
                     Output.LayerIndex   = Entry.LayerIndex;
                     Output.DensityScale = Entry.DensityScale;
@@ -271,7 +271,7 @@ namespace Lumina
         OutTarget.Generation   = Material->GetPermutationGeneration();
         OutTarget.StaticSwitchOverrides.clear();
 
-        for (const FMaterialStaticSwitch& Switch : Material->StaticSwitches)
+        for (const SMaterialStaticSwitch& Switch : Material->StaticSwitches)
         {
             OutTarget.StaticSwitchOverrides[Switch.ParameterName] = (Key & (1ull << Switch.BitIndex)) != 0;
         }

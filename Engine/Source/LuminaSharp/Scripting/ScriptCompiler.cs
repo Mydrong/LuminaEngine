@@ -132,14 +132,7 @@ internal static class ScriptCompiler
                 .ToArray();
         }
 
-        // Turn each [Property] field into the native-backed property it has to be. This is the one thing a
-        // source generator could not do -- it may only ADD members -- and it is why script authors no longer
-        // write `partial`. Done here rather than anywhere else because this compilation is the only one whose
-        // output is ever loaded: the generated .csproj is IntelliSense-only, and packaging stages what this
-        // emits (ProjectPackager copies FScriptUnit::AssemblyPath).
-        //
-        // The probe compilation exists only to give the rewriter a semantic model, so it can tell a string
-        // from a struct from an enum. Binding is lazy, so this costs the trees it actually inspects.
+        // Each stored field becomes its native-backed property here, the only compilation ever loaded, the probe compilation just giving the rewriter a semantic model.
         var RewriteErrors = new List<string>();
         var Probe = CSharpCompilation.Create(AssemblyName, Trees, AllReferences,
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary, allowUnsafe: true));
@@ -210,8 +203,7 @@ internal static class ScriptCompiler
         return null;
     }
 
-    // CS0234 names the missing member, never the shadowing namespace that actually caused it.
-    // An [Element] field is filled when its CUIScript's document loads, so "never assigned" is wrong about it.
+    // An [Element] field is filled when its UI document loads, so a never-assigned warning is wrong about it.
     private static bool IsAssignedByEngine(Diagnostic Diagnostic)
     {
         if (Diagnostic.Id != "CS0649" || Diagnostic.Location.SourceTree is not { } Tree)
@@ -224,6 +216,7 @@ internal static class ScriptCompiler
             .Any(Attribute => Attribute.Name.ToString() is "Element" or "ElementAttribute" or "LuminaSharp.Element");
     }
 
+    // CS0234 names the missing member, never the shadowing namespace that actually caused it.
     private static void ExplainShadowedGameNamespace(Diagnostic Diagnostic)
     {
         string Message = Diagnostic.GetMessage();
@@ -240,20 +233,15 @@ internal static class ScriptCompiler
 
     private static ImmutableArray<ISourceGenerator>? CachedGenerators;
 
-    // Source generators run on every script compile (loaded once).
-    //
-    // An explicit allow-list, NOT "every IIncrementalGenerator in the assembly": ManagedExportGenerator is
-    // engine-only and emits its attribute definition into whatever compilation it runs in, so letting it into
-    // a script compile duplicates a type LuminaSharp already exports (CS0101).
+    // An explicit list, since ManagedExportGenerator is engine-only and would duplicate a type LuminaSharp exports.
     private static readonly string[] ScriptGeneratorNames =
     {
         "NativeCallGenerator",      // [NativeCall] -> the native binding glue
-        // Emits nothing; ScriptPropertyRewriter produces the accessors. It runs here anyway for the one thing
-        // the rewriter cannot report: a [Property] declared as a partial property is invisible to it, and
-        // would surface as a bare CS9248 "must have an implementation part" with nothing naming the cause.
+        // Emits nothing but reports a [Property] declared as a partial property, which would otherwise surface as a bare CS9248.
         "ScriptPropertyGenerator",
         "ScriptFunctionInvokerGenerator",   // [ScriptFunction] -> the typed frame invoker
         "ContainerIndexerWriteGenerator",   // rejects a write through a TVector indexer that reads a held copy
+        "ScriptStructGenerator",            // gives a [Reflect] script struct the handle it views native memory through
     };
 
     private static ImmutableArray<ISourceGenerator> SourceGenerators => CachedGenerators ??= LoadGenerators();
@@ -300,8 +288,7 @@ internal static class ScriptCompiler
                 }
             }
 
-            // A generator that silently fails to load looks like "the language feature does not work": every
-            // [Property] partial in every script becomes CS9248 with nothing pointing at the cause. Say so.
+            // A generator that fails to load looks like a missing language feature, so it is named here.
             if (Missing.Count > 0)
             {
                 Native.Log(ELogLevel.Error,

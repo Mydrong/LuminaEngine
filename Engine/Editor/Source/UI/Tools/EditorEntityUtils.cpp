@@ -137,7 +137,7 @@ namespace Lumina::EditorEntityUtils
             {
                 if (Mesh->StaticMesh)
                 {
-                    const FAABB Box = Mesh->GetAABB().ToWorld(WorldMatrix);
+                    const SAABB Box = Mesh->GetAABB().ToWorld(WorldMatrix);
                     Min = Math::Min(Min, Box.Min);
                     Max = Math::Max(Max, Box.Max);
                     bAny = true;
@@ -149,7 +149,7 @@ namespace Lumina::EditorEntityUtils
             {
                 if (Skinned->SkeletalMesh)
                 {
-                    const FAABB Box = Skinned->GetAABB().ToWorld(WorldMatrix);
+                    const SAABB Box = Skinned->GetAABB().ToWorld(WorldMatrix);
                     Min = Math::Min(Min, Box.Min);
                     Max = Math::Max(Max, Box.Max);
                     bAny = true;
@@ -214,12 +214,12 @@ namespace Lumina::EditorEntityUtils
         const SSkeletalMeshComponent* Skinned = Registry.TryGet<SSkeletalMeshComponent>(Entity);
         if (Mesh && Mesh->StaticMesh)
         {
-            const FAABB Local = Mesh->GetAABB();
+            const SAABB Local = Mesh->GetAABB();
             Accumulate(Local.Min * WorldScale, Local.Max * WorldScale);
         }
         else if (Skinned && Skinned->SkeletalMesh)
         {
-            const FAABB Local = Skinned->GetAABB();
+            const SAABB Local = Skinned->GetAABB();
             Accumulate(Local.Min * WorldScale, Local.Max * WorldScale);
         }
 

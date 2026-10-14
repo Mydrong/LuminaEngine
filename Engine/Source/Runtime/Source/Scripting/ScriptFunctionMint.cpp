@@ -2,6 +2,7 @@
 #include "ScriptFunctionMint.h"
 
 #include "Core/Object/ScriptClass.h"
+#include "Core/Reflection/ReflectionDesc.h"
 #include "Log/Log.h"
 #include "ScriptStruct.h"
 #include "ScriptableObject.h"
@@ -12,7 +13,8 @@ namespace Lumina::Scripting
 {
     FFunction* MintScriptFunction(CScriptClass& Class, CScriptStruct& LayoutRecord, const FName& Name,
                                   const FScriptExportSchema& ParamSchema, int32 ReturnIndex,
-                                  FFunction::FNativeFuncPtr Thunk, EFunctionFlags ExtraFlags)
+                                  FFunction::FNativeFuncPtr Thunk, EFunctionFlags ExtraFlags,
+                                  const FScriptExportMeta& Meta)
     {
         TVector<FProperty*> Params;
         Params.reserve(ParamSchema.Fields.size());
@@ -34,8 +36,20 @@ namespace Lumina::Scripting
             return nullptr;
         }
 
+        // Viewing the schema's strings is enough, since the builder copies them into the class's arena.
+        TVector<FString> Keys;
+        TVector<FMetadataEntry> Metadata;
+        Keys.reserve(Meta.Entries.size());
+        Metadata.reserve(Meta.Entries.size());
+        for (const FScriptExportMetaArg& Entry : Meta.Entries)
+        {
+            Keys.push_back(Entry.Key.ToString());
+            Metadata.push_back(FMetadataEntry{ Keys.back().c_str(), Entry.Value.c_str() });
+        }
+
         FFunction* Function = FFunctionBuilder::BuildMinted(Class.GetPropertyArena(), &Class, Name,
-            EFunctionFlags::ScriptCallable | ExtraFlags, Params, ReturnIndex, (uint16)Layout.EndOffset, Thunk);
+            EFunctionFlags::ScriptCallable | ExtraFlags, Params, ReturnIndex, (uint16)Layout.EndOffset, Thunk,
+            TSpan<const FMetadataEntry>(Metadata.data(), Metadata.size()));
 
         if (Function == nullptr)
         {
@@ -99,8 +113,7 @@ namespace Lumina::Scripting
             return;
         }
 
-        // Straight into the generated entry point once the binder has published one, which skips the
-        // dispatcher's handle lookup, type read and cache probe entirely.
+        // Straight into the generated entry point once one is published, skipping the dispatcher entirely.
         if (void* Invoker = Function.GetManagedInvoker())
         {
             using FDirect = void (*)(void*, void*, const int32*);
@@ -114,8 +127,7 @@ namespace Lumina::Scripting
 
     namespace
     {
-        // Every function the managed binder published to, so a reload can drop them all before the code they
-        // point at unloads.
+        // Every function given a managed invoker, so a reload can drop them before the code they point at unloads.
         TVector<const FFunction*> GPublishedInvokers;
     }
 

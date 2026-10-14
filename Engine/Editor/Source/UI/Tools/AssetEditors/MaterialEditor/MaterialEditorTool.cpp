@@ -571,9 +571,9 @@ namespace Lumina
                 Hash *= 1099511628211ull;
             };
 
-            for (const FCustomSlangPin& Pin : Node->Inputs)  { Mix(Pin.Name.c_str()); }
+            for (const SCustomSlangPin& Pin : Node->Inputs)  { Mix(Pin.Name.c_str()); }
             Mix("|");
-            for (const FCustomSlangPin& Pin : Node->Outputs) { Mix(Pin.Name.c_str()); }
+            for (const SCustomSlangPin& Pin : Node->Outputs) { Mix(Pin.Name.c_str()); }
             return Hash;
         }
     }
@@ -601,11 +601,11 @@ namespace Lumina
         // A misspelled output is otherwise a silent no-op that only surfaces as nothing changing.
         if (Node != nullptr)
         {
-            for (const FCustomSlangPin& Pin : Node->Inputs)
+            for (const SCustomSlangPin& Pin : Node->Inputs)
             {
                 CodeEditorLanguage.identifiers.insert(Pin.Name.c_str());
             }
-            for (const FCustomSlangPin& Pin : Node->Outputs)
+            for (const SCustomSlangPin& Pin : Node->Outputs)
             {
                 CodeEditorLanguage.identifiers.insert(Pin.Name.c_str());
             }
@@ -662,7 +662,7 @@ namespace Lumina
         ImGui::SameLine(0.0f, 12.0f);
 
         FFixedString Signature;
-        for (const FCustomSlangPin& In : Node->Inputs)
+        for (const SCustomSlangPin& In : Node->Inputs)
         {
             Signature += (Signature.empty() ? "in: " : ", ");
             Signature += In.Name.c_str();
@@ -671,7 +671,7 @@ namespace Lumina
         {
             Signature += Signature.empty() ? "out: " : "  |  out: ";
             bool bFirst = true;
-            for (const FCustomSlangPin& Out : Node->Outputs)
+            for (const SCustomSlangPin& Out : Node->Outputs)
             {
                 if (!bFirst) { Signature += ", "; }
                 Signature += Out.Name.c_str();

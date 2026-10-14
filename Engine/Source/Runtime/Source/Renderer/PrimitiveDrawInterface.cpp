@@ -11,6 +11,7 @@ namespace Lumina
     void IPrimitiveDrawInterface::DrawBox(const FVector3& Center, const FVector3& HalfExtents,
         const FQuat& Rotation, const FVector4& Color, float Thickness, bool bDepthTest, float Duration)
     {
+        #if !defined(LE_SHIPPING)
         FVector3 LocalCorners[8] =
         {
             {-HalfExtents.x, -HalfExtents.y, -HalfExtents.z},
@@ -44,11 +45,13 @@ namespace Lumina
         DrawLine(corners[1], corners[5], Color, Thickness, bDepthTest, Duration);
         DrawLine(corners[2], corners[6], Color, Thickness, bDepthTest, Duration);
         DrawLine(corners[3], corners[7], Color, Thickness, bDepthTest, Duration);
+            #endif
     }
 
     void IPrimitiveDrawInterface::DrawBoxCorners(const FVector3& Center, const FVector3& HalfExtents,
         const FQuat& Rotation, const FVector4& Color, float CornerFraction, float Thickness, bool bDepthTest, float Duration)
     {
+        #if !defined(LE_SHIPPING)
         const float t = Math::Clamp(CornerFraction, 0.0f, 0.5f);
 
         FVector3 LocalCorners[8] =
@@ -92,11 +95,13 @@ namespace Lumina
                 DrawLine(Corners[i], Stub, Color, Thickness, bDepthTest, Duration);
             }
         }
+            #endif
     }
 
     void IPrimitiveDrawInterface::DrawSphere(const FVector3& Center, float Radius, const FVector4& Color,
         uint8 Segments, float Thickness, bool bDepthTest, float Duration)
     {
+        #if !defined(LE_SHIPPING)
         for (uint8 lat = 1; lat < Segments; ++lat)
         {
             float latAngle = Math::Pi<float>() * lat / Segments;
@@ -135,10 +140,12 @@ namespace Lumina
                 DrawLine(p1, p2, Color, Thickness, bDepthTest, Duration);
             }
         }
+            #endif
     }
 
     void IPrimitiveDrawInterface::DrawCapsule(const FVector3& Start, const FVector3& End, float Radius, const FVector4& Color, uint8 Segments, float Thickness, bool bDepthTest, float Duration)
     {
+        #if !defined(LE_SHIPPING)
         FVector3 axis = End - Start;
         float height = Math::Length(axis);
         FVector3 direction = height > 0.0f ? axis / height : FVector3(0, 1, 0);
@@ -235,11 +242,13 @@ namespace Lumina
                 DrawLine(p1, p2, Color, Thickness, bDepthTest, Duration);
             }
         }
+            #endif
     }
 
     void IPrimitiveDrawInterface::DrawCone(const FVector3& Apex, const FVector3& Direction, float AngleRadians,
                                            float Length, const FVector4& Color, uint8 Segments, uint8 Stacks, float Thickness, bool bDepthTest, float Duration)
     {
+        #if !defined(LE_SHIPPING)
         FVector3 dir = Math::Normalize(Direction);
         
         FVector3 up = Math::Abs(dir.y) < 0.99f ? FVector3(0,1,0) : FVector3(1,0,0);
@@ -283,10 +292,12 @@ namespace Lumina
                 }
             }
         }
+            #endif
     }
 
     void IPrimitiveDrawInterface::DrawFrustum(const FMatrix4& Matrix, float zNear, float zFar, const FVector4& Color, float Thickness, bool bDepthTest, float Duration)
     {
+        #if !defined(LE_SHIPPING)
         auto UnprojectCorner = [&](float x, float y, float z) -> FVector3
         {
             FVector4 ndc(x, y, z, 1.0f);
@@ -320,10 +331,12 @@ namespace Lumina
         DrawLine(corners[1], corners[5], Color, Thickness, bDepthTest, Duration);
         DrawLine(corners[2], corners[6], Color, Thickness, bDepthTest, Duration);
         DrawLine(corners[3], corners[7], Color, Thickness, bDepthTest, Duration);
+            #endif
     }
 
     void IPrimitiveDrawInterface::DrawArrow(const FVector3& Start, const FVector3& Direction, float Length, const FVector4& Color, float Thickness, bool bDepthTest, float Duration, float HeadSize)
     {
+        #if !defined(LE_SHIPPING)
         FVector3 End = Start + Math::Normalize(Direction) * Length;
 
         DrawLine(Start, End, Color, Thickness, bDepthTest, Duration);
@@ -353,20 +366,26 @@ namespace Lumina
         DrawLine(Corner2, Corner3, Color, Thickness, bDepthTest, Duration);
         DrawLine(Corner3, Corner4, Color, Thickness, bDepthTest, Duration);
         DrawLine(Corner4, Corner1, Color, Thickness, bDepthTest, Duration);
+            #endif
     }
 
     void IPrimitiveDrawInterface::DrawViewVolume(const FViewVolume& ViewVolume, const FVector4& Color, float Thickness, bool bDepthTest, float Duration)
     {
+        #if !defined(LE_SHIPPING)
         DrawFrustum(ViewVolume.GetViewProjectionMatrix(), ViewVolume.GetNear(), ViewVolume.GetFar(), Color, Thickness, bDepthTest, Duration);
+            #endif
     }
 
     void IPrimitiveDrawInterface::DrawCircle(const FVector3& Center, const FVector3& Normal, float Radius, const FVector4& Color, uint8 Segments, float Thickness, bool bDepthTest, float Duration)
     {
+        #if !defined(LE_SHIPPING)
         DrawArc(Center, Normal, Radius, 0.0f, Math::TwoPi<float>(), Color, Segments >= 3 ? Segments : 3, Thickness, bDepthTest, Duration);
+            #endif
     }
 
     void IPrimitiveDrawInterface::DrawArc(const FVector3& Center, const FVector3& Normal, float Radius, float StartAngle, float SweepAngle, const FVector4& Color, uint8 Segments, float Thickness, bool bDepthTest, float Duration)
     {
+        #if !defined(LE_SHIPPING)
         const float NormalLength = Math::Length(Normal);
         if (Radius <= 0.0f || NormalLength <= 0.0f || SweepAngle == 0.0f)
         {
@@ -387,10 +406,12 @@ namespace Lumina
             DrawLine(Previous, Current, Color, Thickness, bDepthTest, Duration);
             Previous = Current;
         }
+            #endif
     }
 
     void IPrimitiveDrawInterface::DrawCylinder(const FVector3& Start, const FVector3& End, float Radius, const FVector4& Color, uint8 Segments, float Thickness, bool bDepthTest, float Duration)
     {
+        #if !defined(LE_SHIPPING)
         const FVector3 Delta = End - Start;
         const float Length = Math::Length(Delta);
         if (Radius <= 0.0f || Length <= 0.0f)
@@ -417,10 +438,12 @@ namespace Lumina
             }
             PreviousOffset = Offset;
         }
+            #endif
     }
 
     void IPrimitiveDrawInterface::DrawAxes(const FVector3& Origin, const FQuat& Rotation, float Length, float Thickness, bool bDepthTest, float Duration)
     {
+        #if !defined(LE_SHIPPING)
         if (Length <= 0.0f)
         {
             return;
@@ -430,10 +453,12 @@ namespace Lumina
         DrawArrow(Origin, Math::Rotate(Rotation, FVector3(1.0f, 0.0f, 0.0f)), Length, FVector4(1.0f, 0.2f, 0.2f, 1.0f), Thickness, bDepthTest, Duration, HeadSize);
         DrawArrow(Origin, Math::Rotate(Rotation, FVector3(0.0f, 1.0f, 0.0f)), Length, FVector4(0.2f, 1.0f, 0.2f, 1.0f), Thickness, bDepthTest, Duration, HeadSize);
         DrawArrow(Origin, Math::Rotate(Rotation, FVector3(0.0f, 0.0f, 1.0f)), Length, FVector4(0.2f, 0.4f, 1.0f, 1.0f), Thickness, bDepthTest, Duration, HeadSize);
+            #endif
     }
 
     void IPrimitiveDrawInterface::DrawPoint(const FVector3& Position, float Size, const FVector4& Color, float Thickness, bool bDepthTest, float Duration)
     {
+        #if !defined(LE_SHIPPING)
         if (Size <= 0.0f)
         {
             return;
@@ -442,5 +467,6 @@ namespace Lumina
         DrawLine(Position - FVector3(Size, 0.0f, 0.0f), Position + FVector3(Size, 0.0f, 0.0f), Color, Thickness, bDepthTest, Duration);
         DrawLine(Position - FVector3(0.0f, Size, 0.0f), Position + FVector3(0.0f, Size, 0.0f), Color, Thickness, bDepthTest, Duration);
         DrawLine(Position - FVector3(0.0f, 0.0f, Size), Position + FVector3(0.0f, 0.0f, Size), Color, Thickness, bDepthTest, Duration);
+            #endif
     }
 }

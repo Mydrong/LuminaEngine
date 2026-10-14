@@ -20,12 +20,12 @@ namespace Lumina
 
         /** Runs OnFire after Rate seconds, repeating while bLoop. FirstDelay >= 0 overrides the first wait. */
         FUNCTION()
-        static uint32 SetTimer(CWorld* World, float Rate, FScriptCallback OnFire, bool bLoop = false,
+        static uint32 SetTimer(CWorld* World, float Rate, SScriptCallback OnFire, bool bLoop = false,
             float FirstDelay = -1.0f);
 
         /** As SetTimer, but cleared automatically when Owner is destroyed. */
         FUNCTION()
-        static uint32 SetTimerForEntity(CWorld* World, ECS::FEntity Owner, float Rate, FScriptCallback OnFire,
+        static uint32 SetTimerForEntity(CWorld* World, ECS::FEntity Owner, float Rate, SScriptCallback OnFire,
             bool bLoop = false, float FirstDelay = -1.0f);
 
         FUNCTION()

@@ -272,17 +272,23 @@ namespace Lumina
             return;
         }
 
-        if (ShouldGenerateThumbnailOnSave() && Asset->GetPackage())
+        CPackage* Package = Asset->GetPackage();
+        if (Package == nullptr || !Package->IsDirty())
         {
-            if (!CThumbnailManager::Get().GenerateThumbnail(Asset.Get(), Asset->GetPackage()))
+            return;
+        }
+
+        if (ShouldGenerateThumbnailOnSave())
+        {
+            if (!CThumbnailManager::Get().GenerateThumbnail(Asset.Get(), Package))
             {
-                GenerateThumbnail(Asset->GetPackage());
+                GenerateThumbnail(Package);
             }
         }
 
         FCoreEditorDelegates::OnAssetPreSave.Broadcast(Asset.Get());
 
-        if (CPackage::SavePackage(Asset->GetPackage(), Asset->GetPackage()->GetPackagePath()))
+        if (CPackage::SavePackage(Package, Package->GetPackagePath()))
         {
             FAssetRegistry::Get().AssetSaved(Asset.Get());
             FCoreEditorDelegates::OnAssetSaved.Broadcast(Asset.Get());

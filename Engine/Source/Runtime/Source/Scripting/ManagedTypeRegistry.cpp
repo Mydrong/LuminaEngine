@@ -51,13 +51,13 @@ namespace Lumina::Scripting
         }
     }
 
-    void FManagedTypeRegistry::CompileAll(TSpan<const FManagedTypeDefinition> Definitions)
+    void FManagedTypeRegistry::CompileAll(TSpan<const FManagedTypeDefinition> Definitions, TSpan<const FManagedTypeAlias> Aliases)
     {
         LUMINA_PROFILE_SCOPE();
 
         for (IManagedTypeCompiler* Stage : Stages)
         {
-            Stage->Compile(Definitions);
+            Stage->Compile(Definitions, Aliases);
         }
     }
 }

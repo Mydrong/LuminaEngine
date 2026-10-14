@@ -1,5 +1,5 @@
 ﻿#include "RuntimePCH.h"
-#include "AssetRef.h"
+#include "UIDocumentRef.h"
 
 #include "Assets/AssetRegistry/AssetRegistry.h"
 #include "Core/Serialization/NetArchive.h"
@@ -7,15 +7,15 @@
 
 namespace Lumina
 {
-    void FAssetRef::NetSerialize(FNetArchive& Ar)
+    void SUIDocumentRef::NetSerialize(FNetArchive& Ar)
     {
         if (Ar.IsWriting())
         {
             // An indexed path uses a compact net index, with path and GUID exported once via AssetExport.
-            if (Ar.AssetRefToNetIndex)
+            if (Ar.DocumentRefToNetIndex)
             {
                 std::ignore = ResolvePath(); // heal/back-fill the GUID so the export keys on a stable identity
-                WriteVarUInt(Ar, IsNull() ? 0u : Ar.AssetRefToNetIndex(*this));
+                WriteVarUInt(Ar, IsNull() ? 0u : Ar.DocumentRefToNetIndex(*this));
                 return;
             }
 
@@ -24,13 +24,13 @@ namespace Lumina
         }
         else
         {
-            if (Ar.NetIndexToAssetRef)
+            if (Ar.NetIndexToDocumentRef)
             {
                 const uint32 Index = ReadVarUInt(Ar);
                 Reset();
                 if (Index != 0)
                 {
-                    Ar.NetIndexToAssetRef(Index, *this);
+                    Ar.NetIndexToDocumentRef(Index, *this);
                 }
                 return;
             }
@@ -40,7 +40,7 @@ namespace Lumina
         }
     }
 
-    FGuid FAssetRef::GetGuid() const
+    FGuid SUIDocumentRef::GetGuid() const
     {
         if (Guid.empty())
         {
@@ -53,7 +53,7 @@ namespace Lumina
         return FGuid();
     }
 
-    FStringView FAssetRef::ResolvePath() const
+    FStringView SUIDocumentRef::ResolvePath() const
     {
         FAssetRegistry& Registry = FAssetRegistry::Get();
 
@@ -66,7 +66,7 @@ namespace Lumina
                 const FStringView Current(Data->Path.c_str(), Data->Path.size());
                 if (Current != GetPath())
                 {
-                    const_cast<FAssetRef*>(this)->Path.assign(Current.data(), Current.size());
+                    const_cast<SUIDocumentRef*>(this)->Path.assign(Current.data(), Current.size());
                 }
                 return GetPath();
             }
@@ -77,14 +77,14 @@ namespace Lumina
         {
             if (FTextAssetData* Data = Registry.GetTextAssetByPath(GetPath()))
             {
-                const_cast<FAssetRef*>(this)->Guid = Data->Guid.ToString();
+                const_cast<SUIDocumentRef*>(this)->Guid = Data->Guid.ToString();
             }
         }
 
         return GetPath();
     }
 
-    bool FAssetRef::ReadText(FString& OutText) const
+    bool SUIDocumentRef::ReadText(FString& OutText) const
     {
         const FStringView ResolvedPath = ResolvePath();
         if (ResolvedPath.empty())
@@ -94,7 +94,7 @@ namespace Lumina
         return VFS::ReadFile(OutText, ResolvedPath);
     }
 
-    void FAssetRef::SetPath(FStringView InPath)
+    void SUIDocumentRef::SetPath(FStringView InPath)
     {
         Path.assign(InPath.data(), InPath.size());
         Guid.clear();
@@ -107,7 +107,7 @@ namespace Lumina
         }
     }
 
-    void FAssetRef::Set(FStringView InPath, const FGuid& InGuid)
+    void SUIDocumentRef::Set(FStringView InPath, const FGuid& InGuid)
     {
         Path.assign(InPath.data(), InPath.size());
         Guid = InGuid.IsValid() ? InGuid.ToString() : FString();

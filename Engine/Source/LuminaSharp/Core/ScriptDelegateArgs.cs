@@ -117,117 +117,72 @@ internal static class ScriptDelegateArgs
     }
 }
 
-internal sealed class ArgsInvoker1<T1> : IDelegateInvoker
+internal sealed class ArgsInvoker1<T1> : DelegateInvoker
 {
     public Action<T1> Handler = null!;
     public FrameMarshal.FSlot[] Slots = null!;
-    public Lumina.CEntityScript? Owner;
 
-    public void Invoke(IntPtr Payload)
+    protected override void Run(IntPtr Payload)
     {
         T1 A0 = Slots.Length == 0
             ? ScriptDelegateArgs.ReadUntyped<T1>(Payload)
             : ScriptDelegateArgs.Read<T1>(Payload, Slots[0]);
 
-        if (Owner is { } Script)
-        {
-            using (Engine.Push(Script.World, Script.Entity))
-            {
-                Handler(A0);
-            }
-        }
-        else
-        {
-            Handler(A0);
-        }
+        Handler(A0);
     }
 }
 
-internal sealed class ArgsInvoker2<T1, T2> : IDelegateInvoker
+internal sealed class ArgsInvoker2<T1, T2> : DelegateInvoker
 {
     public Action<T1, T2> Handler = null!;
     public FrameMarshal.FSlot[] Slots = null!;
-    public Lumina.CEntityScript? Owner;
 
-    public void Invoke(IntPtr Payload)
+    protected override void Run(IntPtr Payload)
     {
         T1 A0 = ScriptDelegateArgs.Read<T1>(Payload, Slots[0]);
         T2 A1 = ScriptDelegateArgs.Read<T2>(Payload, Slots[1]);
 
-        if (Owner is { } Script)
-        {
-            using (Engine.Push(Script.World, Script.Entity))
-            {
-                Handler(A0, A1);
-            }
-        }
-        else
-        {
-            Handler(A0, A1);
-        }
+        Handler(A0, A1);
     }
 }
 
-internal sealed class ArgsInvoker3<T1, T2, T3> : IDelegateInvoker
+internal sealed class ArgsInvoker3<T1, T2, T3> : DelegateInvoker
 {
     public Action<T1, T2, T3> Handler = null!;
     public FrameMarshal.FSlot[] Slots = null!;
-    public Lumina.CEntityScript? Owner;
 
-    public void Invoke(IntPtr Payload)
+    protected override void Run(IntPtr Payload)
     {
         T1 A0 = ScriptDelegateArgs.Read<T1>(Payload, Slots[0]);
         T2 A1 = ScriptDelegateArgs.Read<T2>(Payload, Slots[1]);
         T3 A2 = ScriptDelegateArgs.Read<T3>(Payload, Slots[2]);
 
-        if (Owner is { } Script)
-        {
-            using (Engine.Push(Script.World, Script.Entity))
-            {
-                Handler(A0, A1, A2);
-            }
-        }
-        else
-        {
-            Handler(A0, A1, A2);
-        }
+        Handler(A0, A1, A2);
     }
 }
 
-internal sealed class ArgsInvoker4<T1, T2, T3, T4> : IDelegateInvoker
+internal sealed class ArgsInvoker4<T1, T2, T3, T4> : DelegateInvoker
 {
     public Action<T1, T2, T3, T4> Handler = null!;
     public FrameMarshal.FSlot[] Slots = null!;
-    public Lumina.CEntityScript? Owner;
 
-    public void Invoke(IntPtr Payload)
+    protected override void Run(IntPtr Payload)
     {
         T1 A0 = ScriptDelegateArgs.Read<T1>(Payload, Slots[0]);
         T2 A1 = ScriptDelegateArgs.Read<T2>(Payload, Slots[1]);
         T3 A2 = ScriptDelegateArgs.Read<T3>(Payload, Slots[2]);
         T4 A3 = ScriptDelegateArgs.Read<T4>(Payload, Slots[3]);
 
-        if (Owner is { } Script)
-        {
-            using (Engine.Push(Script.World, Script.Entity))
-            {
-                Handler(A0, A1, A2, A3);
-            }
-        }
-        else
-        {
-            Handler(A0, A1, A2, A3);
-        }
+        Handler(A0, A1, A2, A3);
     }
 }
 
-internal sealed class ArgsInvoker5<T1, T2, T3, T4, T5> : IDelegateInvoker
+internal sealed class ArgsInvoker5<T1, T2, T3, T4, T5> : DelegateInvoker
 {
     public Action<T1, T2, T3, T4, T5> Handler = null!;
     public FrameMarshal.FSlot[] Slots = null!;
-    public Lumina.CEntityScript? Owner;
 
-    public void Invoke(IntPtr Payload)
+    protected override void Run(IntPtr Payload)
     {
         T1 A0 = ScriptDelegateArgs.Read<T1>(Payload, Slots[0]);
         T2 A1 = ScriptDelegateArgs.Read<T2>(Payload, Slots[1]);
@@ -235,27 +190,16 @@ internal sealed class ArgsInvoker5<T1, T2, T3, T4, T5> : IDelegateInvoker
         T4 A3 = ScriptDelegateArgs.Read<T4>(Payload, Slots[3]);
         T5 A4 = ScriptDelegateArgs.Read<T5>(Payload, Slots[4]);
 
-        if (Owner is { } Script)
-        {
-            using (Engine.Push(Script.World, Script.Entity))
-            {
-                Handler(A0, A1, A2, A3, A4);
-            }
-        }
-        else
-        {
-            Handler(A0, A1, A2, A3, A4);
-        }
+        Handler(A0, A1, A2, A3, A4);
     }
 }
 
-internal sealed class ArgsInvoker6<T1, T2, T3, T4, T5, T6> : IDelegateInvoker
+internal sealed class ArgsInvoker6<T1, T2, T3, T4, T5, T6> : DelegateInvoker
 {
     public Action<T1, T2, T3, T4, T5, T6> Handler = null!;
     public FrameMarshal.FSlot[] Slots = null!;
-    public Lumina.CEntityScript? Owner;
 
-    public void Invoke(IntPtr Payload)
+    protected override void Run(IntPtr Payload)
     {
         T1 A0 = ScriptDelegateArgs.Read<T1>(Payload, Slots[0]);
         T2 A1 = ScriptDelegateArgs.Read<T2>(Payload, Slots[1]);
@@ -264,17 +208,7 @@ internal sealed class ArgsInvoker6<T1, T2, T3, T4, T5, T6> : IDelegateInvoker
         T5 A4 = ScriptDelegateArgs.Read<T5>(Payload, Slots[4]);
         T6 A5 = ScriptDelegateArgs.Read<T6>(Payload, Slots[5]);
 
-        if (Owner is { } Script)
-        {
-            using (Engine.Push(Script.World, Script.Entity))
-            {
-                Handler(A0, A1, A2, A3, A4, A5);
-            }
-        }
-        else
-        {
-            Handler(A0, A1, A2, A3, A4, A5);
-        }
+        Handler(A0, A1, A2, A3, A4, A5);
     }
 }
 

@@ -9,8 +9,7 @@ using System.Text;
 
 namespace LuminaSharp;
 
-// Marshalling + boundary primitives shared by every native<->managed crossing: UTF-8 string transfer and
-// keeping managed exceptions from unwinding into native code.
+// String transfer and exception containment shared by every crossing.
 internal static unsafe class Interop
 {
     // Longer than this => treated as corrupt rather than read (guards a bad pointer becoming a huge allocation).
@@ -49,8 +48,7 @@ internal static unsafe class Interop
         return Encoding.UTF8.GetString(Span);
     }
 
-    /// <summary>A UTF-8, NUL-terminated copy of a managed string for one native call: stack-encoded when it fits
-    /// (alloc-free), else heap. Caller MUST <see cref="Free"/> it in a finally; freeing a stack copy is a no-op.</summary>
+    // A NUL-terminated UTF-8 copy for one native call, on the stack when it fits. Always Free it in a finally.
     public unsafe ref struct FInteropString
     {
         /// <summary>UTF-8 bytes (NUL-terminated); null when the source string was null.</summary>
@@ -113,8 +111,7 @@ internal static unsafe class Interop
         }
     }
 
-    /// <summary>Logs an exception caught at a native boundary; every [UnmanagedCallersOnly] entry funnels here so a
-    /// managed exception never unwinds into native code. Swallows any secondary logging failure.</summary>
+    // Logs an exception caught at a native boundary, so a managed exception never unwinds into native code.
     public static void LogException(Exception Exception)
     {
         LogException(Exception, null);

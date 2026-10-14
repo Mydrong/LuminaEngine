@@ -55,8 +55,8 @@ internal static class ElementKinds
         {
             return EElementKind.SoftRef;
         }
-        // A generated wrapper views native memory rather than holding it, so both ends go through a real copy.
-        if (typeof(NativeStruct).IsAssignableFrom(Slot))
+        // A struct handle views native memory rather than holding it, so both ends go through a real copy.
+        if (Slot.IsValueType && typeof(INativeStruct).IsAssignableFrom(Slot))
         {
             return EElementKind.StructView;
         }

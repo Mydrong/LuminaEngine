@@ -65,7 +65,7 @@ namespace Lumina
 
         /** RML document to display, e.g. "/Game/UI/MyWidget.rml". Empty = nothing drawn. Rename-safe. */
         PROPERTY(Editable, Category = "Widget")
-        FUIDocumentRef DocumentPath;
+        SUIDocumentRef DocumentPath;
 
         /** Offscreen render-target resolution the document is laid out at (pixels). */
         PROPERTY(Editable, Category = "Widget")

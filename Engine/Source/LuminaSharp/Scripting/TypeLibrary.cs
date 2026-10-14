@@ -10,11 +10,12 @@ namespace LuminaSharp;
 // The managed reflection registry for one loaded script generation, resolving any type to a cached TypeDescription. Rebuilt on every load.
 internal sealed class TypeLibrary
 {
-    // C# subclasses of REFLECT(Scriptable) native CObjects, keyed by full name; the host mints a CClass per one.
+    // C# subclasses of reflected native classes, keyed by full name, the host minting a CClass per one.
     private readonly Dictionary<string, Type> Scriptables = new();
-    // Types carrying a ScriptStructBase marker, keyed by StableId (the simple type name). The host mints a
-    // CScriptStruct per one, deriving from the named native struct.
-    private readonly Dictionary<string, DataStructEntry> DataStructs = new();
+    // Every [Reflect] struct, keyed by the simple name an asset stores; the host mints a CScriptStruct per one.
+    private readonly Dictionary<string, ScriptStructEntry> ScriptStructs = new();
+    // Every [Reflect] enum, keyed by its simple name; the host mints a CScriptEnum per one.
+    private readonly Dictionary<string, Type> Enums = new();
     private readonly Dictionary<Type, TypeDescription> ByType = new();
     // Prior full type names to current full name, so renamed script references resolve.
     private readonly Dictionary<string, string> ScriptAliases = new();
@@ -23,8 +24,7 @@ internal sealed class TypeLibrary
 
     public TypeLibrary(IEnumerable<Type> Types)
     {
-        // Before anything is described: proves the view table below still lines up with the shared classifier
-        // the rewriter emitted accessors from. Cheap, once, and the failures it catches are otherwise silent.
+        // Proves the view table still matches the classifier the rewriter emitted accessors from, failures it catches being otherwise silent.
         ScriptPropertyViews.Validate();
 
         AllTypes = new List<Type>(Types);
@@ -34,51 +34,74 @@ internal sealed class TypeLibrary
             {
                 continue;
             }
-            // Abstract ones too, since a subclass is minted under its C# parent and needs that class to exist.
-            if (IsScriptableSubclass(Type))
+            if (!IsScriptableSubclass(Type))
             {
-                Scriptables[NativeTypeName.Of(Type)] = Type;
+                continue;
             }
+            // Abstract ones too, since a subclass is minted under its C# parent and needs that class to exist.
+            if (!Type.IsDefined(typeof(ReflectAttribute), inherit: false))
+            {
+                // An unreflected abstract class is a plain C# base, whose members the reflected classes below it carry.
+                if (Type.IsAbstract)
+                {
+                    continue;
+                }
+                Native.Log(ELogLevel.Warn,
+                    $"'{Type.FullName}' derives from a native script class without [Reflect], so the engine does not see it. "
+                    + "Add [Reflect] to register it.");
+                continue;
+            }
+            Scriptables[NativeTypeName.Of(Type)] = Type;
         }
 
-        // A second, unconditional pass rather than another arm of the chain above. A marked data type is
-        // not one of those roles and is not required to be reachable from one: it is published because it
-        // carries the marker, so discovery cannot depend on the classification or on anything referencing
-        // it. Keyed by StableId (simple name) because that is the identity an asset stores, and native
-        // struct names share that same flat namespace.
+        // Its own pass, since a struct or enum is published for carrying [Reflect] whether or not anything references it.
+        List<Type> ReflectedValueTypes = new();
         foreach (Type Type in AllTypes)
         {
-            if (Type.IsAbstract)
+            if (!Type.IsValueType || Type.IsPrimitive || Type.ContainsGenericParameters || Type.IsDefined(typeof(NativeTypeAttribute), inherit: false))
             {
                 continue;
             }
 
-            ScriptStructBaseAttribute? Marker = Type.GetCustomAttribute<ScriptStructBaseAttribute>(inherit: false);
-            if (Marker == null)
+            bool bReflected = Type.IsDefined(typeof(ReflectAttribute), inherit: false);
+            Type? NativeBase = Type.IsEnum ? null : NativeStructBaseOf(Type);
+            if (!bReflected)
             {
+                if (NativeBase != null || IsComponentStruct(Type))
+                {
+                    Native.Log(ELogLevel.Warn,
+                        $"'{Type.FullName}' lives in native memory as a {(NativeBase != null ? "native struct's extension" : "component")} but has no [Reflect], "
+                        + "so the engine does not see it. Add [Reflect] to register it.");
+                }
                 continue;
             }
 
             string StableId = NativeTypeName.Of(Type);
-            if (DataStructs.TryGetValue(StableId, out DataStructEntry Existing))
+            if (ScriptStructs.ContainsKey(StableId) || Enums.ContainsKey(StableId))
             {
                 Native.Log(ELogLevel.Warn,
-                    $"Data type name '{StableId}' is claimed by both '{Existing.Description.Type.FullName}' and "
-                    + $"'{Type.FullName}'; ignoring the latter. Rename one, they share one identity namespace.");
+                    $"Reflected type name '{StableId}' is claimed by more than one C# type, '{Type.FullName}' among them; "
+                    + "ignoring the latter. Rename one, they share one name space with every native type.");
                 continue;
             }
 
-            DataStructs[StableId] = new DataStructEntry(Describe(Type), Marker.NativeBase);
+            ReflectedValueTypes.Add(Type);
+            if (Type.IsEnum)
+            {
+                Enums[StableId] = Type;
+                continue;
+            }
+            ScriptStructs[StableId] = new ScriptStructEntry(Describe(Type), NativeBase != null ? NativeTypeName.Of(NativeBase) : "");
         }
 
         // Built once every current name is known, so an alias never shadows a live type.
-        foreach (Type Scriptable in Scriptables.Values)
+        foreach (Type Renamed in Scriptables.Values.Concat(ReflectedValueTypes))
         {
-            string Current = NativeTypeName.Of(Scriptable);
+            string Current = NativeTypeName.Of(Renamed);
             // Not inherited, since a subclass is not the class that used to have the name.
-            foreach (AliasAttribute Alias in Scriptable.GetCustomAttributes<AliasAttribute>(inherit: false))
+            foreach (AliasAttribute Alias in Renamed.GetCustomAttributes<AliasAttribute>(inherit: false))
             {
-                if (string.IsNullOrEmpty(Alias.Name) || Scriptables.ContainsKey(Alias.Name))
+                if (string.IsNullOrEmpty(Alias.Name) || Scriptables.ContainsKey(Alias.Name) || ScriptStructs.ContainsKey(Alias.Name) || Enums.ContainsKey(Alias.Name))
                 {
                     continue;
                 }
@@ -92,10 +115,8 @@ internal sealed class TypeLibrary
         }
     }
 
-    /// <summary>Prior script class name to its current full name, from the <c>[Alias]</c> attributes on
-    /// script classes. Native mirrors this into its class-redirect registry so a renamed class still resolves
-    /// from a saved scene and so a hot reload can move live instances onto the new class.</summary>
-    public IEnumerable<KeyValuePair<string, string>> ClassAliases => ScriptAliases;
+    // Prior type names to current ones from [Alias], which native mirrors so saved scenes and live instances follow a rename.
+    public IEnumerable<KeyValuePair<string, string>> TypeAliases => ScriptAliases;
 
     /// <summary>Full type names of every discovered Scriptable C# subclass.</summary>
     public IReadOnlyCollection<string> ScriptableTypeNames => Scriptables.Keys;
@@ -103,22 +124,70 @@ internal sealed class TypeLibrary
     /// <summary>Every discovered Scriptable C# subclass type.</summary>
     public IEnumerable<Type> ScriptableTypes => Scriptables.Values;
 
-    /// <summary>Every marked data type as (StableId, description, native base name).</summary>
-    public IEnumerable<KeyValuePair<string, DataStructEntry>> DataStructTypes => DataStructs;
-
-    /// <summary>The description for a marked data type by StableId, or null if unknown.</summary>
-    public TypeDescription? GetDataStruct(string StableId)
+    // Every reflected struct as (StableId, description, native base name), each after the structs it holds by value.
+    public IEnumerable<KeyValuePair<string, ScriptStructEntry>> ScriptStructTypes
     {
-        return DataStructs.TryGetValue(StableId, out DataStructEntry Entry) ? Entry.Description : null;
+        get
+        {
+            var Ordered = new List<KeyValuePair<string, ScriptStructEntry>>(ScriptStructs.Count);
+            var Placed = new HashSet<string>();
+            void Place(string Name, ScriptStructEntry Entry)
+            {
+                if (!Placed.Add(Name))
+                {
+                    return;
+                }
+                foreach (ScriptProperty Field in Entry.Description.Properties)
+                {
+                    foreach (string Held in HeldStructNames(Field.Type))
+                    {
+                        if (ScriptStructs.TryGetValue(Held, out ScriptStructEntry Dependency))
+                        {
+                            Place(Held, Dependency);
+                        }
+                    }
+                }
+                Ordered.Add(new KeyValuePair<string, ScriptStructEntry>(Name, Entry));
+            }
+            foreach (KeyValuePair<string, ScriptStructEntry> Pair in ScriptStructs)
+            {
+                Place(Pair.Key, Pair.Value);
+            }
+            return Ordered;
+        }
+    }
+
+    // Every reflected enum as (name, type).
+    public IEnumerable<KeyValuePair<string, Type>> EnumTypes => Enums;
+
+    private static IEnumerable<string> HeldStructNames(ScriptType Type)
+    {
+        if (Type.Kind == EPropertyType.Struct && Type.NativeName != null)
+        {
+            yield return Type.NativeName;
+        }
+        foreach (ScriptType? Inner in new[] { Type.Element, Type.KeyType, Type.ValueType })
+        {
+            if (Inner != null)
+            {
+                foreach (string Name in HeldStructNames(Inner))
+                {
+                    yield return Name;
+                }
+            }
+        }
+    }
+
+    // The description for a script struct by StableId, or null if unknown.
+    public TypeDescription? GetScriptStruct(string StableId)
+    {
+        return ScriptStructs.TryGetValue(StableId, out ScriptStructEntry Entry) ? Entry.Description : null;
     }
 
     /// <summary>A Scriptable C# subclass by full name, or null if unknown.</summary>
     public Type? GetScriptable(string FullName) => Scriptables.TryGetValue(FullName, out Type? Type) ? Type : null;
 
-    // True if any base type carries [ScriptableType] (Type is a user subclass of a REFLECT(Scriptable) class).
-    /// <summary>A type that IS a view over native storage rather than a managed value, so a get-only member
-    /// of it is still a real property. One of three questions asked of ScriptPropertyViews' single table --
-    /// the others being element and key/value -- so a view cannot be known to one and not the others.</summary>
+    // A type that views native storage, so a get-only member of it is still a real property.
     private static bool IsNativeOwnedViewType(Type Type) => ScriptPropertyViews.IsView(Type);
 
     // The nearest C# class above Type that is minted too, which is what Type is minted under, or null below a native base.
@@ -147,16 +216,43 @@ internal sealed class TypeLibrary
         }
     }
 
-    // A generated wrapper of a native class, a game module's included, names that class and is never minted.
-    private static bool IsScriptableSubclass(Type Type)
+    // The native struct a C# struct names through IExtends, or null when it extends none.
+    public static Type? NativeStructBaseOf(Type Type)
     {
-        if (Type.GetCustomAttribute<NativeTypeAttribute>(inherit: false) != null)
+        if (!Type.IsValueType || Type.IsDefined(typeof(NativeTypeAttribute), inherit: false))
+        {
+            return null;
+        }
+        foreach (Type Interface in Type.GetInterfaces())
+        {
+            if (Interface.IsGenericType && Interface.GetGenericTypeDefinition() == typeof(IExtends<>))
+            {
+                return Interface.GetGenericArguments()[0];
+            }
+        }
+        return null;
+    }
+
+    // A C# struct or enum is a reflected type only through [Reflect], as a C++ one is only through REFLECT.
+    public static bool IsReflectedType(Type Type) =>
+        Type.IsDefined(typeof(ReflectAttribute), inherit: false) || Type.IsDefined(typeof(NativeTypeAttribute), inherit: false);
+
+    // A struct living in native memory, extending a native struct or stored as a component, joins reflection only through [Reflect].
+    public static bool IsNativeBackedStruct(Type Type)
+    {
+        return Type.IsDefined(typeof(ReflectAttribute), inherit: false) && (NativeStructBaseOf(Type) != null || IsComponentStruct(Type));
+    }
+
+    // A C# struct the ECS stores per entity, which it declares as REFLECT(Component) does in C++ by implementing IComponent.
+    public static bool IsComponentStruct(Type Type)
+    {
+        if (!Type.IsValueType || Type.IsDefined(typeof(NativeTypeAttribute), inherit: false))
         {
             return false;
         }
-        for (Type? Base = Type.BaseType; Base != null; Base = Base.BaseType)
+        foreach (Type Interface in Type.GetInterfaces())
         {
-            if (Base.GetCustomAttribute<ScriptableTypeAttribute>(false) != null)
+            if (Interface.IsGenericType && Interface.GetGenericTypeDefinition() == typeof(IComponent<>) && Interface.GetGenericArguments()[0] == Type)
             {
                 return true;
             }
@@ -164,11 +260,23 @@ internal sealed class TypeLibrary
         return false;
     }
 
-    // Any minted class's description, through class aliases, so a renamed script still finds its properties.
-    public TypeDescription? GetMintedClass(string FullName)
+    // A generated wrapper of a native class, a game module's included, names that class and is never minted.
+    private static bool IsScriptableSubclass(Type Type)
     {
-        string Name = ScriptAliases.TryGetValue(FullName, out string? Current) ? Current : FullName;
-        return GetScriptable(Name) is { } Type ? Describe(Type) : null;
+        return Type.GetCustomAttribute<NativeTypeAttribute>(inherit: false) == null && NativeClassBaseOf(Type) != null;
+    }
+
+    // The nearest generated wrapper above Type, which is the reflected native class a C# class extends.
+    public static Type? NativeClassBaseOf(Type Type)
+    {
+        for (Type? Base = Type.BaseType; Base != null && Base != typeof(NativeObject); Base = Base.BaseType)
+        {
+            if (Base.IsDefined(typeof(NativeTypeAttribute), inherit: false) && typeof(NativeObject).IsAssignableFrom(Base))
+            {
+                return Base;
+            }
+        }
+        return null;
     }
 
     /// <summary>Get-or-build the description for any type (used recursively for nested struct members).</summary>
@@ -185,27 +293,19 @@ internal sealed class TypeLibrary
         return Description;
     }
 
-    /// <summary>
-    /// Resolves a CLR type to its recursive serialized shape, expressed in the shared reflected taxonomy
-    /// <see cref="EPropertyType"/>. Scalars/enums map directly; arrays and lists become
-    /// <see cref="EPropertyType.Vector"/>; any other struct/class becomes a <see cref="EPropertyType.Struct"/>
-    /// whose members recurse. Returns None for shapes we can't serialize. <paramref name="Depth"/> +
-    /// <paramref name="Visiting"/> guard against cycles.
-    /// </summary>
-    public ScriptType ResolveType(Type Type, int Depth, HashSet<Type> Visiting, bool ForceInstanced = false)
+    // The reflected shape of a CLR type, which names any struct, enum or class rather than describing it, or None when it has none.
+    public ScriptType ResolveType(Type Type)
     {
         if (Type == typeof(bool))
         {
             return new ScriptType { Kind = EPropertyType.Bool, Clr = Type };
         }
-        // An interned name. POD, so it round-trips as its own reflected kind rather than as text: native
-        // mints an FNameProperty and C# reads the id in place.
+        // An interned name round-trips as its own kind, C# reading the id in place.
         if (Type == typeof(FName))
         {
             return new ScriptType { Kind = EPropertyType.Name, Clr = Type };
         }
-        // Both string spellings are one native FString. FString is the explicit mirror -- the only one that
-        // can be a container ELEMENT, since a managed reference cannot live in native memory.
+        // Both string spellings are one native FString, and only FString can be a container element.
         if (Type == typeof(string) || Type == typeof(FString))
         {
             return new ScriptType { Kind = EPropertyType.String, Clr = Type };
@@ -214,9 +314,7 @@ internal sealed class TypeLibrary
         {
             return new ScriptType { Kind = EPropertyType.Entity, Clr = Type };
         }
-        // An input binding is stored as the name of the action it listens to (the object itself carries the
-        // subscriptions, which are code, not data), tagged so the editor draws the action picker. Checked
-        // before the generic class branch below, which would otherwise mint its members as a sub-struct.
+        // An input binding is stored as its action name, tagged so the editor draws the action picker.
         if (typeof(SInputBinding).IsAssignableFrom(Type) && !Type.IsAbstract)
         {
             return new ScriptType { Kind = EPropertyType.String, Clr = Type, IsInputAction = true };
@@ -236,34 +334,18 @@ internal sealed class TypeLibrary
             return new ScriptType { Kind = Numeric, Clr = Type };
         }
 
+        // A field names its enum, which is reflected once like any other type, as REFLECT requires of a C++ one.
         if (Type.IsEnum)
         {
             EPropertyType Underlying = MapNumeric(Enum.GetUnderlyingType(Type));
-            if (Underlying == EPropertyType.None)
+            if (Underlying == EPropertyType.None || !IsReflectedType(Type))
             {
                 return new ScriptType { Kind = EPropertyType.None, Clr = Type };
             }
-
-            string[] Names = Enum.GetNames(Type);
-            Array Values = Enum.GetValues(Type);
-            var Entries = new List<EnumEntry>(Names.Length);
-            for (int Index = 0; Index < Names.Length; Index++)
-            {
-                Entries.Add(new EnumEntry { Name = Names[Index], Value = Convert.ToInt64(Values.GetValue(Index)) });
-            }
-
-            return new ScriptType
-            {
-                Kind = EPropertyType.Enum,
-                Clr = Type,
-                EnumName = Type.FullName ?? Type.Name,
-                EnumUnderlying = Underlying,
-                EnumEntries = Entries,
-            };
+            return new ScriptType { Kind = EPropertyType.Enum, Clr = Type, EnumName = NativeTypeName.Of(Type), EnumUnderlying = Underlying };
         }
 
-        // Asset references round-trip as a path and draw as an asset picker filtered to the target class; they
-        // are the script layer's soft-object references (kind SoftObject, distinguished only by TargetClass).
+        // An asset reference is a path, drawn as an asset picker filtered to the target class.
         if (Type == typeof(FSoftObjectPath))
         {
             return new ScriptType { Kind = EPropertyType.SoftObject, Clr = Type, TargetClass = "" };
@@ -271,7 +353,7 @@ internal sealed class TypeLibrary
         // A nullable is an optional over its payload, matching the native TOptional a C++ one reflects as.
         if (Nullable.GetUnderlyingType(Type) is Type Payload)
         {
-            ScriptType Inner = ResolveType(Payload, Depth + 1, Visiting);
+            ScriptType Inner = ResolveType(Payload);
             if (Inner.Kind == EPropertyType.None)
             {
                 return new ScriptType { Kind = EPropertyType.None, Clr = Type };
@@ -282,32 +364,27 @@ internal sealed class TypeLibrary
         if (Type.IsGenericType)
         {
             Type Definition = Type.GetGenericTypeDefinition();
-            // A SOFT reference is a path resolved on demand; a HARD one is a live object pointer that keeps
-            // its target alive. They were both reported as SoftObject, which gave TStrongObjectPtr<T> an asset
-            // picker, no strong reference, and no way to point at an object that has no asset path.
+            // A soft reference is a path resolved on demand, while a strong one is a live pointer that keeps its target alive.
             if (Definition == typeof(TSoftObjectPtr<>))
             {
-                return new ScriptType { Kind = EPropertyType.SoftObject, Clr = Type, TargetClass = Type.GetGenericArguments()[0].Name };
+                return new ScriptType { Kind = EPropertyType.SoftObject, Clr = Type, TargetClass = NativeTypeName.Of(Type.GetGenericArguments()[0]) };
             }
             if (Definition == typeof(TStrongObjectPtr<>))
             {
-                return new ScriptType { Kind = EPropertyType.Object, Clr = Type, TargetClass = Type.GetGenericArguments()[0].Name };
+                return new ScriptType { Kind = EPropertyType.Object, Clr = Type, TargetClass = NativeTypeName.Of(Type.GetGenericArguments()[0]) };
             }
         }
 
-        // A wrapper around a native CObject (CTexture, CAudioStream, ...): a HARD reference, stored as an
-        // object property. Checked before the generic class branch far below, which would otherwise mint the
-        // wrapper's own members as a sub-struct -- native would hold a struct while C# read an object pointer.
+        // A wrapper around a native CObject is a hard reference, stored as an object property.
         if (typeof(NativeObject).IsAssignableFrom(Type))
         {
-            return new ScriptType { Kind = EPropertyType.Object, Clr = Type, TargetClass = Type.Name };
+            return new ScriptType { Kind = EPropertyType.Object, Clr = Type, TargetClass = NativeTypeName.Of(Type) };
         }
 
-        // A List<T> or T[]. When the field is marked [Instanced], the ELEMENT is the instanced (polymorphic)
-        // one, so forward the flag inward: List<ICommand> with [Instanced] picks a concrete type per element.
+        // A List<T> or T[].
         if (TryGetElementType(Type, out Type? ElementType))
         {
-            ScriptType Element = ResolveType(ElementType!, Depth + 1, Visiting, ForceInstanced);
+            ScriptType Element = ResolveType(ElementType!);
             if (Element.Kind == EPropertyType.None)
             {
                 return new ScriptType { Kind = EPropertyType.None, Clr = Type };
@@ -315,12 +392,11 @@ internal sealed class TypeLibrary
             return new ScriptType { Kind = EPropertyType.Vector, Clr = Type, Element = Element };
         }
 
-        // A Dictionary<K,V> -> a reflected map. Key and value resolve recursively; [Instanced] applies to the
-        // value (polymorphic values), never the key. Dropped if either key or value isn't serializable.
+        // A Dictionary<K,V> is a reflected map, dropped if either key or value has no reflected type.
         if (TryGetMapTypes(Type, out Type? KeyClr, out Type? ValueClr))
         {
-            ScriptType Key = ResolveType(KeyClr!, Depth + 1, Visiting);
-            ScriptType Value = ResolveType(ValueClr!, Depth + 1, Visiting, ForceInstanced);
+            ScriptType Key = ResolveType(KeyClr!);
+            ScriptType Value = ResolveType(ValueClr!);
             if (Key.Kind == EPropertyType.None || Value.Kind == EPropertyType.None)
             {
                 return new ScriptType { Kind = EPropertyType.None, Clr = Type };
@@ -328,138 +404,17 @@ internal sealed class TypeLibrary
             return new ScriptType { Kind = EPropertyType.Map, Clr = Type, KeyType = Key, ValueType = Value };
         }
 
-        // A C# mirror of a native reflected value struct, drawn by the native CStruct's own customization. Both
-        // native and script structs are kind Struct; a non-null NativeName is what marks it as the native one.
-        string? NativeName = Type.GetCustomAttribute<NativeTypeAttribute>()?.Name
-                           ?? Type.GetCustomAttribute<NativeLayoutAttribute>()?.NativeType;
-        if (NativeName != null && Type.IsValueType && Depth < 16 && Visiting.Add(Type))
+        // A native struct or a [Reflect] C# one is a reflected type of its own, which the field names.
+        string? StructName = Type.GetCustomAttribute<NativeLayoutAttribute>()?.NativeType ?? (IsReflectedType(Type) ? NativeTypeName.Of(Type) : null);
+        if (Type.IsValueType && !Type.IsPrimitive && !Type.IsEnum && StructName != null)
         {
-            try
-            {
-                List<ScriptProperty> Fields = BuildNativeMembers(Type, Depth, Visiting);
-                return new ScriptType { Kind = EPropertyType.Struct, Clr = Type, NativeName = NativeName, Fields = Fields };
-            }
-            finally
-            {
-                Visiting.Remove(Type);
-            }
-        }
-
-        // Instanced (polymorphic) object, opt-in via [Instanced] on the field. Offers a picker of
-        // concrete subtypes (and the type itself if concrete). An unmarked field is never instanced.
-        if (ForceInstanced && Depth < 16)
-        {
-            List<ScriptInstanceCandidate> Candidates = DiscoverInstanceCandidates(Type, Depth, Visiting);
-            if (Candidates.Count > 0)
-            {
-                return new ScriptType
-                {
-                    Kind = EPropertyType.InstancedStruct,
-                    Clr = Type,
-                    BaseName = Type.Name,
-                    Candidates = Candidates,
-                };
-            }
-            return new ScriptType { Kind = EPropertyType.None, Clr = Type };
-        }
-
-        // A C#-defined struct or class; its [Property] members are minted into a sub-CScriptStruct. It is a
-        // Struct with no NativeName (the marker that separates it from a native-struct mirror above).
-        if ((Type.IsClass || (Type.IsValueType && !Type.IsPrimitive)) && Depth < 16 && Visiting.Add(Type))
-        {
-            try
-            {
-                List<ScriptProperty> Fields = BuildMembers(Type, Depth, Visiting);
-                if (Fields.Count > 0)
-                {
-                    return new ScriptType
-                    {
-                        Kind = EPropertyType.Struct,
-                        Clr = Type,
-                        Fields = Fields,
-                        ManagedSize = ManagedSizeOf(Type),
-                    };
-                }
-            }
-            finally
-            {
-                Visiting.Remove(Type);
-            }
+            return new ScriptType { Kind = EPropertyType.Struct, Clr = Type, NativeName = StructName };
         }
 
         return new ScriptType { Kind = EPropertyType.None, Clr = Type };
     }
 
-    /// <summary>The concrete, default-constructible types assignable to Base (and Base itself if concrete),
-    /// each resolved to its [Property] members. Drawn from every loaded script type.</summary>
-    private List<ScriptInstanceCandidate> DiscoverInstanceCandidates(Type Base, int Depth, HashSet<Type> Visiting)
-    {
-        var Result = new List<ScriptInstanceCandidate>();
-        foreach (Type Candidate in AllTypes)
-        {
-            if (Candidate.IsAbstract || Candidate.IsInterface || !Base.IsAssignableFrom(Candidate))
-            {
-                continue;
-            }
-            // Must be default-constructible: the editor and the deserializer both Activator.CreateInstance it.
-            if (Candidate.GetConstructor(System.Type.EmptyTypes) == null)
-            {
-                continue;
-            }
-            if (!Visiting.Add(Candidate))
-            {
-                continue;
-            }
-            try
-            {
-                Result.Add(new ScriptInstanceCandidate
-                {
-                    TypeName = StableTypeName(Candidate),
-                    Clr = Candidate,
-                    Fields = BuildMembers(Candidate, Depth, Visiting),
-                });
-            }
-            finally
-            {
-                Visiting.Remove(Candidate);
-            }
-        }
-        Result.Sort((A, B) => string.CompareOrdinal(A.TypeName, B.TypeName));
-        return Result;
-    }
-
-    // The round-trip key for an instanced candidate; must match on both serialize and deserialize.
-    private static string StableTypeName(Type Type) => Type.FullName ?? Type.Name;
-
-    private static readonly MethodInfo UnsafeSizeOf =
-        typeof(System.Runtime.CompilerServices.Unsafe).GetMethod(
-            nameof(System.Runtime.CompilerServices.Unsafe.SizeOf),
-            BindingFlags.Public | BindingFlags.Static)!;
-
-    // The managed size, which is what the generated accessor reads, not the marshalled one Marshal.SizeOf gives.
-    private static int ManagedSizeOf(Type Type)
-    {
-        if (!Type.IsValueType)
-        {
-            return 0;
-        }
-        try
-        {
-            // Marshalled field by field, so what native has to agree with is the layout it is read through.
-            if (ScriptStructLayout.NeedsMarshalling(Type))
-            {
-                return ScriptStructLayout.Of(Type).Size;
-            }
-            return (int)UnsafeSizeOf.MakeGenericMethod(Type).Invoke(null, null)!;
-        }
-        catch (Exception Ex)
-        {
-            Native.Log(ELogLevel.Warn, $"Could not size script struct '{Type.FullName}': {Ex.Message}");
-            return 0;
-        }
-    }
-
-    private static EPropertyType MapNumeric(Type Type)
+    internal static EPropertyType MapNumeric(Type Type)
     {
         if (Type == typeof(sbyte))  return EPropertyType.Int8;
         if (Type == typeof(short))  return EPropertyType.Int16;
@@ -473,12 +428,12 @@ internal sealed class TypeLibrary
     }
 
     // Every member ScriptMemberRules stores, fields and properties alike, under its own name.
-    internal List<ScriptProperty> BuildMembers(Type Type, int Depth, HashSet<Type> Visiting)
+    internal List<ScriptProperty> BuildMembers(Type Type)
     {
         var Members = new List<ScriptProperty>();
         const BindingFlags Flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.FlattenHierarchy;
         bool bClassSkip = Type.GetCustomAttribute<SkipHotReloadAttribute>() != null;
-        bool bNativeObject = typeof(NativeObject).IsAssignableFrom(Type);
+        bool bNativeObject = typeof(NativeObject).IsAssignableFrom(Type) || IsNativeBackedStruct(Type);
 
         foreach (MemberInfo Member in Type.GetMembers(Flags))
         {
@@ -493,8 +448,15 @@ internal sealed class TypeLibrary
             {
                 MemberType = Property.PropertyType;
 
+                // The rewriter turns a native struct field on a class into a ref readonly view of the owner's storage.
+                bool bStructView = MemberType.IsByRef;
+                if (bStructView)
+                {
+                    MemberType = MemberType.GetElementType()!;
+                }
+
                 // A get-only container is a view over storage native owns, so it is stored even with no setter.
-                Kind = Property.CanWrite || IsNativeOwnedViewType(MemberType) ? EScriptMemberKind.WritableProperty : EScriptMemberKind.ReadOnlyProperty;
+                Kind = Property.CanWrite || bStructView || IsNativeOwnedViewType(MemberType) ? EScriptMemberKind.WritableProperty : EScriptMemberKind.ReadOnlyProperty;
             }
             else
             {
@@ -507,14 +469,13 @@ internal sealed class TypeLibrary
                 continue;
             }
 
-            ScriptType Resolved = ResolveType(MemberType, Depth + 1, Visiting, Member.GetCustomAttribute<InstancedAttribute>() != null);
+            ScriptType Resolved = ResolveType(MemberType);
             if (Resolved.Kind == EPropertyType.None)
             {
                 continue;
             }
 
             PropertyAttribute? Meta = Member.GetCustomAttribute<PropertyAttribute>();
-            bool bNativeOwnedView = Member is PropertyInfo AsProperty && !AsProperty.CanWrite;
             Members.Add(new ScriptProperty
             {
                 Name = Member.Name,
@@ -528,9 +489,6 @@ internal sealed class TypeLibrary
                 NetRate = Member.GetCustomAttribute<SyncAttribute>()?.Rate ?? 0.0f,
                 ExtraMeta = ExtraMetaOf(Member, Meta),
                 Get = Member is FieldInfo F ? F.GetValue : ((PropertyInfo)Member).GetValue,
-                // Never Property.SetValue for a view: there is no setter to call, and reaching for one throws.
-                Set = Member is FieldInfo G ? G.SetValue : bNativeOwnedView ? (Instance, Value) => { } : ((PropertyInfo)Member).SetValue,
-                IsNativeOwnedView = bNativeOwnedView,
             });
         }
 
@@ -570,50 +528,6 @@ internal sealed class TypeLibrary
         return Result;
     }
 
-    /// <summary>Members of a C# mirror of a native struct, used only to round-trip its value by member name.</summary>
-    private List<ScriptProperty> BuildNativeMembers(Type Type, int Depth, HashSet<Type> Visiting)
-    {
-        var Members = new List<ScriptProperty>();
-        const BindingFlags Flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.FlattenHierarchy;
-
-        foreach (FieldInfo Field in Type.GetFields(Flags))
-        {
-            ScriptType Resolved = ResolveType(Field.FieldType, Depth + 1, Visiting);
-            if (Resolved.Kind == EPropertyType.None)
-            {
-                continue;
-            }
-            Members.Add(new ScriptProperty
-            {
-                Name = Field.Name,
-                Type = Resolved,
-                Get = Field.GetValue,
-                Set = Field.SetValue,
-            });
-        }
-
-        foreach (PropertyInfo Property in Type.GetProperties(Flags))
-        {
-            if (!Property.CanRead || !Property.CanWrite || Property.GetIndexParameters().Length > 0)
-            {
-                continue;
-            }
-            ScriptType Resolved = ResolveType(Property.PropertyType, Depth + 1, Visiting);
-            if (Resolved.Kind == EPropertyType.None)
-            {
-                continue;
-            }
-            Members.Add(new ScriptProperty
-            {
-                Name = Property.Name,
-                Type = Resolved,
-                Get = Property.GetValue,
-                Set = Property.SetValue,
-            });
-        }
-
-        return Members;
-    }
 
     private static bool TryGetElementType(Type Type, out Type? ElementType)
     {
@@ -627,9 +541,7 @@ internal sealed class TypeLibrary
             ElementType = Type.GetGenericArguments()[0];
             return true;
         }
-        // The list VIEWS, which is what a [Property] container on a script type is declared as (there is one
-        // copy of the value and native owns it, so a List<T> would be a lie). Each is shaped identically to
-        // a List<T> on the wire; ScriptPropertyViews knows which they are and what their element is.
+        // A [Property] container is declared as a view, since native owns the one copy of the value.
         if (ScriptPropertyViews.TryGetElementType(Type, out ElementType))
         {
             return true;
@@ -638,18 +550,21 @@ internal sealed class TypeLibrary
         return false;
     }
 
-    // The same keys and values the C++ PROPERTY(Sync = ..., Change = ..., AssetType = ...) gives a field.
+    // The same keys and values the C++ PROPERTY(Sync = ..., Change = ..., AssetType = ..., Bundle = ..., Group = ...) gives a field.
     private static List<KeyValuePair<string, string>>? ExtraMetaOf(MemberInfo Member, PropertyAttribute? Meta)
     {
         var Result = new List<KeyValuePair<string, string>>();
-        if (!string.IsNullOrEmpty(Meta?.Name))
+        void AddIfSet(string Key, string? Value)
         {
-            Result.Add(new("DisplayName", Meta.Name));
+            if (!string.IsNullOrEmpty(Value))
+            {
+                Result.Add(new(Key, Value));
+            }
         }
-        if (!string.IsNullOrEmpty(Meta?.AssetType))
-        {
-            Result.Add(new("AssetType", Meta.AssetType));
-        }
+        AddIfSet("DisplayName", Meta?.Name);
+        AddIfSet(nameof(PropertyAttribute.AssetType), Meta?.AssetType);
+        AddIfSet(nameof(PropertyAttribute.Bundle), Meta?.Bundle);
+        AddIfSet(nameof(PropertyAttribute.Group), Meta?.Group);
         if (Member.GetCustomAttribute<BindAttribute>() is BindAttribute Bind)
         {
             Result.Add(new("Bind", Bind.Name ?? ""));
@@ -661,7 +576,7 @@ internal sealed class TypeLibrary
 
         if (Member.GetCustomAttribute<SyncAttribute>() is SyncAttribute Sync)
         {
-            Result.Add(new("Sync", (Sync.Flags & SyncFlags.FromOwner) != 0 ? "FromOwner" : ""));
+            Result.Add(new("Sync", (Sync.Flags & Lumina.ESyncFlags.FromOwner) != 0 ? "FromOwner" : ""));
             if (Sync.Quantize > 0.0)
             {
                 Result.Add(new("Quantize", Sync.Quantize.ToString("R", System.Globalization.CultureInfo.InvariantCulture)));
@@ -689,12 +604,11 @@ internal sealed class TypeLibrary
     }
 }
 
-// Cached, immutable-after-Build description of one script type; Create() uses Activator deliberately, since a compiled factory would pin this collectible ALC's ctor and block hot-reload unload.
+// Cached, immutable after Build, description of one script type.
 internal sealed class TypeDescription
 {
     public Type Type { get; }
     public IReadOnlyList<ScriptProperty> Properties { get; private set; } = Array.Empty<ScriptProperty>();
-    public IReadOnlyList<ScriptButton> Buttons { get; private set; } = Array.Empty<ScriptButton>();
     public IReadOnlyList<ScriptFunction> Functions { get; private set; } = Array.Empty<ScriptFunction>();
     private IReadOnlyList<ScriptProperty> InputBindings = Array.Empty<ScriptProperty>();
     public bool HasInputBindings { get; private set; }
@@ -706,8 +620,7 @@ internal sealed class TypeDescription
 
     public void Build(TypeLibrary Library)
     {
-        Properties = Library.BuildMembers(Type, 0, new HashSet<Type>());
-        Buttons = ComputeButtons(Type);
+        Properties = Library.BuildMembers(Type);
         Functions = ComputeFunctions(Type, Library);
         InputBindings = ComputeInputBindings(Properties);
         HasInputBindings = InputBindings.Count > 0;
@@ -724,6 +637,7 @@ internal sealed class TypeDescription
     private static bool IsReflectedMethod(MethodInfo Method, HashSet<string> NamedBySync)
     {
         return Method.GetCustomAttribute<ScriptFunctionAttribute>() != null
+            || Method.GetCustomAttribute<ButtonAttribute>() != null
             || Method.GetCustomAttribute<Rpc.RpcAttribute>() != null
             || IsUIBound(Method)
             || NamedBySync.Contains(Method.Name);
@@ -772,6 +686,25 @@ internal sealed class TypeDescription
     // EFunctionFlags::UIBind, mirroring Function.h.
     private const uint UIBindFlag = 1u << 12;
 
+    // A [Button] is ordinary function metadata, which the inspector draws for any function carrying it.
+    private static IReadOnlyList<KeyValuePair<string, string>>? FunctionMetaOf(MethodInfo Method)
+    {
+        if (Method.GetCustomAttribute<ButtonAttribute>() is not ButtonAttribute Button)
+        {
+            return null;
+        }
+        if (Method.GetParameters().Length != 0)
+        {
+            Debug.LogWarning($"[Button] {Method.DeclaringType?.Name}.{Method.Name} takes parameters, so the inspector cannot call it.");
+        }
+        var Meta = new List<KeyValuePair<string, string>> { new("Button", Button.Label ?? "") };
+        if (!string.IsNullOrEmpty(Button.Tooltip))
+        {
+            Meta.Add(new("ToolTip", Button.Tooltip));
+        }
+        return Meta;
+    }
+
     private static uint FunctionFlagsOf(MethodInfo Method)
     {
         if (Method.GetCustomAttribute<Rpc.RpcAttribute>() is not Rpc.RpcAttribute Declared)
@@ -784,11 +717,11 @@ internal sealed class TypeDescription
             Rpc.OwnerAttribute => RpcOwnerFlag,
             _ => RpcBroadcastFlag,
         };
-        if ((Declared.Flags & NetFlags.Unreliable) != 0)
+        if ((Declared.Flags & Lumina.ENetFlags.Unreliable) != 0)
         {
             Flags |= NetUnreliableFlag;
         }
-        if ((Declared.Flags & NetFlags.OwnerOnly) != 0)
+        if ((Declared.Flags & Lumina.ENetFlags.OwnerOnly) != 0)
         {
             Flags |= NetOwnerOnlyFlag;
         }
@@ -821,6 +754,7 @@ internal sealed class TypeDescription
             }
 
             List<ScriptProperty> Params = new();
+            string? Unreflected = null;
             foreach (ParameterInfo Parameter in Method.GetParameters())
             {
                 // A frame slot holds the value, so a by-ref parameter is described as the type behind it.
@@ -830,12 +764,23 @@ internal sealed class TypeDescription
                     Declared = Declared.GetElementType()!;
                 }
 
+                ScriptType Resolved = Library.ResolveType(Declared);
+                if (Resolved.Kind == EPropertyType.None)
+                {
+                    Unreflected ??= $"parameter '{Parameter.Name}' has type '{Declared.Name}', which is not a reflected type"
+                                  + (Declared.IsEnum || Declared.IsValueType ? ". Mark it [Reflect]." : ".");
+                }
                 Params.Add(new ScriptProperty
                 {
                     Name = Parameter.Name ?? $"Arg{Params.Count}",
-                    Type = Library.ResolveType(Declared, 0, new HashSet<Type>()),
+                    Type = Resolved,
                     ParamFlags = FrameMarshal.DirectionOf(Parameter),
                 });
+            }
+            if (Unreflected != null)
+            {
+                Debug.LogError($"Script function '{Type.Name}.{Method.Name}' is not reflected, because its {Unreflected}");
+                continue;
             }
 
             if (ScriptAsync.WhyUnsupported(Method.ReturnType) is string Why)
@@ -853,13 +798,13 @@ internal sealed class TypeDescription
                     Name = "ReturnValue",
                     // An async function hands back a token native polls, since a frame cannot wait for it.
                     Type = ScriptAsync.IsFireAndForget(Method.ReturnType)
-                        ? Library.ResolveType(typeof(ulong), 0, new HashSet<Type>())
-                        : Library.ResolveType(Method.ReturnType, 0, new HashSet<Type>()),
+                        ? Library.ResolveType(typeof(ulong))
+                        : Library.ResolveType(Method.ReturnType),
                 });
             }
 
             Found ??= new List<ScriptFunction>();
-            Found.Add(new ScriptFunction(Method.Name, Params, ReturnIndex, FunctionFlagsOf(Method)));
+            Found.Add(new ScriptFunction(Method.Name, Params, ReturnIndex, FunctionFlagsOf(Method), FunctionMetaOf(Method)));
         }
 
         return (IReadOnlyList<ScriptFunction>?)Found ?? Array.Empty<ScriptFunction>();
@@ -894,8 +839,7 @@ internal sealed class TypeDescription
         return Overloaded;
     }
 
-    // The [Property] members that are input bindings, gathered once per type so the per-frame poll is a
-    // list walk with no reflection.
+    // Gathered once per type, so the per-frame poll walks a list without reflection.
     private static IReadOnlyList<ScriptProperty> ComputeInputBindings(IReadOnlyList<ScriptProperty> Properties)
     {
         List<ScriptProperty>? Result = null;
@@ -909,9 +853,7 @@ internal sealed class TypeDescription
         return (IReadOnlyList<ScriptProperty>?)Result ?? Array.Empty<ScriptProperty>();
     }
 
-    /// <summary>Gives a script that declares input bindings the component that feeds them, so declaring an
-    /// SInputAction field is enough on its own. Idempotent, so a script
-    /// that also calls EnableInput() is unaffected.</summary>
+    // Gives a script declaring input bindings the component that feeds them, idempotent so EnableInput() still works beside it.
     public void EnsureInputComponent(Lumina.CEntityScript Script)
     {
         if (InputBindings.Count > 0)
@@ -921,78 +863,23 @@ internal sealed class TypeDescription
     }
 
     /// <summary>Hands one action's state to each of the instance's bindings that listens to it.</summary>
-    public void DispatchAction(Lumina.CEntityScript Script, Lumina.FName Action, in Lumina.FInputActionState State)
+    public void DispatchAction(Lumina.CEntityScript Script, Lumina.FName Action, in Lumina.SInputActionState State)
     {
         foreach (ScriptProperty Property in InputBindings)
         {
-            // A binding the script nulled out is skipped rather than recreated: the field is the script's
-            // to own, and silently handing it a new object would lose whatever it meant by clearing it.
+            // A binding the script nulled out is skipped, since the field is the script's and clearing it meant something.
             if (Property.Get(Script) is SInputBinding Binding && Binding.Listens(Action))
             {
                 Binding.Apply(State);
             }
         }
     }
-
-    // Discovers the [Button] methods: parameterless instance methods surfaced as inspector buttons,
-    // invoked by name at click time. Deduped by name (a virtual override would otherwise appear twice).
-    private static IReadOnlyList<ScriptButton> ComputeButtons(Type Type)
-    {
-        const BindingFlags Flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.FlattenHierarchy;
-        List<ScriptButton>? Result = null;
-        HashSet<string>? Seen = null;
-
-        foreach (MethodInfo Method in Type.GetMethods(Flags))
-        {
-            ButtonAttribute? Meta = Method.GetCustomAttribute<ButtonAttribute>();
-            if (Meta == null)
-            {
-                continue;
-            }
-            if (Method.GetParameters().Length != 0 || Method.IsAbstract || Method.IsGenericMethodDefinition)
-            {
-                Native.Log(ELogLevel.Warn, $"[Button] {Type.Name}.{Method.Name}: only parameterless methods are supported.");
-                continue;
-            }
-            if (!(Seen ??= new HashSet<string>()).Add(Method.Name))
-            {
-                continue;
-            }
-            (Result ??= new List<ScriptButton>()).Add(new ScriptButton
-            {
-                Method = Method.Name,
-                Label = string.IsNullOrEmpty(Meta.Label) ? Method.Name : Meta.Label!,
-                Tooltip = Meta.Tooltip ?? "",
-            });
-        }
-
-        return (IReadOnlyList<ScriptButton>?)Result ?? Array.Empty<ScriptButton>();
-    }
-
-    public object? Create()
-    {
-        if (Type.IsAbstract || Type.IsInterface)
-        {
-            return null;
-        }
-
-        try
-        {
-            return Activator.CreateInstance(Type);
-        }
-        catch (Exception Exception)
-        {
-            Native.Log(ELogLevel.Error, $"Failed to instantiate script '{Type.FullName}': {Exception}");
-            return null;
-        }
-    }
-
 }
 
 /// <summary>A discovered data type: its member description plus the native struct it derives from.</summary>
-internal readonly struct DataStructEntry
+internal readonly struct ScriptStructEntry
 {
-    public DataStructEntry(TypeDescription Description, string NativeBase)
+    public ScriptStructEntry(TypeDescription Description, string NativeBase)
     {
         this.Description = Description;
         this.NativeBase = NativeBase;

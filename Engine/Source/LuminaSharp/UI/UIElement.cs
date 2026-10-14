@@ -12,9 +12,9 @@ namespace LuminaSharp;
 public readonly unsafe struct UIElement
 {
     internal readonly ulong World;
-    internal readonly Lumina.FUIElement Handle;
+    internal readonly Lumina.SUIElement Handle;
 
-    internal UIElement(ulong World, Lumina.FUIElement Handle)
+    internal UIElement(ulong World, Lumina.SUIElement Handle)
     {
         this.World = World;
         this.Handle = Handle;
@@ -193,7 +193,7 @@ public readonly unsafe struct UIElement
         // RmlUi dispatches outside every script callback, so the handler re-enters the subscriber's context.
         Lumina.CEntityScript? Owner = Engine.ActiveScript;
 
-        Lumina.FUIEventListener Listener = Lumina.CUILibrary.AddEventListener(UIWorld.FromHandle(WorldId), Handle, EventType);
+        Lumina.SUIEventListener Listener = Lumina.CUILibrary.AddEventListener(UIWorld.FromHandle(WorldId), Handle, EventType);
         if (!Listener.IsValid)
         {
             return UIEventSubscription.Empty;

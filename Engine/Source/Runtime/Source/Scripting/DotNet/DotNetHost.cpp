@@ -1,14 +1,9 @@
 ﻿#include "LayoutRegistry.h"
 #include "DotNetHost.h"
 #include "Core/Delegates/CoreDelegates.h"
-#include "Scripting/EntityScript.h"
 #include "Scripting/ManagedTypeRegistry.h"
 #include "Scripting/ScriptSchemaCodec.h"
-#include "World/ECS/Registry.h"
 
-#include "Platform/Filesystem/PlatformFilesystem.h"
-#include <fstream>
-#include <iterator>
 #include <string>
 #include <cstring>
 #include <cstdio>
@@ -17,15 +12,9 @@
 #include "Containers/Vector.h"
 #include "Containers/String.h"
 #include "Core/Console/ConsoleVariable.h"
-#include "Core/Delegates/ScriptDelegate.h"
 #include "Core/Engine/Engine.h"
-#include "Core/Object/ManagedInstance.h"
-#include "Core/Object/ObjectReferenceProvider.h"
-#include "Core/Object/ObjectHandleTyped.h"
 #include "Core/Threading/Atomic.h"
-#include "Scripting/ScriptStruct.h"
 #include "Scripting/ScriptableObject.h"
-#include "Scripting/ScriptDataStruct.h"
 #include "Core/Plugin/Plugin.h"
 #include "Core/Plugin/PluginManager.h"
 #include "FileSystem/FileSystem.h"
@@ -35,21 +24,17 @@
 #include "Platform/Time/PlatformTime.h"
 #include "World/World.h"
 #include "World/WorldManager.h"
-#include "World/Entity/EntityUtils.h"
-#include "World/Entity/Components/Component.h"
+#include "Platform/Filesystem/PlatformFilesystem.h"
+#include "Core/Object/ManagedInstance.h"
+#include "Scripting/EntityScript.h"
 #include "Scripting/DotNet/DotNetExport.h"
 #include "Scripting/DotNet/ExportSignature.h"
 #include "Scripting/DotNet/ScriptReferences.h"
-#include "Scripting/ScriptExports.h"
+#include "Scripting/DotNet/ScriptUnits.h"
 #include "Core/Object/Object.h"
 #include "Core/Object/ObjectCore.h"
-#include "Core/Object/ObjectHandleTyped.h"
-#include "Core/Object/SoftObjectPtr.h"
-#include "Assets/AssetRegistry/AssetRegistry.h"
 #include "TaskSystem/ThreadedCallback.h"
-#include "TaskSystem/Future.h"
 #include "Tools/UI/ImGui/ImGuiX.h"   // editor toast notifications for script-compile feedback
-#include "nlohmann/json.hpp"          // cooked script manifest (prebuilt-DLL unit graph)
 
 #if defined(_WIN32)
     #ifndef WIN32_LEAN_AND_MEAN
@@ -92,36 +77,6 @@ namespace Lumina::DotNet
         constexpr const char* kSharedExt = ".so";
         constexpr const char* kSharedPrefix = "lib";
     #endif
-
-        // Defined further down; the project-generation helpers above it normalize paths through it.
-        FString NativePath(FStringView P);
-
-        FString Join(FStringView Left, FStringView Right)
-        {
-            FString Result(Left.data(), Left.size());
-            if (!Result.empty() && Result.back() != '/' && Result.back() != '\\')
-            {
-                Result.push_back('/');
-            }
-            Result.append(Right.data(), Right.size());
-            return Result;
-        }
-
-        FString ParentOf(FStringView Path)
-        {
-            const size_t Slash = Path.find_last_of("/\\");
-            return Slash == FStringView::npos ? FString() : FString(Path.data(), Slash);
-        }
-
-        // File name without directory or extension, which for a managed assembly is also its simple name.
-        FString StemOf(FStringView Path)
-        {
-            const size_t Slash = Path.find_last_of("/\\");
-            const size_t Start = Slash == FStringView::npos ? 0 : Slash + 1;
-            const size_t Dot   = Path.rfind('.');
-            const size_t End   = (Dot == FStringView::npos || Dot < Start) ? Path.size() : Dot;
-            return FString(Path.data() + Start, End - Start);
-        }
 
         // hostfxr takes wchar_t paths on Windows and char elsewhere, so they cross the boundary here.
         class FHostString
@@ -196,38 +151,22 @@ namespace Lumina::DotNet
         typedef void  (CORECLR_DELEGATE_CALLTYPE* OnWorldTeardownFn)(uint64);
         typedef int32 (CORECLR_DELEGATE_CALLTYPE* GetRuntimeDiagnosticsFn)(void*, int32);
         typedef void* (CORECLR_DELEGATE_CALLTYPE* CreateScriptableFn)(const char*, int32, uint64);
-        typedef void  (CORECLR_DELEGATE_CALLTYPE* EnumerateScriptablesFn)(void*, void*);
-        typedef void  (CORECLR_DELEGATE_CALLTYPE* EnumerateScriptableAliasesFn)(void*, void*);
         typedef void  (CORECLR_DELEGATE_CALLTYPE* ApplyScriptableDefaultsFn)(const char*, int32, uint64);
-        typedef void  (CORECLR_DELEGATE_CALLTYPE* EnumerateScriptStructsFn)(void*, void*);
-        typedef void  (CORECLR_DELEGATE_CALLTYPE* GetScriptStructSchemaFn)(const char*, int32, void*, void*);
-        typedef void  (CORECLR_DELEGATE_CALLTYPE* GetScriptSchemaFn)(const char*, int32, void*, void*);
-        typedef void  (CORECLR_DELEGATE_CALLTYPE* GetScriptButtonsFn)(const char*, int32, void*, void*);
-        typedef void  (CORECLR_DELEGATE_CALLTYPE* InvokeAssetCallbackFn)(void*, void*);
+        typedef void  (CORECLR_DELEGATE_CALLTYPE* GetTypeManifestFn)(void*, void*);
         typedef void  (CORECLR_DELEGATE_CALLTYPE* ManagedFreeHandleFn)(void*);
         typedef int32 (CORECLR_DELEGATE_CALLTYPE* ManagedIsHandleAliveFn)(void*);
-        typedef int32 (CORECLR_DELEGATE_CALLTYPE* InvokeScriptButtonFn)(void*, const char*, int32);
 
-        // NOT an ABI mirror, since each field is resolved by name and a missing one fails loudly.
-        // Host lifecycle and the gathers the bootstrap validates. A feature area declares its own exports
-        // where it uses them (TManagedExport) rather than adding a field, a typedef and a resolve line here.
+        // Resolved by name, so a missing field fails loudly. A feature area declares its own exports with TManagedExport instead.
         struct FManagedExports
         {
             CreateScriptableFn          CreateScriptable;
-            EnumerateScriptablesFn      EnumerateScriptables;
-            EnumerateScriptableAliasesFn EnumerateScriptableAliases;
             ApplyScriptableDefaultsFn   ApplyScriptableDefaults;
-            EnumerateScriptStructsFn    EnumerateScriptStructs;
-            GetScriptStructSchemaFn     GetScriptStructSchema;
+            GetTypeManifestFn           GetTypeManifest;
             ManagedFreeHandleFn         FreeHandle;
             ManagedIsHandleAliveFn      IsHandleAlive;
-            InvokeScriptButtonFn        InvokeScriptButton;
             GetGenerationFn             GetGeneration;
             OnWorldTeardownFn           OnWorldTeardown;
             GetRuntimeDiagnosticsFn     GetRuntimeDiagnostics;
-            GetScriptSchemaFn           GetScriptSchema;
-            GetScriptButtonsFn          GetScriptButtons;
-            InvokeAssetCallbackFn       InvokeAssetCallback;
             LoadScriptsFn               LoadScripts;
             SetScriptCompileOptimizationFn SetScriptCompileOptimization;
             ShutdownFn                  Shutdown;
@@ -240,8 +179,7 @@ namespace Lumina::DotNet
         // Set by a UI trigger or a source watcher, serviced at frame start; see RequestScriptReload.
         TAtomic<bool>                               GScriptReloadRequested{ false };
 
-        // Monotonic seconds before which a latched reload must not run. Zero means "at the next frame start",
-        // which is what an explicit user request wants; a watched-file change pushes it out instead.
+        // Seconds before which a latched reload must not run, zero meaning the next frame start for an explicit request.
         TAtomic<double>                             GScriptReloadEarliest{ 0.0 };
 
         // Counts finished reloads whether they compiled or not, so a waiter can tell a failure from one still queued.
@@ -260,551 +198,6 @@ namespace Lumina::DotNet
         ResolveManagedExportFn                      GResolveManagedExport = nullptr;
         FManagedExports                             GManaged{};
 
-        // Reflection layouts for each C# script type, cleared on reload/shutdown.
-
-        // Sink one (prior name, current name) pair; Ctx is the out pair vector.
-        void LmScriptableAliasSink(void* Ctx, const char* Old, int OldLen, const char* New, int NewLen)
-        {
-            auto* Out = static_cast<TVector<FScriptableAlias>*>(Ctx);
-            if (Out == nullptr || Old == nullptr || OldLen <= 0 || New == nullptr || NewLen <= 0)
-            {
-                return;
-            }
-            FScriptableAlias Alias;
-            Alias.OldName = FString(Old, static_cast<size_t>(OldLen));
-            Alias.NewName = FString(New, static_cast<size_t>(NewLen));
-            Out->emplace_back(std::move(Alias));
-        }
-
-        // Sink the managed EnumerateScriptables calls once per Scriptable C# type; Ctx is the out desc vector.
-        void LmScriptableSink(void* Ctx, const char* Name, int NameLen, const char* Base, int BaseLen,
-            const char* Overrides, int OverridesLen, uint8 Flags, const char* Meta, int MetaLen)
-        {
-            auto* Out = static_cast<TVector<FScriptableTypeDesc>*>(Ctx);
-            if (Out == nullptr || Name == nullptr || NameLen <= 0)
-            {
-                return;
-            }
-            FScriptableTypeDesc Desc;
-            Desc.TypeName = FString(Name, static_cast<size_t>(NameLen));
-            if (Base != nullptr && BaseLen > 0)
-            {
-                Desc.NativeBaseName = FString(Base, static_cast<size_t>(BaseLen));
-            }
-            // Semicolon joined, which is how every other list on this boundary travels.
-            if (Overrides != nullptr && OverridesLen > 0)
-            {
-                const FStringView Joined(Overrides, (size_t)OverridesLen);
-                size_t Start = 0;
-                while (Start <= Joined.size())
-                {
-                    size_t End = Joined.find(';', Start);
-                    if (End == FStringView::npos)
-                    {
-                        End = Joined.size();
-                    }
-                    if (End > Start)
-                    {
-                        Desc.OverriddenEvents.emplace_back(Joined.data() + Start, End - Start);
-                    }
-                    Start = End + 1;
-                }
-            }
-
-            constexpr uint8 AbstractFlag = 1;
-            Desc.bAbstract = (Flags & AbstractFlag) != 0;
-
-            // Lines of key, a tab, then value.
-            if (Meta != nullptr && MetaLen > 0)
-            {
-                const FStringView Joined(Meta, (size_t)MetaLen);
-                size_t Start = 0;
-                while (Start < Joined.size())
-                {
-                    size_t End = Joined.find('\n', Start);
-                    if (End == FStringView::npos)
-                    {
-                        End = Joined.size();
-                    }
-                    const FStringView Line = Joined.substr(Start, End - Start);
-                    const size_t Tab = Line.find('\t');
-                    if (Tab != FStringView::npos)
-                    {
-                        Desc.ClassMeta.emplace_back(FString(Line.data(), Tab), FString(Line.data() + Tab + 1, Line.size() - Tab - 1));
-                    }
-                    Start = End + 1;
-                }
-            }
-            Out->emplace_back(std::move(Desc));
-        }
-
-        // Sink the managed EnumerateScriptStructs calls once per marked C# data type; Ctx is the out desc vector.
-        void LmScriptStructSink(void* Ctx, const char* Name, int NameLen, const char* Base, int BaseLen)
-        {
-            auto* Out = static_cast<TVector<FScriptStructTypeDesc>*>(Ctx);
-            if (Out == nullptr || Name == nullptr || NameLen <= 0)
-            {
-                return;
-            }
-            FScriptStructTypeDesc Desc;
-            Desc.ScriptTypeName = FString(Name, static_cast<size_t>(NameLen));
-            if (Base != nullptr && BaseLen > 0)
-            {
-                Desc.NativeBaseName = FString(Base, static_cast<size_t>(BaseLen));
-            }
-            Out->emplace_back(std::move(Desc));
-        }
-
-
-        // Keeps each source file's text alive while it's marshaled to managed.
-        struct FGatheredSource
-        {
-            FString Path;
-            FString Text;
-        };
-
-        // Scripts are source rather than VFS content, so a code-only plugin still gets its scripts compiled.
-        template<typename TVisit>
-        void ForEachScriptSource(const FString& DiskDir, TVisit&& Visit)
-        {
-            if (DiskDir.empty() || !Filesystem::IsDirectory(DiskDir))
-            {
-                return;
-            }
-
-            Filesystem::IterateDirectoryRecursive(DiskDir, [&Visit](const Filesystem::FDirectoryEntry& Entry)
-            {
-                if (Entry.IsDirectory() || Entry.GetExtension() != FStringView(".cs"))
-                {
-                    return;
-                }
-
-                const FStringView P = Entry.FullPath;
-                if (P.find("/obj/") != FStringView::npos || P.find("/bin/") != FStringView::npos)
-                {
-                    return;
-                }
-                Visit(P);
-            });
-        }
-
-        void GatherSourcesUnder(const FString& DiskDir, TVector<FGatheredSource>& Out)
-        {
-            ForEachScriptSource(DiskDir, [&Out](FStringView P)
-            {
-                FGatheredSource Src;
-                if (!Filesystem::ReadFile(Src.Text, P))
-                {
-                    return;
-                }
-
-                Src.Path.assign(P.data(), P.size());
-                Out.push_back(std::move(Src));
-            });
-        }
-        
-        // The SINGLE source of truth, so the IDE view can never disagree with what actually compiles.
-        struct FScriptUnit
-        {
-            FString          Name;            // assembly label (becomes the managed assembly name)
-            FString          DiskDir;         // absolute Scripts dir on disk (source root + .csproj location)
-            FString          BinaryDir;       // <root>/Binaries/DotNet  (where this unit's compiled DLL is emitted)
-            FString          IntermediateDir; // <root>/Intermediates/DotNet/<Name>  (IDE obj dir)
-            FString          AssemblyPath;    // <BinaryDir>/<Name>.dll (emit target when sources exist; load source otherwise)
-            TVector<FString> Deps;            // sibling unit names this one references
-            TVector<FString> References;      // absolute paths to third-party assemblies (packages + declared DLLs)
-            FScriptReferenceSet Declared;     // kept so the generated project can name the packages rather than their DLLs
-        };
-
-        // Descriptor-declared references, resolved (restoring packages when the declaration changed).
-        void ApplyScriptReferences(FScriptUnit& Unit, FStringView DescriptorPath, FStringView RootDir)
-        {
-            if (DescriptorPath.empty() || !Filesystem::Exists(DescriptorPath))
-            {
-                return;
-            }
-            if (!ParseScriptReferences(DescriptorPath, RootDir, Unit.Declared))
-            {
-                return;
-            }
-
-            const FString RestoreDir = Unit.IntermediateDir.empty()
-                ? FString()
-                : Unit.IntermediateDir + "/Packages";
-
-            if (!ResolveScriptReferences(Unit.Name, RestoreDir, Unit.Declared, Unit.References))
-            {
-                LOG_ERROR("C#: unit '{}' will compile without its declared references.", Unit.Name);
-            }
-        }
-
-        // The engine convention is one descriptor named for the project beside its content.
-        FString FindProjectDescriptor(FStringView ProjectDir)
-        {
-            FString Found;
-            Filesystem::IterateDirectory(ProjectDir, [&Found](const Filesystem::FDirectoryEntry& Entry)
-            {
-                if (Entry.IsFile() && Entry.GetExtension() == ".lproject")
-                {
-                    Found.assign(Entry.FullPath.data(), Entry.FullPath.size());
-                    return Filesystem::EVisit::Stop;
-                }
-                return Filesystem::EVisit::Continue;
-            });
-            return Found;
-        }
-
-        // Each unit compiles into its OWN DLL, and a disabled plugin produces no unit at all.
-        TVector<FScriptUnit> BuildScriptUnits()
-        {
-            TVector<FScriptUnit> Units;
-            TVector<FString>     PluginNames;
-
-            for (const FPlugin* Plugin : FPluginManager::Get().GetAllPlugins())
-            {
-                if (Plugin == nullptr || !Plugin->IsEnabled())
-                {
-                    continue;
-                }
-
-                FScriptUnit Unit;
-                Unit.Name.assign(Plugin->GetName().data(), Plugin->GetName().size());
-                const FString PluginDir(Plugin->GetDirectory().data(), Plugin->GetDirectory().size());
-                Unit.DiskDir         = PluginDir + "/Scripts";
-                Unit.BinaryDir       = PluginDir + "/Binaries/DotNet";
-                Unit.IntermediateDir = PluginDir + "/Intermediates/DotNet/" + Unit.Name;
-                Unit.AssemblyPath    = Unit.BinaryDir + "/" + Unit.Name + ".dll";
-                for (const FPluginDependency& Dep : Plugin->GetDescriptor().Dependencies)
-                {
-                    Unit.Deps.push_back(Dep.Name);
-                }
-
-                ApplyScriptReferences(Unit, Plugin->GetDescriptorPath(), PluginDir);
-
-                PluginNames.push_back(Unit.Name);
-                Units.push_back(std::move(Unit));
-            }
-
-            {
-                FScriptUnit Game;
-                Game.Name = "Game";
-                if (GEngine != nullptr)
-                {
-                    const FFixedString ScriptsDir = GEngine->GetProjectScriptsDirectory();
-                    Game.DiskDir.assign(ScriptsDir.data(), ScriptsDir.size());
-
-                    const FStringView ProjectPath = GEngine->GetProjectPath();
-                    if (!ProjectPath.empty())
-                    {
-                        const FString Root(ProjectPath.data(), ProjectPath.size());
-                        Game.BinaryDir       = Root + "/Binaries/DotNet";
-                        Game.IntermediateDir = Root + "/Intermediates/DotNet/Game";
-                        Game.AssemblyPath    = Game.BinaryDir + "/Game.dll";
-
-                        ApplyScriptReferences(Game, FindProjectDescriptor(Root), Root);
-                    }
-                }
-                Game.Deps = PluginNames;
-                Units.push_back(std::move(Game));
-            }
-
-            {
-                FScriptUnit Engine;
-                Engine.Name = "Engine";
-                Engine.DiskDir = Paths::GetEngineResourceDirectory() + "/Scripts";
-                // Engine example scripts live next to the engine binaries (a sibling of DotNet/Managed, not in it).
-                const FString ExeDir = ParentOf(Platform::GetCurrentProcessPath());
-                Engine.BinaryDir       = NativePath(Join(ExeDir, "DotNet"));
-                Engine.IntermediateDir = NativePath(Join(ExeDir, "DotNet/obj/Engine"));
-                Engine.AssemblyPath    = Engine.BinaryDir + "/Engine.dll";
-                Units.push_back(std::move(Engine));
-            }
-
-            return Units;
-        }
-
-        // Returns empty when no manifest is present, as in a dev run or a project with no C#.
-        TVector<FScriptUnit> BuildCookedScriptUnits()
-        {
-            TVector<FScriptUnit> Units;
-
-            // A package keeps its script assemblies with LuminaSharp in the data folder's Managed directory.
-            const FString ScriptsDir   = Join(Paths::GetGameDataDirectory(), "Managed");
-            const FString ManifestPath = Join(ScriptsDir, "scripts.manifest.json");
-
-            FString Text;
-            if (!Filesystem::ReadFile(Text, ManifestPath))
-            {
-                return Units;
-            }
-
-            nlohmann::json J;
-            try
-            {
-                J = nlohmann::json::parse(Text.c_str());
-            }
-            catch (const std::exception& Err)
-            {
-                LOG_ERROR("C#: failed to parse cooked script manifest '{}': {}", ManifestPath, Err.what());
-                return Units;
-            }
-
-            const nlohmann::json& Arr = J.contains("Units") ? J["Units"] : J;
-            if (!Arr.is_array())
-            {
-                return Units;
-            }
-
-            for (const nlohmann::json& Entry : Arr)
-            {
-                if (!Entry.is_object())
-                {
-                    continue;
-                }
-                const std::string Name = Entry.value("Name", std::string());
-                if (Name.empty())
-                {
-                    continue;
-                }
-
-                FScriptUnit Unit;
-                Unit.Name = FString(Name.c_str());
-                const std::string Dll = Entry.value("Dll", Name + ".dll");
-                Unit.AssemblyPath = Join(ScriptsDir, FStringView(Dll.c_str(), Dll.size()));
-
-                if (Entry.contains("Deps") && Entry["Deps"].is_array())
-                {
-                    for (const nlohmann::json& Dep : Entry["Deps"])
-                    {
-                        if (Dep.is_string())
-                        {
-                            Unit.Deps.push_back(FString(Dep.get<std::string>().c_str()));
-                        }
-                    }
-                }
-
-                // Staged beside the unit DLLs, so the cooked game never needs the NuGet cache.
-                if (Entry.contains("References") && Entry["References"].is_array())
-                {
-                    for (const nlohmann::json& Reference : Entry["References"])
-                    {
-                        if (Reference.is_string())
-                        {
-                            const std::string ReferenceName = Reference.get<std::string>();
-                            Unit.References.push_back(Join(ScriptsDir, FStringView(ReferenceName.c_str(), ReferenceName.size())));
-                        }
-                    }
-                }
-                Units.push_back(std::move(Unit));
-            }
-            return Units;
-        }
-
-        // So frequent reloads do not churn the files and the IDE does not reload projects each time.
-        void WriteTextIfChanged(FStringView Path, const std::string& Content)
-        {
-            FString Existing;
-            if (Filesystem::ReadFile(Existing, Path)
-                && Existing.size() == Content.size()
-                && ::memcmp(Existing.data(), Content.data(), Content.size()) == 0)
-            {
-                return;
-            }
-
-            const TSpan<const uint8> Bytes(reinterpret_cast<const uint8*>(Content.data()), Content.size());
-            if (Filesystem::WriteFile(Path, Bytes))
-            {
-                LOG_DISPLAY("Generated C# script project: {}", Path);
-            }
-        }
-
-        // Tells a stale emitted artifact apart from an authored prebuilt assembly at the same path.
-        FString CompiledMarkerPath(const FString& DllPath)
-        {
-            return DllPath + ".compiled";
-        }
-
-        // Stable across regenerations, so the IDE does not treat each regen as a brand-new project.
-        std::string MakeStableGuid(const FString& Seed)
-        {
-            auto Fnv = [](const char* S, uint64 Basis) -> uint64
-            {
-                uint64 H = Basis;
-                for (; *S != '\0'; ++S)
-                {
-                    H = (H ^ static_cast<uint64>(static_cast<uint8>(*S))) * 1099511628211ULL;
-                }
-                return H;
-            };
-
-            const uint64 A = Fnv(Seed.c_str(), 14695981039346656037ULL);
-            const uint64 B = Fnv(Seed.c_str(), 14695981039346656037ULL ^ 0x9E3779B97F4A7C15ULL);
-            uint8 Bytes[16];
-            for (int Index = 0; Index < 8; ++Index)
-            {
-                Bytes[Index]     = static_cast<uint8>(A >> (Index * 8));
-                Bytes[8 + Index] = static_cast<uint8>(B >> (Index * 8));
-            }
-
-            char Buf[40];
-            std::snprintf(Buf, sizeof(Buf),
-                "{%02X%02X%02X%02X-%02X%02X-%02X%02X-%02X%02X-%02X%02X%02X%02X%02X%02X}",
-                Bytes[0], Bytes[1], Bytes[2], Bytes[3], Bytes[4], Bytes[5], Bytes[6], Bytes[7],
-                Bytes[8], Bytes[9], Bytes[10], Bytes[11], Bytes[12], Bytes[13], Bytes[14], Bytes[15]);
-            return std::string(Buf);
-        }
-
-        // The absolute path of the generated IDE project for a unit ("<DiskDir>/<Name>.Scripts.csproj").
-        FString UnitProjectPath(const FScriptUnit& Unit)
-        {
-            return NativePath(Join(Unit.DiskDir, Unit.Name + ".Scripts.csproj"));
-        }
-
-        // Matches the runtime cross-assembly references exactly, so IntelliSense sees the same graph.
-        std::string BuildCsprojXml(const FScriptUnit& Unit, const TVector<FScriptUnit>& AllUnits, const FString& LuminaSharpDll)
-        {
-            std::string Xml;
-            Xml += "<Project Sdk=\"Microsoft.NET.Sdk\">\n";
-            Xml += "  <!-- GENERATED for IDE IntelliSense only (run \"dotnet.genprojects\" to refresh).\n";
-            Xml += "       Scripts are compiled at runtime by the engine; this project is never the runtime\n";
-            Xml += "       path and is overwritten on reload. -->\n";
-            Xml += "  <PropertyGroup>\n";
-            Xml += "    <TargetFramework>net10.0</TargetFramework>\n";
-            Xml += "    <Nullable>enable</Nullable>\n";
-            Xml += "    <ImplicitUsings>disable</ImplicitUsings>\n";
-            Xml += "    <EnableDefaultItems>true</EnableDefaultItems>\n";
-            // Generated reflected-type bindings read properties through raw pointers.
-            Xml += "    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>\n";
-            Xml += "    <AssemblyName>" + std::string(Unit.Name.c_str()) + "</AssemblyName>\n";
-            // An IDE build produces the same artifact and nothing lands in the engine library's output.
-            if (!Unit.BinaryDir.empty())
-            {
-                Xml += "    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>\n";
-                Xml += "    <OutputPath>" + std::string(Unit.BinaryDir.c_str()) + "/</OutputPath>\n";
-            }
-            if (!Unit.IntermediateDir.empty())
-            {
-                Xml += "    <IntermediateOutputPath>" + std::string(Unit.IntermediateDir.c_str()) + "/</IntermediateOutputPath>\n";
-            }
-            Xml += "  </PropertyGroup>\n";
-            Xml += "  <ItemGroup>\n";
-            Xml += "    <Reference Include=\"LuminaSharp\">\n";
-            Xml += "      <HintPath>" + std::string(LuminaSharpDll.c_str()) + "</HintPath>\n";
-            Xml += "    </Reference>\n";
-            // The generator the runtime compile loads; without it partial NativeCall bodies are missing.
-            Xml += "    <Analyzer Include=\""
-                + std::string(NativePath(Join(ParentOf(LuminaSharpDll), "LuminaSharp.Generators.dll")).c_str())
-                + "\" />\n";
-            // Matches the import ScriptCompiler adds to every runtime compile, so LoadObject<T> resolves the same in the IDE.
-            Xml += "    <Using Include=\"LuminaSharp.ObjectCore\" Static=\"true\" />\n";
-            Xml += "  </ItemGroup>\n";
-
-            // Named as packages rather than as their restored DLLs, so the IDE restores them the usual way.
-            if (!Unit.Declared.Packages.empty() || !Unit.Declared.Assemblies.empty())
-            {
-                Xml += "  <ItemGroup>\n";
-                for (const FScriptPackageRef& Package : Unit.Declared.Packages)
-                {
-                    Xml += "    <PackageReference Include=\"" + std::string(Package.Name.c_str())
-                        + "\" Version=\"" + std::string(Package.Version.c_str()) + "\" />\n";
-                }
-                for (const FString& Assembly : Unit.Declared.Assemblies)
-                {
-                    const FString Stem = StemOf(Assembly);
-                    Xml += "    <Reference Include=\"" + std::string(Stem.c_str()) + "\">\n";
-                    Xml += "      <HintPath>" + std::string(NativePath(Assembly).c_str()) + "</HintPath>\n";
-                    Xml += "    </Reference>\n";
-                }
-                Xml += "  </ItemGroup>\n";
-            }
-
-            std::string Refs;
-            for (const FString& DepName : Unit.Deps)
-            {
-                const FScriptUnit* Dep = nullptr;
-                for (const FScriptUnit& Candidate : AllUnits)
-                {
-                    if (Candidate.Name == DepName)
-                    {
-                        Dep = &Candidate;
-                        break;
-                    }
-                }
-                if (Dep == nullptr || Dep->DiskDir.empty() || !Filesystem::Exists(Dep->DiskDir))
-                {
-                    continue; // the dependency ships no scripts on disk; nothing to reference
-                }
-                Refs += "    <ProjectReference Include=\"" + std::string(UnitProjectPath(*Dep).c_str()) + "\" />\n";
-            }
-            if (!Refs.empty())
-            {
-                Xml += "  <ItemGroup>\n" + Refs + "  </ItemGroup>\n";
-            }
-
-            Xml += "</Project>\n";
-            return Xml;
-        }
-
-        // Placed at the project root, and skipped when no project is loaded.
-        void WriteScriptSolution(const TVector<FScriptUnit>& Units)
-        {
-            if (GEngine == nullptr || GEngine->GetProjectPath().empty())
-            {
-                return;
-            }
-
-            struct FSlnEntry { std::string Name; std::string Path; std::string Guid; };
-            TVector<FSlnEntry> Entries;
-            for (const FScriptUnit& Unit : Units)
-            {
-                if (Unit.DiskDir.empty())
-                {
-                    continue;
-                }
-                if (!Filesystem::Exists(Unit.DiskDir))
-                {
-                    continue;
-                }
-                Entries.push_back({ std::string(Unit.Name.c_str()) + ".Scripts", std::string(UnitProjectPath(Unit).c_str()), MakeStableGuid(Unit.Name) });
-            }
-            if (Entries.empty())
-            {
-                return;
-            }
-
-            const char* CsProjTypeGuid = "{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}";
-            std::string Sln;
-            Sln += "\xEF\xBB\xBF";
-            Sln += "Microsoft Visual Studio Solution File, Format Version 12.00\n";
-            Sln += "# Visual Studio Version 17\n";
-            for (const FSlnEntry& Entry : Entries)
-            {
-                Sln += "Project(\"" + std::string(CsProjTypeGuid) + "\") = \"" + Entry.Name + "\", \"" + Entry.Path + "\", \"" + Entry.Guid + "\"\n";
-                Sln += "EndProject\n";
-            }
-            Sln += "Global\n";
-            Sln += "\tGlobalSection(SolutionConfigurationPlatforms) = preSolution\n";
-            Sln += "\t\tDebug|Any CPU = Debug|Any CPU\n";
-            Sln += "\t\tRelease|Any CPU = Release|Any CPU\n";
-            Sln += "\tEndGlobalSection\n";
-            Sln += "\tGlobalSection(ProjectConfigurationPlatforms) = postSolution\n";
-            for (const FSlnEntry& Entry : Entries)
-            {
-                Sln += "\t\t" + Entry.Guid + ".Debug|Any CPU.ActiveCfg = Debug|Any CPU\n";
-                Sln += "\t\t" + Entry.Guid + ".Release|Any CPU.ActiveCfg = Release|Any CPU\n";
-            }
-            Sln += "\tEndGlobalSection\n";
-            Sln += "EndGlobal\n";
-
-            FString ProjectName(GEngine->GetProjectName().data(), GEngine->GetProjectName().size());
-            if (ProjectName.empty())
-            {
-                ProjectName = "Game";
-            }
-            const FString SlnPath = NativePath(Join(GEngine->GetProjectPath(), ProjectName + ".GameScripts.sln"));
-            WriteTextIfChanged(SlnPath, Sln);
-        }
-
         // Native function the managed side calls to write into the engine log.
         void CORECLR_DELEGATE_CALLTYPE Export_Log(int32 Level, const char* Utf8, int32 Len)
         {
@@ -816,15 +209,6 @@ namespace Lumina::DotNet
             case 3:  LOG_ERROR("[C#] {}", Msg.c_str()); break;
             default: LOG_INFO ("[C#] {}", Msg.c_str()); break;
             }
-        }
-        
-        FString NativePath(FStringView P)
-        {
-            FString Result(P.data(), P.size());
-        #if defined(_WIN32)
-            Algo::Replace(Result, '/', '\\');
-        #endif
-            return Result;
         }
 
         const char* RuntimeRid()
@@ -1067,27 +451,19 @@ namespace Lumina::DotNet
 
         #define LM_RESOLVE(Field, Type) GManaged.Field = (Type)GResolveManagedExport(#Field, (int32)std::strlen(#Field))
         LM_RESOLVE(CreateScriptable,       CreateScriptableFn);      // optional, only when scripts ship Scriptables
-        LM_RESOLVE(EnumerateScriptables,   EnumerateScriptablesFn);
-        LM_RESOLVE(EnumerateScriptableAliases, EnumerateScriptableAliasesFn);   // optional, only with an alias
         LM_RESOLVE(ApplyScriptableDefaults, ApplyScriptableDefaultsFn);   // optional, initializers only
-        LM_RESOLVE(EnumerateScriptStructs, EnumerateScriptStructsFn);   // optional, only when scripts ship data types
-        LM_RESOLVE(GetScriptStructSchema,  GetScriptStructSchemaFn);
+        LM_RESOLVE(GetTypeManifest,        GetTypeManifestFn);
         LM_RESOLVE(FreeHandle,             ManagedFreeHandleFn);
         LM_RESOLVE(IsHandleAlive,          ManagedIsHandleAliveFn);
-        LM_RESOLVE(InvokeScriptButton,     InvokeScriptButtonFn);   // optional, for editor button support
         LM_RESOLVE(GetGeneration,          GetGenerationFn);
         LM_RESOLVE(OnWorldTeardown,        OnWorldTeardownFn);
         LM_RESOLVE(GetRuntimeDiagnostics,  GetRuntimeDiagnosticsFn);
-        LM_RESOLVE(GetScriptSchema,        GetScriptSchemaFn);
-        LM_RESOLVE(GetScriptButtons,       GetScriptButtonsFn);
-        LM_RESOLVE(InvokeAssetCallback,    InvokeAssetCallbackFn);
         LM_RESOLVE(LoadScripts,            LoadScriptsFn);
         LM_RESOLVE(SetScriptCompileOptimization, SetScriptCompileOptimizationFn);   // optional, packaging only
         LM_RESOLVE(Shutdown,               ShutdownFn);
         LM_RESOLVE(Tick,                   TickFn);
         #undef LM_RESOLVE
 
-        // Scripts are CObjects driven by the native system, so managed no longer owns their lifecycle.
         if (GManaged.LoadScripts == nullptr || GManaged.Tick == nullptr || GManaged.Shutdown == nullptr ||
             GManaged.GetGeneration == nullptr)
         {
@@ -1098,10 +474,8 @@ namespace Lumina::DotNet
         bInitialized = true;
 
         // Core must not know about GC handles, so hand it the free function once managed can service one.
-        // A managed delegate binding hands its handle to the delegate, which frees it through the same call.
         Lumina::ManagedInstances::SetFreeHandleFn(&FreeManagedGCHandle);
         Lumina::ManagedInstances::SetIsHandleAliveFn(&IsManagedGCHandleAlive);
-        GFreeManagedDelegateContext = &FreeManagedGCHandle;
 
         LOG_DISPLAY(".NET host initialized (bundled runtime: {}).", Bundled);
     }
@@ -1129,7 +503,6 @@ namespace Lumina::DotNet
         Lumina::ManagedInstances::SetIsHandleAliveFn(nullptr);
 
         bInitialized = false;
-        GFreeManagedDelegateContext = nullptr;
         GExports = FExporterTable{};
         GCachedGeneration = 0;
         GManaged = FManagedExports{};   // clears the whole native->managed table in one go
@@ -1296,8 +669,7 @@ namespace Lumina::DotNet
         Scripting::RegisterBuiltInManagedTypeStages();
         Scripting::FManagedTypeRegistry::Get().PreUnloadAll();
 
-        // A managed handler lives in the load context about to be dropped, so no binding can outlive this.
-        // Releasing them here is what frees the GCHandles holding that context alive.
+        // A managed handler lives in the context about to be dropped, and releasing the bindings frees the handles pinning it.
         ClearAllManagedDelegateBindings();
 
         // Zero until the first load completes, which is what tells a fresh start from a replacement.
@@ -1350,12 +722,12 @@ namespace Lumina::DotNet
 
         // Every stage reads this one gather rather than crossing the boundary for its own copy.
         TVector<Scripting::FManagedTypeDefinition> Definitions;
-        GatherManagedTypeDefinitions(Definitions);
+        TVector<Scripting::FManagedTypeAlias> Aliases;
+        GatherManagedTypeDefinitions(Definitions, Aliases);
 
-        Scripting::FManagedTypeRegistry::Get().CompileAll(Definitions);
+        Scripting::FManagedTypeRegistry::Get().CompileAll(Definitions, Aliases);
 
-        // Last, so a handler runs against the generation that is now live. On a first load no world holds
-        // a script yet, so this reaches nobody rather than needing a guard.
+        // Last, so a handler runs against the generation now live. On a first load no world holds a script yet.
         EntityScripts::NotifyScriptsReloaded(
             PreviousGeneration == 0 ? EScriptReloadReason::InitialLoad : EScriptReloadReason::Requested,
             GCachedGeneration);
@@ -1523,8 +895,7 @@ namespace Lumina::DotNet
             return;
         }
 
-        // Destroying each listener runs its delegate's destructor, which is what tells managed to release
-        // the binding. The registry is still alive here, so the disconnect is valid too.
+        // Destroying a listener releases its managed binding, and the registry is still alive for the disconnect.
         auto It = GSignalListeners.find(World);
         if (It != GSignalListeners.end())
         {
@@ -1547,121 +918,6 @@ namespace Lumina::DotNet
         GManaged.OnWorldTeardown(reinterpret_cast<uint64>(World));
     }
 
-    FString FindScriptSourceFile(FStringView TypeName)
-    {
-        if (TypeName.empty())
-        {
-            return FString();
-        }
-
-        // The stem, since a script is declared in a file named after it by every convention the templates set.
-        const size_t Dot = TypeName.find_last_of('.');
-        const FStringView Short = Dot == FStringView::npos ? TypeName : TypeName.substr(Dot + 1);
-
-        FString Wanted(Short.data(), Short.size());
-        Wanted += ".cs";
-
-        FString Found;
-        for (const FScriptUnit& Unit : BuildScriptUnits())
-        {
-            if (Unit.DiskDir.empty() || !Filesystem::Exists(Unit.DiskDir))
-            {
-                continue;
-            }
-
-            Filesystem::IterateDirectoryRecursive(Unit.DiskDir, [&](const Filesystem::FDirectoryEntry& Entry)
-            {
-                if (Entry.IsDirectory() || !Found.empty())
-                {
-                    return true;
-                }
-                if (Entry.Name.size() == Wanted.size()
-                    && EqualsIgnoreCase(Entry.Name, FStringView(Wanted)))
-                {
-                    Found.assign(Entry.FullPath.data(), Entry.FullPath.size());
-                    return false;
-                }
-                return true;
-            });
-
-            if (!Found.empty())
-            {
-                break;
-            }
-        }
-
-        return Found;
-    }
-
-    void GatherScriptSourceFolders(TVector<FScriptSourceFolder>& Out)
-    {
-        Out.clear();
-
-        TVector<FScriptUnit> Units;
-        for (FScriptUnit& Unit : BuildScriptUnits())
-        {
-            if (!Unit.DiskDir.empty() && Filesystem::Exists(Unit.DiskDir))
-            {
-                Units.push_back(Move(Unit));
-            }
-        }
-
-        auto ToForwardSlashes = [](FString Path)
-        {
-            for (char& Character : Path)
-            {
-                Character = Character == '\\' ? '/' : Character;
-            }
-            return Path;
-        };
-
-        // Collected per unit first, since the unit name only earns a folder level when more than one unit has scripts.
-        TVector<TVector<FScriptSourceFolder>> PerUnit(Units.size());
-        uint32 UnitsWithScripts = 0;
-        for (size_t UnitIndex = 0; UnitIndex < Units.size(); ++UnitIndex)
-        {
-            const FString Root = ToForwardSlashes(Units[UnitIndex].DiskDir);
-            Filesystem::IterateDirectoryRecursive(Units[UnitIndex].DiskDir, [&](const Filesystem::FDirectoryEntry& Entry)
-            {
-                const FStringView Name(Entry.Name);
-                if (Entry.IsDirectory() || Name.size() <= 3 || !EqualsIgnoreCase(Name.substr(Name.size() - 3), FStringView(".cs")))
-                {
-                    return true;
-                }
-
-                FString Relative = ToForwardSlashes(FString(Entry.FullPath.data(), Entry.FullPath.size()));
-                if (Relative.size() > Root.size() && Relative.compare(0, Root.size(), Root) == 0)
-                {
-                    Relative.erase(0, Root.size());
-                }
-                while (!Relative.empty() && Relative.front() == '/')
-                {
-                    Relative.erase(0, 1);
-                }
-
-                const size_t LastSlash = Relative.find_last_of('/');
-                FScriptSourceFolder& Found = PerUnit[UnitIndex].emplace_back();
-                Found.Stem   = FString(Name.substr(0, Name.size() - 3));
-                Found.Folder = LastSlash == FString::npos ? FString() : Relative.substr(0, LastSlash);
-                Found.Path   = FString(Entry.FullPath.data(), Entry.FullPath.size());
-                return true;
-            });
-            UnitsWithScripts += PerUnit[UnitIndex].empty() ? 0u : 1u;
-        }
-
-        for (size_t UnitIndex = 0; UnitIndex < Units.size(); ++UnitIndex)
-        {
-            for (FScriptSourceFolder& Found : PerUnit[UnitIndex])
-            {
-                if (UnitsWithScripts > 1)
-                {
-                    Found.Folder = Found.Folder.empty() ? Units[UnitIndex].Name : Units[UnitIndex].Name + "/" + Found.Folder;
-                }
-                Out.push_back(Move(Found));
-            }
-        }
-    }
-
     void RequestScriptReload()
     {
         GScriptReloadRequested.store(true, Atomic::MemoryOrderRelease);
@@ -1675,8 +931,7 @@ namespace Lumina::DotNet
             return;
         }
 
-        // Pushed forward by each event rather than set once, so the reload lands after the burst settles
-        // instead of once per file and again for everything that arrives during the compile.
+        // Pushed forward by each event, so the reload lands once after a burst settles.
         GScriptReloadEarliest.store(PlatformTime::Seconds() + kScriptReloadQuietSeconds, Atomic::MemoryOrderRelease);
         GScriptReloadRequested.store(true, Atomic::MemoryOrderRelease);
     }
@@ -1725,32 +980,6 @@ namespace Lumina::DotNet
         LoadScriptUnitsCore(Units, /*bEditorFollowups*/false);
     }
 
-    void GatherScriptSourceFiles(TVector<FString>& OutPaths)
-    {
-        OutPaths.clear();
-
-        // The same roots BuildScriptUnits compiles, minus the reference resolution that can restore packages.
-        TVector<FString> Roots;
-        for (const FPlugin* Plugin : FPluginManager::Get().GetAllPlugins())
-        {
-            if (Plugin != nullptr && Plugin->IsEnabled())
-            {
-                Roots.push_back(FString(Plugin->GetDirectory().data(), Plugin->GetDirectory().size()) + "/Scripts");
-            }
-        }
-        if (GEngine != nullptr)
-        {
-            const FFixedString ScriptsDir = GEngine->GetProjectScriptsDirectory();
-            Roots.emplace_back(ScriptsDir.data(), ScriptsDir.size());
-        }
-        Roots.push_back(Paths::GetEngineResourceDirectory() + "/Scripts");
-
-        for (const FString& Root : Roots)
-        {
-            ForEachScriptSource(Root, [&OutPaths](FStringView P) { OutPaths.emplace_back(P.data(), P.size()); });
-        }
-    }
-
     void GatherScriptUnitsForPackaging(TVector<FPackagedScriptUnit>& Out)
     {
         Out.clear();
@@ -1788,35 +1017,6 @@ namespace Lumina::DotNet
         }
     }
 
-    void GenerateScriptProjects()
-    {
-        if (!bInitialized)
-        {
-            return;
-        }
-
-        const FString ExePath = NativePath(Platform::GetCurrentProcessPath());
-        const FString Dll = NativePath(Join(ParentOf(ExePath), "DotNet/Managed/LuminaSharp.dll"));
-
-        // The same unit graph the runtime compiles, so the IDE view matches what actually builds.
-        const TVector<FScriptUnit> Units = BuildScriptUnits();
-        for (const FScriptUnit& Unit : Units)
-        {
-            if (Unit.DiskDir.empty())
-            {
-                continue;
-            }
-            std::error_code Ec;
-            if (!Filesystem::Exists(Unit.DiskDir))
-            {
-                continue;
-            }
-            WriteTextIfChanged(UnitProjectPath(Unit), BuildCsprojXml(Unit, Units, Dll));
-        }
-
-        WriteScriptSolution(Units);
-    }
-
     int32 GetScriptGeneration()
     {
         return GCachedGeneration; // native mirror; refreshed on (re)load, see ReloadScripts
@@ -1839,24 +1039,6 @@ namespace Lumina::DotNet
             return false;
         }
         return GManaged.GetRuntimeDiagnostics(&OutDiagnostics, bForceCollect ? 1 : 0) != 0;
-    }
-
-    void GatherScriptableTypes(TVector<FScriptableTypeDesc>& Out)
-    {
-        Out.clear();
-        if (bInitialized && GManaged.EnumerateScriptables)
-        {
-            GManaged.EnumerateScriptables(reinterpret_cast<void*>(&LmScriptableSink), &Out);
-        }
-    }
-
-    void GatherScriptableAliases(TVector<FScriptableAlias>& Out)
-    {
-        Out.clear();
-        if (bInitialized && GManaged.EnumerateScriptableAliases)
-        {
-            GManaged.EnumerateScriptableAliases(reinterpret_cast<void*>(&LmScriptableAliasSink), &Out);
-        }
     }
 
     void* CreateScriptable(FStringView TypeName, uint64 NativePtr)
@@ -1890,120 +1072,26 @@ namespace Lumina::DotNet
         }
     }
 
-    void GatherManagedTypeDefinitions(TVector<Scripting::FManagedTypeDefinition>& Out)
+    void GatherManagedTypeDefinitions(TVector<Scripting::FManagedTypeDefinition>& OutTypes, TVector<Scripting::FManagedTypeAlias>& OutAliases)
     {
-        Out.clear();
-        if (!bInitialized)
+        OutTypes.clear();
+        OutAliases.clear();
+        if (!bInitialized || GManaged.GetTypeManifest == nullptr)
         {
             return;
         }
 
-        TVector<FScriptableTypeDesc> Descs;
-        GatherScriptableTypes(Descs);
-        Out.reserve(Descs.size());
-
-        for (const FScriptableTypeDesc& Desc : Descs)
-        {
-            Scripting::FManagedTypeDefinition Definition;
-            Definition.Kind           = Scripting::EManagedTypeKind::ScriptableClass;
-            Definition.TypeName       = FName(Desc.TypeName.c_str());
-            Definition.NativeBaseName = Desc.NativeBaseName;
-            Definition.OverriddenEvents = Desc.OverriddenEvents;
-            Definition.bAbstract       = Desc.bAbstract;
-            Definition.ClassMeta       = Desc.ClassMeta;
-
-            // The one crossing for this type's schema. Consumers read it from here.
-            TVector<Scripting::FScriptPropertyEntry> UnusedDefaults;
-            Definition.bHasSchema = GatherScriptSchema(Desc.TypeName, Definition.Schema, UnusedDefaults);
-
-            Out.push_back(std::move(Definition));
-        }
-    }
-
-    void GatherScriptStructTypes(TVector<FScriptStructTypeDesc>& Out)
-    {
-        Out.clear();
-        if (bInitialized && GManaged.EnumerateScriptStructs)
-        {
-            GManaged.EnumerateScriptStructs(reinterpret_cast<void*>(&LmScriptStructSink), &Out);
-        }
-    }
-
-    bool GatherScriptStructSchema(FStringView ScriptTypeName, Scripting::FScriptExportSchema& OutSchema,
-        TVector<Scripting::FScriptPropertyEntry>& OutDefaults)
-    {
-        OutSchema.Fields.clear();
-        OutDefaults.clear();
-        if (!bInitialized || GManaged.GetScriptStructSchema == nullptr || ScriptTypeName.empty())
-        {
-            return false;
-        }
-
-        const FString Name(ScriptTypeName.data(), ScriptTypeName.size());
         TVector<uint8> Blob;
-        GManaged.GetScriptStructSchema(Name.c_str(), (int32)Name.size(), reinterpret_cast<void*>(&LmSchemaBlobSink), &Blob);
-
-        if (!Scripting::ParseSchemaBlob(Blob, OutSchema, OutDefaults))
+        GManaged.GetTypeManifest(reinterpret_cast<void*>(&LmSchemaBlobSink), &Blob);
+        if (!Blob.empty())
         {
-            return false;
+            Scripting::ParseTypeManifest(Blob, OutTypes, OutAliases);
         }
-
-        OutSchema.ScriptTypeName = FName(Name.c_str());
-        return true;
-    }
-
-    bool GatherScriptSchema(FStringView ScriptClass, Scripting::FScriptExportSchema& OutSchema, TVector<Scripting::FScriptPropertyEntry>& OutDefaults)
-    {
-        OutSchema.Fields.clear();
-        OutDefaults.clear();
-        if (!bInitialized || GManaged.GetScriptSchema == nullptr || ScriptClass.empty())
-        {
-            return false;
-        }
-
-        const FString Name(ScriptClass.data(), ScriptClass.size());
-        TVector<uint8> Blob;
-        GManaged.GetScriptSchema(Name.c_str(), (int32)Name.size(), reinterpret_cast<void*>(&LmSchemaBlobSink), &Blob);
-
-        return Scripting::ParseSchemaBlob(Blob, OutSchema, OutDefaults);
-    }
-
-    void GatherScriptButtons(FStringView ScriptClass, TVector<Scripting::FScriptButton>& OutButtons)
-    {
-        OutButtons.clear();
-        if (!bInitialized || GManaged.GetScriptButtons == nullptr || ScriptClass.empty())
-        {
-            return;
-        }
-
-        const FString Name(ScriptClass.data(), ScriptClass.size());
-        TVector<uint8> Blob;
-        GManaged.GetScriptButtons(Name.c_str(), (int32)Name.size(), reinterpret_cast<void*>(&LmSchemaBlobSink), &Blob);
-        Scripting::ParseButtonsBlob(Blob, OutButtons);
-    }
-
-    bool InvokeScriptButton(void* Instance, FStringView Method)
-    {
-        if (!bInitialized || Instance == nullptr || Method.empty() || GManaged.InvokeScriptButton == nullptr)
-        {
-            return false;
-        }
-        return GManaged.InvokeScriptButton(Instance, Method.data(), (int32)Method.size()) == 0;
     }
 
     bool IsInitialized()
     {
         return bInitialized;
-    }
-
-    // Reachable from the global load export, which cannot see the anonymous-namespace delegate.
-    void DispatchAssetCallback(void* Callback, void* Object)
-    {
-        LUMINA_PROFILE_SCOPE();
-        if (bInitialized && GManaged.InvokeAssetCallback != nullptr)
-        {
-            GManaged.InvokeAssetCallback(Callback, Object);
-        }
     }
 
     namespace
@@ -2025,455 +1113,6 @@ namespace Lumina::DotNet
 LUMINA_DOTNET_EXPORT(int, NativeSelfTest)(int A, int B)
 {
     return A + B;
-}
-
-namespace
-{
-    Lumina::ECS::FRegistry* LmRegistryFromWorld(uint64 World)
-    {
-        Lumina::CWorld* W = reinterpret_cast<Lumina::CWorld*>(World);
-        return W ? &Lumina::ECS::GetWorldRegistry(*W) : nullptr;
-    }
-}
-
-// Resolves a reflected component type name to its op-table token (the C# side caches it per type).
-LUMINA_DOTNET_EXPORT(const void*, FindComponentOps)(const char* Name, int Len)
-{
-    if (Name == nullptr || Len <= 0)
-    {
-        return nullptr;
-    }
-    return Lumina::FindComponentOps(Lumina::FStringView(Name, static_cast<size_t>(Len)));
-}
-
-LUMINA_DOTNET_EXPORT(void*, GetComponent)(uint64 World, uint32 Entity, const void* Ops)
-{
-    Lumina::ECS::FRegistry* R = LmRegistryFromWorld(World);
-    const auto* O = static_cast<const Lumina::FComponentOps*>(Ops);
-    return (R && O) ? O->Get(*R, static_cast<Lumina::ECS::FEntity>(Entity)) : nullptr;
-}
-
-// Also hands back the pool's layout epoch, so the view can revalidate itself without crossing again.
-LUMINA_DOTNET_EXPORT(void*, GetComponentTracked)(uint64 World, uint32 Entity, const void* Ops, const uint32** OutEpoch)
-{
-    *OutEpoch = nullptr;
-    Lumina::ECS::FRegistry* R = LmRegistryFromWorld(World);
-    const auto* O = static_cast<const Lumina::FComponentOps*>(Ops);
-    if (R == nullptr || O == nullptr)
-    {
-        return nullptr;
-    }
-
-    void* Component = O->Get(*R, static_cast<Lumina::ECS::FEntity>(Entity));
-    if (Component != nullptr)
-    {
-        if (const Lumina::ECS::FSparseSet* Pool = R->FindStorage(static_cast<uint32>(O->TypeId)))
-        {
-            *OutEpoch = Pool->GetLayoutEpoch();
-        }
-    }
-
-    return Component;
-}
-
-// A reflected function hands back a bare component pointer, so this finds its owner for the view to track.
-LUMINA_DOTNET_EXPORT(int, TrackComponentPointer)(const void* Payload, const void* Ops, uint64* OutWorld, uint32* OutEntity, const uint32** OutEpoch)
-{
-    *OutWorld = 0;
-    *OutEntity = 0;
-    *OutEpoch = nullptr;
-    const auto* O = static_cast<const Lumina::FComponentOps*>(Ops);
-    if (Payload == nullptr || O == nullptr || Lumina::GWorldManager == nullptr)
-    {
-        return 0;
-    }
-
-    int Found = 0;
-    Lumina::GWorldManager->ForEachWorld([&](Lumina::CWorld& World)
-    {
-        if (Found != 0)
-        {
-            return;
-        }
-
-        const Lumina::ECS::FSparseSet* Pool = Lumina::ECS::GetWorldRegistry(World).FindStorage(static_cast<uint32>(O->TypeId));
-        const Lumina::ECS::FEntity Owner = Pool != nullptr ? Pool->FindPayloadOwner(Payload) : Lumina::ECS::NullEntity;
-        if (!Owner.IsNull())
-        {
-            *OutWorld = reinterpret_cast<uint64>(&World);
-            *OutEntity = Owner.GetPacked();
-            *OutEpoch = Pool->GetLayoutEpoch();
-            Found = 1;
-        }
-    });
-    return Found;
-}
-
-LUMINA_DOTNET_EXPORT(int, HasComponent)(uint64 World, uint32 Entity, const void* Ops)
-{
-    Lumina::ECS::FRegistry* R = LmRegistryFromWorld(World);
-    const auto* O = static_cast<const Lumina::FComponentOps*>(Ops);
-    return (R && O) ? O->Has(*R, static_cast<Lumina::ECS::FEntity>(Entity)) : 0;
-}
-
-// Get-or-emplace a default component, returning the live pointer to configure in place.
-LUMINA_DOTNET_EXPORT(void*, EmplaceComponent)(uint64 World, uint32 Entity, const void* Ops)
-{
-    Lumina::ECS::FRegistry* R = LmRegistryFromWorld(World);
-    const auto* O = static_cast<const Lumina::FComponentOps*>(Ops);
-    return (R && O) ? O->Emplace(*R, static_cast<Lumina::ECS::FEntity>(Entity)) : nullptr;
-}
-
-LUMINA_DOTNET_EXPORT(int, RemoveComponent)(uint64 World, uint32 Entity, const void* Ops)
-{
-    Lumina::ECS::FRegistry* R = LmRegistryFromWorld(World);
-    const auto* O = static_cast<const Lumina::FComponentOps*>(Ops);
-    if (R == nullptr || O == nullptr)
-    {
-        return 0;
-    }
-
-    // A parallel script removes at the sync point, and reports success since the removal is now owed.
-    if (Lumina::ECS::FCommandBus::ShouldDefer())
-    {
-        reinterpret_cast<Lumina::CWorld*>(World)->GetCommandBus().Enqueue([O, Target = static_cast<Lumina::ECS::FEntity>(Entity)](Lumina::ECS::FRegistry& Registry)
-        {
-            O->Remove(Registry, Target);
-        });
-        return 1;
-    }
-    return O->Remove(*R, static_cast<Lumina::ECS::FEntity>(Entity));
-}
-
-// Allocates the listener, whose address is the disconnect key, and returns it as an opaque handle.
-LUMINA_DOTNET_EXPORT(void*, RegistryConnect)(uint64 World, const void* Ops, int32 Kind)
-{
-    Lumina::ECS::FRegistry* R = LmRegistryFromWorld(World);
-    const auto* O = static_cast<const Lumina::FComponentOps*>(Ops);
-    if (R == nullptr || O == nullptr || O->ConnectSignal == nullptr)
-    {
-        return nullptr;
-    }
-
-    auto* Listener = new Lumina::FManagedSignalListener();
-    O->ConnectSignal(*R, static_cast<Lumina::EComponentSignal>(Kind), Listener);
-
-    // Tracked per world, because a torn down world takes its registry with it and nothing else would
-    // ever destroy the listener, which is what releases the script binding on it.
-    Lumina::DotNet::TrackSignalListener(reinterpret_cast<Lumina::CWorld*>(World), Listener);
-    return Listener;
-}
-
-LUMINA_DOTNET_EXPORT(void*, RegistryGetSignalDelegate)(void* Handle)
-{
-    auto* Listener = static_cast<Lumina::FManagedSignalListener*>(Handle);
-    return Listener != nullptr ? static_cast<Lumina::FScriptDelegateBase*>(&Listener->Signal) : nullptr;
-}
-
-// Disconnect a listener returned by Connect and free it. Safe with a null handle / torn-down world.
-LUMINA_DOTNET_EXPORT(void, RegistryDisconnect)(uint64 World, const void* Ops, int32 Kind, void* Handle)
-{
-    if (Handle == nullptr)
-    {
-        return;
-    }
-    Lumina::ECS::FRegistry* R = LmRegistryFromWorld(World);
-    const auto* O = static_cast<const Lumina::FComponentOps*>(Ops);
-    if (R != nullptr && O != nullptr && O->DisconnectSignal != nullptr)
-    {
-        O->DisconnectSignal(*R, static_cast<Lumina::EComponentSignal>(Kind), static_cast<Lumina::FManagedSignalListener*>(Handle));
-    }
-
-    Lumina::DotNet::ForgetSignalListener(reinterpret_cast<Lumina::CWorld*>(World), Handle);
-    delete static_cast<Lumina::FManagedSignalListener*>(Handle);
-}
-
-// Fire on_update<T> for an entity's component (the manual "signal" pulse). No-op for tags or if absent.
-LUMINA_DOTNET_EXPORT(void, RegistryPatch)(uint64 World, uint32 Entity, const void* Ops)
-{
-    Lumina::ECS::FRegistry* R = LmRegistryFromWorld(World);
-    const auto* O = static_cast<const Lumina::FComponentOps*>(Ops);
-    if (R != nullptr && O != nullptr && O->Patch != nullptr)
-    {
-        O->Patch(*R, static_cast<Lumina::ECS::FEntity>(Entity));
-    }
-}
-
-LUMINA_DOTNET_EXPORT(void, SetObjectPtr)(void* Member, void* Value)
-{
-    if (Member != nullptr)
-    {
-        *reinterpret_cast<Lumina::TStrongObjectPtr<Lumina::CObject>*>(Member) = static_cast<Lumina::CObject*>(Value);
-    }
-}
-
-// Through TStrongObjectPtr::Get, so a slot that has moved on reads as null rather than as reclaimed memory.
-LUMINA_DOTNET_EXPORT(void*, GetObjectPtr)(const void* Member)
-{
-    return Member != nullptr
-        ? static_cast<void*>(reinterpret_cast<const Lumina::TStrongObjectPtr<Lumina::CObject>*>(Member)->Get())
-        : nullptr;
-}
-
-// A wrapper to a since-freed object throws on access rather than reading reclaimed memory.
-LUMINA_DOTNET_EXPORT(int64, ObjectGetHandle)(void* Object)
-{
-    const Lumina::FObjectHandle Handle(static_cast<Lumina::CObjectBase*>(static_cast<Lumina::CObject*>(Object)));
-    return (static_cast<int64>(static_cast<uint32>(Handle.Generation)) << 32)
-         | static_cast<int64>(static_cast<uint32>(Handle.Index));
-}
-
-LUMINA_DOTNET_EXPORT(void*, ObjectResolve)(int32 Index, int32 Generation)
-{
-    return Lumina::FObjectHandle(Index, Generation).Resolve();
-}
-
-// The object's array entry, which outlives the object, so managed can revalidate without crossing back.
-LUMINA_DOTNET_EXPORT(void*, ObjectGetEntry)(void* Object)
-{
-    return Lumina::GObjectArray.GetEntry(static_cast<Lumina::CObjectBase*>(static_cast<Lumina::CObject*>(Object)));
-}
-
-// Field offsets for that revalidation, exported rather than hard-coded so a layout change cannot drift.
-LUMINA_DOTNET_EXPORT(int32, ObjectLayoutOffset)(int32 Which)
-{
-    switch (Which)
-    {
-        case 0:  return (int32)offsetof(Lumina::FCObjectEntry, Generation);
-        case 1:  return (int32)offsetof(Lumina::FCObjectEntry, Object);
-        case 2:  return (int32)Lumina::CObjectBase::GetFlagsOffsetForInterop();
-        case 3:  return (int32)Lumina::OF_MarkedDestroy;
-        default: return -1;
-    }
-}
-
-// Every C# wrap asks here first, so a C# class's own instance is made on demand at this one point.
-LUMINA_DOTNET_EXPORT(void*, ObjectGetManagedInstance)(void* Object)
-{
-    Lumina::CObject* Typed = static_cast<Lumina::CObject*>(Object);
-    if (Typed != nullptr && Lumina::ToScriptClass(Typed->GetClass()) != nullptr && !Typed->HasAnyFlag(Lumina::OF_DefaultObject))
-    {
-        return Lumina::Scriptable::GetOrCreateInstance(Typed);
-    }
-    return Lumina::ManagedInstances::Find(Typed);
-}
-
-LUMINA_DOTNET_EXPORT(void, ObjectSetManagedInstance)(void* Object, void* Handle)
-{
-    Lumina::ManagedInstances::Set(static_cast<Lumina::CObjectBase*>(static_cast<Lumina::CObject*>(Object)), Handle);
-}
-
-// Nonzero when C# took ownership, after which the table holds WeakHandle and C# keeps the object alive.
-LUMINA_DOTNET_EXPORT(int32, ObjectAdoptScriptTwin)(void* Object, void* WeakHandle)
-{
-    return Lumina::ManagedInstances::AdoptScriptTwin(static_cast<Lumina::CObjectBase*>(static_cast<Lumina::CObject*>(Object)), WeakHandle) ? 1 : 0;
-}
-
-// Called before the collectible load context unloads, since Scriptable instances are held strongly.
-LUMINA_DOTNET_EXPORT(void, ReleaseAllManagedInstances)()
-{
-    Lumina::ManagedInstances::ReleaseAll();
-}
-
-// Synchronous (blocking) load by virtual path; returns the CObject* or null. Backs Asset.Load<T>.
-LUMINA_DOTNET_EXPORT(void*, LoadObject)(const char* Path, int Len)
-{
-    if (Path == nullptr || Len <= 0)
-    {
-        return nullptr;
-    }
-    return Lumina::StaticLoadObject(Lumina::FStringView(Path, static_cast<size_t>(Len)));
-}
-
-namespace
-{
-    using FManagedPin = Lumina::TStrongObjectPtr<Lumina::CObject>;
-
-    // Without this a reinstance leaves the replacement unowned while C# keeps the original alive.
-    class FManagedPinProvider final : public Lumina::IObjectReferenceProvider
-    {
-    public:
-
-        static FManagedPinProvider& Get()
-        {
-            static FManagedPinProvider Instance;
-            return Instance;
-        }
-
-        const char* GetReferenceProviderName() const override { return "ManagedPins"; }
-
-        // Visited unlocked, since only the game thread removes a pin and a reinstance runs there too.
-        void VisitObjectReferences(Lumina::FObjectReferenceVisitor::FSlotFunc Func) override
-        {
-            Lumina::TVector<FManagedPin*> Snapshot;
-            {
-                Lumina::FScopeLock Lock(Mutex);
-                Snapshot.assign(Pins.begin(), Pins.end());
-            }
-            for (FManagedPin* Pin : Snapshot)
-            {
-                Lumina::CObject* const Current = Pin->Get();
-                if (Lumina::CObject* const Replacement = Func(Current); Replacement != Current)
-                {
-                    *Pin = Replacement;
-                }
-            }
-        }
-
-        FManagedPin* Pin(Lumina::CObject* Object)
-        {
-            FManagedPin* Pin = Lumina::Memory::New<FManagedPin>(Object);
-            Lumina::FScopeLock Lock(Mutex);
-            Pins.insert(Pin);
-            return Pin;
-        }
-
-        void Unpin(FManagedPin* Pin)
-        {
-            {
-                Lumina::FScopeLock Lock(Mutex);
-                Pins.erase(Pin);
-            }
-            Lumina::Memory::Delete(Pin);
-        }
-
-    private:
-
-        FManagedPinProvider()
-        {
-            Lumina::FObjectReferenceProviders::Register(this);
-        }
-
-        Lumina::FMutex                Mutex;
-        Lumina::THashSet<FManagedPin*> Pins;
-    };
-}
-
-// The strong reference a canonical C# wrapper owns, released once the wrapper is collected.
-LUMINA_DOTNET_EXPORT(void*, PinObject)(void* Object)
-{
-    if (Object == nullptr)
-    {
-        return nullptr;
-    }
-    return FManagedPinProvider::Get().Pin(static_cast<Lumina::CObject*>(Object));
-}
-
-LUMINA_DOTNET_EXPORT(void, UnpinObject)(void* Pin)
-{
-    if (Pin != nullptr)
-    {
-        FManagedPinProvider::Get().Unpin(static_cast<FManagedPin*>(Pin));
-    }
-}
-
-// Registry probe with no load, returning bool because the generated binding marshals a C# bool as one byte.
-LUMINA_DOTNET_EXPORT(bool, AssetExists)(const char* Path, int Len)
-{
-    if (Path == nullptr || Len <= 0)
-    {
-        return false;
-    }
-    return Lumina::FAssetRegistry::Get().GetAssetByPath(Lumina::FStringView(Path, static_cast<size_t>(Len))) != nullptr;
-}
-
-namespace
-{
-    struct FPendingScriptLoad
-    {
-        Lumina::FString Path;
-        void*           Callback = nullptr;
-    };
-
-    // A streaming script asks for hundreds of assets in one frame, so a request only queues its path and a worker resolves the batch.
-    Lumina::FMutex                       GScriptLoadMutex;
-    Lumina::TVector<FPendingScriptLoad>  GScriptLoads;
-    bool                                 bScriptLoadDrainScheduled = false;
-
-    void RequestScriptLoad(const Lumina::FString& Path, void* Callback)
-    {
-        Lumina::FSoftObjectPath Soft{ Lumina::FStringView(Path.c_str(), Path.size()) };
-        Soft.LoadAsync([Callback](Lumina::CObject* Object)
-        {
-            // The only owner may be a release already queued for the game thread, so the hop holds its own reference.
-            Lumina::MainThread::Enqueue([Callback, Held = Lumina::TStrongObjectPtr<Lumina::CObject>(Object)]()
-            {
-                Lumina::DotNet::DispatchAssetCallback(Callback, Held.Get());
-            });
-        });
-    }
-
-    void DrainScriptLoads()
-    {
-        LUMINA_PROFILE_SCOPE();
-        Lumina::TVector<FPendingScriptLoad> Batch;
-        for (;;)
-        {
-            {
-                Lumina::FScopeLock Lock(GScriptLoadMutex);
-                if (GScriptLoads.empty())
-                {
-                    bScriptLoadDrainScheduled = false;
-                    return;
-                }
-                Batch.swap(GScriptLoads);
-            }
-            for (const FPendingScriptLoad& Load : Batch)
-            {
-                RequestScriptLoad(Load.Path, Load.Callback);
-            }
-            Batch.clear();
-        }
-    }
-}
-
-// Resumes the managed continuation on the game thread with the loaded object, or null.
-LUMINA_DOTNET_EXPORT(void, LoadObjectAsync)(const char* Path, int Len, void* Callback)
-{
-    LUMINA_PROFILE_SCOPE();
-    if (Path == nullptr || Len <= 0)
-    {
-        Lumina::DotNet::DispatchAssetCallback(Callback, nullptr);
-        return;
-    }
-
-    bool bSchedule = false;
-    {
-        Lumina::FScopeLock Lock(GScriptLoadMutex);
-        GScriptLoads.push_back(FPendingScriptLoad{ Lumina::FString(Path, static_cast<size_t>(Len)), Callback });
-        bSchedule = !bScriptLoadDrainScheduled;
-        bScriptLoadDrainScheduled = true;
-    }
-    if (bSchedule)
-    {
-        Lumina::Task::Async([]() { DrainScriptLoads(); });
-    }
-}
-
-// Fills the buffer up to capacity and returns the full length, backing a path round-trip.
-LUMINA_DOTNET_EXPORT(int, GetObjectPath)(void* Object, char* Buffer, int Capacity)
-{
-    if (Object == nullptr)
-    {
-        return 0;
-    }
-    Lumina::CObject* O = static_cast<Lumina::CObject*>(Object);
-    Lumina::FAssetData* Data = Lumina::FAssetRegistry::Get().GetAssetByGUID(O->GetGUID());
-    if (Data == nullptr)
-    {
-        return 0;
-    }
-    const char* S = Data->Path.c_str();
-    const int L = static_cast<int>(Data->Path.size());
-    if (Buffer != nullptr && Capacity > 0)
-    {
-        const int N = L < Capacity ? L : Capacity;
-        for (int i = 0; i < N; ++i)
-        {
-            Buffer[i] = S[i];
-        }
-    }
-    return L;
 }
 
 // Matches up to the build-config suffix, so any module's reflected types can carry C# bindings.
@@ -2604,32 +1243,5 @@ LE_REGISTER_LAYOUT("FScriptDiagnostics", Lumina::DotNet::FScriptDiagnostics);
 
 LUMINA_DOTNET_SIGNATURES(
     LUMINA_DOTNET_SIG(NativeSelfTest),
-    LUMINA_DOTNET_SIG(FindComponentOps),
-    LUMINA_DOTNET_SIG(GetComponent),
-    LUMINA_DOTNET_SIG(GetComponentTracked),
-    LUMINA_DOTNET_SIG(TrackComponentPointer),
-    LUMINA_DOTNET_SIG(HasComponent),
-    LUMINA_DOTNET_SIG(EmplaceComponent),
-    LUMINA_DOTNET_SIG(RemoveComponent),
-    LUMINA_DOTNET_SIG(RegistryConnect),
-    LUMINA_DOTNET_SIG(RegistryGetSignalDelegate),
-    LUMINA_DOTNET_SIG(RegistryDisconnect),
-    LUMINA_DOTNET_SIG(RegistryPatch),
-    LUMINA_DOTNET_SIG(SetObjectPtr),
-    LUMINA_DOTNET_SIG(GetObjectPtr),
-    LUMINA_DOTNET_SIG(ObjectGetHandle),
-    LUMINA_DOTNET_SIG(ObjectResolve),
-    LUMINA_DOTNET_SIG(ObjectGetEntry),
-    LUMINA_DOTNET_SIG(ObjectLayoutOffset),
-    LUMINA_DOTNET_SIG(ObjectGetManagedInstance),
-    LUMINA_DOTNET_SIG(ObjectSetManagedInstance),
-    LUMINA_DOTNET_SIG(ReleaseAllManagedInstances),
-    LUMINA_DOTNET_SIG(LoadObject),
-    LUMINA_DOTNET_SIG(PinObject),
-    LUMINA_DOTNET_SIG(ObjectAdoptScriptTwin),
-    LUMINA_DOTNET_SIG(UnpinObject),
-    LUMINA_DOTNET_SIG(AssetExists),
-    LUMINA_DOTNET_SIG(LoadObjectAsync),
-    LUMINA_DOTNET_SIG(GetObjectPath),
     LUMINA_DOTNET_SIG(ResolveModuleHandle)
 );

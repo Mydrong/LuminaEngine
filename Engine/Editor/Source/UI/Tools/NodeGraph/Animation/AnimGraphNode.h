@@ -12,7 +12,7 @@ namespace Lumina
     // Persisted per-pin default. Pins are rebuilt by BuildNode() and not serialized, so a value pin's
     // editable inline default lives here, keyed by pin name.
     REFLECT()
-    struct FAnimGraphPinDefault
+    struct SAnimGraphPinDefault
     {
         GENERATED_BODY()
 
@@ -49,7 +49,7 @@ namespace Lumina
 
         /** Persisted inline defaults for value pins, keyed by pin name. */
         PROPERTY()
-        TVector<FAnimGraphPinDefault> PinDefaults;
+        TVector<SAnimGraphPinDefault> PinDefaults;
 
     protected:
 

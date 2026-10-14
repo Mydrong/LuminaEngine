@@ -348,7 +348,7 @@ namespace Lumina::NetPrediction
             return;
         }
 
-        const ECS::FEntity Entity = State->GuidTable.Find(FNetGUID{ Guid });
+        const ECS::FEntity Entity = State->GuidTable.Find(SNetGUID{ Guid });
         if (Entity == ECS::NullEntity || !Registry.IsValid(Entity))
         {
             return;
@@ -471,7 +471,7 @@ namespace Lumina::NetPrediction
             return;
         }
 
-        const ECS::FEntity Entity = State.GuidTable.Find(FNetGUID{ Guid });
+        const ECS::FEntity Entity = State.GuidTable.Find(SNetGUID{ Guid });
         FNetPredictionClient* Prediction = (Entity != ECS::NullEntity && Registry.IsValid(Entity))
             ? Registry.TryGet<FNetPredictionClient>(Entity) : nullptr;
         if (Prediction == nullptr || Seq <= Prediction->LastAcked)

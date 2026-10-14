@@ -71,7 +71,7 @@ namespace Lumina
 		PROPERTY(ReadOnly, NoSerialize, ScriptReadOnly, Category = "State")
 		bool bListenerInside = false;
 
-		FAudioHandle ActiveHandle;
+		SAudioHandle ActiveHandle;
 		float        InsideWeight = 0.0f;
 		float        AppliedVolume = -1.0f;
 		uint64       ResumeFrame = 0;

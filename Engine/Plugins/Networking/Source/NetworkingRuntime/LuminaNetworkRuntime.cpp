@@ -245,7 +245,7 @@ namespace Lumina
     ECS::FEntity FLuminaNetworkRuntime::NetIdToEntity(const CWorld* World, uint32 NetId) const
     {
         const FNetWorldState* State = StateOf(World);
-        return (State != nullptr && NetId != 0) ? State->GuidTable.Find(FNetGUID{ NetId }) : ECS::NullEntity;
+        return (State != nullptr && NetId != 0) ? State->GuidTable.Find(SNetGUID{ NetId }) : ECS::NullEntity;
     }
 
     bool FLuminaNetworkRuntime::SendScriptRpc(CEntityScript* Script, uint32 RpcId, ERpcTarget Target, uint8 Flags,

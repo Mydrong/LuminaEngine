@@ -3,7 +3,6 @@
 #include "Core/Object/Package/Package.h"
 #include "Core/Console/ConsoleVariable.h"
 #include "Core/Engine/Engine.h"
-#include "Core/Engine/GameInstance.h"
 #include "Core/Profiler/Profile.h"
 #include "Renderer/ImmediateLineRenderer.h"
 #include "Renderer/RenderManager.h"
@@ -253,19 +252,8 @@ namespace Lumina
         Contexts.push_back(Move(Context));
 
         World->OwningContext = Raw;
-        
-        CGameInstance* GameInstance = ((Type == EWorldType::Game || Type == EWorldType::Simulation) && GEngine != nullptr) ? GEngine->GetGameInstance() : nullptr;
-        if (GameInstance != nullptr)
-        {
-            GameInstance->PreWorldLoad(World);
-        }
 
         World->InitializeWorld(Type);
-
-        if (GameInstance != nullptr)
-        {
-            GameInstance->PostWorldLoad(World);
-        }
 
         // Loading frees far more than it keeps, and without a trim those spans stay cached for the session.
         if (GEngine != nullptr)

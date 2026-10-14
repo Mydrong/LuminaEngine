@@ -15,6 +15,6 @@ namespace Lumina
         GENERATED_BODY()
 
         PROPERTY(Editable, Category = "Gameplay")
-        FGameplayTagContainer Tags;
+        SGameplayTagContainer Tags;
     };
 }

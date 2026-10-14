@@ -4,6 +4,7 @@
 #include "Core/Object/ObjectArray.h"
 #include "Core/Object/Package/Package.h"
 #include "Core/Versioning/CoreVersion.h"
+#include "Core/Serialization/PortableBytes.h"
 #include "Memory/Memcpy.h"
 
 namespace Lumina
@@ -19,23 +20,42 @@ namespace Lumina
         return Ar;
     }
 
-    FArchive::FDeferredReaderFactory FPackageLoader::GetDeferredReaderFactory() const
+    bool FPackageLoader::DescribeCutBytes(FPortableBytes& Cut) const
     {
-        TSharedPtr<const FPackageNameTable> Table = Names;
-        CPackage* Owner = Package;
-        const int32 Version = GetFileVersion();
-        return [Table, Owner, Version](const TVector<uint8>& Bytes) -> TUniquePtr<FArchive>
+        if (Package == nullptr)
         {
-            void* Copy = Memory::Malloc(Math::Max<SIZE_T>(Bytes.size(), 1));
-            if (!Bytes.empty())
+            return false;
+        }
+
+        const bool bNameSlots = Names != nullptr && Cut.FileVersion >= (int32)ELuminaEngineVersion::PACKAGE_NAME_TABLE;
+        const int32 NumImports = (int32)Package->ImportTable.size();
+        const int32 NumExports = (int32)Package->ExportTable.size();
+
+        THashSet<uint32> SeenNames;
+        THashSet<int32> SeenObjects;
+        for (size_t Offset = 0; Offset + sizeof(uint32) <= Cut.Bytes.size(); ++Offset)
+        {
+            uint32 Word = 0;
+            Memory::Memcpy(&Word, Cut.Bytes.data() + Offset, sizeof(uint32));
+
+            const uint32 Slot = Word & kPackageNameSlotMask;
+            if (bNameSlots && Slot < Names->Num() && SeenNames.insert(Slot).second)
             {
-                Memory::Memcpy(Copy, Bytes.data(), Bytes.size());
+                Cut.Names.push_back({ Slot, Names->Resolve(Slot, false, 0) });
             }
-            TUniquePtr<FPackageLoader> Reader = MakeUnique<FPackageLoader>(MakeShared<FPackageFileBytes>(Copy, (int64)Bytes.size()), Owner);
-            Reader->SetNameTable(Table);
-            Reader->SetFileVersion(Version);
-            return Reader;
-        };
+
+            const FObjectPackageIndex Index((int32)Word);
+            const int64 Raw = Index.GetRaw();
+            if (Raw == 0 || Raw < -(int64)NumImports || Raw > (int64)NumExports || !SeenObjects.insert(Index.GetRaw()).second)
+            {
+                continue;
+            }
+            const FGuid& Object = Index.IsImport()
+                ? Package->ImportTable[Index.GetArrayIndex()].ObjectGUID
+                : Package->ExportTable[Index.GetArrayIndex()].ObjectGUID;
+            Cut.Objects.push_back({ Index.GetRaw(), Object });
+        }
+        return true;
     }
 
     FArchive& FPackageLoader::operator<<(FName& Value)

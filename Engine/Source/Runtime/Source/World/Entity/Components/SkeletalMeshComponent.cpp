@@ -34,8 +34,8 @@ namespace Lumina
         return nullptr;
     }
 
-    FAABB SSkeletalMeshComponent::GetAABB() const
+    SAABB SSkeletalMeshComponent::GetAABB() const
     {
-        return SkeletalMesh ? SkeletalMesh->GetAABB() : FAABB();
+        return SkeletalMesh ? SkeletalMesh->GetAABB() : SAABB();
     }
 }

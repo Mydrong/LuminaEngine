@@ -20,7 +20,7 @@ namespace Lumina
     class CMaterialInput;
     class CMaterialOutput;
     struct FMaterialUniforms;
-    struct FMaterialParameter;
+    struct SMaterialParameter;
     struct SKeyedCurve;
 }
 
@@ -186,7 +186,7 @@ namespace Lumina
         void SetStaticSwitchOverrides(const THashMap<FName, bool>& InOverrides) { StaticSwitchOverrides = InOverrides; }
 
         // Pins the slots Params, Textures and Collections already hold, so every permutation reads one layout.
-        void SeedManifest(const TVector<FMaterialParameter>& Params, const FMaterialUniforms& Uniforms,
+        void SeedManifest(const TVector<SMaterialParameter>& Params, const FMaterialUniforms& Uniforms,
                           const TVector<TStrongObjectPtr<CTexture>>& Textures,
                           const TVector<TStrongObjectPtr<CMaterialParameterCollection>>& Collections);
 
@@ -206,7 +206,7 @@ namespace Lumina
         bool ResolveStaticSwitch(const FName& ParamID, bool bDefaultValue, CEdGraphNode* Node);
 
         // Every named switch the walk reached, ordered by name with BitIndex already assigned.
-        void GetStaticSwitches(TVector<FMaterialStaticSwitch>& OutSwitches) const;
+        void GetStaticSwitches(TVector<SMaterialStaticSwitch>& OutSwitches) const;
 
         // Node is carried only so an over-budget refusal can focus its error on the asking node.
         void DefineFloatParameter(const FString& NodeID, const FName& ParamID, float Value, CEdGraphNode* Node = nullptr);
@@ -499,7 +499,7 @@ namespace Lumina
         void GetBoundTextures(TVector<TStrongObjectPtr<CTexture>>& Images);
 
         /** Export the dynamic parameter manifest discovered during compile and seed default values into the uniform block. */
-        void GetParameters(TVector<FMaterialParameter>& OutParams, FMaterialUniforms& OutUniforms) const;
+        void GetParameters(TVector<SMaterialParameter>& OutParams, FMaterialUniforms& OutUniforms) const;
 
         // Computes shader complexity / cost metrics from the current chunk state. Call after
         // CompileGraph so the chunks are populated. Cheap (single linear scan per chunk).
@@ -654,7 +654,7 @@ namespace Lumina
         TVector<EdNodeGraph::FError> Warnings;   // non-fatal; see AddWarning
 
         // Insertion-ordered; GetStaticSwitches sorts by name so the key survives a node reorder.
-        TVector<FMaterialStaticSwitch> StaticSwitches;
+        TVector<SMaterialStaticSwitch> StaticSwitches;
         THashMap<FName, bool>          StaticSwitchOverrides;
 
         THashMap<FName, FScalarParam>  ScalarParameters;

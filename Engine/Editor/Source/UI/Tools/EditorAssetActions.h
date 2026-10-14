@@ -1,6 +1,8 @@
 #pragma once
 
 #include "Containers/HashTable.h"
+#include "Containers/Name.h"
+#include "Containers/Span.h"
 #include "Containers/Vector.h"
 #include "Containers/Function.h"
 #include "Containers/String.h"
@@ -9,6 +11,7 @@ namespace Lumina
 {
     class CClass;
     class CObject;
+    class CPackage;
     class IEditorToolContext;
     struct FAssetData;
 }
@@ -58,4 +61,7 @@ namespace Lumina
     EDITOR_API FFixedString MakeSiblingAssetPath(FStringView SourceVirtualPath, const char* Suffix);
     
     EDITOR_API CObject* DuplicateAssetPackage(CObject* PrimaryAsset, FStringView DestPath);
+
+    // Copies Sources into Dest under the names NameFor picks, with every reference between them repointed to the copies.
+    EDITOR_API THashMap<CObject*, CObject*> CopyObjectsInto(TSpan<CObject* const> Sources, CPackage* Dest, const TFunction<FName(CObject*)>& NameFor);
 }

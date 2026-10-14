@@ -36,8 +36,8 @@ namespace Lumina
 
     private:
 
-        FInputActionHandle CachedValue;
-        FInputActionHandle DisplayValue;
+        SInputActionHandle CachedValue;
+        SInputActionHandle DisplayValue;
         ImGuiTextFilter    SearchFilter;
 
         // One-frame discrete edit: Started on the change frame, Finished the next, so undo sees a pair.

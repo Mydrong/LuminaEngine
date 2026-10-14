@@ -2,13 +2,16 @@
 
 #include "ParticleEmitterStack.h"
 #include "ParticleStockModules.h"
+#include "Assets/AssetRegistry/AssetRegistry.h"
 #include "Assets/AssetTypes/ParticleSystem/ParticleSystem.h"
 #include "Containers/StringFormat.h"
 #include "Core/Object/Cast.h"
 #include "Core/Object/Class.h"
 #include "Core/Object/ObjectArray.h"
 #include "Core/Object/Package/Package.h"
+#include "FileSystem/FileSystem.h"
 #include "Renderer/ShaderCompiler.h"
+#include "UI/Tools/EditorAssetActions.h"
 #include "UI/Tools/NodeGraph/Particle/ParticleCompiler.h"
 
 #include <cctype>
@@ -57,7 +60,7 @@ namespace Lumina::ParticleOps
         {
             if (!Input.ParameterName.IsNone())
             {
-                if (const FParticleParameter* Bound = System->FindUserParameter(Input.ParameterName))
+                if (const SParticleParameter* Bound = System->FindUserParameter(Input.ParameterName))
                 {
                     return Bound->Type == EParticleParameterType::Float ? FVector2(Bound->Scalar) : FVector2(Bound->Vector.x, Bound->Vector.y);
                 }
@@ -87,12 +90,34 @@ namespace Lumina::ParticleOps
 
             Emitter->LifetimeRange = Range;
         }
+
+        // An emitter asset keeps its stack in its own package, which for an emitter inside a system is the system's.
+        CParticleEmitterStack* StackOf(const CParticleEmitter* Emitter)
+        {
+            if (Emitter == nullptr || Emitter->GetPackage() == nullptr || Emitter->AuthoringStackName.empty())
+            {
+                return nullptr;
+            }
+            return Cast<CParticleEmitterStack>(Emitter->GetPackage()->LoadObjectByName(FName(Emitter->AuthoringStackName.c_str())));
+        }
+
+        FName UniqueStackName(CPackage* Package)
+        {
+            for (int32 Suffix = 0; ; ++Suffix)
+            {
+                const FName Candidate(Format("ParticleStack_{}", Suffix).c_str());
+                if (Package->LoadObjectByName(Candidate) == nullptr)
+                {
+                    return Candidate;
+                }
+            }
+        }
     }
 
     CParticleEmitterStack* FindOrCreateStack(CParticleSystem* System, int32 EmitterIndex)
     {
         CParticleEmitter* Emitter = EmitterAt(System, EmitterIndex);
-        if (Emitter == nullptr || System->GetPackage() == nullptr)
+        if (Emitter == nullptr || Emitter->GetPackage() == nullptr)
         {
             return nullptr;
         }
@@ -103,10 +128,10 @@ namespace Lumina::ParticleOps
             Emitter->AuthoringStackName = FString("ParticleStack_") + Format("{}", EmitterIndex).c_str();
         }
 
-        CParticleEmitterStack* Stack = Cast<CParticleEmitterStack>(System->GetPackage()->LoadObjectByName(Emitter->AuthoringStackName));
+        CParticleEmitterStack* Stack = StackOf(Emitter);
         if (Stack == nullptr)
         {
-            Stack = NewObject<CParticleEmitterStack>(System->GetPackage(), Emitter->AuthoringStackName);
+            Stack = NewObject<CParticleEmitterStack>(Emitter->GetPackage(), Emitter->AuthoringStackName);
             Stack->EnsureDefaultStack();
         }
 
@@ -115,12 +140,79 @@ namespace Lumina::ParticleOps
 
     CParticleEmitterStack* FindStack(CParticleSystem* System, int32 EmitterIndex)
     {
-        CParticleEmitter* Emitter = EmitterAt(System, EmitterIndex);
-        if (Emitter == nullptr || System->GetPackage() == nullptr || Emitter->AuthoringStackName.empty())
+        return StackOf(EmitterAt(System, EmitterIndex));
+    }
+
+    TStrongObjectPtr<CParticleSystem> WrapEmitter(CParticleEmitter* Emitter)
+    {
+        // Strong from the start, since nothing else holds the wrapper and a compile job dropping its ref would free it.
+        TStrongObjectPtr<CParticleSystem> System = NewObject<CParticleSystem>();
+        System->Emitters.push_back(Emitter);
+        return System;
+    }
+
+    CParticleEmitter* CopyEmitter(CParticleEmitter* Source, CPackage* Dest, FName EmitterName)
+    {
+        if (Source == nullptr || Dest == nullptr)
         {
             return nullptr;
         }
-        return Cast<CParticleEmitterStack>(System->GetPackage()->LoadObjectByName(Emitter->AuthoringStackName));
+
+        TVector<CObject*> Sources = { Source };
+        CParticleEmitterStack* Stack = StackOf(Source);
+        if (Stack != nullptr)
+        {
+            Sources.push_back(Stack);
+            for (const TVector<TStrongObjectPtr<CParticleModule>>* Modules : { &Stack->SpawnModules, &Stack->UpdateModules })
+            {
+                for (const TStrongObjectPtr<CParticleModule>& Module : *Modules)
+                {
+                    Sources.push_back(Module.Get());
+                }
+            }
+        }
+
+        // Dest may already hold another emitter's stack under the source's name, so the copy takes a free one.
+        const FName StackName = UniqueStackName(Dest);
+        const THashMap<CObject*, CObject*> Remap = CopyObjectsInto(Sources, Dest, [&](CObject* Object)
+        {
+            return Object == Source ? EmitterName : Object == Stack ? StackName : NAME_None;
+        });
+        if (Remap.empty())
+        {
+            return nullptr;
+        }
+
+        CParticleEmitter* Copy = Cast<CParticleEmitter>(Remap.find(Source)->second);
+        Copy->AuthoringStackName = Stack != nullptr ? FString(StackName.c_str()) : FString();
+        return Copy;
+    }
+
+    CParticleEmitter* SaveEmitterAsAsset(CParticleSystem* System, int32 EmitterIndex, FStringView Path)
+    {
+        CParticleEmitter* Source = EmitterAt(System, EmitterIndex);
+        CPackage* Package = Source != nullptr ? CPackage::CreatePackage(Path) : nullptr;
+
+        // Held strongly, since a fresh object dies the first time a ref the save takes is released.
+        const TStrongObjectPtr<CParticleEmitter> Asset(CopyEmitter(Source, Package, FName(VFS::FileName(Path, true))));
+        if (!Asset || !CPackage::SavePackage(Package, Path))
+        {
+            return nullptr;
+        }
+
+        FAssetRegistry::Get().AssetCreated(Asset.Get());
+        System->Emitters[EmitterIndex] = Asset;
+        return Asset.Get();
+    }
+
+    CParticleEmitter* MakeEmitterLocal(CParticleSystem* System, int32 EmitterIndex)
+    {
+        CParticleEmitter* Local = CopyEmitter(EmitterAt(System, EmitterIndex), System != nullptr ? System->GetPackage() : nullptr);
+        if (Local != nullptr)
+        {
+            System->Emitters[EmitterIndex] = Local;
+        }
+        return Local;
     }
 
     TVector<CClass*> GetModuleTypes()

@@ -386,10 +386,10 @@ namespace Lumina::SkeletonDebugDraw
                 Job.Skeleton  = Skeleton;
                 Job.Pose      = ((int32)Mesh.BoneTransforms.size() == Skeleton->GetNumBones()) ? &Mesh.BoneTransforms : nullptr;
 
-                const FAABB LocalBounds = SkeletalMesh->GetAABB();
+                const SAABB LocalBounds = SkeletalMesh->GetAABB();
                 if (State != nullptr && LocalBounds.IsValid())
                 {
-                    const FAABB WorldBounds = LocalBounds.ToWorld(Job.MeshWorld);
+                    const SAABB WorldBounds = LocalBounds.ToWorld(Job.MeshWorld);
                     if (!DebugDraw::ShouldDraw(*State, WorldBounds))
                     {
                         continue;

@@ -141,6 +141,20 @@ namespace Lumina
     }
 
     // A fault is not a broken promise, so it stops a parallel pass without being reported as one.
+    void CEntityScript::OnReinstanced(CObject& Previous)
+    {
+        CEntityScript* Original = Cast<CEntityScript>(&Previous);
+        if (Original == nullptr)
+        {
+            return;
+        }
+        OwningEntity = Original->OwningEntity;
+        OwningWorld  = Original->OwningWorld;
+        bReady       = Original->bReady;
+        bFaulted     = Original->bFaulted;
+        UIScripts::Replace(Original, this);
+    }
+
     void CEntityScript::MarkFaulted()
     {
         bFaulted = true;
@@ -306,9 +320,60 @@ namespace Lumina
 
     void CEntityScript::MarkNetDirty()
     {
-        if (INetworkRuntime* Net = GetNetworkRuntime(); Net != nullptr && OwningWorld != nullptr)
+        if (INetworkRuntime* Net = GetNetworkRuntime(); Net != nullptr && OwningWorld != nullptr && IsAttached())
         {
             Net->MarkEntityDirty(OwningWorld, OwningEntity);
+        }
+    }
+
+    void* CEntityScript::FindRpcFunction(FName Name) const
+    {
+        const FFunction* Function = GetClass() != nullptr ? GetClass()->FindFunction(Name) : nullptr;
+        return Function != nullptr && Function->IsRpc() ? const_cast<FFunction*>(Function) : nullptr;
+    }
+
+    ERpcRoute CEntityScript::PlanRpcCall(void* Function)
+    {
+        return Function != nullptr ? PlanRpc(*static_cast<const FFunction*>(Function)) : ERpcRoute::RunHere;
+    }
+
+    void* CEntityScript::MakeRpcFrame(void* Function)
+    {
+        const FFunction* Typed = static_cast<const FFunction*>(Function);
+        if (Typed == nullptr)
+        {
+            return nullptr;
+        }
+        const size_t Size = std::max<size_t>(Typed->GetParmsSize(), 1);
+        void* Frame = Memory::Malloc(Size, alignof(std::max_align_t));
+        Memory::Memzero(Frame, Size);
+        Typed->InitializeFrame(Frame);
+        return Frame;
+    }
+
+    void CEntityScript::SendRpcCall(void* Function, void* Frame)
+    {
+        const FFunction* Typed = static_cast<const FFunction*>(Function);
+        if (Typed == nullptr || Frame == nullptr)
+        {
+            return;
+        }
+        SendRpcFrame(*Typed, Frame);
+        Typed->DestructFrame(Frame);
+        Memory::Free(Frame);
+    }
+
+    void* CEntityScript::FindSyncField(FName Name) const
+    {
+        FProperty* Field = GetClass() != nullptr ? GetClass()->GetProperty(Name) : nullptr;
+        return Field != nullptr && IsSyncFromOwner(Field) ? Field : nullptr;
+    }
+
+    void CEntityScript::ForwardSyncField(void* Field)
+    {
+        if (Field != nullptr)
+        {
+            SendSync(static_cast<FProperty*>(Field), false);
         }
     }
 
@@ -709,11 +774,33 @@ namespace Lumina
         }
     }
 
+    namespace
+    {
+        // Null while the class is still not loaded.
+        CEntityScript* RestoreHeldScript(const SHeldValue& Held)
+        {
+            CClass* ScriptClass = FScriptableRegistry::ResolveClass(Held.TypeName);
+            if (ScriptClass == nullptr || !ScriptClass->IsChildOf(CEntityScript::StaticClass()))
+            {
+                return nullptr;
+            }
+
+            CEntityScript* Script = static_cast<CEntityScript*>(
+                NewObject(ScriptClass, nullptr, NAME_None, FGuid::New(), OF_Transient));
+            if (Script != nullptr && !Held.Data.IsEmpty())
+            {
+                const TUniquePtr<FArchive> Reader = Held.Data.MakeReader();
+                ScriptClass->SerializeProperties(*Reader, Script);
+            }
+            return Script;
+        }
+    }
+
     bool SEntityScriptComponent::Serialize(FArchive& Ar)
     {
         if (Ar.IsWriting())
         {
-            int32 Count = (int32)Pending.size();
+            int32 Count = 0;
             for (const TStrongObjectPtr<CEntityScript>& Held : Scripts)
             {
                 if (Held.Get() != nullptr && Held.Get()->GetClass() != nullptr)
@@ -722,19 +809,6 @@ namespace Lumina
                 }
             }
             Ar << Count;
-
-            // Written back byte for byte, so a world saved while a script failed to compile keeps it.
-            for (FPendingScript& Held : Pending)
-            {
-                Ar << Held.ClassName;
-
-                int64 ScriptSize = (int64)Held.Bytes.size();
-                Ar << ScriptSize;
-                if (ScriptSize > 0)
-                {
-                    Ar.Serialize(Held.Bytes.data(), ScriptSize);
-                }
-            }
 
             for (const TStrongObjectPtr<CEntityScript>& Held : Scripts)
             {
@@ -760,6 +834,9 @@ namespace Lumina
                 Ar << ScriptSize;
                 Ar.Seek(DataEnd);
             }
+
+            // Carried with their own names and objects, so a world saved while a script failed to compile keeps it.
+            Ar << Pending;
             return true;
         }
 
@@ -805,20 +882,20 @@ namespace Lumina
                         break;
                     }
 
-                    // Held verbatim rather than discarded, since the class is usually just not loaded yet.
-                    FPendingScript Held;
-                    Held.ClassName   = ClassName;
-                    Held.FileVersion = Ar.GetFileVersion();
-                    Held.MakeReader  = Ar.GetDeferredReaderFactory();
-                    Held.Bytes.resize((size_t)Math::Max<int64>(ScriptSize, 0));
-                    if (ScriptSize > 0)
+                    // Held rather than discarded, since the class is usually just not loaded yet.
+                    SHeldValue Held;
+                    Held.TypeName = ClassName;
+                    if (Held.Data.Cut(Ar, ScriptSize))
                     {
-                        Ar.Serialize(Held.Bytes.data(), ScriptSize);
+                        Pending.push_back(Move(Held));
+                        LOG_WARN("SEntityScriptComponent: script class '{}' is not loaded; holding it until a "
+                                 "script reload can restore it.", ClassName.c_str());
                     }
-                    Pending.push_back(Move(Held));
-
-                    LOG_WARN("SEntityScriptComponent: script class '{}' is not loaded; holding it until a "
-                             "script reload can restore it.", ClassName.c_str());
+                    else
+                    {
+                        LOG_WARN("SEntityScriptComponent: script class '{}' is not loaded and this archive cannot "
+                                 "hold it; dropped.", ClassName.c_str());
+                    }
                     Ar.Seek(DataStart + ScriptSize);
                     continue;
                 }
@@ -832,6 +909,21 @@ namespace Lumina
                 }
 
                 Scripts.push_back(Script);
+            }
+
+            if (Ar.GetFileVersion() >= (int32)ELuminaEngineVersion::PORTABLE_HELD_SCRIPTS)
+            {
+                TVector<SHeldValue> Held;
+                Ar << Held;
+                for (SHeldValue& Value : Held)
+                {
+                    if (CEntityScript* Script = RestoreHeldScript(Value))
+                    {
+                        Scripts.push_back(Script);
+                        continue;
+                    }
+                    Pending.push_back(Move(Value));
+                }
             }
             return true;
         }
@@ -953,6 +1045,55 @@ namespace Lumina
             LE_NO_COPYMOVE(FParallelScriptPassScope);
         };
 
+        // Whatever a parallel run did not get to goes the checked serial way, finishing an interrupted entity first.
+        template<typename TRunScript, typename TRunEntity>
+        void FinishRemainder(const TVector<ECS::FEntity>& Entities, const TVector<CEntityScript*>& Scripts, uint32 Begin, uint32 Ran, uint32 End,
+            TRunScript&& RunScript, TRunEntity&& RunEntity)
+        {
+            uint32 Index = Begin + Ran;
+            if (Index >= End)
+            {
+                return;
+            }
+            if (Ran > 0)
+            {
+                const ECS::FEntity Interrupted = Entities[Index - 1];
+                for (; Index < End && Entities[Index] == Interrupted; ++Index)
+                {
+                    RunScript(Interrupted, Scripts[Index]);
+                }
+            }
+            for (ECS::FEntity Previous = ECS::NullEntity; Index < End; ++Index)
+            {
+                if (Entities[Index] != Previous)
+                {
+                    Previous = Entities[Index];
+                    RunEntity(Previous);
+                }
+            }
+        }
+
+        // RunSpan returns how many scripts of its span ran before a structural change stopped it.
+        template<typename TRunSpan, typename TRunScript, typename TRunEntity>
+        void RunInEntityChunks(TVector<uint32>& ChunkStarts, TVector<uint32>& ChunkRan, const TVector<ECS::FEntity>& Entities,
+            const TVector<CEntityScript*>& Scripts, TRunSpan&& RunSpan, TRunScript&& RunScript, TRunEntity&& RunEntity)
+        {
+            BuildEntityChunks(Entities, ChunkStarts);
+            const uint32 NumChunks = (uint32)ChunkStarts.size() - 1;
+            ChunkRan.assign(NumChunks, 0);
+
+            RunChunks((uint32)Scripts.size(), NumChunks, [&](uint32 Chunk)
+            {
+                FParallelScriptPassScope PassScope;
+                ChunkRan[Chunk] = RunSpan(ChunkStarts[Chunk], ChunkStarts[Chunk + 1]);
+            });
+
+            for (uint32 Chunk = 0; Chunk < NumChunks; ++Chunk)
+            {
+                FinishRemainder(Entities, Scripts, ChunkStarts[Chunk], ChunkRan[Chunk], ChunkStarts[Chunk + 1], RunScript, RunEntity);
+            }
+        }
+
         // Both tick passes rebuild these every call, so they are parked per thread rather than reallocated.
         struct FTickScratch
         {
@@ -1065,8 +1206,7 @@ namespace Lumina
             return false;
         }
 
-        // A loaded prefab owns a registry and is not a world, so the world sweep alone left its scripts.
-        // A script attached to a new entity during the pass readies on the next tick like any other.
+        // A loaded prefab owns a registry without being a world, so its scripts need sweeping too. A script attached mid-pass readies next tick.
         void SnapshotScriptedEntities(ECS::FRegistry& Registry, TVector<ECS::FEntity>& Out)
         {
             Out.clear();
@@ -1612,34 +1752,12 @@ namespace Lumina
 
             const uint32 ClaimEpoch = GStructureEpoch.load(std::memory_order_relaxed);
 
-            // Whatever a parallel run did not get to goes the checked serial way, finishing an interrupted entity first.
-            auto FinishRemainder = [&](const TVector<ECS::FEntity>& RunEntities, const TVector<CEntityScript*>& RunScripts, uint32 Begin, uint32 Ran, uint32 End)
+            auto RunInterrupted = [&](ECS::FEntity Entity, CEntityScript* Script)
             {
-                uint32 Index = Begin + Ran;
-                if (Index >= End)
+                if (IsStillAttached(Registry, Entity, Script) && Script->ShouldTick() && ScriptPhase(Script) == Phase)
                 {
-                    return;
-                }
-                if (Ran > 0)
-                {
-                    const ECS::FEntity Interrupted = RunEntities[Index - 1];
-                    for (; Index < End && RunEntities[Index] == Interrupted; ++Index)
-                    {
-                        CEntityScript* Script = RunScripts[Index];
-                        if (IsStillAttached(Registry, Interrupted, Script) && Script->ShouldTick() && ScriptPhase(Script) == Phase)
-                        {
-                            LUMINA_PROFILE_SECTION_NAMED(Script->GetClass()->GetName().c_str());
-                            Script->OnUpdate(DeltaTime);
-                        }
-                    }
-                }
-                for (ECS::FEntity Previous = ECS::NullEntity; Index < End; ++Index)
-                {
-                    if (RunEntities[Index] != Previous)
-                    {
-                        Previous = RunEntities[Index];
-                        RunEntity(Previous);
-                    }
+                    LUMINA_PROFILE_SECTION_NAMED(Script->GetClass()->GetName().c_str());
+                    Script->OnUpdate(DeltaTime);
                 }
             };
 
@@ -1683,7 +1801,7 @@ namespace Lumina
                 {
                     const FClaimChunk& In = Scratch.ClaimChunks[Chunk];
                     PostPhysicsScripts += In.PostPhysics;
-                    FinishRemainder(In.Entities, In.Scripts, 0u, In.Ran, (uint32)In.Scripts.size());
+                    FinishRemainder(In.Entities, In.Scripts, 0u, In.Ran, (uint32)In.Scripts.size(), RunInterrupted, RunEntity);
                 }
             }
             else
@@ -1704,25 +1822,10 @@ namespace Lumina
                 if (!ParallelScripts.empty())
                 {
                     LUMINA_PROFILE_SECTION("Parallel Entity Scripts");
-
-                    TVector<uint32>& ChunkStarts = Scratch.ChunkStarts;
-                    TVector<uint32>& ChunkRan    = Scratch.ChunkRan;
-                    BuildEntityChunks(ParallelEntities, ChunkStarts);
-                    const uint32 NumChunks = (uint32)ChunkStarts.size() - 1;
-                    ChunkRan.assign(NumChunks, 0);
-
-                    RunChunks((uint32)ParallelScripts.size(), NumChunks, [&](uint32 Chunk)
+                    RunInEntityChunks(Scratch.ChunkStarts, Scratch.ChunkRan, ParallelEntities, ParallelScripts, [&](uint32 Begin, uint32 End)
                     {
-                        FParallelScriptPassScope PassScope;
-                        const uint32 Begin = ChunkStarts[Chunk];
-                        ChunkRan[Chunk] = RunClaimedSpan(ParallelHandles.data() + Begin, ParallelScripts.data() + Begin,
-                                                         ChunkStarts[Chunk + 1] - Begin, DeltaTime, ClaimEpoch);
-                    });
-
-                    for (uint32 Chunk = 0; Chunk < NumChunks; ++Chunk)
-                    {
-                        FinishRemainder(ParallelEntities, ParallelScripts, ChunkStarts[Chunk], ChunkRan[Chunk], ChunkStarts[Chunk + 1]);
-                    }
+                        return RunClaimedSpan(ParallelHandles.data() + Begin, ParallelScripts.data() + Begin, End - Begin, DeltaTime, ClaimEpoch);
+                    }, RunInterrupted, RunEntity);
                 }
             }
 
@@ -1862,55 +1965,21 @@ namespace Lumina
             if (!ParallelScripts.empty())
             {
                 LUMINA_PROFILE_SECTION("Parallel Entity Scripts Fixed");
-
-                TVector<uint32>& ChunkStarts = Scratch.ChunkStarts;
-                TVector<uint32>& ChunkRan    = Scratch.ChunkRan;
-                BuildEntityChunks(ParallelEntities, ChunkStarts);
-                const uint32 NumChunks = (uint32)ChunkStarts.size() - 1;
-                ChunkRan.assign(NumChunks, 0);
-
-                RunChunks((uint32)ParallelScripts.size(), NumChunks, [&](uint32 Chunk)
+                RunInEntityChunks(Scratch.ChunkStarts, Scratch.ChunkRan, ParallelEntities, ParallelScripts, [&](uint32 Begin, uint32 End)
                 {
-                    FParallelScriptPassScope PassScope;
-                    const uint32 Begin = ChunkStarts[Chunk];
-                    const uint32 End   = ChunkStarts[Chunk + 1];
                     uint32 Index = Begin;
                     for (; Index < End && GStructureEpoch.load(std::memory_order_relaxed) == ClaimEpoch; ++Index)
                     {
                         ParallelScripts[Index]->OnFixedUpdate(FixedDeltaTime);
                     }
-                    ChunkRan[Chunk] = Index - Begin;
-                });
-
-                for (uint32 Chunk = 0; Chunk < NumChunks; ++Chunk)
+                    return Index - Begin;
+                }, [&](ECS::FEntity Entity, CEntityScript* Script)
                 {
-                    const uint32 End = ChunkStarts[Chunk + 1];
-                    uint32 Index = ChunkStarts[Chunk] + ChunkRan[Chunk];
-                    if (Index >= End)
+                    if (IsStillAttached(Registry, Entity, Script) && Script->ShouldTick())
                     {
-                        continue;
+                        Script->OnFixedUpdate(FixedDeltaTime);
                     }
-                    if (ChunkRan[Chunk] > 0)
-                    {
-                        const ECS::FEntity Interrupted = ParallelEntities[Index - 1];
-                        for (; Index < End && ParallelEntities[Index] == Interrupted; ++Index)
-                        {
-                            CEntityScript* Script = ParallelScripts[Index];
-                            if (IsStillAttached(Registry, Interrupted, Script) && Script->ShouldTick())
-                            {
-                                Script->OnFixedUpdate(FixedDeltaTime);
-                            }
-                        }
-                    }
-                    for (ECS::FEntity Previous = ECS::NullEntity; Index < End; ++Index)
-                    {
-                        if (ParallelEntities[Index] != Previous)
-                        {
-                            Previous = ParallelEntities[Index];
-                            RunEntity(Previous);
-                        }
-                    }
-                }
+                }, RunEntity);
             }
 
             for (size_t EntityIndex = 0; EntityIndex < Entities.size(); ++EntityIndex)
@@ -2017,7 +2086,7 @@ namespace Lumina
             }
         }
 
-        void DispatchActions(ECS::FRegistry& Registry, ECS::FEntity Entity, const FInputActionState* States,
+        void DispatchActions(ECS::FRegistry& Registry, ECS::FEntity Entity, const SInputActionState* States,
             int32 Count, TSpan<const int32> ChangedActionIndices)
         {
             FScriptSnapshot Scripts;
@@ -2072,65 +2141,24 @@ namespace Lumina
 
         int32 ResolvePendingScripts(ECS::FRegistry& Registry)
         {
-            TVector<ECS::FEntity> Entities;
-            auto View = Registry.View<SEntityScriptComponent>();
-            Entities.reserve(View.Num());
-            for (ECS::FEntity Entity : View)
-            {
-                Entities.push_back(Entity);
-            }
-
             int32 Restored = 0;
-            for (ECS::FEntity Entity : Entities)
+            for (ECS::FEntity Entity : Registry.View<SEntityScriptComponent>())
             {
-                SEntityScriptComponent* Component = Registry.TryGet<SEntityScriptComponent>(Entity);
-                if (Component == nullptr || Component->Pending.empty())
+                SEntityScriptComponent& Component = Registry.Get<SEntityScriptComponent>(Entity);
+                Restored += (int32)Component.Pending.RemoveAllBy([&Component](const SHeldValue& Held)
                 {
-                    continue;
-                }
-
-                TVector<FPendingScript> StillPending;
-                TVector<FPendingScript> Holding = Move(Component->Pending);
-                Component->Pending.clear();
-
-                for (FPendingScript& Held : Holding)
-                {
-                    CClass* ScriptClass = FScriptableRegistry::ResolveClass(Held.ClassName);
-                    if (ScriptClass == nullptr || !ScriptClass->IsChildOf(CEntityScript::StaticClass()))
+                    CEntityScript* Script = RestoreHeldScript(Held);
+                    if (Script != nullptr)
                     {
-                        StillPending.push_back(Move(Held));
-                        continue;
+                        Component.Scripts.push_back(Script);
+                        LOG_INFO("SEntityScriptComponent: restored held script '{}' now that its class is loaded.", Held.TypeName.c_str());
                     }
-
-                    CEntityScript* Script = static_cast<CEntityScript*>(
-                        NewObject(ScriptClass, nullptr, NAME_None, FGuid::New(), OF_Transient));
-                    if (Script == nullptr)
-                    {
-                        StillPending.push_back(Move(Held));
-                        continue;
-                    }
-
-                    if (!Held.Bytes.empty() && Held.MakeReader)
-                    {
-                        TUniquePtr<FArchive> Reader = Held.MakeReader(Held.Bytes);
-                        ScriptClass->SerializeProperties(*Reader, Script);
-                    }
-                    else if (!Held.Bytes.empty())
-                    {
-                        FMemoryReader Reader(Held.Bytes);
-                        Reader.SetFileVersion(Held.FileVersion);
-                        ScriptClass->SerializeProperties(Reader, Script);
-                    }
-
-                    Component->Scripts.push_back(Script);
-                    NoteStructureChange();
-                    ++Restored;
-
-                    LOG_INFO("SEntityScriptComponent: restored held script '{}' now that its class is loaded.",
-                        Held.ClassName.c_str());
-                }
-
-                Component->Pending = Move(StillPending);
+                    return Script != nullptr;
+                });
+            }
+            if (Restored > 0)
+            {
+                NoteStructureChange();
             }
             return Restored;
         }
@@ -2147,6 +2175,8 @@ namespace Lumina
                 ECS::FRegistry& Registry = ECS::GetWorldRegistry(World);
 
                 // Anything held back by a failed or late load comes in first, so it sees this reload too.
+                MissingComponents::HoldOrphaned(Registry);
+                MissingComponents::Restore(Registry);
                 ResolvePendingScripts(Registry);
 
                 TVector<ECS::FEntity> Entities;

@@ -15,12 +15,12 @@ namespace Lumina::EntityScriptPicker
 {
     namespace
     {
-        FString LowercaseScriptStem(FStringView Text)
+        FString NormalizeSourceKey(FStringView Text)
         {
             FString Lower(Text.data(), Text.size());
             for (char& Character : Lower)
             {
-                Character = (char)std::tolower((unsigned char)Character);
+                Character = Character == '\\' ? '/' : (char)std::tolower((unsigned char)Character);
             }
             return Lower;
         }
@@ -34,9 +34,11 @@ namespace Lumina::EntityScriptPicker
         TVector<DotNet::FScriptSourceFolder> Sources;
         DotNet::GatherScriptSourceFolders(Sources);
         THashMap<FString, const DotNet::FScriptSourceFolder*> SourceByStem;
+        THashMap<FString, const DotNet::FScriptSourceFolder*> SourceByPath;
         for (const DotNet::FScriptSourceFolder& Source : Sources)
         {
-            SourceByStem.emplace(LowercaseScriptStem(Source.Stem), &Source);
+            SourceByStem.emplace(NormalizeSourceKey(Source.Stem), &Source);
+            SourceByPath.emplace(NormalizeSourceKey(Source.Path), &Source);
         }
 
         CClass* Base = CEntityScript::StaticClass();
@@ -61,11 +63,27 @@ namespace Lumina::EntityScriptPicker
             Item.Key  = FullName;
             Item.Icon = bManaged ? LE_ICON_LANGUAGE_CSHARP : LE_ICON_LANGUAGE_CPP;
 
-            auto Source = SourceByStem.find(LowercaseScriptStem(Short));
-            if (bManaged && Source != SourceByStem.end())
+            const DotNet::FScriptSourceFolder* Source = nullptr;
+            if (bManaged && Class->HasMeta("SourceFile"))
             {
-                Item.Category = Source->second->Folder;
-                Item.Tooltip  = Lumina::Format("{}\n{}", FullName, Source->second->Path);
+                auto ByPath = SourceByPath.find(NormalizeSourceKey(Class->GetMeta("SourceFile")));
+                if (ByPath != SourceByPath.end())
+                {
+                    Source = ByPath->second;
+                }
+            }
+            if (bManaged && Source == nullptr)
+            {
+                auto ByStem = SourceByStem.find(NormalizeSourceKey(Short));
+                if (ByStem != SourceByStem.end())
+                {
+                    Source = ByStem->second;
+                }
+            }
+            if (Source != nullptr)
+            {
+                Item.Category = Source->Folder;
+                Item.Tooltip  = Lumina::Format("{}\n{}", FullName, Source->Path);
             }
             else
             {

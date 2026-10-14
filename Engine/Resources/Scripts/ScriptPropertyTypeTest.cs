@@ -23,8 +23,10 @@ namespace Lumina.Tests;
 ///   2. a round-trip check per type, which necessarily overwrites values -- so each check restores what it
 ///      found. Running this script must not disturb what you authored.
 /// </summary>
+[Reflect]
 public class ScriptPropertyTypeTest : CEntityScript
 {
+    [Reflect]
     public enum ETestMode
     {
         Off,
@@ -87,6 +89,9 @@ public class ScriptPropertyTypeTest : CEntityScript
 
     [Property(Category = "Structs")]
     public FTransform TransformValue = FTransform.Identity;
+
+    [Property(Category = "Structs")]
+    public SDataTableRowHandle RowHandle;
 
     //~ Storage-owning kinds: these need per-instance construction over the appended block. A memzeroed FString
     //~ reads as a plausible empty string and corrupts on the first assignment, which is what makes them the
@@ -283,6 +288,11 @@ public class ScriptPropertyTypeTest : CEntityScript
         Check("FVector4", Vector4Value.W == 4.0f, $"({Vector4Value.X}, {Vector4Value.Y}, {Vector4Value.Z}, {Vector4Value.W})");
         Check("FTransform", TransformValue.Location.X == 5.0f && TransformValue.Location.Z == 7.0f,
             $"location ({TransformValue.Location.X}, {TransformValue.Location.Y}, {TransformValue.Location.Z})");
+
+        string SavedRowName = RowHandle.RowName;
+        RowHandle.RowName = "ScriptPropertyTypeTest";
+        Check("SDataTableRowHandle", RowHandle.RowName == "ScriptPropertyTypeTest", RowHandle.RowName);
+        RowHandle.RowName = SavedRowName;
 
         (Vector2Value, Vector3Value, Vector4Value, TransformValue) = Saved;
     }

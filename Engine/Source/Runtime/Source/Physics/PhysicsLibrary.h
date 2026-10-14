@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Containers/Vector.h"
+#include "Core/Math/AABB.h"
 #include "Core/Object/FunctionLibrary.h"
 #include "Core/Object/ObjectMacros.h"
 #include "Core/Math/Quat/Quat.h"
@@ -35,33 +36,117 @@ namespace Lumina
         static void RaycastAll(CWorld* World, FVector3 Start, FVector3 End, ECS::FEntity IgnoreEntity,
             ECollisionProfiles LayerMask, TVector<SRayResult>& Out);
 
-        /** A thick raycast, sweeping a sphere of Radius along the segment. */
+        // Raycast from Start along Direction for Distance meters.
+        FUNCTION()
+        static SRayResult RaycastDirection(CWorld* World, FVector3 Start, FVector3 Direction, float Distance,
+            ECS::FEntity IgnoreEntity, ECollisionProfiles LayerMask = ECollisionProfiles::All);
+
+        // True when nothing blocks the segment, stopping at the first blocker. Both entities are skipped, the looker and what it looks at.
+        FUNCTION()
+        static bool HasLineOfSight(CWorld* World, FVector3 From, FVector3 To, ECS::FEntity IgnoreEntity,
+            ECS::FEntity TargetEntity, ECollisionProfiles LayerMask = ECollisionProfiles::All);
+
+        // The segment against one entity's body only, such as testing whether a click landed on it.
+        FUNCTION()
+        static SRayResult RaycastEntity(CWorld* World, ECS::FEntity Entity, FVector3 Start, FVector3 End);
+
+        //~ Sweeps move a shape along the segment, and the hit Location is where it first touches something.
+
+        /** Every body a sphere of Radius touches along the segment, near to far. */
         FUNCTION()
         static void SphereCast(CWorld* World, FVector3 Start, FVector3 End, float Radius,
-            ECS::FEntity IgnoreEntity, TVector<SRayResult>& Out);
+            ECS::FEntity IgnoreEntity, TVector<SRayResult>& Out, ECollisionProfiles LayerMask = ECollisionProfiles::All);
 
-        /** Distinct entities whose bodies overlap the sphere. IgnoreEntity excludes the querier. */
+        FUNCTION()
+        static SRayResult SphereCastClosest(CWorld* World, FVector3 Start, FVector3 End, float Radius,
+            ECS::FEntity IgnoreEntity, ECollisionProfiles LayerMask = ECollisionProfiles::All);
+
+        FUNCTION()
+        static SRayResult BoxCast(CWorld* World, FVector3 Start, FVector3 End, FVector3 HalfExtents, FQuat Rotation,
+            ECS::FEntity IgnoreEntity, ECollisionProfiles LayerMask = ECollisionProfiles::All);
+
+        FUNCTION()
+        static void BoxCastAll(CWorld* World, FVector3 Start, FVector3 End, FVector3 HalfExtents, FQuat Rotation,
+            ECS::FEntity IgnoreEntity, TVector<SRayResult>& Out, ECollisionProfiles LayerMask = ECollisionProfiles::All);
+
+        // The capsule runs along Rotation's up axis, the shape of a character moving through the world.
+        FUNCTION()
+        static SRayResult CapsuleCast(CWorld* World, FVector3 Start, FVector3 End, float Radius, float HalfHeight, FQuat Rotation,
+            ECS::FEntity IgnoreEntity, ECollisionProfiles LayerMask = ECollisionProfiles::All);
+
+        FUNCTION()
+        static void CapsuleCastAll(CWorld* World, FVector3 Start, FVector3 End, float Radius, float HalfHeight, FQuat Rotation,
+            ECS::FEntity IgnoreEntity, TVector<SRayResult>& Out, ECollisionProfiles LayerMask = ECollisionProfiles::All);
+
+        // Any shape, for a caller that picks the shape at runtime.
+        FUNCTION()
+        static SRayResult ShapeCast(CWorld* World, SQueryShape Shape, FVector3 Start, FVector3 End,
+            ECS::FEntity IgnoreEntity, ECollisionProfiles LayerMask = ECollisionProfiles::All);
+
+        FUNCTION()
+        static void ShapeCastAll(CWorld* World, SQueryShape Shape, FVector3 Start, FVector3 End,
+            ECS::FEntity IgnoreEntity, TVector<SRayResult>& Out, ECollisionProfiles LayerMask = ECollisionProfiles::All);
+
+        //~ Overlaps list distinct entities whose bodies intersect the shape. IgnoreEntity excludes the querier.
+
         FUNCTION()
         static void OverlapSphere(CWorld* World, FVector3 Center, float Radius, ECS::FEntity IgnoreEntity,
-            TVector<ECS::FEntity>& Out);
+            TVector<ECS::FEntity>& Out, ECollisionProfiles LayerMask = ECollisionProfiles::All);
 
-        /** The same against an oriented box. */
         FUNCTION()
         static void OverlapBox(CWorld* World, FVector3 Center, FVector3 HalfExtents, FQuat Rotation,
-            ECS::FEntity IgnoreEntity, TVector<ECS::FEntity>& Out);
+            ECS::FEntity IgnoreEntity, TVector<ECS::FEntity>& Out, ECollisionProfiles LayerMask = ECollisionProfiles::All);
+
+        FUNCTION()
+        static void OverlapCapsule(CWorld* World, FVector3 Center, float Radius, float HalfHeight, FQuat Rotation,
+            ECS::FEntity IgnoreEntity, TVector<ECS::FEntity>& Out, ECollisionProfiles LayerMask = ECollisionProfiles::All);
+
+        FUNCTION()
+        static void OverlapShape(CWorld* World, SQueryShape Shape, FVector3 Center, ECS::FEntity IgnoreEntity,
+            TVector<ECS::FEntity>& Out, ECollisionProfiles LayerMask = ECollisionProfiles::All);
 
         /** Entities whose bodies contain the point, which is volume containment rather than a shape sweep. */
         FUNCTION()
         static void OverlapPoint(CWorld* World, FVector3 Point, ECS::FEntity IgnoreEntity,
-            TVector<ECS::FEntity>& Out);
-
-        // The height of the first surface straight down through Point, searching SearchDistance above and below it.
-        FUNCTION()
-        static float GetGroundHeight(CWorld* World, FVector3 Point, float SearchDistance, ECS::FEntity IgnoreEntity, float Fallback);
+            TVector<ECS::FEntity>& Out, ECollisionProfiles LayerMask = ECollisionProfiles::All);
 
         // True when no body overlaps the sphere, the check for whether something can be placed there.
         FUNCTION()
-        static bool IsSpaceFree(CWorld* World, FVector3 Center, float Radius, ECS::FEntity IgnoreEntity);
+        static bool IsSpaceFree(CWorld* World, FVector3 Center, float Radius, ECS::FEntity IgnoreEntity,
+            ECollisionProfiles LayerMask = ECollisionProfiles::All);
+
+        FUNCTION()
+        static bool IsBoxSpaceFree(CWorld* World, FVector3 Center, FVector3 HalfExtents, FQuat Rotation,
+            ECS::FEntity IgnoreEntity, ECollisionProfiles LayerMask = ECollisionProfiles::All);
+
+        // Whether a character capsule fits at Center, such as before a spawn or a teleport.
+        FUNCTION()
+        static bool IsCapsuleSpaceFree(CWorld* World, FVector3 Center, float Radius, float HalfHeight, FQuat Rotation,
+            ECS::FEntity IgnoreEntity, ECollisionProfiles LayerMask = ECollisionProfiles::All);
+
+        //~ Proximity, measured to the surface of an entity's colliders rather than to its origin.
+
+        // The entity in Radius whose surface is closest to Center, or the null entity when there is none.
+        FUNCTION()
+        static ECS::FEntity FindNearestEntity(CWorld* World, FVector3 Center, float Radius, ECS::FEntity IgnoreEntity,
+            ECollisionProfiles LayerMask = ECollisionProfiles::All);
+
+        // Point itself when it is inside the body, and Point unchanged when the entity has no body.
+        FUNCTION()
+        static FVector3 GetClosestPoint(CWorld* World, ECS::FEntity Entity, FVector3 Point);
+
+        // Zero inside the body, and negative when the entity has no body.
+        FUNCTION()
+        static float GetDistanceToEntity(CWorld* World, ECS::FEntity Entity, FVector3 Point);
+
+        // The world bounds of the entity's colliders, an invalid box when it has no body.
+        FUNCTION()
+        static SAABB GetBodyBounds(CWorld* World, ECS::FEntity Entity);
+
+        // The height of the first surface straight down through Point, searching SearchDistance above and below it.
+        FUNCTION()
+        static float GetGroundHeight(CWorld* World, FVector3 Point, float SearchDistance, ECS::FEntity IgnoreEntity, float Fallback,
+            ECollisionProfiles LayerMask = ECollisionProfiles::All);
 
         //~ Forces and impulses. An entity without a body is a no-op.
 
@@ -134,7 +219,7 @@ namespace Lumina
         //~ Constraints. A body left as the null entity anchors that side to the world.
 
         FUNCTION()
-        static uint32 CreateConstraint(CWorld* World, Physics::FConstraintDesc Desc);
+        static uint32 CreateConstraint(CWorld* World, Physics::SConstraintDesc Desc);
 
         /** Welds the two bodies rigidly at their current relative pose. */
         FUNCTION()

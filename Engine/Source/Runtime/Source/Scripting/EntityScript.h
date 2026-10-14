@@ -10,6 +10,7 @@
 #include "Input/InputEvent.h"
 #include "Networking/NetworkTypes.h"
 #include "ScriptReloadContext.h"
+#include "World/Entity/Components/MissingComponents.h"
 #include "EntityScript.generated.h"
 
 // The first statement of a FUNCTION(Rpc = ...) body, passed the function's parameters in order, the C++ form of calling a C# [Rpc] method.
@@ -23,6 +24,7 @@ namespace Lumina
     class FPropertySnapshot;
 
     // Where one routed call runs, decided the same way for NET_RPC and a C# [Rpc] method.
+    REFLECT()
     enum class ERpcRoute : uint8
     {
         RunHere,
@@ -30,16 +32,14 @@ namespace Lumina
         SendOnly,
     };
 
-    // Which side of the physics step a script's OnUpdate runs on. Mirrors LuminaSharp.EScriptPhase.
+    REFLECT()
     enum class EScriptUpdatePhase : uint8
     {
         PrePhysics = 0,
         PostPhysics = 1,
     };
 
-    /**
-     * Base for a script attached to a single entity.
-     */
+    /// Base for a script attached to a single entity.
     REFLECT(Scriptable)
     class RUNTIME_API CEntityScript : public CObject
     {
@@ -67,21 +67,21 @@ namespace Lumina
         FUNCTION()
         virtual void OnDetach() {}
 
-        /** The script load context was replaced. Nothing that lived in the old one survived, so anything
-         *  bound in OnAttach is unbound here and has to be bound again. OnAttach, OnReady and OnDetach do
-         *  not run for a reload; this is the whole of it. */
+        /// The script load context was replaced, so anything bound in OnAttach has to be bound again. No other lifecycle event runs for a reload.
         FUNCTION()
         virtual void OnReloaded(SScriptReloadContext Context) {}
 
-        /** One discrete input event (key/mouse press, move, scroll). Delivered only to entities carrying an
-         *  SInputComponent, and only while their viewport has game input focus -- see SInputSystem. */
+        /// One input event, delivered only to an entity with an SInputComponent while its viewport has game input focus.
         FUNCTION()
         virtual void OnInput(SInputEvent Event) {}
 
-        /** An authored action that changed this frame: pressed, released, or an axis off zero. A C# script
-         *  overriding this must call base, which is what feeds its SInputAction / SInputAxis bindings. */
+        /// An authored action that changed this frame. A C# override must call base, which feeds its input bindings.
         FUNCTION()
-        virtual void OnAction(FName Action, FInputActionState State) {}
+        virtual void OnAction(FName Action, SInputActionState State) {}
+
+        // The level changed and SPersistentComponent carried this script along, so anything found in the old level is gone.
+        FUNCTION()
+        virtual void OnTraveled() {}
 
         // A save game just wrote this running script's SaveGame fields back, so anything built from them is stale.
         FUNCTION()
@@ -91,15 +91,11 @@ namespace Lumina
         FUNCTION()
         virtual void OnSaving() {}
 
-        /** The entity this script is attached to. Valid from OnAttach onwards.
-         *  FUNCTION() so the C# base reads its entity from here rather than being handed one separately --
-         *  one owner for the value in both languages. Non-virtual, so it binds as an ordinary call, not a
-         *  ScriptEvent. */
+        /// The entity this script is attached to, valid from OnAttach on.
         FUNCTION()
         ECS::FEntity GetOwningEntity() const { return OwningEntity; }
 
-        /** The world this script's entity lives in, or null when the registry has no world (a bare registry
-         *  in a test). Resolved once at attach from the registry's CWorld* context singleton. */
+        /// The world this script's entity lives in, or null for a bare registry with no world.
         FUNCTION()
         CWorld* GetWorld() const { return OwningWorld; }
 
@@ -110,8 +106,7 @@ namespace Lumina
             OwningWorld  = InWorld;
         }
 
-        /** OnAttach has run. The driver sets the owner immediately before it, so this is the exact pairing
-         *  test: a script that was loaded or stamped but never adopted must not receive OnDetach. */
+        /// OnAttach has run, so a script loaded but never adopted gets no OnDetach.
         bool IsAttached() const { return OwningEntity != ECS::NullEntity; }
 
         FUNCTION()
@@ -121,18 +116,15 @@ namespace Lumina
         // Set when OnAttach or OnReady threw, so a half-built script keeps its OnDetach but never ticks.
         FUNCTION()
         bool IsFaulted() const { return bFaulted; }
+
+        // The managed boundary caught a throw from OnAttach or OnReady, and only it knows which script raised it.
+        FUNCTION(ScriptInternal)
         void MarkFaulted();
 
         bool ShouldTick() const { return bReady && !bFaulted; }
 
-        // A reload that reshapes a C# class replaces its instances, and the replacement carries on where the original was rather than attaching again.
-        void ContinueLifecycleOf(const CEntityScript& Original)
-        {
-            OwningEntity = Original.OwningEntity;
-            OwningWorld  = Original.OwningWorld;
-            bReady       = Original.bReady;
-            bFaulted     = Original.bFaulted;
-        }
+        // OnReloaded is what a reload delivers, so the replacement carries on where the original was rather than attaching again.
+        void OnReinstanced(CObject& Previous) override;
 
         //~ Networking, spelled the way LuminaSharp's Networking and EntityNetwork are. A standalone world answers as its own host.
 
@@ -149,12 +141,15 @@ namespace Lumina
         uint32 GetRpcCaller() const;
 
         // True on this thread while a received RPC or an owner's Sync write is being applied.
+        FUNCTION(ScriptInternal)
         static bool IsReceivingRpc();
 
         // The connection that sent what is being applied, or zero when nothing is.
+        FUNCTION(ScriptInternal)
         static uint32 GetReceivingCaller();
 
         // Resends the entity's replicated component fields. A PROPERTY(Sync) field needs no call, since it is checked every tick.
+        FUNCTION(ScriptInternal)
         void MarkNetDirty();
 
         // Called through NET_RPC. Sends the call where its FUNCTION(Rpc = ...) says and returns true when it should not also run here.
@@ -175,6 +170,31 @@ namespace Lumina
 
         // The same, reading the arguments out of a call frame laid out for Function.
         void SendRpcFrame(const FFunction& Function, const void* Frame);
+
+        //~ The C# [Rpc] and [Sync] runtime, which finds a function or field once and then addresses it by pointer.
+
+        // The reflected RPC named Name, or null when this script has none by that name.
+        FUNCTION(ScriptInternal)
+        void* FindRpcFunction(FName Name) const;
+
+        // PlanRpc for a function FindRpcFunction returned.
+        FUNCTION(ScriptInternal)
+        ERpcRoute PlanRpcCall(void* Function);
+
+        // A default call frame the caller fills slot by slot and hands to SendRpcCall, which frees it.
+        FUNCTION(ScriptInternal)
+        static void* MakeRpcFrame(void* Function);
+
+        FUNCTION(ScriptInternal)
+        void SendRpcCall(void* Function, void* Frame);
+
+        // The FromOwner Sync field named Name, or null when this script has none by that name.
+        FUNCTION(ScriptInternal)
+        void* FindSyncField(FName Name) const;
+
+        // Sends an owner's write of Field to the host, which validates and applies it as it would a C++ one.
+        FUNCTION(ScriptInternal)
+        void ForwardSyncField(void* Field);
 
         // An RPC or an owner's Sync write arrived for this script, read through the same FProperty::NetSerialize it was written with.
         void ReceiveRpc(uint32 RpcId, uint32 CallerId, const uint8* Payload, uint32 PayloadSize);
@@ -206,18 +226,22 @@ namespace Lumina
         void SyncArriving();
         void SyncArrived(const char* Names, uint32 NamesSize);
 
-        //~ Session events, the C++ side of LuminaSharp.INetworkListener.
+        //~ Session events, which a C# script overrides like any other script event.
 
         // Host. A client finished joining.
+        FUNCTION()
         virtual void OnConnected(uint32 ConnectionId) {}
 
         // Host. A client left, told before anything it owned changes hands.
+        FUNCTION()
         virtual void OnDisconnected(uint32 ConnectionId) {}
 
         // Client. This peer finished joining its host.
+        FUNCTION()
         virtual void OnJoinedHost() {}
 
         // Client. The session ended, or never came up, for Reason.
+        FUNCTION()
         virtual void OnLeftHost(ENetLeaveReason Reason) {}
 
         // The batched update's copy of this script's managed handle, trusted only while the generation still matches.
@@ -242,21 +266,7 @@ namespace Lumina
         FPropertySnapshot& EnsureSyncSnapshot();
     };
 
-    /** One script kept verbatim because its class was not loadable when the world was read. */
-    struct FPendingScript
-    {
-        FName          ClassName;
-        TVector<uint8> Bytes;
-
-        /** Replayed on restore so the held bytes are read exactly as the file wrote them. */
-        int32          FileVersion = 0;
-
-        // A package writes names and objects as indices into its own tables, so plain bytes cannot be read back alone.
-        FArchive::FDeferredReaderFactory MakeReader;
-    };
-
-    /** Holds the scripts attached to one entity. Language-agnostic: each element is a CEntityScript of
-     *  whatever CClass, native or minted-from-C#. */
+    /// Holds the scripts attached to one entity, each a CEntityScript of any class, native or minted from C#.
     REFLECT(Component, Category = "Gameplay")
     struct RUNTIME_API SEntityScriptComponent
     {
@@ -271,26 +281,20 @@ namespace Lumina
         SEntityScriptComponent(const SEntityScriptComponent& Other);
         SEntityScriptComponent& operator=(const SEntityScriptComponent& Other);
 
-        // Reflected so the object graph can be walked and repointed, NoSerialize because the component
-        // carries its own Serialize and a second, per-property path would fight it.
+        // Reflected so references can be walked and repointed, NoSerialize since the component serializes itself.
         PROPERTY(NoSerialize)
         TVector<TStrongObjectPtr<CEntityScript>> Scripts;
 
-        /** Unresolved at load, written back out untouched, retried on the next script reload. */
-        TVector<FPendingScript> Pending;
+        // Unresolved at load, written back with what its bytes refer to, retried on the next script reload.
+        TVector<SHeldValue> Pending;
 
         bool Serialize(FArchive& Ar);
     };
 
-    /**
-     * The whole script driver. Every function here is language-agnostic on purpose: adding C++ scripts cost
-     * nothing beyond this file existing, and adding a third language would cost nothing here either.
-     */
+    /// The script driver, which is the same for a C++ script and a C# one.
     namespace EntityScripts
     {
-        /** Creates a script of ScriptClass on Entity, runs OnAttach, and returns it (null if the class is not
-         *  a CEntityScript). OnReady is deferred to the first Tick, so a script can rely on every sibling
-         *  script on the entity existing by the time it runs. */
+        /// Creates a script on Entity and runs OnAttach, OnReady waiting for the first tick so every sibling exists by then.
         RUNTIME_API CEntityScript* Attach(ECS::FRegistry& Registry, ECS::FEntity Entity, CClass* ScriptClass);
 
         // A detached copy of Source's values with no owner and no lifecycle, for script data held outside a world.
@@ -316,8 +320,7 @@ namespace Lumina
         // Walks a snapshot, so an OnDetach that adds or removes scripts cannot invalidate the pool underneath.
         RUNTIME_API void DetachAllInRegistry(ECS::FRegistry& Registry);
 
-        //~ Lookup/mutation by class, backing the script-facing GetScript/AddScript/RemoveScript API. Class
-        //~ rather than C# type: a C++ script is found by exactly the same call.
+        // Lookup and mutation by class, which finds a C++ script the same way as a C# one.
 
         /** The first script on Entity whose class IS-A ScriptClass, or null. */
         RUNTIME_API CEntityScript* Find(ECS::FRegistry& Registry, ECS::FEntity Entity, const CClass* ScriptClass);
@@ -329,8 +332,7 @@ namespace Lumina
         /** Runs OnDetach on Script and removes it from its entity. Returns false if it was not attached. */
         RUNTIME_API bool Remove(ECS::FRegistry& Registry, ECS::FEntity Entity, CEntityScript* Script);
 
-        /** Delivers OnReloaded to every C#-backed script in every world. A C++ script is not reloaded, so
-         *  it is skipped rather than told about someone else's reload. */
+        /// Delivers OnReloaded to every C# script in every world, a C++ script having nothing to reload.
         RUNTIME_API void NotifyScriptsReloaded(EScriptReloadReason Reason, int32 Generation);
 
         /** Materializes scripts held back at load because their class was missing, returning the count. */
@@ -340,7 +342,7 @@ namespace Lumina
         RUNTIME_API void DispatchInput(ECS::FRegistry& Registry, ECS::FEntity Entity, const SInputEvent& Event);
 
         /** Delivers OnAction for each of ChangedActionIndices to every script on Entity. */
-        RUNTIME_API void DispatchActions(ECS::FRegistry& Registry, ECS::FEntity Entity, const FInputActionState* States,
+        RUNTIME_API void DispatchActions(ECS::FRegistry& Registry, ECS::FEntity Entity, const SInputActionState* States,
             int32 Count, TSpan<const int32> ChangedActionIndices);
 
     }

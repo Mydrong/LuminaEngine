@@ -922,12 +922,12 @@ namespace Lumina
             const uint32 Count = Math::Min(Raised, (uint32)PARTICLE_EVENT_CAPACITY);
             const FParticleEventGPU* Events = reinterpret_cast<const FParticleEventGPU*>(Copy + ParticleEventCountBytes);
 
-            TVector<FParticleCollision>& Hits = ParticleCollisionResults[Source.Entity];
+            TVector<SParticleCollision>& Hits = ParticleCollisionResults[Source.Entity];
             Hits.reserve(Hits.size() + Count);
             for (uint32 EventIndex = 0; EventIndex < Count; ++EventIndex)
             {
                 const FParticleEventGPU& Event = Events[EventIndex];
-                FParticleCollision& Hit = Hits.emplace_back();
+                SParticleCollision& Hit = Hits.emplace_back();
                 Hit.Position     = FVector3(Event.PositionSize);
                 Hit.Size         = Event.PositionSize.w;
                 Hit.Velocity     = FVector3(Event.VelocityFlags);

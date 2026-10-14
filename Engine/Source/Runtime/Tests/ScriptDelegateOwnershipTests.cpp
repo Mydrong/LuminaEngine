@@ -8,30 +8,16 @@ using namespace Lumina;
 // A managed binding hands its GCHandle to the delegate, so these pin down who releases it and when.
 namespace
 {
-    int32 GFreedContexts = 0;
-    void* GLastFreed = nullptr;
-
-    void CountingFree(void* Context)
-    {
-        ++GFreedContexts;
-        GLastFreed = Context;
-    }
-
     void NoopThunk(void*, const void*) {}
 
     struct FOwnershipFixture : ::testing::Test
     {
-        void SetUp() override
-        {
-            Previous = GFreeManagedDelegateContext;
-            GFreeManagedDelegateContext = &CountingFree;
-            GFreedContexts = 0;
-            GLastFreed = nullptr;
-        }
+        void SetUp() override { Baseline = GetLiveManagedBindingCount(); }
 
-        void TearDown() override { GFreeManagedDelegateContext = Previous; }
+        // A release is what settles the live count, so the count is how a test sees one happen.
+        size_t Held() const { return GetLiveManagedBindingCount() - Baseline; }
 
-        void (*Previous)(void*) = nullptr;
+        size_t Baseline = 0;
     };
 }
 
@@ -42,11 +28,10 @@ TEST_F(FOwnershipFixture, UnbindingReleasesTheManagedContext)
 
     const uint64 Id = Event.BindManaged(&NoopThunk, &Context);
     ASSERT_NE(Id, 0u);
-    EXPECT_EQ(GFreedContexts, 0);
+    EXPECT_EQ(Held(), 1u);
 
     EXPECT_TRUE(Event.UnbindManaged(Id));
-    EXPECT_EQ(GFreedContexts, 1);
-    EXPECT_EQ(GLastFreed, &Context);
+    EXPECT_EQ(Held(), 0u);
 }
 
 // The case the managed registry used to exist for: the delegate dies while a binding is still live.
@@ -58,10 +43,10 @@ TEST_F(FOwnershipFixture, DestroyingTheDelegateReleasesEveryManagedContext)
 
     Event->BindManaged(&NoopThunk, &First);
     Event->BindManaged(&NoopThunk, &Second);
-    EXPECT_EQ(GFreedContexts, 0);
+    EXPECT_EQ(Held(), 2u);
 
     Memory::Delete(Event);
-    EXPECT_EQ(GFreedContexts, 2);
+    EXPECT_EQ(Held(), 0u);
 }
 
 // A native listener owns its own callable, so retiring one must not run the managed release.
@@ -77,7 +62,7 @@ TEST_F(FOwnershipFixture, ANativeListenerIsNotReleasedAsManaged)
     EXPECT_EQ(Event.GetManagedBindingCount(), 1u);
 
     EXPECT_TRUE(Event.Remove(Native));
-    EXPECT_EQ(GFreedContexts, 0) << "retiring a native listener released a managed context";
+    EXPECT_EQ(Held(), 1u) << "retiring a native listener released a managed context";
     EXPECT_EQ(Event.GetManagedBindingCount(), 1u);
 }
 
@@ -129,7 +114,6 @@ TEST_F(FOwnershipFixture, ClearingForReloadReleasesEveryManagedContextEverywhere
 
     ClearAllManagedDelegateBindings();
 
-    EXPECT_EQ(GFreedContexts, 3);
     EXPECT_EQ(GetLiveManagedBindingCount(), 0u);
     EXPECT_EQ(First.GetBindingCount(), 0u);
 
@@ -146,12 +130,12 @@ TEST_F(FOwnershipFixture, AnUnboundDelegateIsNotVisitedByTheReloadSweep)
         TScriptDelegate<int32> Event;
         const uint64 Id = Event.BindManaged(&NoopThunk, &Context);
         Event.UnbindManaged(Id);
-        EXPECT_EQ(GFreedContexts, 1);
+        EXPECT_EQ(Held(), 0u);
     }
 
     // A stale entry here would be a sweep over freed memory rather than a no-op.
     ClearAllManagedDelegateBindings();
-    EXPECT_EQ(GFreedContexts, 1);
+    EXPECT_EQ(Held(), 0u);
 }
 
 // Component storage relocates by move-construct and destroy, which must not cost the listeners.
@@ -166,7 +150,7 @@ TEST_F(FOwnershipFixture, RelocatingTheDelegateKeepsEveryListener)
     auto* Relocated = Memory::New<TScriptDelegate<int32>>(std::move(*Source));
     Memory::Delete(Source);
 
-    EXPECT_EQ(GFreedContexts, 0);
+    EXPECT_EQ(Held(), 1u);
     EXPECT_EQ(Relocated->GetBindingCount(), 2u);
     EXPECT_EQ(Relocated->GetManagedBindingCount(), 1u);
 
@@ -174,7 +158,7 @@ TEST_F(FOwnershipFixture, RelocatingTheDelegateKeepsEveryListener)
     EXPECT_EQ(Calls, 1);
 
     Memory::Delete(Relocated);
-    EXPECT_EQ(GFreedContexts, 1);
+    EXPECT_EQ(Held(), 0u);
 }
 
 // The managed binding remembers the address it bound at, so unbinding has to find the listener after a move.
@@ -189,12 +173,12 @@ TEST_F(FOwnershipFixture, UnbindingFindsAListenerThatWasRelocated)
     Memory::Delete(Source);
 
     EXPECT_TRUE(FScriptDelegateBase::UnbindManagedAnywhere(BoundAt, Id));
-    EXPECT_EQ(GFreedContexts, 1);
+    EXPECT_EQ(Held(), 0u);
     EXPECT_EQ(Relocated.GetBindingCount(), 0u);
 
     // The relocated delegate left the sweep set with its last managed listener.
     ClearAllManagedDelegateBindings();
-    EXPECT_EQ(GFreedContexts, 1);
+    EXPECT_EQ(Held(), 0u);
 }
 
 // Assigning a value is not a new identity, so the destination keeps its own listeners.
@@ -207,5 +191,5 @@ TEST_F(FOwnershipFixture, AssigningOverADelegateKeepsItsListeners)
 
     Target = std::move(Value);
     EXPECT_EQ(Target.GetManagedBindingCount(), 1u);
-    EXPECT_EQ(GFreedContexts, 0);
+    EXPECT_EQ(Held(), 1u);
 }

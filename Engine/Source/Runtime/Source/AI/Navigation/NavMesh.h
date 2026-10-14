@@ -9,7 +9,7 @@ class dtNavMeshQuery;
 
 namespace Lumina
 {
-    struct FNavTileData;
+    struct SNavTileData;
 
     /** World-space AABB of a loaded nav tile + its grid coords. */
     struct FNavTileBounds
@@ -45,7 +45,7 @@ namespace Lumina
 
         /** Tiles is consumed; each blob is copied into Detour memory. Every non-empty tile is made resident,
          *  so MaxResidentTiles must be at least that many. */
-        bool Initialize(const FVector3& Origin, float TileWorldSize, int32 MaxResidentTiles, int32 MaxPolysPerTile, TVector<FNavTileData>&& Tiles);
+        bool Initialize(const FVector3& Origin, float TileWorldSize, int32 MaxResidentTiles, int32 MaxPolysPerTile, TVector<SNavTileData>&& Tiles);
 
         void Shutdown();
 
@@ -55,7 +55,7 @@ namespace Lumina
         bool FindPath(const FVector3& Start, const FVector3& End, const FNavQueryFilter& Filter, FNavPath& Out) const;
 
         /** Walks the surface from Start toward End. False when the query could not run; Out.bHit says whether a wall stopped it. */
-        bool Raycast(const FVector3& Start, const FVector3& End, const FNavQueryFilter& Filter, FNavRaycastResult& Out) const;
+        bool Raycast(const FVector3& Start, const FVector3& End, const FNavQueryFilter& Filter, SNavRaycastResult& Out) const;
 
         bool FindRandomPoint(const FVector3& Center, float Radius, const FNavQueryFilter& Filter, FVector3& Out) const;
 

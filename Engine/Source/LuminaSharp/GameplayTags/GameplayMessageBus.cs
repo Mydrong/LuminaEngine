@@ -57,7 +57,7 @@ public readonly unsafe struct GameplayMessageBus
     {
         if (!Owner.IsNull && IsLive)
         {
-            Native.MessageBusUnsubscribeAll(World!.WorldHandle, Owner.Id);
+            CGameplayMessageLibrary.UnsubscribeAll(World!, Owner);
         }
     }
 
@@ -91,10 +91,9 @@ public readonly unsafe struct GameplayMessageBus
             return GameplayMessageSubscription.Empty;
         }
 
-        // Handed to the native bus, which frees it when the listener goes.
-        GCHandle Handle = GCHandle.Alloc(new MessageInvoker<T>(Handler));
-        ulong Id = Native.MessageBusSubscribe(World!.WorldHandle, Channel.Id, Owner.Id, MessageType<T>.Key, (uint)Match,
-                                              MessageInvoker.ThunkPtr, GCHandle.ToIntPtr(Handle));
+        // Handed to the native bus, which releases it when the listener goes.
+        ulong Id = CGameplayMessageLibrary.Subscribe(World!, Channel.Id, Owner, MessageType<T>.Key, Match == GameplayTagMatch.Exact,
+                                                     ScriptCallback.Bind(new MessageInvoker<T>(Handler)));
         return Id == 0 ? GameplayMessageSubscription.Empty : new GameplayMessageSubscription(World, Id);
     }
 
@@ -105,30 +104,28 @@ public readonly unsafe struct GameplayMessageBus
             return;
         }
 
-        ulong Handle = World!.WorldHandle;
-        uint Include = IncludeSelf ? 1u : 0u;
         switch (MessageType<T>.Kind)
         {
             case PayloadKind.Bytes:
             {
                 T Copy = Message;
-                Native.MessageBusSend(Handle, (uint)Route, Target.Id, Channel.Id, (uint)PayloadKind.Bytes, MessageType<T>.Key,
-                                      (IntPtr)Unsafe.AsPointer(ref Copy), (uint)Unsafe.SizeOf<T>(), IntPtr.Zero, Include);
+                CGameplayMessageLibrary.Send(World!, (uint)Route, Target, Channel.Id, (uint)PayloadKind.Bytes, MessageType<T>.Key,
+                                      (IntPtr)Unsafe.AsPointer(ref Copy), (uint)Unsafe.SizeOf<T>(), IntPtr.Zero, IncludeSelf);
                 break;
             }
             case PayloadKind.Struct:
             {
-                NativeStruct Struct = (NativeStruct)(object)Message;
-                Native.MessageBusSend(Handle, (uint)Route, Target.Id, Channel.Id, (uint)PayloadKind.Struct, MessageType<T>.Key,
-                                      Struct.Handle, 0, MessageType<T>.Struct, Include);
+                T Copy = Message;
+                CGameplayMessageLibrary.Send(World!, (uint)Route, Target, Channel.Id, (uint)PayloadKind.Struct, MessageType<T>.Key,
+                                      Unsafe.As<T, NativeRef>(ref Copy).Address, 0, MessageType<T>.Struct, IncludeSelf);
                 break;
             }
             default:
             {
                 // The native bus frees the handle once the message is delivered.
                 GCHandle Payload = GCHandle.Alloc(Message);
-                Native.MessageBusSend(Handle, (uint)Route, Target.Id, Channel.Id, (uint)PayloadKind.Managed, MessageType.ManagedKey,
-                                      GCHandle.ToIntPtr(Payload), 0, IntPtr.Zero, Include);
+                CGameplayMessageLibrary.Send(World!, (uint)Route, Target, Channel.Id, (uint)PayloadKind.Managed, MessageType.ManagedKey,
+                                      GCHandle.ToIntPtr(Payload), 0, IntPtr.Zero, IncludeSelf);
                 break;
             }
         }
@@ -185,18 +182,23 @@ internal static class MessageType<T>
         Type Type = typeof(T);
         string? NativeName = Type.GetCustomAttribute<NativeTypeAttribute>()?.Name;
 
-        if (Type.IsValueType && !RuntimeHelpers.IsReferenceOrContainsReferences<T>())
+        // Checked first, since a struct handle is also an unmanaged value and would otherwise send its own bytes.
+        if (NativeName != null && Type.IsValueType && typeof(INativeStruct).IsAssignableFrom(Type))
+        {
+            Kind = PayloadKind.Struct;
+            Key = CGameplayMessageLibrary.GetMessageTypeKey(NativeName);
+            Struct = Native.FindStructByName(NativeName);
+            Wrap = Pointer =>
+            {
+                NativeRef Ref = new(Pointer);
+                return Unsafe.As<NativeRef, T>(ref Ref);
+            };
+        }
+        else if (Type.IsValueType && !RuntimeHelpers.IsReferenceOrContainsReferences<T>())
         {
             // A generated mirror keys on its native name, so C++ listeners of that struct hear it.
             Kind = PayloadKind.Bytes;
-            Key = Native.MessageBusTypeKey(NativeName ?? "cs:" + Type.FullName);
-        }
-        else if (NativeName != null && typeof(NativeStruct).IsAssignableFrom(Type))
-        {
-            Kind = PayloadKind.Struct;
-            Key = Native.MessageBusTypeKey(NativeName);
-            Struct = Native.FindStructByName(NativeName);
-            Wrap = Pointer => (T)Activator.CreateInstance(Type, Pointer)!;
+            Key = CGameplayMessageLibrary.GetMessageTypeKey(NativeName ?? "cs:" + Type.FullName);
         }
         else
         {
@@ -206,17 +208,16 @@ internal static class MessageType<T>
     }
 }
 
-internal abstract unsafe class MessageInvoker
+internal abstract unsafe class MessageInvoker : ScriptClosure
 {
     public abstract bool Invoke(GameplayMessageData* Message);
 
-    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
-    private static uint Thunk(IntPtr Context, GameplayMessageData* Message)
+    public sealed override ulong Invoke(ulong Payload)
     {
         // One throwing listener must not starve the rest, nor surface inside the sender.
         try
         {
-            return GCHandle.FromIntPtr(Context).Target is MessageInvoker Invoker && Invoker.Invoke(Message) ? 1u : 0u;
+            return Invoke((GameplayMessageData*)Payload) ? 1u : 0u;
         }
         catch (Exception Exception)
         {
@@ -224,8 +225,6 @@ internal abstract unsafe class MessageInvoker
             return 0;
         }
     }
-
-    public static readonly IntPtr ThunkPtr = (IntPtr)(delegate* unmanaged[Cdecl]<IntPtr, GameplayMessageData*, uint>)&Thunk;
 }
 
 internal sealed unsafe class MessageInvoker<T> : MessageInvoker
@@ -276,7 +275,7 @@ public sealed class GameplayMessageSubscription : IDisposable
         // A world that is already gone took its listeners with it.
         if (Id != 0 && World is { IsValid: true })
         {
-            Native.MessageBusUnsubscribe(World.WorldHandle, Id);
+            CGameplayMessageLibrary.Unsubscribe(World, Id);
         }
         Id = 0;
     }

@@ -8,6 +8,7 @@
 
 #include "UI/Properties/PropertyTable.h"
 #include "UI/Tools/AssetEditors/AssetEditorTool.h"
+#include "UI/Tools/AssetEditors/Animation/AnimPreview.h"
 
 namespace Lumina
 {
@@ -57,6 +58,7 @@ namespace Lumina
 
         void SyncPreviewToPlayhead(CAnimationMontage* Montage);
         SSimpleAnimationComponent* GetPreviewComponent() const;
+        void CreatePreviewEntity();
 
         void MarkMontageDirty();
         float SnapTime(float Time, float Duration) const;
@@ -98,5 +100,6 @@ namespace Lumina
 
         ECS::FEntity DirectionalLightEntity = ECS::NullEntity;
         ECS::FEntity MeshEntity = ECS::NullEntity;
+        FPreviewMeshSelection PreviewMeshSelection;
     };
 }

@@ -6,7 +6,7 @@
 
 namespace Lumina
 {
-    // Picker for FUIDocumentRef slots, listing the project's .rml documents by name the way an asset slot lists assets.
+    // Picker for SUIDocumentRef slots, listing the project's .rml documents by name the way an asset slot lists assets.
     class FUIDocumentPropertyCustomization : public IPropertyTypeCustomization
     {
     public:

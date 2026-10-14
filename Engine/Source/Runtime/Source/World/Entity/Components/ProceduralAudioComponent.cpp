@@ -27,7 +27,7 @@ namespace Lumina
 			}
 		}
 
-		FAudioPlayParams Params;
+		SAudioPlayParams Params;
 		Params.Volume       = Volume;
 		Params.Pitch        = Pitch;
 		Params.bSpatialized = bSpatialized;
@@ -44,7 +44,7 @@ namespace Lumina
 		if (Audio::HasDevice() && bPlaying && ActiveHandle.IsValid())
 		{
 			Audio::Context().StopSound(ActiveHandle, EAudioStopMode::Immediate);
-			ActiveHandle = FAudioHandle::Invalid();
+			ActiveHandle = SAudioHandle::Invalid();
 			bPlaying = false;
 		}
 	}

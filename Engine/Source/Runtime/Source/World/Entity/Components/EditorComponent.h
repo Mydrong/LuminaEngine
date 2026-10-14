@@ -11,7 +11,7 @@ namespace Lumina
 
     // Viewport picks on any descendant resolve up to the nearest ancestor carrying this tag.
     REFLECT(Component, HideInComponentList)
-    struct RUNTIME_API FSelectionRoot
+    struct RUNTIME_API SSelectionRoot
     {
         GENERATED_BODY()
     };

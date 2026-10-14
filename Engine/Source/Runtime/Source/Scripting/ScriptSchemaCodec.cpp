@@ -5,6 +5,7 @@
 
 #include "Containers/Name.h"
 #include "Core/Object/ObjectCore.h"
+#include "ManagedTypeRegistry.h"
 #include "Log/Log.h"
 #include "Memory/SmartPtr.h"
 
@@ -12,7 +13,7 @@ namespace Lumina::Scripting
 {
     namespace
     {
-        // Little-endian cursor over the managed-written schema blob (see ScriptProperties.BuildSchemaBlob).
+        // Little-endian cursor over the schema blob the managed Serializer writes.
         struct FBlobReader
         {
             const uint8* P;
@@ -43,8 +44,7 @@ namespace Lumina::Scripting
             }
         };
 
-        // Every record states its tag and byte length first, so a reader that does not understand a trailing
-        // field skips it and resyncs at the next boundary rather than misreading the rest of the buffer.
+        // Each record states its tag and byte length first, so a reader skips a field it does not know and resyncs.
         struct FRecordScope
         {
             FBlobReader&        Reader;
@@ -76,18 +76,6 @@ namespace Lumina::Scripting
         };
 
         FString NumberToString(double V) { char Buf[32]; snprintf(Buf, sizeof(Buf), "%g", V); return FString(Buf); }
-
-        // Append-cursor over a byte vector; mirror of the managed FBlobReader (little-endian).
-        struct FBlobWriter
-        {
-            TVector<uint8>& B;
-            void Raw(const void* P, size_t N) { B.insert(B.end(), (const uint8*)P, (const uint8*)P + N); }
-            void U8(uint8 V) { B.push_back(V); }
-            void I32(int32 V) { Raw(&V, 4); }
-            void I64(int64 V) { Raw(&V, 8); }
-            void F64(double V) { Raw(&V, 8); }
-            void Str(FStringView S) { I32((int32)S.size()); Raw(S.data(), S.size()); }
-        };
 
         // Folds a field's alias list into the field metadata as a ';'-joined "Aliases" value.
         void ReadAliasesInto(FBlobReader& R, FScriptExportMeta& Meta)
@@ -149,8 +137,6 @@ namespace Lumina::Scripting
             }
         }
 
-        void ReadValue(FBlobReader& R, FScriptPropertyValue& Out);
-
         FScriptExportField ReadField(FBlobReader& R, bool bTopLevel);
 
         TSharedPtr<FScriptExportType> ReadType(FBlobReader& R)
@@ -166,32 +152,14 @@ namespace Lumina::Scripting
                 {
                     Type->EnumName = FName(R.Str().c_str());
                     Type->EnumUnderlying = static_cast<EPropertyTypeFlags>(R.U8());
-                    const int32 N = R.I32();
-                    for (int32 i = 0; i < N; ++i)
-                    {
-                        FScriptEnumEntry E;
-                        E.Name = FName(R.Str().c_str());
-                        E.Value = R.I64();
-                        Type->EnumEntries.push_back(E);
-                    }
                     break;
                 }
                 case EPropertyTypeFlags::Struct:
                 {
-                    // The reader tells the two apart by whether a native name is present.
-                    const FString NativeName = R.Str();
-                    if (!NativeName.empty())
-                    {
-                        Type->NativeName = FName(NativeName.c_str());
-                    }
-                    Type->ManagedSize = (uint32)R.I32();
-                    const int32 N = R.I32();
-                    for (int32 i = 0; i < N; ++i)
-                    {
-                        Type->Fields.push_back(ReadField(R, /*bTopLevel*/ false));
-                    }
+                    Type->NativeName = FName(R.Str().c_str());
                     break;
                 }
+                case EPropertyTypeFlags::Object:
                 case EPropertyTypeFlags::SoftObject:
                 {
                     Type->TargetClass = FName(R.Str().c_str());
@@ -212,157 +180,11 @@ namespace Lumina::Scripting
                 case EPropertyTypeFlags::InstancedStruct:
                 {
                     Type->BaseName = FName(R.Str().c_str());
-                    const int32 NumCandidates = R.I32();
-                    for (int32 c = 0; c < NumCandidates; ++c)
-                    {
-                        const FRecordScope CandidateScope(R, EScriptSchemaRecord::Candidate);
-
-                        FScriptExportInstanceCandidate Candidate;
-                        Candidate.TypeName = FName(R.Str().c_str());
-                        const int32 NumFields = R.I32();
-                        for (int32 i = 0; i < NumFields; ++i)
-                        {
-                            Candidate.Fields.push_back(ReadField(R, /*bTopLevel*/ false));
-                        }
-                        Type->Candidates.push_back(std::move(Candidate));
-                    }
                     break;
                 }
                 default: break;
             }
             return Type;
-        }
-
-        // Recursive self-describing value reader; each value leads with its kind byte.
-        void ReadValue(FBlobReader& R, FScriptPropertyValue& Out)
-        {
-            // (forward-declared above ReadType, which reads a default for every nested field)
-            Out = FScriptPropertyValue{};
-            Out.Kind = static_cast<EScriptValueKind>(R.U8());
-            switch (Out.Kind)
-            {
-                case EScriptValueKind::Bool:   Out.AsBool = R.U8() != 0; break;
-                case EScriptValueKind::Int:    Out.AsInt = R.I64(); break;
-                case EScriptValueKind::Double: Out.AsDouble = R.F64(); break;
-                case EScriptValueKind::String: Out.AsString = R.Str(); break;
-                case EScriptValueKind::Array:
-                {
-                    const int32 N = R.I32();
-                    Out.Items.reserve(N > 0 ? N : 0);
-                    for (int32 i = 0; i < N; ++i)
-                    {
-                        FScriptPropertyValue E;
-                        ReadValue(R, E);
-                        Out.Items.push_back(E);
-                    }
-                    break;
-                }
-                case EScriptValueKind::Map:
-                {
-                    // count pairs, each [key, value]; stored interleaved in Items (Items[2i]=key, [2i+1]=value).
-                    const int32 N = R.I32();
-                    Out.Items.reserve(N > 0 ? N * 2 : 0);
-                    for (int32 i = 0; i < N; ++i)
-                    {
-                        FScriptPropertyValue K;
-                        ReadValue(R, K);
-                        Out.Items.push_back(std::move(K));
-                        FScriptPropertyValue Val;
-                        ReadValue(R, Val);
-                        Out.Items.push_back(std::move(Val));
-                    }
-                    break;
-                }
-                case EScriptValueKind::Nested:
-                {
-                    const int32 N = R.I32();
-                    Out.StructFields.reserve(N > 0 ? N : 0);
-                    for (int32 i = 0; i < N; ++i)
-                    {
-                        FScriptPropertyEntry E;
-                        E.Name = FName(R.Str().c_str());
-                        ReadValue(R, E.Value);
-                        Out.StructFields.push_back(E);
-                    }
-                    break;
-                }
-                case EScriptValueKind::Instance:
-                {
-                    // Chosen type name, then (when non-empty) a field count and each field's name and value.
-                    Out.AsString = R.Str();
-                    if (!Out.AsString.empty())
-                    {
-                        const int32 N = R.I32();
-                        Out.StructFields.reserve(N > 0 ? N : 0);
-                        for (int32 i = 0; i < N; ++i)
-                        {
-                            FScriptPropertyEntry E;
-                            E.Name = FName(R.Str().c_str());
-                            ReadValue(R, E.Value);
-                            Out.StructFields.push_back(E);
-                        }
-                    }
-                    break;
-                }
-                default: break;
-            }
-        }
-
-        // Mirror of ReadValue.
-        void WriteValue(FBlobWriter& W, const FScriptPropertyValue& V)
-        {
-            W.U8((uint8)V.Kind);
-            switch (V.Kind)
-            {
-                case EScriptValueKind::Bool:   W.U8(V.AsBool ? 1 : 0); break;
-                case EScriptValueKind::Int:    W.I64(V.AsInt); break;
-                case EScriptValueKind::Double: W.F64(V.AsDouble); break;
-                case EScriptValueKind::String: W.Str(FStringView(V.AsString.c_str(), V.AsString.size())); break;
-                case EScriptValueKind::Array:
-                {
-                    W.I32((int32)V.Items.size());
-                    for (const FScriptPropertyValue& E : V.Items)
-                    {
-                        WriteValue(W, E);
-                    }
-                    break;
-                }
-                case EScriptValueKind::Map:
-                {
-                    // Items are the interleaved [key, value] pairs; the wire leads with the PAIR count.
-                    W.I32((int32)(V.Items.size() / 2));
-                    for (const FScriptPropertyValue& E : V.Items)
-                    {
-                        WriteValue(W, E);
-                    }
-                    break;
-                }
-                case EScriptValueKind::Nested:
-                {
-                    W.I32((int32)V.StructFields.size());
-                    for (const FScriptPropertyEntry& E : V.StructFields)
-                    {
-                        W.Str(FStringView(E.Name.c_str()));
-                        WriteValue(W, E.Value);
-                    }
-                    break;
-                }
-                case EScriptValueKind::Instance:
-                {
-                    W.Str(FStringView(V.AsString.c_str(), V.AsString.size()));
-                    if (!V.AsString.empty())
-                    {
-                        W.I32((int32)V.StructFields.size());
-                        for (const FScriptPropertyEntry& E : V.StructFields)
-                        {
-                            W.Str(FStringView(E.Name.c_str()));
-                            WriteValue(W, E.Value);
-                        }
-                    }
-                    break;
-                }
-                default: break;
-            }
         }
 
         // The wire format is read in exactly one place, whichever managed export produced it.
@@ -382,7 +204,6 @@ namespace Lumina::Scripting
             }
 
             Field.Type = ReadType(R);
-            ReadValue(R, Field.Default);
             return Field;
         }
 
@@ -405,11 +226,17 @@ namespace Lumina::Scripting
             }
             Out.Flags = R.P < Scope.RecordEnd ? R.U32() : 0u;
 
+            const int32 MetaCount = R.P < Scope.RecordEnd ? R.I32() : 0;
+            for (int32 i = 0; i < MetaCount && !R.bError; ++i)
+            {
+                const FString Key = R.Str();
+                Out.Meta.Set(FName(Key.c_str()), R.Str());
+            }
+
             return !R.bError && !Out.Name.IsNone();
         }
 
-        bool ParseSchemaBlobInternal(const TVector<uint8>& Blob, FScriptExportSchema& OutSchema,
-            TVector<FScriptPropertyEntry>& OutDefaults)
+        bool ParseSchemaBlobInternal(const TVector<uint8>& Blob, FScriptExportSchema& OutSchema)
         {
             if (Blob.empty())
             {
@@ -436,18 +263,10 @@ namespace Lumina::Scripting
             const int32 Count = R.I32();
             for (int32 i = 0; i < Count; ++i)
             {
-                FScriptExportField Field = ReadField(R, /*bTopLevel*/ true);
-
-                FScriptPropertyEntry Entry;
-                Entry.Name = Field.Name;
-                Entry.Value = Field.Default;
-
-                OutSchema.Fields.push_back(std::move(Field));
-                OutDefaults.push_back(std::move(Entry));
+                OutSchema.Fields.push_back(ReadField(R, /*bTopLevel*/ true));
             }
 
-            // Written after the fields, so a reader that stopped at their count simply never sees them and a
-            // buffer from before functions existed leaves the list empty rather than failing.
+            // Written after the fields, so an older buffer without them leaves the list empty.
             if (!R.bError && R.Remaining() > 0)
             {
                 const int32 FunctionCount = R.I32();
@@ -470,36 +289,88 @@ namespace Lumina::Scripting
         }
     }
 
-    bool ParseSchemaBlob(const TVector<uint8>& Blob, FScriptExportSchema& OutSchema,
-        TVector<FScriptPropertyEntry>& OutDefaults)
+    bool ParseSchemaBlob(const TVector<uint8>& Blob, FScriptExportSchema& OutSchema)
     {
-        return ParseSchemaBlobInternal(Blob, OutSchema, OutDefaults);
+        return ParseSchemaBlobInternal(Blob, OutSchema);
     }
 
-    void ParseButtonsBlob(const TVector<uint8>& Blob, TVector<FScriptButton>& OutButtons)
+    bool ParseTypeManifest(const TVector<uint8>& Blob, TVector<FManagedTypeDefinition>& OutTypes,
+        TVector<FManagedTypeAlias>& OutAliases)
     {
-        OutButtons.clear();
-        if (Blob.empty())
-        {
-            return;
-        }
+        OutTypes.clear();
+        OutAliases.clear();
 
         FBlobReader R{ Blob.data(), Blob.data() + Blob.size() };
-        const int32 Count = R.I32();
-        OutButtons.reserve(Count > 0 ? Count : 0);
-        for (int32 i = 0; i < Count; ++i)
+        if (R.U32() != kTypeManifestMagic || R.U16() != kTypeManifestVersion)
         {
-            FScriptButton Button;
-            Button.Method = R.Str();
-            Button.Label = R.Str();
-            Button.Tooltip = R.Str();
-            OutButtons.push_back(std::move(Button));
+            LOG_ERROR("Script type manifest has a bad header; the managed and native halves are out of date with each other.");
+            return false;
         }
-    }
 
-    void WriteScriptValue(TVector<uint8>& OutBytes, const FScriptPropertyValue& Value)
-    {
-        FBlobWriter W{ OutBytes };
-        WriteValue(W, Value);
+        const int32 TypeCount = R.I32();
+        for (int32 Index = 0; Index < TypeCount && !R.bError; ++Index)
+        {
+            FManagedTypeDefinition& Type = OutTypes.emplace_back();
+            Type.Kind = static_cast<EManagedTypeKind>(R.U8());
+            Type.TypeName = FName(R.Str().c_str());
+            Type.NativeBaseName = R.Str();
+
+            constexpr uint8 AbstractFlag = 1;
+            Type.bAbstract = (R.U8() & AbstractFlag) != 0;
+
+            const int32 OverrideCount = R.I32();
+            for (int32 Override = 0; Override < OverrideCount && !R.bError; ++Override)
+            {
+                Type.OverriddenEvents.push_back(R.Str());
+            }
+
+            const int32 MetaCount = R.I32();
+            for (int32 Meta = 0; Meta < MetaCount && !R.bError; ++Meta)
+            {
+                FString Key = R.Str();
+                FString Value = R.Str();
+                Type.Meta.emplace_back(std::move(Key), std::move(Value));
+            }
+
+            if (Type.Kind == EManagedTypeKind::Enum)
+            {
+                Type.EnumUnderlying = static_cast<EPropertyTypeFlags>(R.U8());
+                const int32 EntryCount = R.I32();
+                for (int32 Entry = 0; Entry < EntryCount && !R.bError; ++Entry)
+                {
+                    FScriptEnumEntry& Added = Type.EnumEntries.emplace_back();
+                    Added.Name = FName(R.Str().c_str());
+                    Added.Value = R.I64();
+                }
+                continue;
+            }
+
+            const int32 SchemaLength = R.I32();
+            if (SchemaLength < 0 || R.Remaining() < (size_t)SchemaLength)
+            {
+                R.bError = true;
+                break;
+            }
+            const TVector<uint8> Schema(R.P, R.P + SchemaLength);
+            R.SeekTo(R.P + SchemaLength);
+            Type.bHasSchema = SchemaLength > 0 && ParseSchemaBlob(Schema, Type.Schema);
+        }
+
+        const int32 AliasCount = R.bError ? 0 : R.I32();
+        for (int32 Index = 0; Index < AliasCount && !R.bError; ++Index)
+        {
+            FManagedTypeAlias& Alias = OutAliases.emplace_back();
+            Alias.OldName = R.Str();
+            Alias.NewName = R.Str();
+        }
+
+        if (R.bError)
+        {
+            LOG_ERROR("Script type manifest is truncated; no script types were published this load.");
+            OutTypes.clear();
+            OutAliases.clear();
+            return false;
+        }
+        return true;
     }
 }

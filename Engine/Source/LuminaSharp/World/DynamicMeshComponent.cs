@@ -5,7 +5,7 @@ using LuminaSharp;
 namespace Lumina;
 
 /// Hand-written ergonomic half of SDynamicMeshComponent (the rest is Reflector-generated). Set streams then Commit; positions and indices required, normals derived if absent. Call on the game thread.
-public unsafe partial class SDynamicMeshComponent
+public readonly unsafe partial struct SDynamicMeshComponent
 {
     /// Vertex positions (one per vertex). Required.
     public void SetPositions(ReadOnlySpan<FVector3> Positions)

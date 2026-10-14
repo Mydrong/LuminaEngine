@@ -10,6 +10,7 @@
 #include "Core/Math/Math.h"
 #include "Memory/SmartPtr.h"
 #include "UI/Tools/AssetEditors/AssetEditorTool.h"
+#include "UI/Tools/AssetEditors/Animation/AnimPreview.h"
 #include "Renderer/SkeletonResource.h"
 
 namespace Lumina
@@ -52,9 +53,9 @@ namespace Lumina
         void HandleGridInput();
 
         CSkeleton* GetSkeleton();
-        FSkeletonResource* GetSkeletonResource();
 
         void RefreshPreviewMesh();
+        FSkeletonResource* GetPreviewSkeletonResource() const;
 
         // Runs the same weight -> sample -> fold recipe the VM's SampleBlendSpace opcode does, so what
         // the viewport shows is what the runtime will produce rather than an editor-only approximation.
@@ -70,7 +71,9 @@ namespace Lumina
 
         int32 FindSampleAtCanvasPos(const ImVec2& CanvasPosition) const;
 
-        void AddSampleAt(const FVector2& AxisPosition);
+        void AddSampleAt(const FVector2& AxisPosition, CAnimation* Clip = nullptr);
+        void AssignClipToSample(int32 SampleIndex, CAnimation* Clip);
+        void HandleClipDrop(const ImVec2& MousePos);
         void RemoveSampleAt(int32 SampleIndex);
 
         void SyncSampleTable();
@@ -91,6 +94,7 @@ namespace Lumina
         ImVec2                      CanvasMin = ImVec2(0.0f, 0.0f);
         ImVec2                      CanvasSize = ImVec2(1.0f, 1.0f);
 
+        FPreviewMeshSelection       PreviewMeshSelection;
         ECS::FEntity                MeshEntity = ECS::NullEntity;
         ECS::FEntity                LightEntity = ECS::NullEntity;
 

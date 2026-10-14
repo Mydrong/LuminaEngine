@@ -6,6 +6,7 @@
 #include "Core/Engine/Engine.h"
 #include "Core/Math/Hash/Hash.h"
 #include "Core/Object/Package/Package.h"
+#include "FileSystem/FileSystem.h"
 #include "Renderer/RenderManager.h"
 #include "Renderer/ShaderLibrary.h"
 #include "Renderer/ShaderPaths.h"
@@ -16,7 +17,7 @@
 
 namespace Lumina
 {
-    bool FParticleParameter::Serialize(FArchive& Ar)
+    bool SParticleParameter::Serialize(FArchive& Ar)
     {
         Ar << Name;
         Ar << Type;
@@ -108,6 +109,17 @@ namespace Lumina
 #endif
     }
 
+    bool CParticleEmitter::IsAsset() const
+    {
+        const CPackage* Package = GetPackage();
+        if (Package == nullptr)
+        {
+            return false;
+        }
+        const FFixedString Path = Package->GetPackagePath();
+        return GetName() == FName(VFS::FileName(FStringView(Path.c_str(), Path.size()), true));
+    }
+
     void CParticleEmitter::OnDestroy()
     {
         CObject::OnDestroy();
@@ -192,21 +204,27 @@ namespace Lumina
     void CParticleSystem::PostLoad()
     {
         LUMINA_MEMORY_SCOPE("Particles");
+        // A shared emitter asset that was deleted leaves an empty slot nothing can draw or edit.
+        if (const size_t Missing = Emitters.RemoveAllBy([](const TStrongObjectPtr<CParticleEmitter>& Emitter) { return !Emitter.IsValid(); }))
+        {
+            LOG_WARN("Particle system '{}' dropped {} emitter(s) whose asset no longer exists.", GetName().c_str(), Missing);
+        }
+
         // Emitters is the only thing every consumer indexes, so an empty one gets a default instead.
         if (Emitters.empty())
         {
             AddEmitter();
         }
 
-        // PostLoad commits their shader binaries, and a nested export gets none from the outer load.
+        // A nested export gets no PostLoad from the outer load, while a shared emitter asset already had its own.
         bool bNeedsCompile = false;
         for (const TStrongObjectPtr<CParticleEmitter>& Emitter : Emitters)
         {
-            if (Emitter.IsValid())
+            if (Emitter->GetPackage() == GetPackage())
             {
                 Emitter->PostLoad();
-                bNeedsCompile |= Emitter->NeedsShaderCompile();
             }
+            bNeedsCompile |= Emitter->NeedsShaderCompile();
         }
 
 #if USING(WITH_EDITOR)
@@ -334,13 +352,13 @@ namespace Lumina
         return Length;
     }
 
-    const FParticleParameter* CParticleSystem::FindUserParameter(const FName& InName) const
+    const SParticleParameter* CParticleSystem::FindUserParameter(const FName& InName) const
     {
         if (InName.IsNone())
         {
             return nullptr;
         }
-        for (const FParticleParameter& Param : UserParameters)
+        for (const SParticleParameter& Param : UserParameters)
         {
             if (Param.Name == InName)
             {
@@ -356,7 +374,7 @@ namespace Lumina
         {
             return FName();
         }
-        for (const FParticlePropertyBinding& Binding : PropertyBindings)
+        for (const SParticlePropertyBinding& Binding : PropertyBindings)
         {
             if (Binding.PropertyName == PropertyName)
             {
@@ -379,7 +397,7 @@ namespace Lumina
             return;
         }
 
-        for (FParticlePropertyBinding& Binding : PropertyBindings)
+        for (SParticlePropertyBinding& Binding : PropertyBindings)
         {
             if (Binding.PropertyName == PropertyName)
             {
@@ -388,7 +406,7 @@ namespace Lumina
             }
         }
 
-        FParticlePropertyBinding NewBinding;
+        SParticlePropertyBinding NewBinding;
         NewBinding.PropertyName  = PropertyName;
         NewBinding.ParameterName = ParameterName;
         PropertyBindings.push_back(NewBinding);
@@ -440,32 +458,32 @@ namespace Lumina
     };
 
     // A bound property searches the component once, and an asset with no bindings skips even that.
-    static const FParticleParameter* FindBoundParameter(const CParticleSystem& Asset, const SParticleSystemComponent& Comp, const FName& PropName)
+    static const SParticleParameter* FindBoundParameter(const CParticleSystem& Asset, const SParticleSystemComponent& Comp, const FName& PropName)
     {
         return Asset.PropertyBindings.empty() ? nullptr : Comp.FindParameter(Asset.GetPropertyBinding(PropName));
     }
 
     static float ResolveBoundFloat(const CParticleSystem& Asset, const SParticleSystemComponent& Comp, const FName& PropName, float Literal)
     {
-        const FParticleParameter* Param = FindBoundParameter(Asset, Comp, PropName);
+        const SParticleParameter* Param = FindBoundParameter(Asset, Comp, PropName);
         return (Param != nullptr && Param->Type == EParticleParameterType::Float) ? Param->Scalar : Literal;
     }
 
     static int32 ResolveBoundInt(const CParticleSystem& Asset, const SParticleSystemComponent& Comp, const FName& PropName, int32 Literal)
     {
-        const FParticleParameter* Param = FindBoundParameter(Asset, Comp, PropName);
+        const SParticleParameter* Param = FindBoundParameter(Asset, Comp, PropName);
         return (Param != nullptr && Param->Type == EParticleParameterType::Int) ? Param->Integer : Literal;
     }
 
     static bool ResolveBoundBool(const CParticleSystem& Asset, const SParticleSystemComponent& Comp, const FName& PropName, bool Literal)
     {
-        const FParticleParameter* Param = FindBoundParameter(Asset, Comp, PropName);
+        const SParticleParameter* Param = FindBoundParameter(Asset, Comp, PropName);
         return (Param != nullptr && Param->Type == EParticleParameterType::Bool) ? Param->Boolean : Literal;
     }
 
     static FVector2 ResolveBoundVec2(const CParticleSystem& Asset, const SParticleSystemComponent& Comp, const FName& PropName, FVector2 Literal)
     {
-        const FParticleParameter* Param = FindBoundParameter(Asset, Comp, PropName);
+        const SParticleParameter* Param = FindBoundParameter(Asset, Comp, PropName);
         if (Param == nullptr)
         {
             return Literal;
@@ -475,7 +493,7 @@ namespace Lumina
 
     static FVector3 ResolveBoundVec3(const CParticleSystem& Asset, const SParticleSystemComponent& Comp, const FName& PropName, FVector3 Literal)
     {
-        const FParticleParameter* Param = FindBoundParameter(Asset, Comp, PropName);
+        const SParticleParameter* Param = FindBoundParameter(Asset, Comp, PropName);
         if (Param == nullptr)
         {
             return Literal;
@@ -485,7 +503,7 @@ namespace Lumina
 
     static FVector4 ResolveBoundVec4(const CParticleSystem& Asset, const SParticleSystemComponent& Comp, const FName& PropName, FVector4 Literal)
     {
-        const FParticleParameter* Param = FindBoundParameter(Asset, Comp, PropName);
+        const SParticleParameter* Param = FindBoundParameter(Asset, Comp, PropName);
         if (Param == nullptr)
         {
             return Literal;
@@ -576,7 +594,7 @@ namespace Lumina
     }
 
     // The module input decides how many components are read, so an int knob can drive a float input.
-    static FVector4 ParameterAsVector4(const FParticleParameter& Param)
+    static FVector4 ParameterAsVector4(const SParticleParameter& Param)
     {
         switch (Param.Type)
         {
@@ -603,7 +621,7 @@ namespace Lumina
                 continue;
             }
 
-            const FParticleParameter* Param = Component.FindParameter(Binding.ParameterName);
+            const SParticleParameter* Param = Component.FindParameter(Binding.ParameterName);
             if (Param == nullptr)
             {
                 continue;   // never declared and never set from code; the authored constant stands

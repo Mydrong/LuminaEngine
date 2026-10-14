@@ -16,7 +16,7 @@ namespace Lumina::Reflection
      * Mapping:
      *   - enum            -> C# enum
      *   - blittable struct -> [StructLayout(Sequential)] value struct (all fields are blittable)
-     *   - other struct    -> opaque handle wrapper (NativeStruct)
+     *   - other struct    -> handle struct over native memory (INativeStruct)
      *   - class (CObject) -> opaque handle wrapper (NativeObject)
      *
      * Each Emit* returns true if it wrote anything. Opt-out via the `NoCSharp` metadata.

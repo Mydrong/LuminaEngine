@@ -2,9 +2,7 @@ using System.Runtime.InteropServices;
 
 namespace LuminaSharp;
 
-/// <summary>
-/// Snapshot of C# runtime state for the editor's C# Diagnostics tool.
-/// </summary>
+// Snapshot of C# runtime state for the editor's C# Diagnostics tool.
 [NativeLayout("FScriptDiagnostics")]
 [StructLayout(LayoutKind.Sequential)]
 internal struct FScriptDiagnostics

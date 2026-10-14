@@ -11,7 +11,7 @@ namespace Lumina
     // Authoring parameters for a camera shake (see SCameraSystem::PlayCameraShake). The shake is additive on
     // the rendered view, so it composes with the cinematic blend and never moves the camera entity.
     REFLECT()
-    struct RUNTIME_API FCameraShakeParams
+    struct RUNTIME_API SCameraShakeParams
     {
         GENERATED_BODY()
 
@@ -65,7 +65,7 @@ namespace Lumina
         //~ Camera shake on the FCameraGlobalState singleton. Additive on the rendered view; multiple shakes sum.
 
         /** Start a shake; returns a non-zero handle to stop it (0 on failure). */
-        static uint32 PlayCameraShake(ECS::FRegistry& Registry, const FCameraShakeParams& Params);
+        static uint32 PlayCameraShake(ECS::FRegistry& Registry, const SCameraShakeParams& Params);
         /** Stop one shake by handle; it fades out over its BlendOutTime rather than cutting abruptly. */
         static void StopCameraShake(ECS::FRegistry& Registry, uint32 Handle);
         /** Immediately clear every active shake. */

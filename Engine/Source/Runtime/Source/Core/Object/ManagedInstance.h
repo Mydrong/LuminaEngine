@@ -13,7 +13,7 @@ namespace Lumina
      *
      * Two kinds of entry share this table and their handles differ in strength. A plain wrapper from
      * Wrapper<T>.ForObject is weak, so the table never keeps one alive and a collected target leaves a slot
-     * that reports no instance until the next access re-creates it. A C# subclass of a REFLECT(Scriptable)
+     * that reports no instance until the next access re-creates it. A C# subclass of a reflected
      * class is strong, because its native object is the only owner it has.
      *
      * So this table can pin the collectible script load context, and what stops it is ReleaseAll running in

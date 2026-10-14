@@ -142,6 +142,28 @@ namespace Lumina
             return;
         }
         SoftReferencedGUIDs.insert(AssetGUID);
+
+        for (FStringView Rest = CurrentBundles; !Rest.empty();)
+        {
+            const size_t Comma = Rest.find(',');
+            FStringView Name = Rest.substr(0, Comma);
+            Rest = Comma == FStringView::npos ? FStringView() : Rest.substr(Comma + 1);
+            Name.remove_prefix(Math::Min(Name.find_first_not_of(' '), Name.size()));
+            Name.remove_suffix(Name.size() - Math::Min(Name.find_last_not_of(' ') + 1, Name.size()));
+            const FName Bundle = Name.empty() ? FName() : FName(Name);
+            TVector<FName>& Bundles = SoftReferenceBundles[AssetGUID];
+            if (!Bundle.IsNone() && !Algo::Contains(Bundles, Bundle))
+            {
+                Bundles.push_back(Bundle);
+            }
+        }
+    }
+
+    FStringView FPackageSaver::SetSoftReferenceBundles(FStringView Bundles)
+    {
+        const FStringView Previous = CurrentBundles;
+        CurrentBundles = Bundles;
+        return Previous;
     }
 
     bool FPackageSaver::WriteBulkData(FBulkDataRef& OutRef, const void* Data, int64 Size)
@@ -213,6 +235,14 @@ namespace Lumina
         for (const FGuid& Guid : SortedSoft)
         {
             Out.emplace_back(Guid, EDependencyType::Soft);
+        }
+
+        for (FObjectImport& Import : Out)
+        {
+            if (auto It = SoftReferenceBundles.find(Import.ObjectGUID); It != SoftReferenceBundles.end())
+            {
+                Import.Bundles = It->second;
+            }
         }
     }
 }

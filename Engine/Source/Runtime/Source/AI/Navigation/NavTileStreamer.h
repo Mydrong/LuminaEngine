@@ -49,7 +49,7 @@ namespace Lumina
         bool IsConfigured() const { return TileWorldSize > 0.0f; }
 
         /** Tiles is the authoritative baked set, read but never retained. */
-        FStats Update(FNavMesh& Mesh, const TVector<FNavTileData>& Tiles, const TVector<FVector3>& FocusPoints, const FSettings& Settings);
+        FStats Update(FNavMesh& Mesh, const TVector<SNavTileData>& Tiles, const TVector<FVector3>& FocusPoints, const FSettings& Settings);
 
         int32 GetResidentCount() const { return (int32)Resident.size(); }
         bool IsResident(int32 TX, int32 TY) const { return Resident.find(NavTile::PackKey(TX, TY)) != Resident.end(); }

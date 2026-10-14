@@ -4254,7 +4254,7 @@ namespace Lumina
             {
                 FLineInstance Line = Chunk.Data[i];
 
-                const FAABB LineBounds(Math::Min(Line.Start, Line.End), Math::Max(Line.Start, Line.End));
+                const SAABB LineBounds(Math::Min(Line.Start, Line.End), Math::Max(Line.Start, Line.End));
                 if (Frustum.IsInside(LineBounds))
                 {
                     uint32 Idx = Constants::kIndexNoneU32;
@@ -4662,7 +4662,7 @@ namespace Lumina
 
             Out.GrassMaxInstances    = Grass->MaxInstancesPerSpecies;
 
-            for (const FGrassOutput& Output : Material->GrassOutputs)
+            for (const SGrassOutput& Output : Material->GrassOutputs)
             {
                 const CGrassType* Type = Output.GrassType.Get();
                 if (Type == nullptr || Type->Mesh == nullptr)

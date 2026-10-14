@@ -166,7 +166,7 @@ namespace Lumina
             "name + type match.");
     }
 
-    CMaterialInterface* FMaterialInstanceEditorTool::FindOverridingAncestor(CMaterialInstance* Instance, const FMaterialParameter& Param) const
+    CMaterialInterface* FMaterialInstanceEditorTool::FindOverridingAncestor(CMaterialInstance* Instance, const SMaterialParameter& Param) const
     {
         for (CMaterialInterface* Level = Instance->Material.Get(); Level != nullptr; Level = Level->GetParentMaterial())
         {
@@ -350,8 +350,8 @@ namespace Lumina
                 ImGui::TableSetupColumn("##Editor", ImGuiTableColumnFlags_WidthStretch);
 
                 // The list belongs to the PARENT, so nothing a row does reallocates it and no copy is needed.
-                const TVector<FMaterialParameter>& Params = Instance->GetMaterialParams();
-                for (const FMaterialParameter& Param : Params)
+                const TVector<SMaterialParameter>& Params = Instance->GetMaterialParams();
+                for (const SMaterialParameter& Param : Params)
                 {
                     ImGui::PushID(Param.ParameterName.c_str());
                     ImGui::TableNextRow();
@@ -391,7 +391,7 @@ namespace Lumina
                     ImGui::BeginDisabled(!bEnabled);
 
                     // Show the stored override value (kept even while disabled), else the parent default.
-                    const FMaterialParameterOverride* Override = Instance->FindOverride(Param.ParameterName);
+                    const SMaterialParameterOverride* Override = Instance->FindOverride(Param.ParameterName);
 
                     switch (Param.Type)
                     {
@@ -475,7 +475,7 @@ namespace Lumina
             ImGui::TableSetupColumn("##Name", ImGuiTableColumnFlags_WidthFixed, 175);
             ImGui::TableSetupColumn("##Editor", ImGuiTableColumnFlags_WidthStretch);
 
-            for (const FMaterialStaticSwitch& Switch : Root->StaticSwitches)
+            for (const SMaterialStaticSwitch& Switch : Root->StaticSwitches)
             {
                 ImGui::PushID(Switch.ParameterName.c_str());
                 ImGui::TableNextRow();
@@ -536,11 +536,11 @@ namespace Lumina
         ImGui::Separator();
     }
 
-    void FMaterialInstanceEditorTool::DrawTextureParameterColumn(CMaterialInstance* Instance, const FMaterialParameter& Param, bool bEnabled)
+    void FMaterialInstanceEditorTool::DrawTextureParameterColumn(CMaterialInstance* Instance, const SMaterialParameter& Param, bool bEnabled)
     {
         // This instance's override, else the parent material's default for the slot.
         CTexture* DisplayTexture = nullptr;
-        for (FMaterialParameterOverride& O : Instance->Overrides)
+        for (SMaterialParameterOverride& O : Instance->Overrides)
         {
             if (O.ParameterName == Param.ParameterName && O.Type == EMaterialParameterType::Texture)
             {
@@ -557,7 +557,7 @@ namespace Lumina
         // Delegates to the engine picker rather than a second implementation that drifted from it.
         if (TexturePicker == nullptr)
         {
-            FProperty* TextureProp = FMaterialParameterOverride::StaticStruct()->GetProperty(FName("Texture"));
+            FProperty* TextureProp = SMaterialParameterOverride::StaticStruct()->GetProperty(FName("Texture"));
             if (TextureProp == nullptr)
             {
                 return;

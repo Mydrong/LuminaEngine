@@ -235,7 +235,7 @@ internal static unsafe class FrameMarshal
 
             case EElementKind.ObjectWrapper:
             {
-                IntPtr Object = Native.PropGetObject(Frame, Slot.Property);
+                IntPtr Object = Native.GetObjectPtr(Address);
                 return Object == IntPtr.Zero ? null : NativeObjectMarshal.FromHandleOfType(Object, Slot.Declared);
             }
 
@@ -281,16 +281,16 @@ internal static unsafe class FrameMarshal
 
             // Assigned rather than written in place, since the frame's string owns its memory.
             case EElementKind.ManagedString:
-                Native.PropSetString(Frame, Slot.Property, Value as string ?? string.Empty);
+                Native.StringAssign(Address, Value as string ?? string.Empty);
                 return;
 
             case EElementKind.ObjectWrapper:
-                Native.PropSetObject(Frame, Slot.Property, NativeObjectMarshal.ToHandle(Value as NativeObject));
+                Native.SetObjectPtr(Address, NativeObjectMarshal.ToHandle(Value as NativeObject));
                 return;
 
             // The property owns the copy, since only it knows whether the struct's members own memory.
             case EElementKind.StructView:
-                Native.PropCopyStruct(Frame, Slot.Property, NativeObjectMarshal.ToHandle(Value as NativeStruct));
+                Native.PropCopyStruct(Frame, Slot.Property, Value is INativeStruct Source && !Source.Ref.IsNull ? Source.Ref.Address : IntPtr.Zero);
                 return;
 
             case EElementKind.Optional:

@@ -5,7 +5,7 @@
 #include "Containers/Vector.h"
 #include "Core/Object/Class.h"
 #include "Core/Object/ObjectCore.h"
-#include "Scripting/ScriptDataStruct.h"
+#include "Scripting/ScriptTypeRegistry.h"
 #include "Tools/UI/ImGui/ImGuiDesignIcons.h"
 #include "Tools/UI/ImGui/ImGuiDragDrop.h"
 #include "Tools/UI/ImGui/ImGuiX.h"
@@ -25,7 +25,7 @@ namespace Lumina
             {
                 return nullptr;
             }
-            return ResolveDataStructByName(FName(Property->GetMetadata("RowType")));
+            return ResolveStructByName(FName(Property->GetMetadata("RowType")));
         }
 
         TVector<FAssetData*> GatherDataTables()

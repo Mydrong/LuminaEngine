@@ -4,7 +4,7 @@ using System.Runtime.InteropServices;
 
 namespace LuminaSharp;
 
-// Type lookup, editor metadata, and the unload handle set; lifecycle and per-frame dispatch are native, arriving through the Reflector's Scriptable shim on CEntityScript.
+// The live entity scripts of a generation, so a destroy or an unload can cancel what each is still awaiting.
 internal sealed class EntityScriptRuntime
 {
     private readonly TypeLibrary Library;
@@ -15,10 +15,26 @@ internal sealed class EntityScriptRuntime
         this.Library = Library;
     }
 
-    // Registers an instance created by ScriptableRuntime, so FreeAll can detach it.
-    internal void Adopt(GCHandle Handle)
+    // Registers an instance created by ScriptableRuntime, so FreeAll can detach it. Description is set first, since OnAction and the profiler labels read it.
+    internal void Adopt(Lumina.CEntityScript Script, GCHandle Handle)
     {
+        Script.Description = Library.Describe(Script.GetType());
         LiveHandles.Add(Handle);
+
+        // The driver sets the owner before the dispatch that creates the instance, so a null entity is only a defensive case.
+        if (Script.Entity.IsNull)
+        {
+            return;
+        }
+
+        try
+        {
+            Script.Description.EnsureInputComponent(Script);
+        }
+        catch (Exception Exception)
+        {
+            Native.Log(ELogLevel.Error, $"CEntityScript component injection threw: {Exception}");
+        }
     }
 
     // Called before the free, since a kept value gets recycled into an unrelated object's handle.
@@ -37,18 +53,6 @@ internal sealed class EntityScriptRuntime
         {
             Script.CancelDestroyToken();
         }
-    }
-
-    public byte[]? Schema(string TypeName)
-    {
-        TypeDescription? Description = Library.GetMintedClass(TypeName);
-        return Description != null ? Serializer.WriteSchema(Description, Library.MintedParentOf(Description.Type)) : null;
-    }
-
-    public byte[]? Buttons(string TypeName)
-    {
-        TypeDescription? Description = Library.GetMintedClass(TypeName);
-        return Description != null ? Serializer.WriteButtons(Description) : null;
     }
 
     // Detaches every live script and drops the index, ahead of the collectible ALC unload.

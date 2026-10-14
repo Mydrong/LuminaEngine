@@ -8,6 +8,9 @@
 
 namespace Lumina
 {
+    constexpr uint32 kPackageNameNumberBit = 0x80000000u;
+    constexpr uint32 kPackageNameSlotMask  = 0x7FFFFFFFu;
+
     // each distinct name once per package, so one on every property header interns once, not per occurrence
     class RUNTIME_API FPackageNameMap
     {
@@ -21,6 +24,8 @@ namespace Lumina
 
         size_t Num() const { return Slots.size(); }
 
+        const TVector<FName>& GetSlots() const { return Slots; }
+
     private:
 
         THashMap<uint32, uint32> BaseToSlot;
@@ -30,6 +35,9 @@ namespace Lumina
     class RUNTIME_API FPackageNameTable
     {
     public:
+
+        FPackageNameTable() = default;
+        explicit FPackageNameTable(TVector<FName> InSlots) : Slots(Move(InSlots)) {}
 
         void Serialize(FArchive& Ar);
 
@@ -62,5 +70,23 @@ namespace Lumina
     private:
 
         const FPackageNameTable* Names = nullptr;
+    };
+
+    // the writing side of FPackageContainerReader, numbering names in a map of its own
+    class RUNTIME_API FPackageContainerWriter : public FMemoryWriter
+    {
+    public:
+
+        explicit FPackageContainerWriter(TVector<uint8>& InBytes) : FMemoryWriter(InBytes) {}
+
+        using FArchive::operator<<;
+
+        FArchive& operator<<(FName& Value) override;
+
+        const FPackageNameMap& GetNameMap() const { return NameMap; }
+
+    private:
+
+        FPackageNameMap NameMap;
     };
 }

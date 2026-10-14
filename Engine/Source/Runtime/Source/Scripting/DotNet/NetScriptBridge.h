@@ -27,7 +27,7 @@ namespace Lumina
         // A remote connection finished joining World, or left it.
         RUNTIME_API void DispatchConnection(CWorld* World, uint32 ConnectionId, bool bJoined);
 
-        // Tells every ready script in World, C# through INetworkListener and C++ through its virtuals.
+        // Tells every ready script in World through its session virtuals, which a C# script overrides.
         RUNTIME_API void DispatchSession(CWorld* World, ENetSessionEvent Event, uint32 ConnectionId, ENetLeaveReason Reason);
 
         // Brackets a replicated update so change handlers see both values. Names are zero-terminated, back to back.

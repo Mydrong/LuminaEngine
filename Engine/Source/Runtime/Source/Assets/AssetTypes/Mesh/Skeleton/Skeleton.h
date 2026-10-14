@@ -32,7 +32,7 @@ namespace Lumina
 
         void ComputeBindPoseSkinningMatrices(TVector<FMatrix4>& OutMatrices) const;
 
-        const FMeshSocket* FindSocket(const FName& SocketName) const { return FindSocketByName(Sockets, SocketName); }
+        const SMeshSocket* FindSocket(const FName& SocketName) const { return FindSocketByName(Sockets, SocketName); }
 
         /** Bone index the named socket rides on; Constants::kIndexNone when the socket or its bone doesn't exist. */
         int32 FindSocketBoneIndex(const FName& SocketName) const;
@@ -47,7 +47,7 @@ namespace Lumina
 
         /** Named attach points riding skeleton bones. */
         PROPERTY(Editable, Category = "Sockets")
-        TVector<FMeshSocket> Sockets;
+        TVector<SMeshSocket> Sockets;
 
     private:
 

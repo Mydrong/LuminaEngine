@@ -2,7 +2,7 @@
 
 #include "PrefabLibrary.h"
 
-#include "Assets/AssetRef.h"
+#include "Assets/AssetManager/AssetManager.h"
 #include "Assets/AssetRegistry/AssetRegistry.h"
 #include "Assets/AssetTypes/Prefabs/Prefab.h"
 #include "Core/Object/Cast.h"
@@ -12,12 +12,12 @@
 
 namespace Lumina
 {
-    ECS::FEntity CPrefabLibrary::SpawnPrefab(CWorld* World, const FAssetRef& Prefab)
+    ECS::FEntity CPrefabLibrary::SpawnPrefab(CWorld* World, const TSoftObjectPtr<CPrefab>& Prefab)
     {
         return SpawnPrefabAt(World, Prefab, FTransform(), ECS::NullEntity);
     }
 
-    ECS::FEntity CPrefabLibrary::SpawnPrefabAt(CWorld* World, const FAssetRef& Prefab,
+    ECS::FEntity CPrefabLibrary::SpawnPrefabAt(CWorld* World, const TSoftObjectPtr<CPrefab>& Prefab,
         const FTransform& SpawnTransform, ECS::FEntity Parent)
     {
         if (World == nullptr)
@@ -48,7 +48,7 @@ namespace Lumina
         return PrefabObject->Instantiate(World, SpawnTransform, Parent);
     }
 
-    void CPrefabLibrary::SpawnPrefabAsync(CWorld* World, const FAssetRef& Prefab, FScriptCallback OnSpawned)
+    void CPrefabLibrary::SpawnPrefabAsync(CWorld* World, const TSoftObjectPtr<CPrefab>& Prefab, SScriptCallback OnSpawned)
     {
         if (World == nullptr)
         {
@@ -58,10 +58,10 @@ namespace Lumina
 
         const FName Path(Prefab.GetPath());
         TStrongObjectPtr<CWorld> WorldHandle(World);
-        AsyncLoadObject(Path, [WorldHandle, Path, OnSpawned](CObject* Object)
+        FAssetManager::Get().Load(Prefab.GetPath()).OnReady([WorldHandle, Path, OnSpawned](const FAssetHandle& Handle)
         {
             CWorld* Target = WorldHandle.Get();
-            CPrefab* Loaded = Cast<CPrefab>(Object);
+            CPrefab* Loaded = Handle.Get<CPrefab>();
             if (Target == nullptr || Loaded == nullptr)
             {
                 if (Loaded == nullptr)

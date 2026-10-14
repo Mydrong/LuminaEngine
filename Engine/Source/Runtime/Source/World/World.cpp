@@ -151,18 +151,22 @@ namespace Lumina
 
     void FWorldDebugInterface::DrawBillboard(int32 ResourceID, const FVector3& Location, float Scale)
     {
+        #if !defined(LE_SHIPPING)
         if (World)
         {
             World->DrawBillboard(ResourceID, Location, Scale);
         }
+            #endif
     }
 
     void FWorldDebugInterface::DrawLine(const FVector3& Start, const FVector3& End, const FVector4& Color, float Thickness, bool bDepthTest, float Duration)
     {
+        #if !defined(LE_SHIPPING)
         if (World != nullptr && !World->IsSuspended())
         {
             World->LineBatcherComponent->EnqueueLine(Start, End, Color, Thickness, bDepthTest, Duration);
         }
+            #endif
     }
 
     void FWorldDebugInterface::DrawText(FStringView Text, TOptional<FVector4> Color)
@@ -178,59 +182,71 @@ namespace Lumina
     }
     void FWorldDebugInterface::DrawLine(FVector3 Start, FVector3 End, FVector4 Color, TOptional<float> Thickness, TOptional<bool> bDepthTest, TOptional<float> Duration)
     {
+        #if !defined(LE_SHIPPING)
         if (World)
         {
-            DrawLine(static_cast<const FVector3&>(Start), static_cast<const FVector3&>(End),
-                static_cast<const FVector4&>(Color), Thickness.value_or(1.0f), bDepthTest.value_or(true), Duration.value_or(0.0f));
+            DrawLine(Start, End, Color, Thickness.value_or(1.0f), bDepthTest.value_or(true), Duration.value_or(0.0f));
         }
+            #endif
     }
     void FWorldDebugInterface::DrawBox(FVector3 Center, FVector3 HalfExtents, FQuat Rotation, FVector4 Color, TOptional<float> Thickness, TOptional<bool> bDepthTest, TOptional<float> Duration)
     {
+        #if !defined(LE_SHIPPING)
         if (World)
         {
             IPrimitiveDrawInterface::DrawBox(Center, HalfExtents, Rotation, Color, Thickness.value_or(1.0f), bDepthTest.value_or(true), Duration.value_or(0.0f));
         }
+            #endif
     }
     void FWorldDebugInterface::DrawSphere(FVector3 Center, float Radius, FVector4 Color, TOptional<float> Thickness, TOptional<bool> bDepthTest, TOptional<float> Duration)
     {
+        #if !defined(LE_SHIPPING)
         if (World)
         {
             IPrimitiveDrawInterface::DrawSphere(Center, Radius, Color, 16, Thickness.value_or(1.0f), bDepthTest.value_or(true), Duration.value_or(0.0f));
         }
+            #endif
     }
     void FWorldDebugInterface::DrawCapsule(FVector3 Start, FVector3 End, float Radius, FVector4 Color, TOptional<float> Thickness, TOptional<bool> bDepthTest, TOptional<float> Duration)
     {
+        #if !defined(LE_SHIPPING)
         if (World)
         {
             IPrimitiveDrawInterface::DrawCapsule(Start, End, Radius, Color, 16, Thickness.value_or(1.0f), bDepthTest.value_or(true), Duration.value_or(0.0f));
         }
+            #endif
     }
     void FWorldDebugInterface::DrawCone(FVector3 Apex, FVector3 Direction, float AngleRadians, float Length, FVector4 Color, TOptional<float> Thickness, TOptional<bool> bDepthTest, TOptional<float> Duration)
     {
+        #if !defined(LE_SHIPPING)
         if (World)
         {
             IPrimitiveDrawInterface::DrawCone(Apex, Direction, AngleRadians, Length, Color, 16, 4, Thickness.value_or(1.0f), bDepthTest.value_or(true), Duration.value_or(0.0f));
         }
+            #endif
     }
     void FWorldDebugInterface::DrawArrow(FVector3 Start, FVector3 Direction, float Length, FVector4 Color, TOptional<float> Thickness, TOptional<bool> bDepthTest, TOptional<float> Duration)
     {
+        #if !defined(LE_SHIPPING)
         if (World)
         {
             IPrimitiveDrawInterface::DrawArrow(Start, Direction, Length, Color, Thickness.value_or(1.0f), bDepthTest.value_or(true), Duration.value_or(0.0f));
         }
+            #endif
     }
 
     void FWorldDebugInterface::DrawSolidTriangles(TVector<FSimpleElementVertex>&& Vertices, ESolidDrawMode Mode, float Duration)
     {
+        #if !defined(LE_SHIPPING)
         if (World != nullptr && !World->IsSuspended())
         {
             World->TriangleBatcherComponent->EnqueueTriangles(std::move(Vertices), Mode, Duration);
         }
+            #endif
     }
 
     CWorld::CWorld()
-        : SingletonEntity(ECS::NullEntity)
-        , CommandBus(EntityRegistry)
+        : CommandBus(EntityRegistry)
         , MessageBus(EntityRegistry, CommandBus)
         , SystemContext(this)
         , LineBatcherComponent(nullptr)
@@ -308,9 +324,7 @@ namespace Lumina
         else
         {
             // DuplicateWorld serializes pre-init, so write from whichever registry holds the data.
-            ECS::FRegistry& Source = (EntityRegistry.NumEntities() != 0)
-                ? EntityRegistry
-                : RegistryPending;
+            ECS::FRegistry& Source = (EntityRegistry.NumEntities() != 0) ? EntityRegistry : RegistryPending;
             ECS::Utils::SerializeRegistry(Ar, Source);
         }
     }
@@ -454,33 +468,27 @@ namespace Lumina
             StartupPendingSystems();
         }
 
-        EntityRegistry.GetSignals<STransformComponent>().OnConstruct         .Connect<&ThisClass::OnTransformComponentConstruct>(this);
-        EntityRegistry.GetSignals<SEntityScriptComponent>().OnDestroy      .Connect<&ThisClass::OnCSharpScriptComponentDestroyed>(this);
-        // Also per entity, which fires before any storage drops its component, so OnDetach can still reach
-        // the sibling components it bound to. Storage order decides the component signal, so it cannot.
-        EntityRegistry.OnEntityDestroyed()                                .Connect<&ThisClass::OnCSharpScriptComponentDestroyed>(this);
-        EntityRegistry.GetSignals<SWidgetComponent>().OnDestroy            .Connect<&ThisClass::OnWidgetComponentDestroyed>(this);
-        SystemContext.EventSink     <FSwitchActiveCameraEvent>()    .Connect<&ThisClass::OnChangeCameraEvent>(this);
+        EntityRegistry.GetSignals<STransformComponent>().OnConstruct    .Connect<&ThisClass::OnTransformComponentConstruct>(this);
+        EntityRegistry.GetSignals<SEntityScriptComponent>().OnDestroy   .Connect<&ThisClass::OnCSharpScriptComponentDestroyed>(this);
+        EntityRegistry.OnEntityDestroyed()                              .Connect<&ThisClass::OnCSharpScriptComponentDestroyed>(this);
+        EntityRegistry.GetSignals<SWidgetComponent>().OnDestroy         .Connect<&ThisClass::OnWidgetComponentDestroyed>(this);
+        SystemContext.EventSink<FSwitchActiveCameraEvent>()             .Connect<&ThisClass::OnChangeCameraEvent>(this);
+        EntityRegistry.GetSignals<SStaticMeshComponent>().OnConstruct   .Connect<&MarkMeshResolveDirty<SStaticMeshComponent>>();
+        EntityRegistry.GetSignals<SStaticMeshComponent>().OnUpdate      .Connect<&MarkMeshResolveDirty<SStaticMeshComponent>>();
+        EntityRegistry.GetSignals<SStaticMeshComponent>().OnDestroy     .Connect<&MarkMeshRemoved<SStaticMeshComponent>>();
+        EntityRegistry.GetSignals<SDynamicMeshComponent>().OnConstruct  .Connect<&MarkMeshResolveDirty<SDynamicMeshComponent>>();
+        EntityRegistry.GetSignals<SDynamicMeshComponent>().OnUpdate     .Connect<&MarkMeshResolveDirty<SDynamicMeshComponent>>();
+        EntityRegistry.GetSignals<SDynamicMeshComponent>().OnDestroy    .Connect<&MarkMeshRemoved<SDynamicMeshComponent>>();
+        EntityRegistry.GetSignals<SSkeletalMeshComponent>().OnConstruct .Connect<&MarkMeshResolveDirty<SSkeletalMeshComponent>>();
+        EntityRegistry.GetSignals<SSkeletalMeshComponent>().OnUpdate    .Connect<&MarkMeshResolveDirty<SSkeletalMeshComponent>>();
+        EntityRegistry.GetSignals<SSkeletalMeshComponent>().OnDestroy   .Connect<&MarkMeshRemoved<SSkeletalMeshComponent>>();
+        EntityRegistry.GetSignals<SFoliageComponent>().OnConstruct      .Connect<&MarkFoliageResolveDirty>();
+        EntityRegistry.GetSignals<SFoliageComponent>().OnUpdate         .Connect<&MarkFoliageResolveDirty>();
+        EntityRegistry.GetSignals<SFoliageComponent>().OnDestroy        .Connect<&MarkFoliageRemoved>();
+        EntityRegistry.GetSignals<SDisabledTag>().OnConstruct           .Connect<&MarkRenderVisibilityDirty>();
+        EntityRegistry.GetSignals<SDisabledTag>().OnDestroy             .Connect<&MarkRenderVisibilityDirty>();
 
-        // on_destroy is what keeps the persistent primitive table from outliving its source.
-        EntityRegistry.GetSignals<SStaticMeshComponent>().OnConstruct  .Connect<&MarkMeshResolveDirty<SStaticMeshComponent>>();
-        EntityRegistry.GetSignals<SStaticMeshComponent>().OnUpdate  .Connect<&MarkMeshResolveDirty<SStaticMeshComponent>>();
-        EntityRegistry.GetSignals<SStaticMeshComponent>().OnDestroy  .Connect<&MarkMeshRemoved<SStaticMeshComponent>>();
-        EntityRegistry.GetSignals<SDynamicMeshComponent>().OnConstruct .Connect<&MarkMeshResolveDirty<SDynamicMeshComponent>>();
-        EntityRegistry.GetSignals<SDynamicMeshComponent>().OnUpdate .Connect<&MarkMeshResolveDirty<SDynamicMeshComponent>>();
-        EntityRegistry.GetSignals<SDynamicMeshComponent>().OnDestroy .Connect<&MarkMeshRemoved<SDynamicMeshComponent>>();
-        EntityRegistry.GetSignals<SSkeletalMeshComponent>().OnConstruct.Connect<&MarkMeshResolveDirty<SSkeletalMeshComponent>>();
-        EntityRegistry.GetSignals<SSkeletalMeshComponent>().OnUpdate.Connect<&MarkMeshResolveDirty<SSkeletalMeshComponent>>();
-        EntityRegistry.GetSignals<SSkeletalMeshComponent>().OnDestroy.Connect<&MarkMeshRemoved<SSkeletalMeshComponent>>();
-        EntityRegistry.GetSignals<SFoliageComponent>().OnConstruct     .Connect<&MarkFoliageResolveDirty>();
-        EntityRegistry.GetSignals<SFoliageComponent>().OnUpdate     .Connect<&MarkFoliageResolveDirty>();
-        EntityRegistry.GetSignals<SFoliageComponent>().OnDestroy     .Connect<&MarkFoliageRemoved>();
-        EntityRegistry.GetSignals<SDisabledTag>().OnConstruct          .Connect<&MarkRenderVisibilityDirty>();
-        EntityRegistry.GetSignals<SDisabledTag>().OnDestroy          .Connect<&MarkRenderVisibilityDirty>();
-
-        // Components loaded before these hooks connected never saw on_construct.
         FMeshResolveCache::MarkPendingWork();
-        // A full rescan is the only way to pick up primitives that predate the hooks.
         FRenderDirtyTracker::Ensure(EntityRegistry).RequestFullRescan();
 
         ECS::Utils::FTransformDirtyGate* DirtyState = ECS::Utils::EnsureTransformDirtyGate(EntityRegistry);
@@ -584,9 +592,6 @@ namespace Lumina
 
         PhysicsScene.reset();
         DestroyRenderer();
-
-        // After the renderer, so nothing still draws the meshes script built.
-        RetainedObjects.clear();
 
         FCoreDelegates::Get().PostWorldUnload.Broadcast();
     }
@@ -917,7 +922,7 @@ namespace Lumina
         else
         {
             // Degenerate fracture falls back to subdividing the bounds into textured box chunks.
-            const FAABB& LocalBounds = SourceMesh->GetAABB();
+            const SAABB& LocalBounds = SourceMesh->GetAABB();
             const FVector3 LocalExtent = Math::Max(LocalBounds.GetSize(), FVector3(0.01f));
             const FVector3 LocalCenter = LocalBounds.GetCenter();
             const int32 Target = Math::Clamp(Destructible->FragmentCount, 2, 512);
@@ -1948,9 +1953,9 @@ namespace Lumina
                 // Create every declared pool before going wide, since view() writes the shared pool map.
                 for (uint16 Index : Members)
                 {
-                    for (void (*Assure)(ECS::FRegistry&) : Stage[Index].System->GetAccess().PoolAssurers)
+                    for (const ECS::FComponentTypeID TypeID : Stage[Index].System->GetAccess().Pools)
                     {
-                        Assure(EntityRegistry);
+                        (void)EntityRegistry.AssureStorage(TypeID);
                     }
                 }
 

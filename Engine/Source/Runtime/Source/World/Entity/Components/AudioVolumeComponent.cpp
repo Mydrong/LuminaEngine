@@ -41,7 +41,7 @@ namespace Lumina
 			}
 			Audio::Context().StopSound(ActiveHandle);
 		}
-		ActiveHandle = FAudioHandle::Invalid();
+		ActiveHandle = SAudioHandle::Invalid();
 		bPlaying = false;
 		AppliedVolume = -1.0f;
 	}

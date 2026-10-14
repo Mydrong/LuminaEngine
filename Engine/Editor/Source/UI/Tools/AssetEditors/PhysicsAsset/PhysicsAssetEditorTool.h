@@ -171,7 +171,7 @@ namespace Lumina
 
         // Live grab state. Distance keeps the body at the depth it was grabbed at, so dragging sideways
         // does not haul it toward the camera; the local offset keeps the pull anchored where it was hit.
-        FPhysicsBodyTarget                      GrabbedTarget;
+        SPhysicsBodyTarget                      GrabbedTarget;
         float                       GrabDistance = 0.0f;
         FVector3                    GrabLocalOffset = FVector3(0.0f);
         uint8                       bFloorBodyReported:1 = false;

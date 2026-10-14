@@ -3,9 +3,7 @@ using System.Runtime.InteropServices;
 
 namespace LuminaSharp;
 
-/// <summary>
-/// Native -&gt; managed log severity. Mirrors the levels FDotNetHost::Export_Log switches on.
-/// </summary>
+// Log severity, mirroring the levels Export_Log switches on.
 public enum ELogLevel
 {
     Trace = 0,
@@ -14,21 +12,14 @@ public enum ELogLevel
     Error = 3,
 }
 
-/// <summary>
-/// Table of native function pointers handed to managed at bootstrap. Mirrors
-/// Lumina::DotNet::FExporterTable exactly (layout + calling convention).
-/// </summary>
+// The native function pointers handed over at bootstrap, mirroring Lumina::DotNet::FExporterTable.
 [StructLayout(LayoutKind.Sequential)]
 public unsafe struct FExporterTable
 {
     public delegate* unmanaged[Stdcall]<int, byte*, int, void> Log;
 }
 
-/// <summary>
-/// Handshake payload passed to <see cref="Host.Bootstrap"/>. Mirrors Lumina::DotNet::FBootstrapArgs.
-/// Native->managed entries are no longer handed over as a struct: Bootstrap registers the engine exports into
-/// <see cref="ManagedExportRegistry"/> and native resolves each by name (see DotNet::ResolveManagedExport).
-/// </summary>
+// The handshake payload Host.Bootstrap receives, mirroring Lumina::DotNet::FBootstrapArgs. Managed exports are resolved by name instead.
 [StructLayout(LayoutKind.Sequential)]
 public unsafe struct FBootstrapArgs
 {
@@ -37,10 +28,7 @@ public unsafe struct FBootstrapArgs
     public IntPtr NativeModule;
 }
 
-/// <summary>
-/// One script source handed from native (already read through the engine VFS). Mirrors
-/// Lumina::DotNet::FSourceFile; natural alignment matches the native struct on x64.
-/// </summary>
+// One script source read through the engine VFS, mirroring Lumina::DotNet::FSourceFile.
 [StructLayout(LayoutKind.Sequential)]
 public unsafe struct FSourceFile
 {
@@ -50,14 +38,7 @@ public unsafe struct FSourceFile
     public int TextLength;
 }
 
-/// <summary>
-/// One compilation unit handed from native: a plugin (or the game, or the engine library) that owns a
-/// set of script sources and depends on a set of sibling units by name. Mirrors
-/// Lumina::DotNet::FSourceAssembly. A unit with no sources but a non-empty <see cref="DllPath"/> is a
-/// prebuilt managed assembly the host loads as-is instead of compiling. Each unit becomes one assembly
-/// in the shared collectible script ALC; <see cref="Deps"/> is a ';'-joined list of the unit names this
-/// one references (used to order compilation and wire cross-assembly metadata references).
-/// </summary>
+// One compilation unit, mirroring Lumina::DotNet::FSourceAssembly, a prebuilt DllPath standing in for sources and Deps naming its siblings.
 [StructLayout(LayoutKind.Sequential)]
 public unsafe struct FSourceAssembly
 {

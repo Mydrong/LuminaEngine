@@ -4,13 +4,13 @@
 #include "Core/Object/Class.h"
 #include "Core/Object/ObjectCore.h"
 #include "Core/Object/PropertyArena.h"
+#include "Core/Reflection/ReflectionDesc.h"
 #include "Core/Reflection/Type/LuminaTypes.h"
 #include "Log/Log.h"
 
 namespace Lumina
 {
-    // 48 before the two managed dispatch pointers, which every function carries so that reaching them costs
-    // no indirection on the call that matters.
+    // 48 of description plus the two pointers script dispatch calls through, so a function stays one cache line.
     static_assert(sizeof(FFunction) == 64, "FFunction changed size; re-check its member order.");
     static_assert(std::is_trivially_destructible_v<FFunction>,
         "FFunction lives in the property arena, which destroys properties and leaves everything else alone.");
@@ -48,6 +48,24 @@ namespace Lumina
         }
     }
 
+    const FMetadataEntry* FFunction::FindMetadata(FStringView Key) const
+    {
+        for (uint16 Index = 0; Index < NumMetadata; ++Index)
+        {
+            if (EqualsIgnoreCase(Key, FStringView(Metadata[Index].Key)))
+            {
+                return &Metadata[Index];
+            }
+        }
+        return nullptr;
+    }
+
+    FCStringView FFunction::GetMetadata(FStringView Key) const
+    {
+        const FMetadataEntry* Entry = FindMetadata(Key);
+        return Entry != nullptr ? FCStringView(Entry->Value) : FCStringView();
+    }
+
     void FFunction::Invoke(void* Context, void* Frame) const
     {
         if (Thunk == nullptr)
@@ -70,26 +88,47 @@ namespace Lumina
                                       TSpan<FProperty* const> OrderedParams)
     {
         return BuildCore(Arena, Owner, FName(Desc.Name), Desc.Flags, OrderedParams,
-                         Desc.ReturnIndex, Desc.FrameSize, Desc.Thunk);
+                         Desc.ReturnIndex, Desc.FrameSize, Desc.Thunk, TSpan<const FMetadataEntry>(Desc.Metadata, Desc.NumMetadata));
     }
 
     FFunction* FFunctionBuilder::BuildMinted(FPropertyArena& Arena, CStruct* Owner, const FName& Name,
                                              EFunctionFlags Flags, TSpan<FProperty* const> OrderedParams,
                                              int32 ReturnIndex, uint16 ParmsSize,
-                                             FFunction::FNativeFuncPtr Thunk)
+                                             FFunction::FNativeFuncPtr Thunk, TSpan<const FMetadataEntry> Metadata)
     {
-        return BuildCore(Arena, Owner, Name, Flags, OrderedParams, ReturnIndex, ParmsSize, Thunk);
+        // A script's strings go away with its schema, so the entries are copied into the arena that outlives the function.
+        auto CopyString = [&Arena](const char* Text)
+        {
+            const size_t Length = Text != nullptr ? std::char_traits<char>::length(Text) : 0;
+            char* Copy = (char*)Arena.AllocateBytes(Length + 1, alignof(char));
+            Memory::Memcpy(Copy, Text != nullptr ? Text : "", Length + 1);
+            return (const char*)Copy;
+        };
+
+        FMetadataEntry* Owned = nullptr;
+        if (!Metadata.empty())
+        {
+            Owned = (FMetadataEntry*)Arena.AllocateBytes(sizeof(FMetadataEntry) * Metadata.size(), alignof(FMetadataEntry));
+            for (size_t Index = 0; Index < Metadata.size(); ++Index)
+            {
+                Owned[Index] = FMetadataEntry{ CopyString(Metadata[Index].Key), CopyString(Metadata[Index].Value) };
+            }
+        }
+        return BuildCore(Arena, Owner, Name, Flags, OrderedParams, ReturnIndex, ParmsSize, Thunk,
+                         TSpan<const FMetadataEntry>(Owned, Metadata.size()));
     }
 
     FFunction* FFunctionBuilder::BuildCore(FPropertyArena& Arena, CStruct* Owner, const FName& Name,
                                            EFunctionFlags Flags, TSpan<FProperty* const> OrderedParams,
-                                           int32 ReturnIndex, uint16 ParmsSize, FFunction::FNativeFuncPtr Thunk)
+                                           int32 ReturnIndex, uint16 ParmsSize, FFunction::FNativeFuncPtr Thunk,
+                                           TSpan<const FMetadataEntry> Metadata)
     {
         const uint16 NumParams = (uint16)OrderedParams.size();
 
-        if (ReturnIndex >= (int32)NumParams)
+        // Every reader finds the return as the last parameter, so one anywhere else would be read as an argument.
+        if (ReturnIndex >= 0 && ReturnIndex != (int32)NumParams - 1)
         {
-            LOG_ERROR("Reflected function '{}' names parameter {} as its return, and it has {}",
+            LOG_ERROR("Reflected function '{}' names parameter {} as its return, and only its last of {} can be",
                 Name, ReturnIndex, NumParams);
             return nullptr;
         }
@@ -130,14 +169,15 @@ namespace Lumina
         Function->Name        = Name;
         Function->OwnerStruct = Owner;
         Function->Params      = ParamArray;
-        Function->ReturnParam = (ReturnIndex >= 0) ? ParamArray[ReturnIndex] : nullptr;
         Function->Thunk       = Thunk;
         Function->Flags       = Flags;
         Function->NumParams   = NumParams;
         Function->ParmsSize   = ParmsSize;
+        Function->Metadata    = Metadata.data();
+        Function->NumMetadata = (uint16)Metadata.size();
 
-        // The flag and the pointer are two spellings of the same fact, so they cannot be allowed to disagree.
-        if (Function->ReturnParam != nullptr)
+        // The flag is the only record of a return, so it follows the index rather than whatever the caller passed.
+        if (ReturnIndex >= 0)
         {
             Function->Flags |= EFunctionFlags::HasReturn;
         }

@@ -249,6 +249,9 @@ namespace Lumina::ECS
 
         RUNTIME_API void Reserve(size_t Count);
 
+        // Rebuilds the payload in a new layout of the same type, keeping every entity at its dense index.
+        RUNTIME_API void Relayout(const FComponentTypeInfo& NewInfo, FMigrateComponentValue Migrate);
+
         // Lives on the pool rather than beside it, so a type-erased write fires the same hooks a typed one does.
         FComponentSignals Signals;
 
@@ -272,6 +275,7 @@ namespace Lumina::ECS
         // Unlinks the entity and hands back its dense slot, or InvalidDenseIndex when absent.
         RUNTIME_API uint32 ReleaseSlot(FEntity Entity);
 
+        void ApplyLayout(const FComponentTypeInfo& InTypeInfo);
         RUNTIME_API void GrowPayloadTo(size_t ElementCount);
         RUNTIME_API void BumpLayoutEpoch();
         RUNTIME_API void DestroyLiveElements();

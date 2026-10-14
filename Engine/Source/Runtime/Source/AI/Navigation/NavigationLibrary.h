@@ -40,18 +40,18 @@ namespace Lumina
 
         /** Snaps onto the nearest walkable surface within the half-extents search box. */
         FUNCTION()
-        static FNavPoint ProjectPoint(CWorld* World, FVector3 Point, FVector3 Extents, FName Agent = FName());
+        static SNavPoint ProjectPoint(CWorld* World, FVector3 Point, FVector3 Extents, FName Agent = FName());
 
         /** Walks the surface toward End and reports where a wall stopped it. */
         FUNCTION()
-        static FNavRaycastResult Raycast(CWorld* World, FVector3 Start, FVector3 End, FName Agent = FName());
+        static SNavRaycastResult Raycast(CWorld* World, FVector3 Start, FVector3 End, FName Agent = FName());
 
         /** Whether the straight line stays on walkable surface the whole way, far cheaper than a path. */
         FUNCTION()
         static bool IsWalkableLine(CWorld* World, FVector3 From, FVector3 To, FName Agent = FName());
 
         FUNCTION()
-        static FNavPoint FindRandomReachablePoint(CWorld* World, FVector3 Origin, float Radius, FName Agent = FName());
+        static SNavPoint FindRandomReachablePoint(CWorld* World, FVector3 Origin, float Radius, FName Agent = FName());
 
         /** Whether a complete route exists, so a partial one reports false. */
         FUNCTION()

@@ -10,6 +10,9 @@ internal sealed class ObjectReference
     private static readonly ConcurrentQueue<IntPtr> PendingReleases = new();
     private static volatile bool bHostShutDown;
 
+    // A finalizer that would call native checks this first, since the host may already be gone.
+    internal static bool HostShutDown => bHostShutDown;
+
     private IntPtr Object;
     private IntPtr Pin;
     private long Count;

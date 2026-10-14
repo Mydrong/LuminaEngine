@@ -45,7 +45,7 @@ namespace Lumina
 
     /** Offline voxelization + region build settings. */
     REFLECT()
-    struct RUNTIME_API FNavBuildSettings
+    struct RUNTIME_API SNavBuildSettings
     {
         GENERATED_BODY()
 
@@ -174,7 +174,7 @@ namespace Lumina
 
     /** Per-tile baked blob in the format dtNavMesh::addTile expects. */
     REFLECT()
-    struct RUNTIME_API FNavTileData
+    struct RUNTIME_API SNavTileData
     {
         GENERATED_BODY()
 
@@ -263,7 +263,7 @@ namespace Lumina
 
     /** Outcome of a surface walk along a straight line. */
     REFLECT()
-    struct FNavRaycastResult
+    struct SNavRaycastResult
     {
         GENERATED_BODY()
 
@@ -286,7 +286,7 @@ namespace Lumina
 
     /** A point query's answer, carrying the found flag a by-value result cannot express as an optional. */
     REFLECT()
-    struct FNavPoint
+    struct SNavPoint
     {
         GENERATED_BODY()
 

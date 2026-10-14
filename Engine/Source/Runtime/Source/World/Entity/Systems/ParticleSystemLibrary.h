@@ -33,6 +33,6 @@ namespace Lumina
 
         // Where the particles of emitters flagged bReportCollisions hit, a few frames ago. A negative index takes every emitter.
         FUNCTION()
-        static void GetCollisions(CWorld* World, ECS::FEntity Entity, int32 EmitterIndex, TVector<FParticleCollision>& OutCollisions);
+        static void GetCollisions(CWorld* World, ECS::FEntity Entity, int32 EmitterIndex, TVector<SParticleCollision>& OutCollisions);
     };
 }

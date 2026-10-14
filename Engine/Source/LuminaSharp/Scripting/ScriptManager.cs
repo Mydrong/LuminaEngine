@@ -7,14 +7,12 @@ using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 namespace LuminaSharp;
 
-/// <summary>
-/// One compilation unit of a generation: a plugin, the game, or the engine library. Compiles (or loads a
-/// prebuilt DLL) into one assembly inside the shared collectible ALC. <see cref="Dependencies"/> are the
-/// names of the sibling units this one references, used to order compilation and wire metadata refs.
-/// </summary>
+// One assembly of a generation, a plugin's, the game's or the engine's, compiled from sources or loaded prebuilt.
 internal sealed class ScriptAssemblyUnit
 {
     public required string Name;
@@ -24,8 +22,7 @@ internal sealed class ScriptAssemblyUnit
     // Absolute paths to third-party assemblies this unit references (restored packages and declared DLLs).
     public IReadOnlyList<string> References = Array.Empty<string>();
 
-    /// <summary>A prebuilt managed assembly to load as-is (when there are no <see cref="Sources"/>); null/empty
-    /// for a compile-from-source unit.</summary>
+    // A prebuilt assembly to load as is when the unit has no sources.
     public string? DllPath;
 }
 
@@ -33,6 +30,7 @@ internal sealed class ScriptAssemblyUnit
 internal sealed class FCompiledGeneration
 {
     public required List<(ScriptAssemblyUnit Unit, FScriptImage Image)> Pending;
+    public Dictionary<string, string> ScriptSourcePaths = new(StringComparer.Ordinal);
 
     // Null for a generation with no units. Nothing runs in it until Commit, so it can be dropped unused.
     public ScriptLoadContext? Context;
@@ -47,14 +45,7 @@ internal sealed class FCompiledGeneration
     }
 }
 
-/// <summary>
-/// Owns one loaded generation of user C# scripts: compiles the sources into a collectible
-/// AssemblyLoadContext, builds the <see cref="TypeLibrary"/> from the loaded types, and exposes the
-/// <see cref="EntityScriptRuntime"/> the native entry points dispatch into. Reload compiles a fresh
-/// generation and, only if that succeeds, frees the previous generation's live handles and unloads its
-/// ALC (no engine restart). There is no archetype/dictionary indirection, the world's native ECS
-/// system drives every per-instance lifecycle call.
-/// </summary>
+// Owns the loaded script generation, compiling a new one into a fresh collectible context and swapping it in only once it succeeds.
 internal sealed class ScriptManager
 {
     private ScriptLoadContext? Context;
@@ -62,11 +53,11 @@ internal sealed class ScriptManager
     /// <summary>The runtime for the current generation, or null when no scripts are loaded.</summary>
     public EntityScriptRuntime? EntityScripts { get; private set; }
 
-    /// <summary>Hosts C# subclasses of REFLECT(Scriptable) native CObjects for the current generation.</summary>
+    // Hosts the C# subclasses of reflected native classes for the current generation.
     public ScriptableRuntime? Scriptables { get; private set; }
 
-    /// <summary>Types marked as engine data shapes ([DataTableRow], ...).</summary>
-    public ScriptDataStructRuntime? DataStructs { get; private set; }
+    // The reflected view of the loaded generation, which the type manifest is written from.
+    public TypeLibrary? Library { get; private set; }
 
     /// <summary>Bumps on every successful (re)load; the native side rebinds entity scripts when it changes.</summary>
     public int Generation { get; private set; }
@@ -97,12 +88,10 @@ internal sealed class ScriptManager
 
     private static FCompiledGeneration? BuildGenerationLocked(IReadOnlyList<ScriptAssemblyUnit> Units)
     {
-        // Order units so every dependency is compiled before its dependents (its emitted image becomes a
-        // metadata reference for them). Cycles are broken + logged rather than fatal.
+        // Every dependency compiles before its dependents, since its image is their metadata reference.
         List<ScriptAssemblyUnit> Ordered = TopologicalOrder(Units);
 
-        // Build every unit's PE image FIRST; never tear down working scripts for a broken edit. Compilation
-        // and DLL reads are independent of any ALC, so a failure here leaves the live generation untouched.
+        // Every image is built before the live generation is touched, so a broken edit leaves working scripts running.
         var Images = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
         var Pending = new List<(ScriptAssemblyUnit Unit, FScriptImage Image)>();
         foreach (ScriptAssemblyUnit Unit in Ordered)
@@ -156,6 +145,7 @@ internal sealed class ScriptManager
         }
 
         var Built = new FCompiledGeneration { Pending = Pending };
+        Built.ScriptSourcePaths = GatherScriptSourcePaths(Pending);
         if (Pending.Count > 0)
         {
             LoadIntoNewContext(Built);
@@ -177,9 +167,7 @@ internal sealed class ScriptManager
             }
         }
 
-        // Load in dependency order: each unit is registered before any dependent loads, so a dependent's
-        // sibling reference resolves to the in-ALC assembly (see ScriptLoadContext.Load). LoadFromStream
-        // (not a path) keeps the file unlocked so the collectible context unloads cleanly on reload.
+        // Loaded in dependency order and from memory, so references resolve inside the context and no file stays locked.
         foreach ((ScriptAssemblyUnit Unit, FScriptImage Image) in Built.Pending)
         {
             Built.Assemblies.Add((Unit.Name, NewContext.LoadScriptAssembly(Unit.Name, Image)));
@@ -192,11 +180,22 @@ internal sealed class ScriptManager
     {
         List<(ScriptAssemblyUnit Unit, FScriptImage Image)> Pending = Compiled.Pending;
 
+        // Refused before the swap, so bindings built against another engine build never replace a working generation.
+        var LayoutFailures = new System.Text.StringBuilder();
+        foreach ((string _, Assembly Loaded) in Compiled.Assemblies)
+        {
+            LayoutValidator.ValidateModules(Loaded, LayoutFailures);
+        }
+        if (LayoutFailures.Length > 0)
+        {
+            Native.Log(ELogLevel.Error, $"C# scripts were not loaded, their bindings do not match the engine:{LayoutFailures}");
+            Compiled.Context?.Unload();
+            return false;
+        }
+
         UnloadCurrent();
 
-        // Even an EMPTY generation must advance the counter: live native bridges gate their rebind on it,
-        // and UnloadCurrent just freed their GCHandles. Without a bump they would keep dispatching into
-        // the unloaded generation instead of rebinding to nothing and falling back to native behavior.
+        // Bumped even for an empty generation, since native rebinds on it after the unload freed every handle.
         Generation++;
 
         if (Pending.Count == 0 || Compiled.Context == null)
@@ -217,8 +216,8 @@ internal sealed class ScriptManager
         LoadedTypeCount = AllTypes.Count;
         var Library = new TypeLibrary(AllTypes);
         EntityScripts = new EntityScriptRuntime(Library);
-        Scriptables = new ScriptableRuntime(Library, EntityScripts);
-        DataStructs = new ScriptDataStructRuntime(Library);
+        Scriptables = new ScriptableRuntime(Library, EntityScripts, Compiled.ScriptSourcePaths);
+        this.Library = Library;
 
         Native.Log(ELogLevel.Info,
             $"Loaded C# scripts [generation {Generation}]: {Pending.Count} assembl(ies), {AllTypes.Count} type(s), " +
@@ -255,9 +254,7 @@ internal sealed class ScriptManager
         return ScriptCompiler.Compile(Unit.Name, Unit.Sources, Refs);
     }
 
-    // Post-order DFS over the unit dependency graph: a unit appears after every dependency it names that is
-    // also present in this set (unknown names, a dependency that ships no scripts, are ignored). A cycle is
-    // broken at the back-edge and logged; the generation still loads (degraded refs) rather than failing.
+    // Dependencies first, with a cycle broken at its back edge and logged so the generation still loads.
     private static List<ScriptAssemblyUnit> TopologicalOrder(IReadOnlyList<ScriptAssemblyUnit> Units)
     {
         var ByName = new Dictionary<string, ScriptAssemblyUnit>(StringComparer.OrdinalIgnoreCase);
@@ -299,10 +296,7 @@ internal sealed class ScriptManager
         return Ordered;
     }
 
-    // Writes a unit's compiled image to its on-disk DLL (creating <root>/Binaries/DotNet as needed). Purely an
-    // artifact: the generation always loads from the in-memory bytes, so a failure here (locked file, read-only
-    // path) is logged and ignored rather than aborting the reload.
-    /// <summary>False when the artifact did not reach disk, which must not be stamped as cacheable.</summary>
+    // Writes the image to its DLL for the next boot, false when it did not reach disk and so must not be cached.
     private static bool EmitAssembly(string UnitName, string? Path, FScriptImage Image)
     {
         if (string.IsNullOrEmpty(Path))
@@ -336,7 +330,6 @@ internal sealed class ScriptManager
         return System.IO.Path.ChangeExtension(DllPath, ".pdb");
     }
 
-    // A prebuilt unit keeps its symbols only if whoever built it shipped them, so this stays optional.
     // Bumped whenever the emitted image could differ for identical sources.
     private const int CompileCacheVersion = 1;
 
@@ -474,13 +467,47 @@ internal sealed class ScriptManager
         }
     }
 
+    private static Dictionary<string, string> GatherScriptSourcePaths(
+        List<(ScriptAssemblyUnit Unit, FScriptImage Image)> Pending)
+    {
+        var Paths = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach ((ScriptAssemblyUnit Unit, FScriptImage _) in Pending)
+        {
+            foreach ((string Path, string Text) in Unit.Sources)
+            {
+                SyntaxNode Root = CSharpSyntaxTree.ParseText(Text).GetRoot();
+                foreach (ClassDeclarationSyntax Class in Root.DescendantNodes().OfType<ClassDeclarationSyntax>())
+                {
+                    var Namespaces = new Stack<string>();
+                    var Types = new Stack<string>();
+                    Types.Push(Class.Identifier.ValueText);
+                    for (SyntaxNode? Parent = Class.Parent; Parent != null; Parent = Parent.Parent)
+                    {
+                        if (Parent is BaseNamespaceDeclarationSyntax Namespace)
+                        {
+                            Namespaces.Push(Namespace.Name.ToString());
+                        }
+                        else if (Parent is TypeDeclarationSyntax Enclosing)
+                        {
+                            Types.Push(Enclosing.Identifier.ValueText);
+                        }
+                    }
+
+                    string NamespaceName = string.Join(".", Namespaces);
+                    string FullName = (NamespaceName.Length == 0 ? "" : NamespaceName + ".") + string.Join("+", Types);
+                    Paths.TryAdd(FullName, Path);
+                }
+            }
+        }
+        return Paths;
+    }
+
     // Global per-frame pump, empty because SEntityScriptSystem drives per-world ticking natively.
     public void Tick()
     {
         GameThreadContext.Drain();
 
-        // A fire-and-forget async script function hands its token to native and is never asked about again,
-        // so this is what retires the finished ones and surfaces the exceptions they threw.
+        // A fire-and-forget async function is never asked about again, so this retires the finished ones and reports what they threw.
         ScriptAsync.ReapCompleted();
     }
 
@@ -499,11 +526,10 @@ internal sealed class ScriptManager
         // Each process-static holder of script state would otherwise pin the collectible generation across the unload.
         CTimerLibrary.ClearAllManaged();      // world timers whose Action captures a script instance
         UIDataModel.DisposeAll();             // MVVM bindings (user ViewModel + native data model)
-        ObjectCore.PurgePendingLoads();                 // in-flight async asset-load callbacks
         ScriptAsync.Clear();                  // tokens for async functions still running in the old generation
         GameTaskRegistry.CancelAll();         // pending awaits, whose continuations close over unloading code
         Interop.ResetExceptionThrottle();     // the reloaded code earns a full stack on its first throw
-        ScriptCallback.PurgeAll();            // in-flight one-shot callbacks handed to native
+        ScriptCallback.PurgeAll();            // every closure handed to native, callbacks, listeners and loads alike
         PropertyAccessor.ClearScriptCaches(); // cached get/set delegates over user property types
         ScriptFunctionDispatch.Reset();        // [ScriptFunction] bindings, which root user MethodInfos
         ScriptInvokerRegistry.Clear();         // generated invokers, which are delegates over user methods
@@ -512,28 +538,20 @@ internal sealed class ScriptManager
         // Every strong handle has to go before the unload, or it roots the generation the ALC is dropping.
         EntityScripts?.FreeAll();  // detaches only; the table drain below owns the script handles
         EntityScripts = null;
-        // C# Scriptable subclass instances live in their native object's managed-instance slot, and those
-        // handles are STRONG -- they would pin this ALC. Draining the whole table here keeps that release at
-        // exactly the point in the teardown contract it has always been at, just on the side that owns it now.
-        // Plain wrapper entries in the same table are weak and would not have pinned anything; they are
-        // dropped too and re-created lazily against the next generation.
+        // A subclass instance holds a strong handle that would pin this context, so the whole instance table drains here.
         Native.ReleaseAllManagedInstances();
         Scriptables = null;
 
         // Cached argument slots are keyed by the handler's declared types, which are types from this ALC.
         ScriptDelegateArgs.PurgeAll();
 
-        // Holds no handles of its own, but it holds the TypeLibrary, which holds user Types. Cleared here
-        // so the teardown table stays complete rather than depending on this runtime being harmless.
-        DataStructs = null;
+        // The library holds user Types, which would pin the load context about to unload.
+        Library = null;
 
-        // Drop this generation's script-tier managed exports: their function pointers reference code in the
-        // ALC about to unload and would dangle. The next generation's module initializers repopulate them.
+        // This generation's managed exports point into the context about to unload, and the next one's initializers register them again.
         ManagedExportRegistry.ClearScriptExports();
 
-        // Confine the only strong reference to the ALC inside a method that fully returns before we
-        // collect: a collectible ALC won't unload while any caller frame (even a JIT-spilled temp under
-        // tier-0) still holds it. The GC loop then runs with no root.
+        // The only strong reference stays inside a method that returns before collecting, or a spilled frame would keep the context alive.
         WeakReference Weak = UnloadContextLocked();
 
         for (int Index = 0; Weak.IsAlive && Index < 10; Index++)
@@ -548,19 +566,14 @@ internal sealed class ScriptManager
         }
         else if (System.Diagnostics.Debugger.IsAttached)
         {
-            // A debugger pins every loaded assembly for its lifetime, so a collectible ALC will not unload
-            // while one is attached. This is expected when running under VS/F5 and resolves in a normal run.
+            // A debugger pins every loaded assembly, so the context cannot unload while one is attached.
             Native.Log(ELogLevel.Info,
                 "Previous script ALC did NOT unload -- expected with a debugger attached (it pins loaded " +
                 "assemblies). It should unload cleanly in a normal (non-debugger) run.");
         }
         else
         {
-            // A collectible ALC unloads asynchronously: after the synchronous GC loop the WeakReference can
-            // still be briefly alive while the unload settles on the finalizer thread, so a single residual is
-            // normal and NOT proof of a leak. The real signal is the trend: open the editor's C# Diagnostics
-            // tool and watch "Resident generations" -- it should fall back to 1; a value that climbs across
-            // reloads is a genuine leak (then capture a gcdump and inspect GC roots of GameScripts.Gen*).
+            // An unload settles on the finalizer thread, so one survivor is normal and a count climbing across reloads in C# Diagnostics is the leak.
             Native.Log(ELogLevel.Info,
                 "Previous script ALC not yet collected (asynchronous unload still settling). Watch the C# " +
                 "Diagnostics tool's 'Resident generations' -- a count that keeps climbing across reloads is a leak.");

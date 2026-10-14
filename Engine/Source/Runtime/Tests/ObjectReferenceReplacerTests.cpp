@@ -13,43 +13,19 @@
 #include "Scripting/ScriptStruct.h"
 #include "Scripting/ScriptableObject.h"
 #include "Scripting/ScriptableTest.h"
+#include "ScriptTestUtil.h"
 
 using namespace Lumina;
 
 // Retargeting references used to be a serialize pass, which could not see a NoSerialize property or a holder
 // that is not a CObject. It walks the reflected shape now, so these cover both directions it has to get right.
 
-namespace
-{
-    Scripting::FScriptExportField MakeScalarField(const char* Name, EPropertyTypeFlags Kind)
-    {
-        Scripting::FScriptExportField Field;
-        Field.Name = FName(Name);
-        Field.Type = MakeShared<Scripting::FScriptExportType>();
-        Field.Type->Kind = Kind;
-        return Field;
-    }
-
-    CScriptClass* MintWith(const char* ClassName, const Scripting::FScriptExportSchema& Schema)
-    {
-        CScriptClass* Minted = FScriptableRegistry::Mint(ClassName, "CScriptableTest");
-        if (Minted == nullptr)
-        {
-            return nullptr;
-        }
-        Scripting::AppendScriptPropertiesToClass(Minted, Schema);
-        RegisterPendingTypes();
-        Minted->GetDefaultObject();
-        return Minted;
-    }
-}
-
 TEST(ObjectReferenceReplacer, RepointsAHardReferenceAndClearsWhenTheReplacementIsNull)
 {
     Scripting::FScriptExportSchema Schema;
-    Schema.Fields.push_back(MakeScalarField("Ref", EPropertyTypeFlags::Object));
+    Schema.Fields.push_back(ScriptTest::ScalarField("Ref", EPropertyTypeFlags::Object));
 
-    CScriptClass* Holder = MintWith("Replacer_Holder", Schema);
+    CScriptClass* Holder = ScriptTest::MintWith("Replacer_Holder", Schema);
     ASSERT_NE(Holder, nullptr);
 
     CObject* Owner  = NewObject(Holder, nullptr, NAME_None, FGuid::New(), OF_Transient);
@@ -78,9 +54,9 @@ TEST(ObjectReferenceReplacer, RepointsAHardReferenceAndClearsWhenTheReplacementI
 TEST(ObjectReferenceReplacer, RewritesASoftReferenceByGuidWithoutLoadingIt)
 {
     Scripting::FScriptExportSchema Schema;
-    Schema.Fields.push_back(MakeScalarField("Soft", EPropertyTypeFlags::SoftObject));
+    Schema.Fields.push_back(ScriptTest::ScalarField("Soft", EPropertyTypeFlags::SoftObject));
 
-    CScriptClass* Holder = MintWith("Replacer_SoftHolder", Schema);
+    CScriptClass* Holder = ScriptTest::MintWith("Replacer_SoftHolder", Schema);
     ASSERT_NE(Holder, nullptr);
 
     CObject* Owner = NewObject(Holder, nullptr, NAME_None, FGuid::New(), OF_Transient);
@@ -115,7 +91,7 @@ TEST(ObjectReferenceReplacer, ReachesAReferenceInsideAContainer)
     Field.Type = List;
     Schema.Fields.push_back(Field);
 
-    CScriptClass* Holder = MintWith("Replacer_ListHolder", Schema);
+    CScriptClass* Holder = ScriptTest::MintWith("Replacer_ListHolder", Schema);
     ASSERT_NE(Holder, nullptr);
 
     CObject* Owner  = NewObject(Holder, nullptr, NAME_None, FGuid::New(), OF_Transient);
@@ -157,9 +133,9 @@ namespace
 TEST(ObjectReferenceReplacer, ClearsAReferenceHeldOnlyByAProvider)
 {
     Scripting::FScriptExportSchema Schema;
-    Schema.Fields.push_back(MakeScalarField("Unused", EPropertyTypeFlags::Int32));
+    Schema.Fields.push_back(ScriptTest::ScalarField("Unused", EPropertyTypeFlags::Int32));
 
-    CScriptClass* Holder = MintWith("Replacer_ProviderHolder", Schema);
+    CScriptClass* Holder = ScriptTest::MintWith("Replacer_ProviderHolder", Schema);
     ASSERT_NE(Holder, nullptr);
 
     CObject* Target = NewObject(Holder, nullptr, NAME_None, FGuid::New(), OF_Transient);
@@ -182,9 +158,9 @@ TEST(ObjectReferenceReplacer, ClearsAReferenceHeldOnlyByAProvider)
 TEST(ObjectReferenceReplacer, ClearsAClassReferenceHeldByAProvider)
 {
     Scripting::FScriptExportSchema Schema;
-    Schema.Fields.push_back(MakeScalarField("Unused", EPropertyTypeFlags::Int32));
+    Schema.Fields.push_back(ScriptTest::ScalarField("Unused", EPropertyTypeFlags::Int32));
 
-    CScriptClass* Retiring = MintWith("Replacer_RetiringClass", Schema);
+    CScriptClass* Retiring = ScriptTest::MintWith("Replacer_RetiringClass", Schema);
     ASSERT_NE(Retiring, nullptr);
 
     FReplacerTestProvider Provider;

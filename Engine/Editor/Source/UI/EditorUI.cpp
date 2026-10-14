@@ -91,7 +91,8 @@
 #include "Properties/Customizations/CustomPrimitiveDataCustomization.h"
 #include "Tools/AssetEditors/ParticleSystemEditor/ParticleParamCustomization.h"
 #include "Tools/AssetEditors/ParticleSystemEditor/ParticleParameterCustomization.h"
-#include "Properties/Customizations/AssetRefPropertyCustomization.h"
+#include "Assets/AssetManager/AssetManager.h"
+#include "Properties/Customizations/AssetIdPropertyCustomization.h"
 #include "Properties/Customizations/UIDocumentPropertyCustomization.h"
 #include "UI/UIDocumentRef.h"
 #include "Properties/Customizations/GameplayTagPropertyCustomization.h"
@@ -577,14 +578,14 @@ namespace Lumina
             return FTransformPropertyCustomization::MakeInstance();
         });
 
-        PropertyCustomizationRegistry->RegisterPropertyCustomization(FAssetRef::StaticStruct()->GetName(), []
-        {
-           return FAssetRefPropertyCustomization::MakeInstance();
-        });
-
-        PropertyCustomizationRegistry->RegisterPropertyCustomization(FUIDocumentRef::StaticStruct()->GetName(), []
+        PropertyCustomizationRegistry->RegisterPropertyCustomization(SUIDocumentRef::StaticStruct()->GetName(), []
         {
            return FUIDocumentPropertyCustomization::MakeInstance();
+        });
+
+        PropertyCustomizationRegistry->RegisterPropertyCustomization(SAssetId::StaticStruct()->GetName(), []
+        {
+            return FAssetIdPropertyCustomization::MakeInstance();
         });
         
         PropertyCustomizationRegistry->RegisterPropertyCustomization(SCustomPrimitiveData::StaticStruct()->GetName(), []
@@ -592,7 +593,7 @@ namespace Lumina
            return FCustomPrimDataPropertyCustomization::MakeInstance();
         });
 
-        PropertyCustomizationRegistry->RegisterPropertyCustomization(FParticleParameter::StaticStruct()->GetName(), []
+        PropertyCustomizationRegistry->RegisterPropertyCustomization(SParticleParameter::StaticStruct()->GetName(), []
         {
            return FParticleParameterCustomization::MakeInstance();
         });
@@ -617,12 +618,12 @@ namespace Lumina
            return FKeyPropertyCustomization::MakeInstance();
         });
 
-        PropertyCustomizationRegistry->RegisterPropertyCustomization(FInputActionHandle::StaticStruct()->GetName(), []
+        PropertyCustomizationRegistry->RegisterPropertyCustomization(SInputActionHandle::StaticStruct()->GetName(), []
         {
            return FInputActionHandlePropertyCustomization::MakeInstance();
         });
 
-        PropertyCustomizationRegistry->RegisterPropertyCustomization(FGameplayTag::StaticStruct()->GetName(), []
+        PropertyCustomizationRegistry->RegisterPropertyCustomization(SGameplayTag::StaticStruct()->GetName(), []
         {
            return FGameplayTagPropertyCustomization::MakeInstance();
         });
@@ -1569,6 +1570,7 @@ namespace Lumina
 
         // Lookup walks the class hierarchy most-derived first, so an override resolves before its base.
         Registry.RegisterAssetEditor<CParticleSystem,     FParticleSystemEditorTool>(Owner);
+        Registry.RegisterAssetEditor<CParticleEmitter,    FParticleSystemEditorTool>(Owner);
         Registry.RegisterAssetEditor<CMaterial,           FMaterialEditorTool>(Owner);
         Registry.RegisterAssetEditor<CMaterialInstance,   FMaterialInstanceEditorTool>(Owner);
         Registry.RegisterAssetEditor<CMaterialFunction,   FMaterialFunctionEditorTool>(Owner);
@@ -2125,6 +2127,26 @@ namespace Lumina
                 if (Drawer.Shortcut != 0 && ImGui::IsKeyChordPressed(Drawer.Shortcut))
                 {
                     ActivateDrawer(Drawer);
+                }
+            }
+        }
+
+        // Backtick works like a game console, opening the log ready to type and closing it from the command line.
+        if (ConsoleLogTool != nullptr && ImGui::IsKeyPressed(ImGuiKey_GraveAccent, false) && ImGui::GetIO().KeyMods == ImGuiMod_None)
+        {
+            if (FFooterDrawer* ConsoleDrawer = FindDrawerForTool(ConsoleLogTool))
+            {
+                if (ConsoleLogTool->IsCommandInputActive())
+                {
+                    if (!ConsoleDrawer->bDocked && OpenDrawer == ConsoleLogTool)
+                    {
+                        ActivateDrawer(*ConsoleDrawer);
+                    }
+                }
+                else if (!ImGui::GetIO().WantTextInput)
+                {
+                    ShowDrawer(*ConsoleDrawer);
+                    ConsoleLogTool->FocusCommandInput();
                 }
             }
         }
@@ -3051,6 +3073,12 @@ namespace Lumina
         {
             const FStringView   DiskPath(Script.c_str(), Script.size());
             const FStringView   FileName    = VFS::FileName(DiskPath);
+            const FStringView   Parent      = VFS::Parent(DiskPath, true);
+            if (FileName.ends_with(".generated.cs") ||
+                (VFS::FileName(Parent) == "Generated" && VFS::FileName(VFS::Parent(Parent, true)) == "Scripts"))
+            {
+                continue;
+            }
             const FFixedString  VirtualPath = VFS::ResolveToVirtualPath(DiskPath);
             Entries.push_back(FEntry{ FGuid(), FFixedString(FileName.data(), FileName.size()),
                                       VirtualPath.empty() ? FFixedString(Script.c_str()) : VirtualPath, FName(),

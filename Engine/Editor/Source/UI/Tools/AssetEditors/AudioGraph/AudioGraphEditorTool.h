@@ -64,7 +64,7 @@ namespace Lumina
         };
 
         TSharedPtr<FAudioGraphInstance> PreviewInstance;
-        FAudioHandle                    PreviewHandle;
+        SAudioHandle                    PreviewHandle;
         TVector<FPreviewParameter>      PreviewParameters;
 
         TVector<FString>                CompileMessages;

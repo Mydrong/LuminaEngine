@@ -2075,12 +2075,12 @@ namespace Lumina
             }
 
             // Each grid line is axis-aligned, so its own AABB prunes where a bounding sphere never would.
-            if (DebugDraw::ShouldDraw(*DrawState, FAABB(FVector3(Coord, 0.0f, -Reach), FVector3(Coord, 0.0f, Reach))))
+            if (DebugDraw::ShouldDraw(*DrawState, SAABB(FVector3(Coord, 0.0f, -Reach), FVector3(Coord, 0.0f, Reach))))
             {
                 Lines->Line(FVector3(Coord, 0, -Reach), FVector3(Coord, 0, Reach), GridColor);
             }
 
-            if (DebugDraw::ShouldDraw(*DrawState, FAABB(FVector3(-Reach, 0.0f, Coord), FVector3(Reach, 0.0f, Coord))))
+            if (DebugDraw::ShouldDraw(*DrawState, SAABB(FVector3(-Reach, 0.0f, Coord), FVector3(Reach, 0.0f, Coord))))
             {
                 Lines->Line(FVector3(-Reach, 0, Coord), FVector3(Reach, 0, Coord), GridColor);
             }

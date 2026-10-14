@@ -135,43 +135,43 @@ namespace Lumina
         void Send(EGameplayMessageRoute Route, ECS::FEntity Entity, uint32 Channel, const FGameplayMessagePayloadRef& Payload, bool bIncludeSelf = true);
 
         template<CGameplayMessagePayload T, typename TFunc>
-        uint64 Subscribe(const FGameplayTag& Channel, TFunc&& Handler, EGameplayTagMatch Match = EGameplayTagMatch::Partial)
+        uint64 Subscribe(const SGameplayTag& Channel, TFunc&& Handler, EGameplayTagMatch Match = EGameplayTagMatch::Partial)
         {
             return SubscribeTyped<T>(ECS::NullEntity, Channel, std::forward<TFunc>(Handler), Match);
         }
 
         // Handler may return bool, and true stops a routed send at this entity.
         template<CGameplayMessagePayload T, typename TFunc>
-        uint64 Subscribe(ECS::FEntity Owner, const FGameplayTag& Channel, TFunc&& Handler, EGameplayTagMatch Match = EGameplayTagMatch::Partial)
+        uint64 Subscribe(ECS::FEntity Owner, const SGameplayTag& Channel, TFunc&& Handler, EGameplayTagMatch Match = EGameplayTagMatch::Partial)
         {
             return Owner.IsNull() ? 0 : SubscribeTyped<T>(Owner, Channel, std::forward<TFunc>(Handler), Match);
         }
 
         template<CGameplayMessagePayload T>
-        void Broadcast(const FGameplayTag& Channel, const T& Message)
+        void Broadcast(const SGameplayTag& Channel, const T& Message)
         {
             Send(EGameplayMessageRoute::Broadcast, ECS::NullEntity, ChannelId(Channel), MakePayload(Message));
         }
 
         template<CGameplayMessagePayload T>
-        void SendUp(ECS::FEntity Source, const FGameplayTag& Channel, const T& Message, bool bIncludeSelf = true)
+        void SendUp(ECS::FEntity Source, const SGameplayTag& Channel, const T& Message, bool bIncludeSelf = true)
         {
             Send(EGameplayMessageRoute::Up, Source, ChannelId(Channel), MakePayload(Message), bIncludeSelf);
         }
 
         template<CGameplayMessagePayload T>
-        void SendDown(ECS::FEntity Source, const FGameplayTag& Channel, const T& Message, bool bIncludeSelf = true)
+        void SendDown(ECS::FEntity Source, const SGameplayTag& Channel, const T& Message, bool bIncludeSelf = true)
         {
             Send(EGameplayMessageRoute::Down, Source, ChannelId(Channel), MakePayload(Message), bIncludeSelf);
         }
 
         template<CGameplayMessagePayload T>
-        void SendTo(ECS::FEntity Target, const FGameplayTag& Channel, const T& Message)
+        void SendTo(ECS::FEntity Target, const SGameplayTag& Channel, const T& Message)
         {
             Send(EGameplayMessageRoute::To, Target, ChannelId(Channel), MakePayload(Message));
         }
 
-        static uint32 ChannelId(const FGameplayTag& Tag)
+        static uint32 ChannelId(const SGameplayTag& Tag)
         {
             return Tag.IsValid() ? FGameplayTagRegistry::Get().RequestTag(FStringView(Tag.TagName.c_str())) : 0u;
         }
@@ -193,7 +193,7 @@ namespace Lumina
         }
 
         template<CGameplayMessagePayload T, typename TFunc>
-        uint64 SubscribeTyped(ECS::FEntity Owner, const FGameplayTag& Channel, TFunc&& Handler, EGameplayTagMatch Match)
+        uint64 SubscribeTyped(ECS::FEntity Owner, const SGameplayTag& Channel, TFunc&& Handler, EGameplayTagMatch Match)
         {
             using THandler = std::decay_t<TFunc>;
 

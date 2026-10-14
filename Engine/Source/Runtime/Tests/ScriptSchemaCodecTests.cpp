@@ -95,11 +95,8 @@ namespace
             Meta();
             U8(0);                  // not SkipHotReload
             OptionalType(Payload);
-            NilValue();
             Close(L);
         }
-
-        void NilValue() { U8((uint8)EScriptValueKind::Nil); }
 
         // Only a top-level field carries the hot-reload byte, so a nested one that wrote it would put every
         // reader a byte out from there on.
@@ -115,7 +112,6 @@ namespace
                 U8(0);              // not SkipHotReload
             }
             ScalarType(Kind);
-            NilValue();
             Close(L);
         }
 
@@ -144,8 +140,7 @@ TEST(ScriptSchemaCodec, ASchemaWithNoFunctionsStillParses)
     W.ScalarField("Speed", EPropertyTypeFlags::Float);
 
     FScriptExportSchema Schema;
-    TVector<FScriptPropertyEntry> Defaults;
-    ASSERT_TRUE(ParseSchemaBlob(W.Bytes, Schema, Defaults));
+    ASSERT_TRUE(ParseSchemaBlob(W.Bytes, Schema));
 
     EXPECT_EQ(Schema.Fields.size(), 1u);
     EXPECT_TRUE(Schema.Functions.empty());
@@ -163,8 +158,7 @@ TEST(ScriptSchemaCodec, ADeclaredFunctionRoundTripsWithItsParameters)
         { EPropertyTypeFlags::Int32, EPropertyTypeFlags::Int32, EPropertyTypeFlags::Int32 });
 
     FScriptExportSchema Schema;
-    TVector<FScriptPropertyEntry> Defaults;
-    ASSERT_TRUE(ParseSchemaBlob(W.Bytes, Schema, Defaults));
+    ASSERT_TRUE(ParseSchemaBlob(W.Bytes, Schema));
 
     ASSERT_EQ(Schema.Functions.size(), 1u);
     const FScriptExportFunction& Function = Schema.Functions[0];
@@ -191,8 +185,7 @@ TEST(ScriptSchemaCodec, SeveralFunctionsKeepTheirOrder)
     W.Function("Second", 0, { "Out" }, { EPropertyTypeFlags::Bool });
 
     FScriptExportSchema Schema;
-    TVector<FScriptPropertyEntry> Defaults;
-    ASSERT_TRUE(ParseSchemaBlob(W.Bytes, Schema, Defaults));
+    ASSERT_TRUE(ParseSchemaBlob(W.Bytes, Schema));
 
     ASSERT_EQ(Schema.Functions.size(), 2u);
     EXPECT_EQ(Schema.Functions[0].Name, FName("First"));
@@ -211,8 +204,7 @@ TEST(ScriptSchemaCodec, AWellFormedBufferRoundTrips)
     W.ScalarField("Health", EPropertyTypeFlags::Int32);
 
     FScriptExportSchema Schema;
-    TVector<FScriptPropertyEntry> Defaults;
-    ASSERT_TRUE(ParseSchemaBlob(W.Bytes, Schema, Defaults));
+    ASSERT_TRUE(ParseSchemaBlob(W.Bytes, Schema));
 
     ASSERT_EQ(Schema.Fields.size(), 2u);
     EXPECT_EQ(Schema.Fields[0].Name, FName("Speed"));
@@ -223,8 +215,6 @@ TEST(ScriptSchemaCodec, AWellFormedBufferRoundTrips)
     const FString* Tooltip = Schema.Fields[0].Meta.Find(FName("ToolTip"));
     ASSERT_NE(Tooltip, nullptr);
     EXPECT_EQ(*Tooltip, FString("how fast"));
-
-    EXPECT_EQ(Defaults.size(), 2u);
 }
 
 // The whole reason the format is framed: a writer that learns a new trailing field must not break a reader
@@ -258,7 +248,6 @@ TEST(ScriptSchemaCodec, AnUnknownTrailingFieldIsSkippedRatherThanDesyncing)
         }
         W.U8(0);
         W.ScalarType(EPropertyTypeFlags::Float);
-        W.NilValue();
         W.Close(L);
     }
 
@@ -266,8 +255,7 @@ TEST(ScriptSchemaCodec, AnUnknownTrailingFieldIsSkippedRatherThanDesyncing)
     W.ScalarField("Health", EPropertyTypeFlags::Int32);
 
     FScriptExportSchema Schema;
-    TVector<FScriptPropertyEntry> Defaults;
-    ASSERT_TRUE(ParseSchemaBlob(W.Bytes, Schema, Defaults));
+    ASSERT_TRUE(ParseSchemaBlob(W.Bytes, Schema));
 
     ASSERT_EQ(Schema.Fields.size(), 2u);
     EXPECT_EQ(Schema.Fields[0].Name, FName("Speed"));
@@ -282,8 +270,7 @@ TEST(ScriptSchemaCodec, ABufferThatIsNotASchemaIsRefused)
     W.I32(0);
 
     FScriptExportSchema Schema;
-    TVector<FScriptPropertyEntry> Defaults;
-    EXPECT_FALSE(ParseSchemaBlob(W.Bytes, Schema, Defaults));
+    EXPECT_FALSE(ParseSchemaBlob(W.Bytes, Schema));
 }
 
 TEST(ScriptSchemaCodec, AVersionMismatchIsRefusedInsteadOfMisread)
@@ -294,8 +281,7 @@ TEST(ScriptSchemaCodec, AVersionMismatchIsRefusedInsteadOfMisread)
     W.ScalarField("Speed", EPropertyTypeFlags::Float);
 
     FScriptExportSchema Schema;
-    TVector<FScriptPropertyEntry> Defaults;
-    EXPECT_FALSE(ParseSchemaBlob(W.Bytes, Schema, Defaults));
+    EXPECT_FALSE(ParseSchemaBlob(W.Bytes, Schema));
 }
 
 TEST(ScriptSchemaCodec, ATruncatedBufferIsReportedRatherThanPartiallyAccepted)
@@ -309,8 +295,7 @@ TEST(ScriptSchemaCodec, ATruncatedBufferIsReportedRatherThanPartiallyAccepted)
     W.Bytes.resize(W.Bytes.size() - 12);
 
     FScriptExportSchema Schema;
-    TVector<FScriptPropertyEntry> Defaults;
-    EXPECT_FALSE(ParseSchemaBlob(W.Bytes, Schema, Defaults));
+    EXPECT_FALSE(ParseSchemaBlob(W.Bytes, Schema));
 }
 
 // A record written out of order is the shape a hand-mirrored writer drifts into, and the tag is what turns
@@ -326,12 +311,10 @@ TEST(ScriptSchemaCodec, AMisorderedRecordIsCaughtByItsTag)
     W.I32(0);
     W.ScalarType(EPropertyTypeFlags::Float);   // a Type where the Meta record belongs
     W.U8(0);
-    W.NilValue();
     W.Close(L);
 
     FScriptExportSchema Schema;
-    TVector<FScriptPropertyEntry> Defaults;
-    EXPECT_FALSE(ParseSchemaBlob(W.Bytes, Schema, Defaults));
+    EXPECT_FALSE(ParseSchemaBlob(W.Bytes, Schema));
 }
 
 
@@ -348,8 +331,7 @@ TEST(ScriptSchemaCodec, DeclaredPropertyFlagsRoundTrip)
     W.ScalarField("Health", EPropertyTypeFlags::Int32);
 
     FScriptExportSchema Schema;
-    TVector<FScriptPropertyEntry> Defaults;
-    ASSERT_TRUE(ParseSchemaBlob(W.Bytes, Schema, Defaults));
+    ASSERT_TRUE(ParseSchemaBlob(W.Bytes, Schema));
 
     ASSERT_EQ(Schema.Fields.size(), 2u);
     EXPECT_EQ(Schema.Fields[0].Flags, Declared);
@@ -365,8 +347,7 @@ TEST(ScriptSchemaCodec, AnOptionalCarriesItsPayloadType)
     W.OptionalField("Maybe", EPropertyTypeFlags::Float);
 
     FScriptExportSchema Schema;
-    TVector<FScriptPropertyEntry> Defaults;
-    ASSERT_TRUE(ParseSchemaBlob(W.Bytes, Schema, Defaults));
+    ASSERT_TRUE(ParseSchemaBlob(W.Bytes, Schema));
 
     ASSERT_EQ(Schema.Fields.size(), 1u);
     EXPECT_EQ(Schema.Fields[0].Name, FName("Maybe"));

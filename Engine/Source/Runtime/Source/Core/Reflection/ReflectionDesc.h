@@ -88,6 +88,8 @@ namespace Lumina
         // sizeof the generated frame struct.
         uint16                    FrameSize = 0;
         FFunction::FNativeFuncPtr Thunk = nullptr;
+        const FMetadataEntry*     Metadata = nullptr;
+        uint16                    NumMetadata = 0;
     };
 
     struct FStructDesc

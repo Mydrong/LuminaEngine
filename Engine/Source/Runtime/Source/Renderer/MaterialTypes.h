@@ -117,7 +117,7 @@ namespace Lumina
      * density, which is what confines a species to specific terrain layers.
      */
     REFLECT()
-    struct RUNTIME_API FGrassOutput
+    struct RUNTIME_API SGrassOutput
     {
         GENERATED_BODY()
 
@@ -135,7 +135,7 @@ namespace Lumina
 
     /** A compile-time branch an instance may flip, at the cost of compiling that instance its own shader. */
     REFLECT()
-    struct RUNTIME_API FMaterialStaticSwitch
+    struct RUNTIME_API SMaterialStaticSwitch
     {
         GENERATED_BODY()
 
@@ -159,7 +159,7 @@ namespace Lumina
     };
 
     REFLECT()
-    struct RUNTIME_API FMaterialParameter
+    struct RUNTIME_API SMaterialParameter
     {
         GENERATED_BODY()
 

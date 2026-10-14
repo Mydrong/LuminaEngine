@@ -28,6 +28,9 @@ namespace Lumina
 
         const TVector<CFactory*>& GetFactories() const { return Factories; }
 
+        // The factory for Class itself, else one for a base class it derives from.
+        CFactory* FindFactory(CClass* Class) const;
+
         TVector<CFactory*> Factories;
     };
     

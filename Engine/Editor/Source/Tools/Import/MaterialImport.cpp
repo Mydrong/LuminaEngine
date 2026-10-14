@@ -678,7 +678,7 @@ namespace Lumina
             }
 
             size_t EnabledOverrides = 0;
-            for (const FMaterialParameterOverride& Override : Candidate.Overrides)
+            for (const SMaterialParameterOverride& Override : Candidate.Overrides)
             {
                 EnabledOverrides += Override.bEnabled ? 1 : 0;
             }
@@ -689,7 +689,7 @@ namespace Lumina
 
             for (const FInstanceParam& Param : Params)
             {
-                const FMaterialParameterOverride* Override = Candidate.FindOverride(Param.Name);
+                const SMaterialParameterOverride* Override = Candidate.FindOverride(Param.Name);
                 if (Override == nullptr || !Override->bEnabled || Override->Type != Param.Type)
                 {
                     return false;

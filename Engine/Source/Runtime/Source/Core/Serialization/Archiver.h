@@ -20,6 +20,7 @@ namespace Lumina
 {
     class FField;
     class FGuid;
+    class FPortableBytes;
 }
 
 enum class EArchiverFlags : uint8
@@ -112,9 +113,8 @@ namespace Lumina
         FORCEINLINE int32 GetFileVersion() const { return FileVersion; }
         FORCEINLINE void SetFileVersion(int32 InVersion) { FileVersion = InVersion; }
 
-        // Reads bytes cut from this archive later, resolving names and objects through the same tables. Empty means plain bytes suffice.
-        using FDeferredReaderFactory = TFunction<TUniquePtr<FArchive>(const TVector<uint8>&)>;
-        virtual FDeferredReaderFactory GetDeferredReaderFactory() const { return {}; }
+        // Records what the name slots and object indices in bytes just read from here stand for, false when this archive cannot say.
+        virtual bool DescribeCutBytes(FPortableBytes& Cut) const { return false; }
 
         FORCEINLINE size_t GetMaxSerializeSize() const { return ArMaxSerializeSize; }
 
@@ -152,6 +152,9 @@ namespace Lumina
         /** Soft-ref hook: FSoftObjectPath::operator<< calls this on write so the saver records
          *  a Soft ImportTable entry. No-op on archives without an import table. */
         virtual void RegisterSoftAssetReference(const FGuid& AssetGUID) {}
+
+        // The bundles a property names for the soft references inside it, returning the ones it replaces so nesting restores them.
+        virtual FStringView SetSoftReferenceBundles(FStringView Bundles) { return {}; }
 
         // Offered its resolved path+GUID on write so a fixup archive can retarget a soft ref in place.
         virtual bool RewriteSoftAssetReference(FString& Path, FGuid& AssetGUID) { return false; }

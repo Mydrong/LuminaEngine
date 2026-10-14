@@ -1,52 +1,94 @@
 #include "RuntimePCH.h"
 
 #include "ManagedTypeRegistry.h"
-#include "ScriptDataStruct.h"
+#include "ScriptTypeRegistry.h"
 #include "ScriptableObject.h"
 
 namespace Lumina::Scripting
 {
     namespace
     {
-        // Minted classes are reused by name across reloads, with each instance rebinding through its bridge.
-        // First, because everything after it reads the classes this produces.
+        // First, so a struct renamed with [Alias] is followed by every stage after, as a renamed class already was.
+        class FRedirectStage final : public IManagedTypeCompiler
+        {
+        public:
+
+            const char* GetName() const override { return "Redirects"; }
+
+            void Compile(TSpan<const FManagedTypeDefinition>, TSpan<const FManagedTypeAlias> Aliases) override
+            {
+                FScriptableRegistry::SetRedirects(Aliases);
+            }
+        };
+
+        // Members change in place, so every field already holding one of these enums sees the reload at once.
+        class FEnumStage final : public IManagedTypeCompiler
+        {
+        public:
+
+            const char* GetName() const override { return "Enums"; }
+
+            void Compile(TSpan<const FManagedTypeDefinition> Definitions, TSpan<const FManagedTypeAlias>) override
+            {
+                FScriptEnumRegistry::Get().Refresh(Definitions);
+            }
+        };
+
+        // Class objects before any layout, so a struct field can name a C# class minted this same reload.
+        class FClassShellStage final : public IManagedTypeCompiler
+        {
+        public:
+
+            const char* GetName() const override { return "ClassShells"; }
+
+            void Compile(TSpan<const FManagedTypeDefinition> Definitions, TSpan<const FManagedTypeAlias>) override
+            {
+                FScriptableRegistry::MintNewClasses(Definitions);
+            }
+        };
+
+        // Classes are reused by name across reloads, and come after the structs since a class holding one by value is laid out around it.
         class FScriptableClassStage final : public IManagedTypeCompiler
         {
         public:
 
             const char* GetName() const override { return "ScriptableClasses"; }
 
-            void Compile(TSpan<const FManagedTypeDefinition> Definitions) override
+            void Compile(TSpan<const FManagedTypeDefinition> Definitions, TSpan<const FManagedTypeAlias> Aliases) override
             {
-                FScriptableRegistry::RefreshMintedClasses(Definitions);
+                FScriptableRegistry::RefreshMintedClasses(Definitions, Aliases);
             }
         };
 
-        // After the class minting, since both read the generation that just loaded and a data struct may
-        // name a class this reload only just produced.
-        class FDataStructStage final : public IManagedTypeCompiler
+        // After the class shells a struct field may name, and before the class layouts that hold a struct by value.
+        class FStructStage final : public IManagedTypeCompiler
         {
         public:
 
-            const char* GetName() const override { return "DataStructs"; }
+            const char* GetName() const override { return "Structs"; }
 
-            void Compile(TSpan<const FManagedTypeDefinition>) override
+            void Compile(TSpan<const FManagedTypeDefinition> Definitions, TSpan<const FManagedTypeAlias>) override
             {
-                FScriptDataStructRegistry::Get().Refresh();
+                FScriptStructRegistry::Get().Refresh(Definitions);
             }
         };
 
     }
 
-    // Registration order is execution order, which is the whole point of declaring them. Idempotent against
-    // the registry's current contents rather than against a one-shot latch, so it reinstalls after a reset.
+    // Registration order is execution order. Idempotent against the registry contents, so it reinstalls after a reset.
     void RegisterBuiltInManagedTypeStages()
     {
+        static FRedirectStage        Redirects;
+        static FEnumStage            Enums;
+        static FClassShellStage      ClassShells;
+        static FStructStage      Structs;
         static FScriptableClassStage ScriptableClasses;
-        static FDataStructStage      DataStructs;
 
         FManagedTypeRegistry& Registry = FManagedTypeRegistry::Get();
+        Registry.Register(&Redirects);
+        Registry.Register(&Enums);
+        Registry.Register(&ClassShells);
+        Registry.Register(&Structs);
         Registry.Register(&ScriptableClasses);
-        Registry.Register(&DataStructs);
     }
 }

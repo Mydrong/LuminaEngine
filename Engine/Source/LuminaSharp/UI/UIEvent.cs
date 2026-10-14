@@ -9,8 +9,8 @@ internal struct UIEventData
 {
     public int Id;
     public int Phase;
-    public Lumina.FUIElement CurrentElement;
-    public Lumina.FUIElement TargetElement;
+    public Lumina.SUIElement CurrentElement;
+    public Lumina.SUIElement TargetElement;
     public float MouseX;
     public float MouseY;
     public int MouseButton;

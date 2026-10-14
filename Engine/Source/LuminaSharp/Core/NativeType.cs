@@ -4,7 +4,7 @@ using System.Reflection;
 namespace LuminaSharp;
 
 /// <summary>Carries a native reflected type's simple name so the mirror can be classified and resolved.</summary>
-[AttributeUsage(AttributeTargets.Struct | AttributeTargets.Class, Inherited = false)]
+[AttributeUsage(AttributeTargets.Struct | AttributeTargets.Class | AttributeTargets.Enum, Inherited = false)]
 public sealed class NativeTypeAttribute : Attribute
 {
     public string Name { get; }
@@ -20,14 +20,14 @@ internal static class NativeTypeName
 {
     public static string Of<T>() => Cache<T>.Name;
 
-    // A wrapper names its native type, a data struct keeps the short name its assets store, and a script class its full name.
+    // A wrapper names its native type, a reflected struct or enum keeps the short name assets store, and a script class its full name.
     public static string Of(Type Type)
     {
         if (Type.GetCustomAttribute<NativeTypeAttribute>(inherit: false) is { } Native)
         {
             return Native.Name;
         }
-        if (Type.GetCustomAttribute<ScriptStructBaseAttribute>(inherit: false) != null)
+        if ((Type.IsValueType || Type.IsEnum) && Type.IsDefined(typeof(ReflectAttribute), inherit: false))
         {
             return Type.Name;
         }

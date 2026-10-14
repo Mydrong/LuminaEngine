@@ -212,7 +212,7 @@ namespace Lumina
         bool HasTextureParameter(const FName& Name);
 
         // The root's declaration of Name, which every level shares.
-        virtual bool GetParameterValue(EMaterialParameterType Type, const FName& Name, FMaterialParameter& Param) { return false; }
+        virtual bool GetParameterValue(EMaterialParameterType Type, const FName& Name, SMaterialParameter& Param) { return false; }
 
         FMaterialUniforms* GetMaterialUniforms() { return &MaterialUniforms; }
         const FMaterialUniforms* GetMaterialUniforms() const { return &MaterialUniforms; }

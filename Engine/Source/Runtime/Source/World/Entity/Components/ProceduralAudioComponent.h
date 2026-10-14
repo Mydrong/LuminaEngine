@@ -52,7 +52,7 @@ namespace Lumina
 		PROPERTY(Editable)
 		bool bPlayOnReady = false;
 
-		FAudioHandle ActiveHandle;
+		SAudioHandle ActiveHandle;
 
 		bool bReady = false;
 		bool bPlaying = false;

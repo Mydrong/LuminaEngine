@@ -1164,7 +1164,7 @@ namespace Lumina
         }
         const FVector3 Origin = FVector3(Terrain.WorldMatrix[3]);
         const float HalfSize = Terrain.TileWorldSize * 0.5f;
-        FAABB Bounds;
+        SAABB Bounds;
         Bounds.Min = FVector3(Origin.x - HalfSize, Origin.y, Origin.z - HalfSize);
         Bounds.Max = FVector3(Origin.x + HalfSize, Origin.y + Terrain.MaxHeight, Origin.z + HalfSize);
         return Frame.CameraFrustum.IsInside(Bounds);

@@ -11,7 +11,7 @@
 namespace Lumina
 {
     REFLECT()
-    struct RUNTIME_API FCollectionScalarParameter
+    struct RUNTIME_API SCollectionScalarParameter
     {
         GENERATED_BODY()
 
@@ -23,7 +23,7 @@ namespace Lumina
     };
 
     REFLECT()
-    struct RUNTIME_API FCollectionVectorParameter
+    struct RUNTIME_API SCollectionVectorParameter
     {
         GENERATED_BODY()
 
@@ -75,10 +75,10 @@ namespace Lumina
 
         /** Declared scalars. A parameter's position here is the index the graph compiles into a shader. */
         PROPERTY(Editable, Category = "Collection")
-        TVector<FCollectionScalarParameter> ScalarParameters;
+        TVector<SCollectionScalarParameter> ScalarParameters;
 
         PROPERTY(Editable, Category = "Collection")
-        TVector<FCollectionVectorParameter> VectorParameters;
+        TVector<SCollectionVectorParameter> VectorParameters;
 
     private:
 

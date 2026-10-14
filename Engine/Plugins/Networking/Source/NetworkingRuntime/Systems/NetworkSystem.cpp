@@ -86,7 +86,7 @@ namespace Lumina
                 {
                     continue;
                 }
-                Net.NetGUID            = FNetGUID{ StableId++ };
+                Net.NetGUID            = SNetGUID{ StableId++ };
                 Net.OwningConnectionId = 0;
                 State.GuidTable.Register(Net.NetGUID, Entity);
 
@@ -179,7 +179,7 @@ namespace Lumina
                 {
                     break;
                 }
-                const ECS::FEntity Entity = State.GuidTable.Find(FNetGUID{ Guid });
+                const ECS::FEntity Entity = State.GuidTable.Find(SNetGUID{ Guid });
                 if (Entity != ECS::NullEntity && Registry.IsValid(Entity))
                 {
                     if (SNetworkComponent* Net = Registry.TryGet<SNetworkComponent>(Entity))
@@ -258,7 +258,7 @@ namespace Lumina
             for (size_t i = 0; i < State.KnownStableGuids.size(); )
             {
                 const uint32 Guid = State.KnownStableGuids[i];
-                const ECS::FEntity Entity = State.GuidTable.Find(FNetGUID{ Guid });
+                const ECS::FEntity Entity = State.GuidTable.Find(SNetGUID{ Guid });
                 if (Entity == ECS::NullEntity || !Registry.IsValid(Entity))
                 {
                     TVector<uint8> Buffer;
@@ -269,7 +269,7 @@ namespace Lumina
                     Net::AppendFramedMessage(Batch, Buffer.data(), static_cast<SIZE_T>(Buffer.size()));
                     ++State.Stats.DespawnsSent;
 
-                    State.GuidTable.Unregister(FNetGUID{ Guid });
+                    State.GuidTable.Unregister(SNetGUID{ Guid });
                     State.DestroyedStableGuids.push_back(Guid);
                     State.KnownStableGuids.erase(State.KnownStableGuids.begin() + i);
                 }
@@ -389,7 +389,7 @@ namespace Lumina
             Reader << Type;
             const uint32 Guid  = Net::ReadNetGuid(Reader);
             const uint32 Owner = ReadVarUInt(Reader);
-            if (Reader.HasError() || State.GuidTable.Find(FNetGUID{ Guid }) != ECS::NullEntity)
+            if (Reader.HasError() || State.GuidTable.Find(SNetGUID{ Guid }) != ECS::NullEntity)
             {
                 return; // malformed, or we already have this entity
             }
@@ -424,7 +424,7 @@ namespace Lumina
             }
 
             SNetworkComponent& Net = Registry.GetOrEmplace<SNetworkComponent>(Entity);
-            Net.NetGUID            = FNetGUID{ Guid };
+            Net.NetGUID            = SNetGUID{ Guid };
             Net.OwningConnectionId = Owner;
             State.GuidTable.Register(Net.NetGUID, Entity);
             Registry.EmplaceOrReplace<FNeedsTransformUpdate>(Entity);
@@ -444,7 +444,7 @@ namespace Lumina
             {
                 return;
             }
-            const ECS::FEntity Entity = State.GuidTable.Find(FNetGUID{ Guid });
+            const ECS::FEntity Entity = State.GuidTable.Find(SNetGUID{ Guid });
             if (Entity != ECS::NullEntity && Registry.IsValid(Entity))
             {
                 Net::BindReaders(Reader, State, SenderConn);
@@ -472,10 +472,10 @@ namespace Lumina
                 return;
             }
             ECS::FRegistry& Registry = ECS::GetWorldRegistry(*World);
-            const ECS::FEntity Entity = State.GuidTable.Find(FNetGUID{ Guid });
+            const ECS::FEntity Entity = State.GuidTable.Find(SNetGUID{ Guid });
             if (Entity != ECS::NullEntity && Registry.IsValid(Entity))
             {
-                State.GuidTable.Unregister(FNetGUID{ Guid });
+                State.GuidTable.Unregister(SNetGUID{ Guid });
                 ECS::Utils::DestroyEntity(Registry, Entity);
             }
         }
@@ -906,7 +906,7 @@ namespace Lumina
                         E.TimeOutOfAOI = 0.0f;
                         if (bDyn)
                         {
-                            if (State.GuidTable.Find(FNetGUID{ Guid }) != ECS::NullEntity)
+                            if (State.GuidTable.Find(SNetGUID{ Guid }) != ECS::NullEntity)
                             {
                                 Ops.push_back({ EClientOp::Spawn, Guid, Rec });
                                 E.bBaselinePending = true; // spawn carried the pose; hold the transform one tick
@@ -998,7 +998,7 @@ namespace Lumina
                     if (E.RelevantTick != State.RelevancyTick)
                     {
                         const uint32 Guid = It->first;
-                        const bool bDestroyed = (State.GuidTable.Find(FNetGUID{ Guid }) == ECS::NullEntity);
+                        const bool bDestroyed = (State.GuidTable.Find(SNetGUID{ Guid }) == ECS::NullEntity);
                         E.TimeOutOfAOI += SinceServiced;
                         if (bDestroyed || E.TimeOutOfAOI >= Grace)
                         {
@@ -1041,7 +1041,7 @@ namespace Lumina
                         continue;
                     }
 
-                    const ECS::FEntity Ent = State.GuidTable.Find(FNetGUID{ Op.Guid });
+                    const ECS::FEntity Ent = State.GuidTable.Find(SNetGUID{ Op.Guid });
                     if (Ent == ECS::NullEntity || !Registry.IsValid(Ent))
                     {
                         continue;
@@ -1352,7 +1352,7 @@ namespace Lumina
                 return false;
             }
 
-            const ECS::FEntity Entity = State.GuidTable.Find(FNetGUID{ Guid });
+            const ECS::FEntity Entity = State.GuidTable.Find(SNetGUID{ Guid });
             if (Entity == ECS::NullEntity || !Registry.IsValid(Entity) || !Registry.HasAll<STransformComponent>(Entity))
             {
                 return true; // unknown/late entity; skip but keep parsing the batch
@@ -1464,7 +1464,7 @@ namespace Lumina
                 }
             }
 
-            const ECS::FEntity Entity = State.GuidTable.Find(FNetGUID{ Guid });
+            const ECS::FEntity Entity = State.GuidTable.Find(SNetGUID{ Guid });
             if (Entity == ECS::NullEntity || !Registry.IsValid(Entity))
             {
                 return;

@@ -32,7 +32,7 @@ namespace Lumina
 
         /** Held through the forget window, and not found once the target drops out of memory. */
         FUNCTION()
-        static FNavPoint GetLastKnownLocation(CWorld* World, ECS::FEntity Perceiver, ECS::FEntity Target);
+        static SNavPoint GetLastKnownLocation(CWorld* World, ECS::FEntity Perceiver, ECS::FEntity Target);
 
         /** Nearest perceived target to the perceiver's eye, or the null entity. */
         FUNCTION()

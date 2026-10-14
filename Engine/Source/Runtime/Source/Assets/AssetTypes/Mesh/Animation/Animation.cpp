@@ -4,6 +4,7 @@
 #include "Animation.h"
 
 #include "Animation/BindPose.h"
+#include "Assets/AssetTypes/Mesh/Skeleton/Skeleton.h"
 #include "Animation/Pose.h"
 #include "Core/Math/SIMD/SIMDConfig.h"
 #include "Memory/Memcpy.h"
@@ -69,6 +70,97 @@ namespace Lumina
 
     namespace Detail
     {
+        constexpr float kRetargetTolerance = 1e-4f;
+
+        bool IsNearlyIdentity(const FVector3& T, const FQuat& R, const FVector3& S)
+        {
+            return Math::Length(T) < kRetargetTolerance
+                && Math::Abs(Math::Abs(R.w) - 1.0f) < kRetargetTolerance
+                && Math::Length(S - FVector3(1.0f)) < kRetargetTolerance;
+        }
+
+        void ApplyRootFix(const FAnimationResource::FRetargetFix& Fix, FVector3& T, FQuat& R, FVector3& S)
+        {
+            AnimPose::DecomposeTRS(Fix.RootCorrection * AnimPose::ComposeTRS(T, R, S), T, R, S);
+        }
+
+        const FAnimationResource::FRetargetFix* FindRetargetFix(const FAnimationResource::FResolvedSkeleton& Resolved, int32 Bone)
+        {
+            for (const FAnimationResource::FRetargetFix& Fix : Resolved.RetargetFixes)
+            {
+                if (Fix.Bone == Bone)
+                {
+                    return &Fix;
+                }
+            }
+            return nullptr;
+        }
+
+        void BuildRetargetFixes(const FCompressedAnimData& Compressed, FAnimationResource::FResolvedSkeleton& Resolved,
+                                const FSkeletonResource& Target, const FSkeletonResource& Source)
+        {
+            for (int32 i = 0; i < (int32)Compressed.Bones.size(); ++i)
+            {
+                const int32 Bone = Resolved.CompressedBones[i];
+                const int32 SourceBone = Source.FindBoneIndex(Compressed.Bones[i].BoneName);
+                if (Bone < 0 || Bone >= Target.GetNumBones() || SourceBone < 0)
+                {
+                    continue;
+                }
+
+                FAnimationResource::FRetargetFix Fix;
+                Fix.Bone            = Bone;
+                Fix.CompressedIndex = i;
+                AnimPose::GetBindLocalTRS(&Source, SourceBone, Fix.SourceBindT, Fix.SourceBindR, Fix.SourceBindS);
+
+                const bool bRootInBoth = Target.GetBone(Bone).ParentIndex == Constants::kIndexNone
+                                      && Source.GetBone(SourceBone).ParentIndex == Constants::kIndexNone;
+                if (bRootInBoth)
+                {
+                    Fix.bRoot = true;
+                    Fix.RootCorrection = Target.GetBone(Bone).LocalTransform * Math::Inverse(Source.GetBone(SourceBone).LocalTransform);
+
+                    FVector3 T, S;
+                    FQuat R;
+                    AnimPose::DecomposeTRS(Fix.RootCorrection, T, R, S);
+                    if (!IsNearlyIdentity(T, R, S))
+                    {
+                        Resolved.RetargetFixes.push_back(Fix);
+                    }
+                    continue;
+                }
+
+                FVector3 TargetT, TargetS;
+                FQuat TargetR;
+                AnimPose::GetBindLocalTRS(&Target, Bone, TargetT, TargetR, TargetS);
+
+                const float SourceLength = Math::Length(Fix.SourceBindT);
+                if (SourceLength < kRetargetTolerance)
+                {
+                    continue;
+                }
+
+                Fix.TranslationScale = Math::Length(TargetT) / SourceLength;
+                if (Math::Abs(Fix.TranslationScale - 1.0f) > 1e-3f)
+                {
+                    Resolved.RetargetFixes.push_back(Fix);
+                }
+            }
+        }
+
+        uint64 MakeRetargetKey(const FSkeletonResource* Target, const FSkeletonResource* Source)
+        {
+            if (Source == nullptr || Source == Target)
+            {
+                return 0;
+            }
+
+            uint64 Key = (uint64)(uintptr_t)Source;
+            Key ^= (uint64)Source->BindPoseGeneration * 0x9E3779B97F4A7C15ull;
+            Key ^= ((uint64)Target->BindPoseGeneration << 32) | (Key >> 32);
+            return Key == 0 ? 1 : Key;
+        }
+
         // Pure selects, so every constant lands as the exact bits its track stores.
         void ApplyConstantOverlay(const FAnimationResource::FResolvedSkeleton& Resolved, FPose& Pose, int32 ActiveBones)
         {
@@ -175,13 +267,14 @@ namespace Lumina
         Resolved.OverlayStreams = Streams;
     }
 
-    const FAnimationResource::FResolvedSkeleton* FAnimationResource::GetResolvedSkeleton(const FSkeletonResource* Skeleton)
+    const FAnimationResource::FResolvedSkeleton* FAnimationResource::GetResolvedSkeleton(const FSkeletonResource* Skeleton, const FSkeletonResource* Source)
     {
         // A skeleton built without its bind cache hashes here, which only costs that rare caller.
         const uint64 Key = Skeleton->BoneLayoutHash != 0 ? Skeleton->BoneLayoutHash : Skeleton->ComputeBoneLayoutHash();
+        const uint64 SourceKey = Detail::MakeRetargetKey(Skeleton, Source);
 
         const FResolvedSkeleton* Active = ActiveResolvedSkeleton.load(std::memory_order_acquire);
-        if (Active && Active->LayoutKey == Key)
+        if (Active && Active->LayoutKey == Key && Active->SourceKey == SourceKey)
         {
             return Active;
         }
@@ -191,7 +284,7 @@ namespace Lumina
         {
             for (const FResolvedSkeleton* Resolved : *Table)
             {
-                if (Resolved->LayoutKey == Key)
+                if (Resolved->LayoutKey == Key && Resolved->SourceKey == SourceKey)
                 {
                     return Resolved;
                 }
@@ -202,7 +295,7 @@ namespace Lumina
 
         for (const TUniquePtr<FResolvedSkeleton>& Resolved : ResolvedSkeletons)
         {
-            if (Resolved->LayoutKey == Key)
+            if (Resolved->LayoutKey == Key && Resolved->SourceKey == SourceKey)
             {
                 return Resolved.get();
             }
@@ -210,6 +303,7 @@ namespace Lumina
 
         TUniquePtr<FResolvedSkeleton> NewSet = MakeUnique<FResolvedSkeleton>();
         NewSet->LayoutKey = Key;
+        NewSet->SourceKey = SourceKey;
 
         const int32 NumBones = Skeleton->GetNumBones();
         NewSet->SkeletonToCompressed.assign(NumBones, Constants::kIndexNone);
@@ -229,6 +323,11 @@ namespace Lumina
         }
 
         BuildConstantOverlay(*NewSet, NumBones);
+
+        if (SourceKey != 0)
+        {
+            Detail::BuildRetargetFixes(Compressed, *NewSet, *Skeleton, *Source);
+        }
 
         // Unmatched bones silently freeze at bind pose, the telltale of the wrong skeleton.
         if (NumUnmatched > 0)
@@ -368,7 +467,7 @@ namespace Lumina
         Memory::Memset(ScratchTouched.data(), 0, (size_t)NumBones * sizeof(uint8));
 
         // Pass 1 gathers per-bone TRS overrides with bone indices pre-resolved.
-        const FAnimationResource::FResolvedSkeleton* Resolved = AnimationResource->GetResolvedSkeleton(InSkeleton);
+        const FAnimationResource::FResolvedSkeleton* Resolved = AnimationResource->GetResolvedSkeleton(InSkeleton, GetSourceSkeletonResource());
         const FCompressedAnimData& Compressed = AnimationResource->Compressed;
 
         uint32 Frame0, Frame1;
@@ -388,6 +487,32 @@ namespace Lumina
             ScratchR[BoneIdx]       = Decoded.R;
             ScratchS[BoneIdx]       = Decoded.S;
             ScratchTouched[BoneIdx] = Decoded.Touched;
+        }
+
+        for (const FAnimationResource::FRetargetFix& Fix : Resolved->RetargetFixes)
+        {
+            const int32 i = Fix.Bone;
+            const uint8 Touched = ScratchTouched[i];
+            if (Touched == 0)
+            {
+                continue;
+            }
+
+            if (Fix.bRoot)
+            {
+                FVector3 T = (Touched & Detail::TouchedT) ? ScratchT[i] : Fix.SourceBindT;
+                FQuat    R = (Touched & Detail::TouchedR) ? ScratchR[i] : Fix.SourceBindR;
+                FVector3 S = (Touched & Detail::TouchedS) ? ScratchS[i] : Fix.SourceBindS;
+                Detail::ApplyRootFix(Fix, T, R, S);
+                ScratchT[i] = T;
+                ScratchR[i] = R;
+                ScratchS[i] = S;
+                ScratchTouched[i] = Detail::TouchedAll;
+            }
+            else if (Touched & Detail::TouchedT)
+            {
+                ScratchT[i] = ScratchT[i] * Fix.TranslationScale;
+            }
         }
 
         // Bones[] is parents-before-children, so local matrices fuse with FK in one linear pass.
@@ -527,7 +652,7 @@ namespace Lumina
         // Three bulk copies instead of a per-bone decompose, and the LOD tail keeps its bind-pose locals.
         OutPose.ResetToBindPose(InSkeleton);
 
-        const FAnimationResource::FResolvedSkeleton* Resolved = AnimationResource->GetResolvedSkeleton(InSkeleton);
+        const FAnimationResource::FResolvedSkeleton* Resolved = AnimationResource->GetResolvedSkeleton(InSkeleton, GetSourceSkeletonResource());
         const FCompressedAnimData& Compressed = AnimationResource->Compressed;
 
         uint32 Frame0, Frame1;
@@ -630,6 +755,39 @@ namespace Lumina
             Track.DataOffset = BatchOffsets[k];
             OutPose.SetRotation(BatchBones[k], Compressed.DecodeRotation(Track, Frame0, Frame1, Alpha));
         }
+
+        for (const FAnimationResource::FRetargetFix& Fix : Resolved->RetargetFixes)
+        {
+            if (Fix.Bone >= ActiveBones)
+            {
+                continue;
+            }
+
+            const FCompressedAnimBone& Track = Compressed.Bones[Fix.CompressedIndex];
+            const bool bHasT = Track.Translation.Format != EAnimTrackFormat::None;
+            const bool bHasR = Track.Rotation.Format != EAnimTrackFormat::None;
+            const bool bHasS = Track.Scale.Format != EAnimTrackFormat::None;
+
+            if (Fix.bRoot)
+            {
+                if (!bHasT && !bHasR && !bHasS)
+                {
+                    continue;
+                }
+
+                FVector3 T = bHasT ? OutPose.GetTranslation(Fix.Bone) : Fix.SourceBindT;
+                FQuat    R = bHasR ? OutPose.GetRotation(Fix.Bone)    : Fix.SourceBindR;
+                FVector3 S = bHasS ? OutPose.GetScale(Fix.Bone)       : Fix.SourceBindS;
+                Detail::ApplyRootFix(Fix, T, R, S);
+                OutPose.SetTranslation(Fix.Bone, T);
+                OutPose.SetRotation(Fix.Bone, R);
+                OutPose.SetScale(Fix.Bone, S);
+            }
+            else if (bHasT)
+            {
+                OutPose.SetTranslation(Fix.Bone, OutPose.GetTranslation(Fix.Bone) * Fix.TranslationScale);
+            }
+        }
     }
 
     void CAnimation::SampleBoneLocal(float Time, FSkeletonResource* RESTRICT InSkeleton, int32 BoneIndex,
@@ -637,7 +795,7 @@ namespace Lumina
     {
         AnimPose::GetBindLocalTRS(InSkeleton, BoneIndex, OutT, OutR, OutS);
 
-        const FAnimationResource::FResolvedSkeleton* Resolved = AnimationResource->GetResolvedSkeleton(InSkeleton);
+        const FAnimationResource::FResolvedSkeleton* Resolved = AnimationResource->GetResolvedSkeleton(InSkeleton, GetSourceSkeletonResource());
         const FCompressedAnimData& Compressed = AnimationResource->Compressed;
 
         if (BoneIndex < 0 || BoneIndex >= (int32)Resolved->SkeletonToCompressed.size())
@@ -656,8 +814,26 @@ namespace Lumina
         Compressed.GetFrameBlend(Time, AnimationResource->Duration, Frame0, Frame1, Alpha);
 
         const Detail::FDecodedBone Decoded = Detail::DecodeBone(Compressed, Compressed.Bones[CompressedIndex], Frame0, Frame1, Alpha);
-        if (Decoded.Touched & Detail::TouchedT) OutT = Decoded.T;
+        const FAnimationResource::FRetargetFix* Fix = Detail::FindRetargetFix(*Resolved, BoneIndex);
+        if (Fix != nullptr && Fix->bRoot && Decoded.Touched != 0)
+        {
+            FVector3 T = (Decoded.Touched & Detail::TouchedT) ? Decoded.T : Fix->SourceBindT;
+            FQuat    R = (Decoded.Touched & Detail::TouchedR) ? Decoded.R : Fix->SourceBindR;
+            FVector3 S = (Decoded.Touched & Detail::TouchedS) ? Decoded.S : Fix->SourceBindS;
+            Detail::ApplyRootFix(*Fix, T, R, S);
+            OutT = T;
+            OutR = R;
+            OutS = S;
+            return;
+        }
+
+        if (Decoded.Touched & Detail::TouchedT) OutT = (Fix != nullptr) ? Decoded.T * Fix->TranslationScale : Decoded.T;
         if (Decoded.Touched & Detail::TouchedR) OutR = Decoded.R;
         if (Decoded.Touched & Detail::TouchedS) OutS = Decoded.S;
+    }
+
+    const FSkeletonResource* CAnimation::GetSourceSkeletonResource() const
+    {
+        return Skeleton.IsValid() ? Skeleton->GetSkeletonResource() : nullptr;
     }
 }

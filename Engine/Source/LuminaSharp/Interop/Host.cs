@@ -254,85 +254,7 @@ public static unsafe partial class Host
         }
     }
 
-
-    /// Writes a script type's [Property] schema + defaults to a recursive blob and hands it to a native sink (called once).
-    [ManagedExport]
-    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
-    public static void GetScriptSchema(byte* ScriptClass, int ClassLength, IntPtr Sink, IntPtr Context)
-    {
-        try
-        {
-            byte[]? Blob = Scripts?.EntityScripts?.Schema(Interop.GetString(ScriptClass, ClassLength));
-            if (Blob == null || Sink == IntPtr.Zero)
-            {
-                return;
-            }
-
-            var Add = (delegate* unmanaged[Stdcall]<IntPtr, byte*, int, void>)Sink;
-            fixed (byte* Bytes = Blob)
-            {
-                Add(Context, Bytes, Blob.Length);
-            }
-        }
-        catch (Exception Exception)
-        {
-            Interop.LogException(Exception);
-        }
-    }
-
-    /// Writes a script type's [Button] methods to a native sink (called once); drives the inspector's action buttons.
-    [ManagedExport]
-    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
-    public static void GetScriptButtons(byte* ScriptClass, int ClassLength, IntPtr Sink, IntPtr Context)
-    {
-        try
-        {
-            byte[]? Blob = Scripts?.EntityScripts?.Buttons(Interop.GetString(ScriptClass, ClassLength));
-            if (Blob == null || Sink == IntPtr.Zero)
-            {
-                return;
-            }
-
-            var Add = (delegate* unmanaged[Stdcall]<IntPtr, byte*, int, void>)Sink;
-            fixed (byte* Bytes = Blob)
-            {
-                Add(Context, Bytes, Blob.Length);
-            }
-        }
-        catch (Exception Exception)
-        {
-            Interop.LogException(Exception);
-        }
-    }
-
-
-    /// Resumes an ObjectCore.AsyncLoadObject continuation; Callback is the GCHandle to an Action&lt;IntPtr&gt; trampoline, freed here.
-    [ManagedExport]
-    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
-    public static void InvokeAssetCallback(IntPtr Callback, IntPtr Object)
-    {
-        try
-        {
-            GCHandle Handle = GCHandle.FromIntPtr(Callback);
-            ObjectCore.CompleteAsyncLoad(Callback);
-            Action<IntPtr>? Trampoline = Handle.Target as Action<IntPtr>;
-            Handle.Free();
-            Trampoline?.Invoke(Object);
-        }
-        catch (Exception Exception)
-        {
-            Interop.LogException(Exception);
-        }
-    }
-
-    // Scriptable bridge: a C# subclass of a REFLECT(Scriptable) native CObject. Native creates the CObject
-    // (a minted CClass), then binds the managed instance to it via a GCHandle stored in the object's
-    // managed-instance slot, which owns it from there (no DestroyScriptable: the object's destructor and the
-    // teardown drain both go through that slot).
-
-    /// Instantiates the named Scriptable subclass, pairs it to the native object, and returns a strong
-    /// GCHandle (IntPtr.Zero on failure). The override mask is no longer reported per instance -- it is
-    /// type-uniform and rides on the minted CClass (see ScriptableRuntime.Enumerate).
+    // Pairs a new managed instance of the named script class with its native object and returns the strong GCHandle that owns it.
     [ManagedExport]
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
     public static IntPtr CreateScriptable(byte* TypeName, int TypeNameLength, ulong NativePtr)
@@ -351,40 +273,7 @@ public static unsafe partial class Host
         }
     }
 
-    /// Reports each discovered Scriptable C# type as (full name, native base class name) to a native sink, so
-    /// the host can mint a CClass deriving from that native base.
-    [ManagedExport]
-    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
-    public static void EnumerateScriptables(IntPtr Sink, IntPtr Context)
-    {
-        try
-        {
-            Scripts?.Scriptables?.Enumerate(Sink, Context);
-        }
-        catch (Exception Exception)
-        {
-            Interop.LogException(Exception);
-        }
-    }
-
-    /// Reports each (prior name, current name) pair from [Alias] on a script class, so the host can record
-    /// where a renamed class went and keep saved references resolving.
-    [ManagedExport]
-    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
-    public static void EnumerateScriptableAliases(IntPtr Sink, IntPtr Context)
-    {
-        try
-        {
-            Scripts?.Scriptables?.EnumerateAliases(Sink, Context);
-        }
-        catch (Exception Exception)
-        {
-            Interop.LogException(Exception);
-        }
-    }
-
-    /// Runs a Scriptable type's declared [Property] initializers into its class default object. Called once
-    /// per type at mint, after the CDO exists; instances are copied from it.
+    // Runs a script type's declared initializers into its defaults, once per type at mint, since instances are copied from them.
     [ManagedExport]
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
     public static unsafe void ApplyScriptableDefaults(byte* TypeName, int NameLength, ulong DefaultObject)
@@ -399,35 +288,19 @@ public static unsafe partial class Host
         }
     }
 
-    /// Reports each marked data type as (StableId, native base struct name) to a native sink, so the host can
-    /// mint a CScriptStruct deriving from that native base.
+    // Every type the loaded generation publishes, in one blob, so native mints the whole generation from one crossing.
     [ManagedExport]
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
-    public static void EnumerateScriptStructs(IntPtr Sink, IntPtr Context)
+    public static void GetTypeManifest(IntPtr Sink, IntPtr Context)
     {
         try
         {
-            Scripts?.DataStructs?.Enumerate(Sink, Context);
-        }
-        catch (Exception Exception)
-        {
-            Interop.LogException(Exception);
-        }
-    }
-
-    /// Writes the member schema blob for a marked data type, addressed by its StableId.
-    [ManagedExport]
-    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
-    public static unsafe void GetScriptStructSchema(byte* StableId, int IdLength, IntPtr Sink, IntPtr Context)
-    {
-        try
-        {
-            byte[]? Blob = Scripts?.DataStructs?.Schema(Interop.GetString(StableId, IdLength));
-            if (Blob == null || Sink == IntPtr.Zero)
+            if (Scripts?.Library is not { } Library || Scripts.Scriptables is not { } Scriptables || Sink == IntPtr.Zero)
             {
                 return;
             }
 
+            byte[] Blob = TypeManifest.Write(Library, Scriptables);
             var Add = (delegate* unmanaged[Stdcall]<IntPtr, byte*, int, void>)Sink;
             fixed (byte* Bytes = Blob)
             {

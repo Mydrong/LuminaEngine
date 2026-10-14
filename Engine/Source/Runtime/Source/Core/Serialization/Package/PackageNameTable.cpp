@@ -7,11 +7,6 @@
 
 namespace Lumina
 {
-    namespace
-    {
-        constexpr uint32 kHasNumberBit = 0x80000000u;
-        constexpr uint32 kSlotMask     = 0x7FFFFFFFu;
-    }
 
     uint32 FPackageNameMap::Slot(const FName& Name)
     {
@@ -24,7 +19,7 @@ namespace Lumina
         }
 
         const uint32 NewSlot = (uint32)Slots.size();
-        DEBUG_ASSERT(NewSlot < kHasNumberBit);
+        DEBUG_ASSERT(NewSlot < kPackageNameNumberBit);
         BaseToSlot.emplace(Key, NewSlot);
         Slots.push_back(Base);
         return NewSlot;
@@ -139,7 +134,7 @@ namespace Lumina
             uint32 Packed = Map->Slot(Value);
             if (Value.HasNumber())
             {
-                Packed |= kHasNumberBit;
+                Packed |= kPackageNameNumberBit;
                 uint32 Number = Value.GetNumber();
                 Ar << Packed;
                 Ar << Number;
@@ -156,7 +151,7 @@ namespace Lumina
         uint32 Packed = 0;
         Ar << Packed;
 
-        const bool bHasNumber = (Packed & kHasNumberBit) != 0;
+        const bool bHasNumber = (Packed & kPackageNameNumberBit) != 0;
         uint32 Number = 0;
         if (bHasNumber)
         {
@@ -164,18 +159,18 @@ namespace Lumina
         }
 
         // One bad slot means the stream is misaligned, so the archive fails rather than logging every name after it.
-        if ((Packed & kSlotMask) >= Table->Num())
+        if ((Packed & kPackageNameSlotMask) >= Table->Num())
         {
             if (!Ar.HasError())
             {
-                LOG_ERROR("Package name slot {} is outside the {}-entry name table; failing the archive", Packed & kSlotMask, Table->Num());
+                LOG_ERROR("Package name slot {} is outside the {}-entry name table; failing the archive", Packed & kPackageNameSlotMask, Table->Num());
             }
             Ar.SetHasError(true);
             Value = NAME_None;
             return;
         }
 
-        Value = Table->Resolve(Packed & kSlotMask, bHasNumber, Number);
+        Value = Table->Resolve(Packed & kPackageNameSlotMask, bHasNumber, Number);
     }
 
     FArchive& FPackageContainerReader::operator<<(FName& Value)
@@ -186,6 +181,17 @@ namespace Lumina
         }
 
         SerializePackageName(*this, Value, nullptr, Names);
+        return *this;
+    }
+
+    FArchive& FPackageContainerWriter::operator<<(FName& Value)
+    {
+        if (GetFileVersion() < (int32)ELuminaEngineVersion::PACKAGE_NAME_TABLE)
+        {
+            return FArchive::operator<<(Value);
+        }
+
+        SerializePackageName(*this, Value, &NameMap, nullptr);
         return *this;
     }
 }

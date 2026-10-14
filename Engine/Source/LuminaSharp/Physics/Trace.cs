@@ -9,7 +9,8 @@ public struct Trace
     private CWorld World;
     private FVector3 From;
     private FVector3 To;
-    private float Radius;
+    private SQueryShape Shape;
+    private bool bSwept;
     private FEntity IgnoreEntity;
     private ECollisionProfiles Mask;
 
@@ -19,8 +20,17 @@ public struct Trace
         T.World = Engine.World;
         T.From = From;
         T.To = To;
+        T.Shape.Rotation = FQuat.Identity;
         T.IgnoreEntity = FEntity.Null;
         T.Mask = ECollisionProfiles.All;
+        return T;
+    }
+
+    private static Trace Sweep(FVector3 From, FVector3 To, EQueryShapeType Type)
+    {
+        Trace T = Begin(From, To);
+        T.Shape.Type = Type;
+        T.bSwept = true;
         return T;
     }
 
@@ -34,9 +44,33 @@ public struct Trace
     /// A swept sphere, so a thick ray, between two points.
     public static Trace Sphere(float Radius, FVector3 From, FVector3 To)
     {
-        Trace T = Begin(From, To);
-        T.Radius = Radius;
+        Trace T = Sweep(From, To, EQueryShapeType.Sphere);
+        T.Shape.Radius = Radius;
         return T;
+    }
+
+    /// A swept box, turned by Rotated.
+    public static Trace Box(FVector3 HalfExtents, FVector3 From, FVector3 To)
+    {
+        Trace T = Sweep(From, To, EQueryShapeType.Box);
+        T.Shape.HalfExtents = HalfExtents;
+        return T;
+    }
+
+    /// A swept capsule standing along the up axis, the shape of a character, turned by Rotated.
+    public static Trace Capsule(float Radius, float HalfHeight, FVector3 From, FVector3 To)
+    {
+        Trace T = Sweep(From, To, EQueryShapeType.Capsule);
+        T.Shape.Radius = Radius;
+        T.Shape.HalfHeight = HalfHeight;
+        return T;
+    }
+
+    /// Turns a swept box or capsule.
+    public Trace Rotated(FQuat Rotation)
+    {
+        Shape.Rotation = Rotation;
+        return this;
     }
 
     /// Skip one entity's body, typically the caster's.
@@ -53,7 +87,7 @@ public struct Trace
         return this;
     }
 
-    /// Only hit bodies whose collision layer intersects Mask. Ray traces only.
+    /// Only hit bodies whose collision layer intersects Mask.
     public Trace WithMask(ECollisionProfiles Mask)
     {
         this.Mask = Mask;
@@ -63,21 +97,16 @@ public struct Trace
     /// Runs the query and returns the closest hit. Check bHit on the result.
     public SRayResult Run()
     {
-        if (Radius > 0.0f)
-        {
-            SRayResult[] Hits = CPhysicsLibrary.SphereCast(World, From, To, Radius, IgnoreEntity);
-            return Hits.Length > 0 ? Hits[0] : new SRayResult { Start = From, End = To };
-        }
-        return CPhysicsLibrary.Raycast(World, From, To, IgnoreEntity, Mask);
+        return bSwept
+            ? CPhysicsLibrary.ShapeCast(World, Shape, From, To, IgnoreEntity, Mask)
+            : CPhysicsLibrary.Raycast(World, From, To, IgnoreEntity, Mask);
     }
 
     /// Runs the query and returns every hit, near to far.
     public SRayResult[] RunAll()
     {
-        if (Radius > 0.0f)
-        {
-            return CPhysicsLibrary.SphereCast(World, From, To, Radius, IgnoreEntity);
-        }
-        return CPhysicsLibrary.RaycastAll(World, From, To, IgnoreEntity, Mask);
+        return bSwept
+            ? CPhysicsLibrary.ShapeCastAll(World, Shape, From, To, IgnoreEntity, Mask)
+            : CPhysicsLibrary.RaycastAll(World, From, To, IgnoreEntity, Mask);
     }
 }

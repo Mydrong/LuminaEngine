@@ -38,7 +38,7 @@ namespace Lumina
         constexpr uint64 kMaterialArtifactVersion = 1;
 
         // Stage count, then per stage its id, word count and words.
-        TVector<uint8> PackStageBlobs(const TVector<FMaterialStageBlob>& Blobs)
+        TVector<uint8> PackStageBlobs(const TVector<SMaterialStageBlob>& Blobs)
         {
             TVector<uint8> Bytes;
             auto Append = [&Bytes](const void* Data, size_t Size)
@@ -49,7 +49,7 @@ namespace Lumina
 
             const uint32 Count = (uint32)Blobs.size();
             Append(&Count, sizeof(Count));
-            for (const FMaterialStageBlob& Blob : Blobs)
+            for (const SMaterialStageBlob& Blob : Blobs)
             {
                 const uint32 Words = (uint32)Blob.Spirv.size();
                 Append(&Blob.Stage, sizeof(Blob.Stage));
@@ -59,7 +59,7 @@ namespace Lumina
             return Bytes;
         }
 
-        bool UnpackStageBlobs(const TVector<uint8>& Bytes, TVector<FMaterialStageBlob>& OutBlobs)
+        bool UnpackStageBlobs(const TVector<uint8>& Bytes, TVector<SMaterialStageBlob>& OutBlobs)
         {
             size_t Offset = 0;
             auto Read = [&Bytes, &Offset](void* Out, size_t Size)
@@ -83,7 +83,7 @@ namespace Lumina
             OutBlobs.reserve(Count);
             for (uint32 i = 0; i < Count; ++i)
             {
-                FMaterialStageBlob& Blob = OutBlobs.emplace_back();
+                SMaterialStageBlob& Blob = OutBlobs.emplace_back();
                 uint32 Words = 0;
                 if (!Read(&Blob.Stage, sizeof(Blob.Stage)) || !Read(&Words, sizeof(Words)) || Blob.Stage >= (uint8)EMaterialShaderStage::Count)
                 {
@@ -99,7 +99,7 @@ namespace Lumina
         }
 
         // Test hosts run without an engine, and they simply compile every time.
-        bool LoadStageBlobs(uint64 Key, TVector<FMaterialStageBlob>& OutBlobs)
+        bool LoadStageBlobs(uint64 Key, TVector<SMaterialStageBlob>& OutBlobs)
         {
             TVector<uint8> Bytes;
             return GEngine != nullptr && GEngine->GetArtifactCache().Load(Key, Bytes) && UnpackStageBlobs(Bytes, OutBlobs);
@@ -148,23 +148,23 @@ namespace Lumina
             return GMaterialStages[(size_t)Stage];
         }
 
-        FMaterialStageBlob* FindStageBlob(TVector<FMaterialStageBlob>& Blobs, EMaterialShaderStage Stage)
+        SMaterialStageBlob* FindStageBlob(TVector<SMaterialStageBlob>& Blobs, EMaterialShaderStage Stage)
         {
-            auto It = Algo::FindIf(Blobs, [Stage](const FMaterialStageBlob& Blob) { return Blob.Stage == (uint8)Stage; });
+            auto It = Algo::FindIf(Blobs, [Stage](const SMaterialStageBlob& Blob) { return Blob.Stage == (uint8)Stage; });
             return It != Blobs.end() ? &*It : nullptr;
         }
 
-        const TVector<uint32>& StageBinaries(const TVector<FMaterialStageBlob>& Blobs, EMaterialShaderStage Stage)
+        const TVector<uint32>& StageBinaries(const TVector<SMaterialStageBlob>& Blobs, EMaterialShaderStage Stage)
         {
             static const TVector<uint32> Empty;
-            auto It = Algo::FindIf(Blobs, [Stage](const FMaterialStageBlob& Blob) { return Blob.Stage == (uint8)Stage; });
+            auto It = Algo::FindIf(Blobs, [Stage](const SMaterialStageBlob& Blob) { return Blob.Stage == (uint8)Stage; });
             return It != Blobs.end() ? It->Spirv : Empty;
         }
 
         // Copies Spirv into Stage's blob. The source may already be that blob, which PostLoad commits in place.
-        void StoreStageBinaries(TVector<FMaterialStageBlob>& Blobs, EMaterialShaderStage Stage, TSpan<const uint32> Spirv)
+        void StoreStageBinaries(TVector<SMaterialStageBlob>& Blobs, EMaterialShaderStage Stage, TSpan<const uint32> Spirv)
         {
-            FMaterialStageBlob* Blob = FindStageBlob(Blobs, Stage);
+            SMaterialStageBlob* Blob = FindStageBlob(Blobs, Stage);
             if (Blob == nullptr)
             {
                 Blob = &Blobs.emplace_back();
@@ -193,7 +193,7 @@ namespace Lumina
         }
 
         // Only reachable from an asset saved before the graph compile refused over-budget slots.
-        void ReportParameterOverBudget(const CMaterial* Material, const FMaterialParameter& Param, const char* SlotKind, uint32 Capacity)
+        void ReportParameterOverBudget(const CMaterial* Material, const SMaterialParameter& Param, const char* SlotKind, uint32 Capacity)
         {
             LOG_ERROR("Material '{}' declares {} parameter '{}' at index {}, past the {} slot budget of {}. Its value is dropped "
                       "and the shader samples an unrelated field. Recompile the material and remove a {} parameter.",
@@ -365,8 +365,8 @@ namespace Lumina
         if (!Ar.IsCooking())
         {
             FRecursiveScopeLock Lock(ShaderStageMutex);
-            TVector<FMaterialStageBlob> CompiledStages = Move(Stages);
-            TVector<FMaterialShaderPermutation> CompiledPermutations = Move(Permutations);
+            TVector<SMaterialStageBlob> CompiledStages = Move(Stages);
+            TVector<SMaterialShaderPermutation> CompiledPermutations = Move(Permutations);
             const uint64 CompiledHash = CompiledTemplateHash;
             Stages.clear();
             Permutations.clear();
@@ -382,18 +382,18 @@ namespace Lumina
 
         // The shipped game never debugs its shaders, and the embedded source and line tables are a third of each binary.
         FRecursiveScopeLock Lock(ShaderStageMutex);
-        TVector<FMaterialStageBlob> EditorStages = Stages;
-        TVector<FMaterialShaderPermutation> EditorPermutations = Permutations;
+        TVector<SMaterialStageBlob> EditorStages = Stages;
+        TVector<SMaterialShaderPermutation> EditorPermutations = Permutations;
 
-        auto StripBlobs = [](TVector<FMaterialStageBlob>& Blobs)
+        auto StripBlobs = [](TVector<SMaterialStageBlob>& Blobs)
         {
-            for (FMaterialStageBlob& Blob : Blobs)
+            for (SMaterialStageBlob& Blob : Blobs)
             {
                 Spirv::StripDebugInfo(Blob.Spirv);
             }
         };
         StripBlobs(Stages);
-        for (FMaterialShaderPermutation& Permutation : Permutations)
+        for (SMaterialShaderPermutation& Permutation : Permutations)
         {
             StripBlobs(Permutation.Stages);
         }
@@ -539,7 +539,7 @@ namespace Lumina
 
     bool CMaterial::SetScalarValue(const FName& Name, const float Value)
     {
-        FMaterialParameter Param;
+        SMaterialParameter Param;
         if (!GetParameterValue(EMaterialParameterType::Scalar, Name, Param))
         {
             LOG_WARN("Material '{}' has no scalar parameter '{}'.", GetName(), Name);
@@ -553,7 +553,7 @@ namespace Lumina
 
     bool CMaterial::SetVectorValue(const FName& Name, const FVector4& Value)
     {
-        FMaterialParameter Param;
+        SMaterialParameter Param;
         if (!GetParameterValue(EMaterialParameterType::Vector, Name, Param))
         {
             LOG_WARN("Material '{}' has no vector parameter '{}'.", GetName(), Name);
@@ -565,7 +565,7 @@ namespace Lumina
         return true;
     }
 
-    bool CMaterial::GetParameterValue(EMaterialParameterType Type, const FName& Name, FMaterialParameter& Param)
+    bool CMaterial::GetParameterValue(EMaterialParameterType Type, const FName& Name, SMaterialParameter& Param)
     {
         Param = {};
         auto It = ParameterLookup.find(Name);
@@ -839,7 +839,7 @@ namespace Lumina
         // A switch can gate a stage's only content, and a null entry would draw nothing at all.
         if (Key != GetDefaultStaticSwitchKey())
         {
-            if (const FMaterialShaderPermutation* Permutation = FindPermutation(Key); Permutation != nullptr && Permutation->Entries[(size_t)Stage] != nullptr)
+            if (const SMaterialShaderPermutation* Permutation = FindPermutation(Key); Permutation != nullptr && Permutation->Entries[(size_t)Stage] != nullptr)
             {
                 return Permutation->Entries[(size_t)Stage];
             }
@@ -863,7 +863,7 @@ namespace Lumina
     void CMaterial::ClearShaderStage(EMaterialShaderStage Stage)
     {
         FRecursiveScopeLock Lock(ShaderStageMutex);
-        Stages.erase(Algo::RemoveIf(Stages, [Stage](const FMaterialStageBlob& Blob) { return Blob.Stage == (uint8)Stage; }), Stages.end());
+        Stages.erase(Algo::RemoveIf(Stages, [Stage](const SMaterialStageBlob& Blob) { return Blob.Stage == (uint8)Stage; }), Stages.end());
         ReleaseEntries(TSpan<FShaderH>(&DefaultEntries[(size_t)Stage], 1));
     }
 
@@ -883,7 +883,7 @@ namespace Lumina
     {
         FRecursiveScopeLock Lock(ShaderStageMutex);
 
-        FMaterialShaderPermutation* Permutation = FindPermutation(Key);
+        SMaterialShaderPermutation* Permutation = FindPermutation(Key);
         if (Permutation == nullptr)
         {
             Permutation = &Permutations.emplace_back();
@@ -910,7 +910,7 @@ namespace Lumina
     {
         static const TVector<uint32> Empty;
         FRecursiveScopeLock Lock(ShaderStageMutex);
-        const FMaterialShaderPermutation* Permutation = FindPermutation(Key);
+        const SMaterialShaderPermutation* Permutation = FindPermutation(Key);
         return Permutation != nullptr ? StageBinaries(Permutation->Stages, Stage) : Empty;
     }
 
@@ -918,7 +918,7 @@ namespace Lumina
     {
         FRecursiveScopeLock Lock(ShaderStageMutex);
 
-        auto It = Algo::FindIf(Permutations, [Key](const FMaterialShaderPermutation& Permutation) { return Permutation.Key == Key; });
+        auto It = Algo::FindIf(Permutations, [Key](const SMaterialShaderPermutation& Permutation) { return Permutation.Key == Key; });
         if (It == Permutations.end())
         {
             return;
@@ -940,7 +940,7 @@ namespace Lumina
         {
             return;
         }
-        for (FMaterialShaderPermutation& Permutation : Permutations)
+        for (SMaterialShaderPermutation& Permutation : Permutations)
         {
             ReleaseEntries(Permutation.Entries);
         }
@@ -948,13 +948,13 @@ namespace Lumina
         BumpShaderRevision();
     }
 
-    FMaterialShaderPermutation* CMaterial::FindPermutation(uint64 Key)
+    SMaterialShaderPermutation* CMaterial::FindPermutation(uint64 Key)
     {
-        auto It = Algo::FindIf(Permutations, [Key](const FMaterialShaderPermutation& Permutation) { return Permutation.Key == Key; });
+        auto It = Algo::FindIf(Permutations, [Key](const SMaterialShaderPermutation& Permutation) { return Permutation.Key == Key; });
         return It != Permutations.end() ? &*It : nullptr;
     }
 
-    const FMaterialShaderPermutation* CMaterial::FindPermutation(uint64 Key) const
+    const SMaterialShaderPermutation* CMaterial::FindPermutation(uint64 Key) const
     {
         return const_cast<CMaterial*>(this)->FindPermutation(Key);
     }
@@ -989,14 +989,14 @@ namespace Lumina
 
     int32 CMaterial::FindStaticSwitchBit(const FName& ParameterName) const
     {
-        auto It = Algo::FindIf(StaticSwitches, [&ParameterName](const FMaterialStaticSwitch& Switch) { return Switch.ParameterName == ParameterName; });
+        auto It = Algo::FindIf(StaticSwitches, [&ParameterName](const SMaterialStaticSwitch& Switch) { return Switch.ParameterName == ParameterName; });
         return It != StaticSwitches.end() ? (int32)It->BitIndex : Constants::kIndexNone;
     }
 
     uint64 CMaterial::MakeStaticSwitchKey(const THashMap<FName, bool>& Overrides) const
     {
         uint64 Key = 0;
-        for (const FMaterialStaticSwitch& Switch : StaticSwitches)
+        for (const SMaterialStaticSwitch& Switch : StaticSwitches)
         {
             const auto Override = Overrides.find(Switch.ParameterName);
             if (Override != Overrides.end() ? Override->second : Switch.bDefaultValue)
@@ -1016,14 +1016,14 @@ namespace Lumina
     {
         // A compile dispatched before this one landed can still be writing Stages from a worker.
         FRecursiveScopeLock Lock(ShaderStageMutex);
-        return Algo::AnyOf(Stages, [](const FMaterialStageBlob& Blob) { return !Blob.Spirv.empty(); });
+        return Algo::AnyOf(Stages, [](const SMaterialStageBlob& Blob) { return !Blob.Spirv.empty(); });
     }
 
     void CMaterial::CommitSerializedShaders()
     {
         FRecursiveScopeLock Lock(ShaderStageMutex);
 
-        for (const FMaterialStageBlob& Blob : Stages)
+        for (const SMaterialStageBlob& Blob : Stages)
         {
             if (!Blob.Spirv.empty() && Blob.Stage < (uint8)EMaterialShaderStage::Count)
             {
@@ -1036,7 +1036,7 @@ namespace Lumina
         {
             for (size_t s = 0; s < Permutations[p].Stages.size(); ++s)
             {
-                const FMaterialStageBlob& Blob = Permutations[p].Stages[s];
+                const SMaterialStageBlob& Blob = Permutations[p].Stages[s];
                 if (!Blob.Spirv.empty() && Blob.Stage < (uint8)EMaterialShaderStage::Count)
                 {
                     CommitPermutationStage(Permutations[p].Key, (EMaterialShaderStage)Blob.Stage, TSpan<const uint32>(Blob.Spirv.data(), Blob.Spirv.size()));
@@ -1053,7 +1053,7 @@ namespace Lumina
 
     bool CMaterial::LoadShadersFromArtifactCache()
     {
-        TVector<FMaterialStageBlob> Blobs;
+        TVector<SMaterialStageBlob> Blobs;
         if (!LoadStageBlobs(MakeArtifactKey(GetDefaultStaticSwitchKey()), Blobs))
         {
             return false;
@@ -1072,14 +1072,14 @@ namespace Lumina
             return HasPermutation(Key);
         }
 
-        TVector<FMaterialStageBlob> Blobs;
+        TVector<SMaterialStageBlob> Blobs;
         if (!LoadStageBlobs(MakeArtifactKey(Key), Blobs))
         {
             return false;
         }
 
         FRecursiveScopeLock Lock(ShaderStageMutex);
-        for (const FMaterialStageBlob& Blob : Blobs)
+        for (const SMaterialStageBlob& Blob : Blobs)
         {
             CommitPermutationStage(Key, (EMaterialShaderStage)Blob.Stage, TSpan<const uint32>(Blob.Spirv.data(), Blob.Spirv.size()));
         }
@@ -1111,7 +1111,7 @@ namespace Lumina
         TVector<uint8> Bytes;
         {
             FRecursiveScopeLock Lock(ShaderStageMutex);
-            const FMaterialShaderPermutation* Permutation = FindPermutation(Key);
+            const SMaterialShaderPermutation* Permutation = FindPermutation(Key);
             if (Permutation == nullptr)
             {
                 return;
@@ -1124,7 +1124,7 @@ namespace Lumina
     void CMaterial::ApplyParameterDefaults()
     {
         // The uniform block is not serialized, so the authored defaults are replayed into it.
-        for (const FMaterialParameter& Param : Parameters)
+        for (const SMaterialParameter& Param : Parameters)
         {
             switch (Param.Type)
             {
@@ -1213,7 +1213,7 @@ namespace Lumina
     {
         ParameterLookup.clear();
         ParameterLookup.reserve(Parameters.size());
-        for (const FMaterialParameter& Param : Parameters)
+        for (const SMaterialParameter& Param : Parameters)
         {
             ParameterLookup[Param.ParameterName] = Param;
         }
@@ -1223,16 +1223,16 @@ namespace Lumina
     {
         FRecursiveScopeLock Lock(ShaderStageMutex);
 
-        auto Drop = [](TVector<FMaterialStageBlob>& Blobs)
+        auto Drop = [](TVector<SMaterialStageBlob>& Blobs)
         {
-            for (FMaterialStageBlob& Blob : Blobs)
+            for (SMaterialStageBlob& Blob : Blobs)
             {
                 Blob.Spirv.clear();
                 Blob.Spirv.shrink_to_fit();
             }
         };
         Drop(Stages);
-        for (FMaterialShaderPermutation& Permutation : Permutations)
+        for (SMaterialShaderPermutation& Permutation : Permutations)
         {
             Drop(Permutation.Stages);
         }
@@ -1259,7 +1259,7 @@ namespace Lumina
         GDefaultMaterial = CreateBuiltinMaterial("DefaultMaterial", MakeSurfaceInputs("VertexColor.rgb", 1.0f));
     }
 
-    CMaterial* CMaterial::CreateBuiltinMaterial(const FName& Name, const FString& PixelInputs, TSpan<const FMaterialParameter> InParameters)
+    CMaterial* CMaterial::CreateBuiltinMaterial(const FName& Name, const FString& PixelInputs, TSpan<const SMaterialParameter> InParameters)
     {
         IShaderCompiler* Compiler = GShaderCompiler;
         if (Compiler == nullptr)

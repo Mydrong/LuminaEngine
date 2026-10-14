@@ -5,28 +5,12 @@ using System.Runtime.InteropServices;
 
 namespace LuminaSharp;
 
-/// <summary>
-/// Builds (once, then caches) a fast constructor for a generated wrapper type from its internal
-/// <c>(IntPtr)</c> ctor, so the registry can turn a native component pointer into its typed wrapper
-/// without per-call reflection.
-/// </summary>
+// A cached fast constructor for a generated wrapper type, so a native pointer becomes its typed wrapper without reflection.
 internal static class Wrapper<T> where T : class
 {
     public static readonly Func<IntPtr, T?> Create = Build();
 
-    /// <summary>
-    /// The canonical wrapper for a native CObject: returns the managed instance this object already has if one
-    /// is still alive, otherwise creates it and caches a WEAK handle on the object. Two calls for the same
-    /// object therefore return the same instance, so reference identity (<c>==</c>, <c>is</c>, dictionary keys)
-    /// works and repeated access stops allocating.
-    ///
-    /// Every hand-out counts as one reference to the object (see NativeObject.Dispose), so holding the wrapper
-    /// keeps the object alive the way a TStrongObjectPtr does. The cache itself stays weak, so a wrapper nothing references
-    /// is collected normally (releasing its references) and the cache can never pin the collectible script ALC.
-    ///
-    /// Only valid for CObject-backed wrappers. Component views (NativeStruct) are not objects, have no slot,
-    /// and keep using <see cref="Create"/>.
-    /// </summary>
+    // The canonical wrapper, cached by a weak handle so identity holds and nothing pins the script context, each hand-out holding a reference.
     public static T? ForObject(IntPtr Pointer)
     {
         if (Pointer == IntPtr.Zero)
@@ -37,8 +21,7 @@ internal static class Wrapper<T> where T : class
         IntPtr Existing = Native.ObjectGetManagedInstance(Pointer);
         if (Existing != IntPtr.Zero)
         {
-            // Target is null when the wrapper was collected, or when it belonged to an unloaded script ALC.
-            // A type mismatch means the object was previously wrapped as a different (e.g. base) type.
+            // Null after a collection or an unloaded context, and a mismatch when it was wrapped as another type.
             if (GCHandle.FromIntPtr(Existing).Target is T Cached)
             {
                 if (Cached is NativeObject Object)
@@ -69,32 +52,10 @@ internal static class Wrapper<T> where T : class
             null, new[] { typeof(IntPtr) }, null);
         if (Constructor == null)
         {
-            return BuildUnboundThenBind() ?? (Handle => null);
+            return Handle => null;
         }
 
         ParameterExpression Parameter = Expression.Parameter(typeof(IntPtr), "handle");
         return Expression.Lambda<Func<IntPtr, T?>>(Expression.New(Constructor, Parameter), Parameter).Compile();
-    }
-
-    // A script data table row declares no IntPtr constructor, so it is created unbound and then pointed at the row.
-    private static Func<IntPtr, T?>? BuildUnboundThenBind()
-    {
-        if (!typeof(NativeStruct).IsAssignableFrom(typeof(T)))
-        {
-            return null;
-        }
-        ConstructorInfo? Parameterless = typeof(T).GetConstructor(
-            BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public, null, Type.EmptyTypes, null);
-        if (Parameterless == null)
-        {
-            return null;
-        }
-        Func<T> Make = Expression.Lambda<Func<T>>(Expression.New(Parameterless)).Compile();
-        return Handle =>
-        {
-            T Instance = Make();
-            (Instance as NativeStruct)!.BindNativeHandle(Handle);
-            return Instance;
-        };
     }
 }

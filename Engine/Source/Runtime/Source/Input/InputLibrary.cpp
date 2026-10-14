@@ -12,54 +12,54 @@ namespace Lumina
         return Input::IsReceivingInput(World);
     }
 
-    FInputActionState CInputLibrary::GetActionState(CWorld* World, const FName& Action)
+    SInputActionState CInputLibrary::GetActionState(CWorld* World, const FName& Action)
     {
-        return Input::GetActionState(World, FInputActionHandle{ Action });
+        return Input::GetActionState(World, SInputActionHandle{ Action });
     }
 
     bool CInputLibrary::IsActionDown(CWorld* World, const FName& Action)
     {
-        return Input::IsActionDown(World, FInputActionHandle{ Action });
+        return Input::IsActionDown(World, SInputActionHandle{ Action });
     }
 
     bool CInputLibrary::WasActionPressed(CWorld* World, const FName& Action)
     {
-        return Input::IsActionPressed(World, FInputActionHandle{ Action });
+        return Input::IsActionPressed(World, SInputActionHandle{ Action });
     }
 
     bool CInputLibrary::WasActionReleased(CWorld* World, const FName& Action)
     {
-        return Input::IsActionReleased(World, FInputActionHandle{ Action });
+        return Input::IsActionReleased(World, SInputActionHandle{ Action });
     }
 
     bool CInputLibrary::IsActionHeld(CWorld* World, const FName& Action)
     {
-        return Input::IsActionHeld(World, FInputActionHandle{ Action });
+        return Input::IsActionHeld(World, SInputActionHandle{ Action });
     }
 
     bool CInputLibrary::WasActionTapped(CWorld* World, const FName& Action)
     {
-        return Input::WasActionTapped(World, FInputActionHandle{ Action });
+        return Input::WasActionTapped(World, SInputActionHandle{ Action });
     }
 
     float CInputLibrary::GetActionAxis(CWorld* World, const FName& Action)
     {
-        return Input::GetActionAxis(World, FInputActionHandle{ Action });
+        return Input::GetActionAxis(World, SInputActionHandle{ Action });
     }
 
     FVector2 CInputLibrary::GetActionAxis2D(CWorld* World, const FName& Action)
     {
-        return Input::GetActionAxis2D(World, FInputActionHandle{ Action });
+        return Input::GetActionAxis2D(World, SInputActionHandle{ Action });
     }
 
     float CInputLibrary::GetActionHeldTime(CWorld* World, const FName& Action)
     {
-        return Input::GetActionHeldTime(World, FInputActionHandle{ Action });
+        return Input::GetActionHeldTime(World, SInputActionHandle{ Action });
     }
 
     float CInputLibrary::GetAxisPair(CWorld* World, const FName& Positive, const FName& Negative)
     {
-        return Input::GetAxisPair(World, FInputActionHandle{ Positive }, FInputActionHandle{ Negative });
+        return Input::GetAxisPair(World, SInputActionHandle{ Positive }, SInputActionHandle{ Negative });
     }
 
     int32 CInputLibrary::FindActionIndex(const FName& Action)

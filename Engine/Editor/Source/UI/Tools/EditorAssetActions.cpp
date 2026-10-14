@@ -4,12 +4,15 @@
 #include "EditorToolContext.h"
 #include "Assets/AssetRegistry/AssetData.h"
 #include "Assets/AssetRegistry/AssetRegistry.h"
+#include "Assets/AssetTypes/Animation/Montage/AnimationMontage.h"
 #include "Assets/AssetTypes/Material/Material.h"
 #include "Assets/AssetTypes/Material/MaterialInstance.h"
+#include "Assets/AssetTypes/Mesh/Animation/Animation.h"
 #include "Assets/AssetTypes/Mesh/StaticMesh/StaticMesh.h"
 #include "Assets/AssetTypes/Physics/CollisionShape.h"
 #include "Physics/CollisionShapeGen.h"
 #include "Assets/Factories/Factory.h"
+#include "Assets/Factories/AnimationMontageFactory/AnimationMontageFactory.h"
 #include "Core/Object/Cast.h"
 #include "Core/Object/Class.h"
 #include "Core/Object/Package/Package.h"
@@ -105,29 +108,40 @@ namespace Lumina
             return nullptr;
         }
 
-        // The PRIMARY object shares its package's name, while sub-objects are found by name instead.
-        const FStringView DestAssetName = VFS::FileName(DestPath, /*bRemoveExtension*/ true);
+        // The primary object shares its package's name, while sub-objects are found by name instead.
+        const FName DestAssetName(VFS::FileName(DestPath, /*bRemoveExtension*/ true));
+        const THashMap<CObject*, CObject*> Remap = CopyObjectsInto(SourceObjects, DestPackage, [&](CObject* Source)
+        {
+            return Source == PrimaryAsset ? DestAssetName : Source->GetName();
+        });
+        if (Remap.empty() || !CPackage::SavePackage(DestPackage, DestPath))
+        {
+            return nullptr;
+        }
 
+        return Remap.find(PrimaryAsset)->second;
+    }
+
+    THashMap<CObject*, CObject*> CopyObjectsInto(TSpan<CObject* const> Sources, CPackage* Dest, const TFunction<FName(CObject*)>& NameFor)
+    {
         // Pass 1 constructs every copy first, so pass 2 can resolve a reference to any sibling.
         THashMap<CObject*, CObject*> Remap;
-        Remap.reserve(SourceObjects.size());
+        Remap.reserve(Sources.size());
 
-        for (CObject* Source : SourceObjects)
+        for (CObject* Source : Sources)
         {
-            const FName CopyName = (Source == PrimaryAsset) ? FName(DestAssetName) : Source->GetName();
-
-            CObject* Copy = NewObject(Source->GetClass(), DestPackage, CopyName, FGuid::New(), OF_Public);
+            CObject* Copy = NewObject(Source->GetClass(), Dest, NameFor(Source), FGuid::New(), OF_Public);
             if (Copy == nullptr)
             {
-                return nullptr;
+                return {};
             }
 
-            // The saver rebuilds ExportTable, so being outered to DestPackage is what makes a copy an export.
+            // The saver rebuilds ExportTable, so being outered to Dest is what makes a copy an export.
             Remap.emplace(Source, Copy);
         }
 
         // Copying reflected properties alone loses state a class serializes by hand, such as a mesh resource.
-        for (CObject* Source : SourceObjects)
+        for (CObject* Source : Sources)
         {
             CObject* Copy = Remap[Source];
 
@@ -161,17 +175,11 @@ namespace Lumina
         }
 
         // A PostLoad that reaches for a sibling needs the whole set present and remapped first.
-        for (CObject* Source : SourceObjects)
+        for (CObject* Source : Sources)
         {
             Remap[Source]->PostLoad();
         }
-
-        if (!CPackage::SavePackage(DestPackage, DestPath))
-        {
-            return nullptr;
-        }
-
-        return Remap[PrimaryAsset];
+        return Remap;
     }
 
     namespace
@@ -276,6 +284,46 @@ namespace Lumina
             }
         }
 
+        void CreateMontageFrom(const FAssetActionContext& Context)
+        {
+            CAnimation* Clip = Cast<CAnimation>(LoadObject<CObject>(Context.Asset->AssetGUID));
+            if (Clip == nullptr)
+            {
+                ImGuiX::Notifications::NotifyError("Could not load '{0}' to build a montage from it.", Context.Asset->Path);
+                return;
+            }
+
+            const FFixedString NewPath = MakeSiblingAssetPath(
+                FStringView(Context.Asset->Path.c_str(), Context.Asset->Path.size()), "_Montage");
+
+            CAnimationMontage* Montage = CFactory::CreateNewOf<CAnimationMontage>(NewPath);
+            if (Montage == nullptr)
+            {
+                ImGuiX::Notifications::NotifyError("Failed to create a montage at '{0}'.", NewPath);
+                return;
+            }
+
+            CAnimationMontageFactory::InitializeMontage(*Montage, Clip->Skeleton.Get(), Clip);
+
+            if (!CPackage::SavePackage(Montage->GetPackage(), NewPath))
+            {
+                ImGuiX::Notifications::NotifyError("Failed to save '{0}'.", NewPath);
+                return;
+            }
+
+            FAssetRegistry::Get().AssetCreated(Montage);
+
+            ImGuiX::Notifications::NotifySuccess("Created '{0}'.", NewPath);
+
+            if (Context.ToolContext != nullptr)
+            {
+                if (const FAssetData* NewData = FAssetRegistry::Get().GetAssetByPath(FStringView(NewPath.c_str(), NewPath.size())))
+                {
+                    Context.ToolContext->OpenAssetEditor(NewData->AssetGUID);
+                }
+            }
+        }
+
         void BrowseToParentMaterial(const FAssetActionContext& Context)
         {
             CMaterialInstance* Instance = Cast<CMaterialInstance>(LoadObject<CObject>(Context.Asset->AssetGUID));
@@ -317,6 +365,12 @@ namespace Lumina
         {
             .Label   = LE_ICON_CUBE_OUTLINE " Create Collision Shape",
             .Execute = &CreateCollisionShapeFrom,
+        });
+
+        Registry.RegisterAction(CAnimation::StaticClass(), FAssetAction
+        {
+            .Label   = LE_ICON_ANIMATION " Create Animation Montage",
+            .Execute = &CreateMontageFrom,
         });
 
         // Answering whether it has a parent means loading it, and the menu redraws every frame.

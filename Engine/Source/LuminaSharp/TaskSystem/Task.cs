@@ -19,43 +19,27 @@ public static unsafe partial class Task
             return;
         }
 
-        // ParallelFor blocks, so the GCHandle is valid for the whole native call; free it in finally.
-        GCHandle Gc = GCHandle.Alloc(Body);
-        try
-        {
-            NativeParallelFor(
-                (uint)Count,
-                0,
-                (IntPtr)(delegate* unmanaged[Cdecl]<void*, uint, uint, uint, void>)&ParallelThunk,
-                GCHandle.ToIntPtr(Gc),
-                PriorityMedium);
-        }
-        finally
-        {
-            Gc.Free();
-        }
+        // Native releases the body once every chunk is done, and the call blocks until then.
+        CTaskLibrary.ParallelFor((uint)Count, 0, ScriptCallback.Bind(new ParallelBody(Body)), PriorityMedium);
     }
 
-    // Runs one chunk over [Start, End). Never throws across the boundary.
-    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
-    private static void ParallelThunk(void* Ctx, uint Start, uint End, uint Thread)
+    // Runs one chunk, Start in the low half of the payload and End in the high half.
+    private sealed class ParallelBody : ScriptClosure
     {
-        try
-        {
-            Action<int>? Body = GCHandle.FromIntPtr((IntPtr)Ctx).Target as Action<int>;
-            if (Body == null)
-            {
-                return;
-            }
+        private readonly Action<int> Body;
 
-            for (uint i = Start; i < End; i++)
-            {
-                Body((int)i);
-            }
-        }
-        catch (Exception Exception)
+        public ParallelBody(Action<int> Body)
         {
-            Interop.LogException(Exception);
+            this.Body = Body;
+        }
+
+        public override ulong Invoke(ulong Payload)
+        {
+            for (int Index = (int)(uint)Payload, End = (int)(Payload >> 32); Index < End; ++Index)
+            {
+                Body(Index);
+            }
+            return 0;
         }
     }
 
@@ -64,9 +48,6 @@ public static unsafe partial class Task
     {
         return new TaskHandle(CTaskLibrary.Run(ScriptCallback.Of(Body), PriorityMedium));
     }
-
-    [NativeCall(Module = "Runtime", EntryPoint = "LuminaSharp_Task_ParallelFor")]
-    private static partial void NativeParallelFor(uint Num, uint MinRange, IntPtr Thunk, IntPtr Ctx, int Priority);
 }
 
 // A value type cannot guard itself, so a second Dispose double-frees the native completion handle.

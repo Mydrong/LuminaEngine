@@ -9,6 +9,7 @@
 
 #include "Assets/AssetTypes/Animation/Montage/AnimationMontage.h"
 #include "Assets/AssetTypes/Mesh/Animation/Animation.h"
+#include "Assets/AssetTypes/Mesh/SkeletalMesh/SkeletalMesh.h"
 #include "Assets/AssetTypes/Mesh/Skeleton/Skeleton.h"
 #include "Core/Math/Math.h"
 #include "Tools/UI/ImGui/ImGuiDragDrop.h"
@@ -93,18 +94,40 @@ namespace Lumina
 
         CameraState.Speed = 5.0f;
 
-        MeshEntity = World->ConstructEntity("MeshEntity");
-        World->EmplaceComponent<SSkeletalMeshComponent>(MeshEntity).SetSkeletalMesh(Montage->Skeleton->PreviewMesh.Get());
-
-        SSimpleAnimationComponent& AnimComp = World->EmplaceComponent<SSimpleAnimationComponent>(MeshEntity);
-        AnimComp.bPlaying = false;
-        AnimComp.bLooping = false;
+        CreatePreviewEntity();
+        if (MeshEntity == ECS::NullEntity)
+        {
+            return;
+        }
 
         STransformComponent& MeshTransform = World->GetComponent<STransformComponent>(MeshEntity);
         STransformComponent& EditorTransform = World->GetComponent<STransformComponent>(EditorEntity);
 
         FQuat Rotation = Math::FindLookAtRotation(MeshTransform.GetLocation() + FVector3(0.0f, 0.85f, 0.0f), EditorTransform.GetLocation());
         EditorTransform.SetRotation(Rotation);
+    }
+
+    void FAnimationMontageEditorTool::CreatePreviewEntity()
+    {
+        if (MeshEntity != ECS::NullEntity)
+        {
+            World->DestroyEntity(MeshEntity);
+            MeshEntity = ECS::NullEntity;
+        }
+
+        CAnimationMontage* Montage = GetAsset<CAnimationMontage>();
+        CSkeletalMesh* PreviewMesh = Montage != nullptr ? PreviewMeshSelection.Resolve(Montage->Skeleton.Get()) : nullptr;
+        if (PreviewMesh == nullptr)
+        {
+            return;
+        }
+
+        MeshEntity = World->ConstructEntity("MeshEntity");
+        World->EmplaceComponent<SSkeletalMeshComponent>(MeshEntity).SetSkeletalMesh(PreviewMesh);
+
+        SSimpleAnimationComponent& AnimComp = World->EmplaceComponent<SSimpleAnimationComponent>(MeshEntity);
+        AnimComp.bPlaying = false;
+        AnimComp.bLooping = false;
     }
 
     void FAnimationMontageEditorTool::Update(const FUpdateContext& UpdateContext)
@@ -290,6 +313,12 @@ namespace Lumina
         {
             DrawSkeletonDebugMenuItems();
             ImGui::EndMenu();
+        }
+
+        CAnimationMontage* Montage = GetAsset<CAnimationMontage>();
+        if (PreviewMeshSelection.DrawMenu(Montage != nullptr ? Montage->Skeleton.Get() : nullptr))
+        {
+            CreatePreviewEntity();
         }
     }
 

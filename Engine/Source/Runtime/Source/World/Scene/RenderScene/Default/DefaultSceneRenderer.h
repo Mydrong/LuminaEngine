@@ -1745,7 +1745,7 @@ namespace Lumina
         };
         TArray<FParticleCollisionReadback, RHI::kFramesInFlight> ParticleCollisionReadback = {};
         // Read back but not yet handed to the components, which the next extract does.
-        THashMap<ECS::FEntity, TVector<FParticleCollision>> ParticleCollisionResults;
+        THashMap<ECS::FEntity, TVector<SParticleCollision>> ParticleCollisionResults;
         void ReadParticleCollisions();
         void CopyParticleCollisions(RHI::FCmdListH CL);
         THashMap<uint64, TVector<RHI::FGPUAllocation>>    ParticleBufferPool;

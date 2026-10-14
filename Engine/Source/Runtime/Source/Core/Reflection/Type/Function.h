@@ -2,6 +2,7 @@
 
 #include "Containers/Name.h"
 #include "Containers/Span.h"
+#include "Containers/String.h"
 #include "Core/LuminaMacros.h"
 #include "Platform/GenericPlatform.h"
 
@@ -10,11 +11,12 @@ namespace Lumina
     class CStruct;
     class FProperty;
     class FPropertyArena;
+    struct FMetadataEntry;
 }
 
 namespace Lumina
 {
-    enum class EFunctionFlags : uint32
+    enum class EFunctionFlags : uint16
     {
         None            = 0,
 
@@ -33,7 +35,7 @@ namespace Lumina
         // callable from script rather than only from native
         ScriptCallable  = BIT(4),
 
-        // returns something, so ReturnParam is set
+        // returns something, which sits after the arguments as the last parameter
         HasReturn       = BIT(5),
 
         // the body lives in script rather than in C++, so calling it dispatches into managed code
@@ -82,7 +84,8 @@ namespace Lumina
             return TSpan<FProperty* const>(Params, HasReturn() ? NumParams - 1u : NumParams);
         }
 
-        NODISCARD FProperty* GetReturnParam() const { return ReturnParam; }
+        // The last parameter, since a return is always laid out after the arguments.
+        NODISCARD FProperty* GetReturnParam() const { return HasReturn() ? Params[NumParams - 1] : nullptr; }
 
         NODISCARD uint16 GetParmsSize() const { return ParmsSize; }
 
@@ -110,6 +113,14 @@ namespace Lumina
 
         NODISCARD const int32* GetManagedOffsets() const { return ManagedOffsets; }
 
+        // A handful of entries, so a scan beats hashing; keys compare case-insensitively like a property's.
+        RUNTIME_API const FMetadataEntry* FindMetadata(FStringView Key) const;
+
+        // Empty when the key is absent.
+        RUNTIME_API FCStringView GetMetadata(FStringView Key) const;
+
+        NODISCARD bool HasMetadata(FStringView Key) const { return FindMetadata(Key) != nullptr; }
+
         /** Published by the managed binder on first dispatch, and cleared by it before a generation unloads. */
         void SetManagedInvoker(void* Invoker, const int32* Offsets) const
         {
@@ -124,11 +135,12 @@ namespace Lumina
         FName             Name;
         CStruct*          OwnerStruct = nullptr;
         FProperty* const* Params      = nullptr;
-        FProperty*        ReturnParam = nullptr;
+        const FMetadataEntry* Metadata = nullptr;
         FNativeFuncPtr    Thunk       = nullptr;
         EFunctionFlags    Flags       = EFunctionFlags::None;
         uint16            NumParams   = 0;
         uint16            ParmsSize   = 0;
+        uint16            NumMetadata = 0;
 
         // Mutable because dispatch holds the function by const reference, and publishing is a cache fill
         // rather than a change to what the function is.
@@ -154,14 +166,15 @@ namespace Lumina
         RUNTIME_API static FFunction* BuildMinted(FPropertyArena& Arena, CStruct* Owner, const FName& Name,
                                                   EFunctionFlags Flags, TSpan<FProperty* const> OrderedParams,
                                                   int32 ReturnIndex, uint16 ParmsSize,
-                                                  FFunction::FNativeFuncPtr Thunk);
+                                                  FFunction::FNativeFuncPtr Thunk,
+                                                  TSpan<const FMetadataEntry> Metadata = {});
 
     private:
 
         // Both entry points land here, so a minted function is held to the same invariants as a generated one.
         static FFunction* BuildCore(FPropertyArena& Arena, CStruct* Owner, const FName& Name, EFunctionFlags Flags,
                                     TSpan<FProperty* const> OrderedParams, int32 ReturnIndex, uint16 ParmsSize,
-                                    FFunction::FNativeFuncPtr Thunk);
+                                    FFunction::FNativeFuncPtr Thunk, TSpan<const FMetadataEntry> Metadata);
     };
 
     /**

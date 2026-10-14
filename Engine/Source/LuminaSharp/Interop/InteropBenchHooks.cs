@@ -6,8 +6,7 @@ using Lumina;
 
 namespace LuminaSharp;
 
-// Managed-side timing loops, so a benchmark can price a managed to native crossing from the side that pays
-// for the marshalling. Each entry returns nanoseconds per iteration.
+// Timing loops pricing a crossing from the managed side, each returning nanoseconds per iteration.
 internal static unsafe partial class InteropBenchHooks
 {
     private static volatile int Sink;
@@ -163,7 +162,7 @@ internal static unsafe partial class InteropBenchHooks
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
     public static double Bench_BlittableMapLookup(IntPtr Storage, int Iterations)
     {
-        var Opaque = new Lumina.FInteropOpaqueStruct(Storage);
+        var Opaque = new Lumina.SInteropOpaqueStruct(Storage);
         Opaque.Scores.Set(1, 1.0f);
 
         float Total = 0.0f;
@@ -212,8 +211,7 @@ internal static unsafe partial class InteropBenchHooks
         return PerIterationNanos(Elapsed, Iterations);
     }
 
-    // The shape a CEntitySystem actually runs, a typed view walked once per tick with a component touched
-    // per entity. This is the number that decides whether a system belongs in C# at all.
+    // A typed view walked once per tick with a component touched per entity, the shape a CEntitySystem runs.
     [ManagedExport]
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
     public static double Bench_SystemViewWalk(nint World, int Ticks, int* OutEntities)
@@ -300,9 +298,7 @@ internal static unsafe partial class InteropBenchHooks
         {
             for (int Index = 0; Index < Count; ++Index)
             {
-                Lumina.STransformComponent? Transform =
-                    Registry.TryGetComponent<Lumina.STransformComponent>(new FEntity(Entities[Index]));
-                if (Transform != null)
+                if (Registry.TryGetComponent<Lumina.STransformComponent>(new FEntity(Entities[Index])) is { } Transform)
                 {
                     Total += Transform.LocalTransform.Location.X;
                 }

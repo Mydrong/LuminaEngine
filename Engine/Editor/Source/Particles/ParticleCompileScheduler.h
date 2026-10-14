@@ -29,6 +29,6 @@ namespace Lumina
         TVector<TUniquePtr<FJob>> InFlight;
 
         // Reported together when the queue drains, rather than one toast per system.
-        uint32                    SystemsNeedingSave = 0;
+        uint32                    AssetsNeedingSave = 0;
     };
 }

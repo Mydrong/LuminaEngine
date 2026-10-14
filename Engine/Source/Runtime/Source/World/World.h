@@ -31,7 +31,6 @@
 
 namespace Lumina
 {
-    struct FAssetRef;
     struct SDefaultWorldSettings;
     struct SSceneFolderComponent;
     struct FLineBatcherComponent;
@@ -492,15 +491,18 @@ namespace Lumina
         // The using-declaration keeps CObject's destroy hook visible alongside the component sink.
         using CObject::OnDestroy;
 
-        template<typename T> NODISCARD auto& OnConstruct() { return EntityRegistry.GetSignals<T>().OnConstruct; }
+        template<typename T> 
+        NODISCARD ECS::FComponentSignal& OnConstruct()          { return EntityRegistry.GetSignals<T>().OnConstruct; }
 
-        template<typename T> NODISCARD auto& OnDestroy()   { return EntityRegistry.GetSignals<T>().OnDestroy; }
+        template<typename T> 
+        NODISCARD ECS::FComponentSignal& OnDestroy()            { return EntityRegistry.GetSignals<T>().OnDestroy; }
 
-        template<typename T> NODISCARD auto& OnUpdate()    { return EntityRegistry.GetSignals<T>().OnUpdate; }
+        template<typename T> 
+        NODISCARD ECS::FComponentSignal& OnUpdate()             { return EntityRegistry.GetSignals<T>().OnUpdate; }
 
-        NODISCARD auto& OnEntityConstruct() { return EntityRegistry.OnEntityCreated(); }
+        NODISCARD ECS::FComponentSignal& OnEntityConstruct()    { return EntityRegistry.OnEntityCreated(); }
 
-        NODISCARD auto& OnEntityDestroy()   { return EntityRegistry.OnEntityDestroyed(); }
+        NODISCARD ECS::FComponentSignal& OnEntityDestroy()      { return EntityRegistry.OnEntityDestroyed(); }
 
         //~ Singletons.
 
@@ -589,14 +591,10 @@ namespace Lumina
 
         NODISCARD const TVector<TStrongObjectPtr<CWorldSubsystem>>& GetSubsystems() const { return Subsystems; }
 
-        // Holds an object until the world is torn down, since a managed wrapper is only weak.
-        FUNCTION()
-        void RetainObject(CObject* Object) { if (Object != nullptr) { RetainedObjects.emplace_back(Object); } }
-
         // Runtime state rather than map data, but reflected so the hot reload reinstancer reaches it.
         PROPERTY(NoSerialize)
         TVector<TStrongObjectPtr<CWorldSubsystem>>         Subsystems;
-        TVector<TStrongObjectPtr<CObject>>                 RetainedObjects;
+
 
         //~ Physics scene and queries.
 
@@ -753,16 +751,16 @@ namespace Lumina
 
     private:
         
-        ECS::FRegistry                                     RegistryPending;
-        ECS::FRegistry                                     EntityRegistry;
-        ECS::FEventDispatcher                              SingletonDispatcher;
-        ECS::FEntity                                       SingletonEntity;
+        ECS::FRegistry                                      RegistryPending;
+        ECS::FRegistry                                      EntityRegistry;
+        ECS::FEventDispatcher                               SingletonDispatcher;
+        ECS::FEntity                                        SingletonEntity;
 
         // After the registry it records against, before the context that hands it out.
-        ECS::FCommandBus                                   CommandBus;
+        ECS::FCommandBus                                    CommandBus;
 
         // After the command bus, since a send from a parallel system is replayed at its flush.
-        FGameplayMessageBus                                MessageBus;
+        FGameplayMessageBus                                 MessageBus;
 
         FSystemContext                                      SystemContext;
         

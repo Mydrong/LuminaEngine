@@ -450,7 +450,7 @@ namespace Lumina
         struct FPlayingSound
         {
             const CSequenceTrack* Track = nullptr;
-            FAudioHandle          Handle;
+            SAudioHandle          Handle;
             int32                 ClipIndex = Constants::kIndexNone;
             bool                  bPaused = false;
         };

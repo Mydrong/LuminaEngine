@@ -19,7 +19,7 @@ namespace Lumina
 {
     /** Holds an FName so it cannot blit, which is what makes it bind as an opaque wrapper. */
     REFLECT()
-    struct FInteropOpaqueStruct
+    struct SInteropOpaqueStruct
     {
         GENERATED_BODY()
 
@@ -98,10 +98,10 @@ namespace Lumina
 
         /** The one-uint64 handle shape a non-reflectable native pointer crosses in. */
         FUNCTION()
-        static FUIElement MakeHandle(uint64 Value);
+        static SUIElement MakeHandle(uint64 Value);
 
         FUNCTION()
-        static uint64 ReadHandle(FUIElement Handle);
+        static uint64 ReadHandle(SUIElement Handle);
 
         /** Returns a name of exactly Length characters, so a test can straddle the managed scratch buffer. */
         FUNCTION()
@@ -116,6 +116,6 @@ namespace Lumina
 
         /** An opaque struct argument, which crosses as the address its managed wrapper views. */
         FUNCTION()
-        static float ReadOpaqueValue(const FInteropOpaqueStruct& Opaque);
+        static float ReadOpaqueValue(const SInteropOpaqueStruct& Opaque);
     };
 }

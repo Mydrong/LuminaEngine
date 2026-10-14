@@ -20,4 +20,19 @@ namespace Lumina
 		CClass* GetAssetClass() const override { return CParticleSystem::StaticClass(); }
 		FString GetCategory() const override { return "Effects"; }
 	};
+
+	REFLECT()
+	class CParticleEmitterFactory : public CFactory
+	{
+		GENERATED_BODY()
+	public:
+
+		CObject* CreateNew(const FName& Name, CPackage* Package) override;
+
+		FString GetAssetName() const override { return "Particle Emitter"; }
+		FStringView GetDefaultAssetCreationName() override { return "NewParticleEmitter"; }
+		FString GetAssetDescription() const override { return "A particle emitter that particle systems can share."; }
+		CClass* GetAssetClass() const override { return CParticleEmitter::StaticClass(); }
+		FString GetCategory() const override { return "Effects"; }
+	};
 }

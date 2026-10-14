@@ -15,8 +15,7 @@ internal enum EElementKind
     /// <summary>A native <c>FString</c>. Read by decoding in place, written through native assignment.</summary>
     String,
 
-    /// <summary>A refcounted object slot. Read as a raw pointer, written through the native assignment so the
-    /// reference it held is released and one is taken on the new target.</summary>
+    // A reference-counted object slot, read as a raw pointer and written through the native assignment.
     ObjectRef,
 
     /// <summary>An opaque reflected struct. Read as a wrapper viewing the slot, written by native struct copy.</summary>
@@ -54,25 +53,12 @@ internal enum EElementKind
     ScriptStruct,
 }
 
-/// <summary>
-/// The element kind for one <c>T</c>, resolved once.
-///
-/// This is what lets a single <see cref="TVector{T}"/> hold plain values, strings and object references
-/// instead of needing a bespoke view type per element flavour -- mirroring what native already does, where
-/// <c>FScriptArrayElementDesc</c> dispatches construct/destruct/copy through the element's own FProperty and
-/// <c>FVectorOps::PushBack</c> runs a real C++ copy-construct.
-///
-/// A <c>static readonly</c> field on a generic type is a JIT constant once the static constructor has run, and
-/// generics over value types are specialised, so the <see cref="EElementKind.Blittable"/> branch folds away
-/// entirely: <c>TVector&lt;int&gt;</c> compiles to the same direct memory access it did when the constraint
-/// was <c>unmanaged</c>.
-/// </summary>
+// The element kind of one T, resolved once, a JIT constant so TVector of a plain value reads memory directly.
 internal static class ElementKind<T>
 {
     public static readonly EElementKind Kind = ElementKinds.Of(typeof(T));
 
-    /// <summary>True for the kinds whose managed value is not the native bytes, so a <c>ref</c> into storage
-    /// would be wrong -- either the wrong layout, or a write that skips the bookkeeping.</summary>
+    // True for the kinds whose managed value is not the native bytes, so a ref into storage would be wrong.
     public static readonly bool IsMarshalled = Kind is not (EElementKind.Blittable or EElementKind.Bool);
 
     public static readonly Func<IntPtr, T>? MakeObject = BindObject();
@@ -180,7 +166,16 @@ internal static class ElementKind<T>
 
     private static Func<nint, T>? BuildView()
     {
-        if (Kind is not (EElementKind.StructView or EElementKind.SlotView))
+        // A struct handle is one NativeRef, so viewing an element is a reinterpretation rather than a constructor call.
+        if (Kind == EElementKind.StructView)
+        {
+            return Address =>
+            {
+                NativeRef Ref = new(Address);
+                return Unsafe.As<NativeRef, T>(ref Ref);
+            };
+        }
+        if (Kind != EElementKind.SlotView)
         {
             return null;
         }
@@ -208,14 +203,12 @@ public static unsafe class ElementMarshal
         {
             case EElementKind.String:
             {
-                // Unsafe.As rather than a cast through object: the kind guarantees T is FString, and boxing
-                // every element read would defeat the point of a view.
+                // Unsafe.As rather than a cast through object, since the kind guarantees T is FString and boxing would defeat the view.
                 FString Value = new FString(Address);
                 return Unsafe.As<FString, T>(ref Value);
             }
             case EElementKind.ObjectRef:
-                // TStrongObjectPtr<X> is a single IntPtr, and so is the native slot, so the read is the same
-                // reinterpretation a blittable element gets. Only the WRITE differs.
+                // A TStrongObjectPtr is one pointer like the native slot, so only its write differs.
                 return Unsafe.ReadUnaligned<T>((void*)Address);
 
             case EElementKind.StructView:
@@ -306,8 +299,7 @@ public static unsafe class ElementMarshal
         }
     }
 
-    /// <summary>Overwrites the element at <paramref name="Address"/>, doing whatever its kind requires to
-    /// leave the native side consistent.</summary>
+    // Overwrites the element at Address, doing whatever its kind needs to keep the native side consistent.
     public static void Write<T>(nint Address, T Value)
     {
         switch (ElementKind<T>.Kind)
@@ -320,8 +312,7 @@ public static unsafe class ElementMarshal
             }
             case EElementKind.ObjectRef:
             {
-                // Through the native assignment, which releases the reference the slot held and takes one on
-                // the new target. A byte write here is the silent refcount corruption this kind exists for.
+                // Through the native assignment, which keeps the reference count a byte write would corrupt.
                 nint Target = Unsafe.As<T, nint>(ref Value);
                 Native.SetObjectPtr(Address, Target);
                 break;
@@ -329,9 +320,10 @@ public static unsafe class ElementMarshal
             case EElementKind.StructView:
             {
                 // Copied through the reflected struct's own ops, so a heap member is duplicated rather than aliased.
-                if (Value is NativeStruct Source && Source.Handle != IntPtr.Zero)
+                NativeRef Source = Unsafe.As<T, NativeRef>(ref Value);
+                if (!Source.IsNull)
                 {
-                    Native.StructAssign(Address, Source.Handle, ElementKind<T>.NativeName);
+                    Native.StructAssign(Address, Source.Address, ElementKind<T>.NativeName);
                 }
                 break;
             }
@@ -373,8 +365,7 @@ public static unsafe class ElementMarshal
         }
     }
 
-    /// <summary>Equality for IndexOf/Contains. Strings compare by characters; everything else by bits, via the
-    /// default comparer.</summary>
+    // Equality for IndexOf and Contains, strings by characters and everything else by the default comparer.
     public static bool Equals<T>(T Left, T Right)
     {
         if (ElementKind<T>.Kind == EElementKind.String)
@@ -386,7 +377,7 @@ public static unsafe class ElementMarshal
         // Same element means same slot, since a container element has no property handle to reach Identical.
         if (ElementKind<T>.Kind == EElementKind.StructView)
         {
-            return Left is NativeStruct A2 && Right is NativeStruct B2 && A2.Handle == B2.Handle;
+            return Unsafe.As<T, NativeRef>(ref Left).Equals(Unsafe.As<T, NativeRef>(ref Right));
         }
         return System.Collections.Generic.EqualityComparer<T>.Default.Equals(Left, Right);
     }

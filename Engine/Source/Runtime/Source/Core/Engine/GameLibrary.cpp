@@ -39,11 +39,6 @@ namespace Lumina
         return World == nullptr || (World->GetNetMode() != ENetMode::DedicatedServer && !World->IsBotWorld());
     }
 
-    CGameInstance* CGameLibrary::GetGameInstance()
-    {
-        return GEngine ? GEngine->GetGameInstance() : nullptr;
-    }
-
     CWorldSubsystem* CGameLibrary::GetSubsystem(CWorld* World, const FName& ClassName)
     {
         if (World == nullptr || ClassName.IsNone())

@@ -19,7 +19,7 @@ namespace Lumina
     {
         ClearRows();
 
-        RowStructName = InStruct != nullptr ? DataStructIdentity(InStruct) : FName();
+        RowStructName = InStruct != nullptr ? StructIdentity(InStruct) : FName();
         RowStructCache.Set(InStruct, RowStructName);
     }
 
@@ -57,6 +57,15 @@ namespace Lumina
             return nullptr;
         }
         return Rows[InOutIndex].Value.GetMemory();
+    }
+
+    const void* CDataTable::GetRowMemoryAt(int32 Index) const
+    {
+        if (Index < 0 || Index >= GetRowCount() || Rows[Index].Value.GetScriptStruct() != GetRowStruct())
+        {
+            return nullptr;
+        }
+        return Rows[Index].Value.GetMemory();
     }
 
     const void* CDataTable::FindRow(const FName& RowName) const

@@ -121,7 +121,7 @@ namespace Lumina
 
     float CMaterialInterface::GetScalarValue(const FName& Name, float Default)
     {
-        FMaterialParameter Param;
+        SMaterialParameter Param;
         if (!GetParameterValue(EMaterialParameterType::Scalar, Name, Param) || Param.Index >= MAX_SCALARS)
         {
             return Default;
@@ -133,7 +133,7 @@ namespace Lumina
 
     FVector4 CMaterialInterface::GetVectorValue(const FName& Name, FVector4 Default)
     {
-        FMaterialParameter Param;
+        SMaterialParameter Param;
         if (!GetParameterValue(EMaterialParameterType::Vector, Name, Param) || Param.Index >= MAX_VECTORS)
         {
             return Default;
@@ -143,25 +143,25 @@ namespace Lumina
 
     CTexture* CMaterialInterface::GetTextureValue(const FName& Name)
     {
-        FMaterialParameter Param;
+        SMaterialParameter Param;
         return GetParameterValue(EMaterialParameterType::Texture, Name, Param) ? GetTextureParameterTexture(Name, Param.Index) : nullptr;
     }
 
     bool CMaterialInterface::HasScalarParameter(const FName& Name)
     {
-        FMaterialParameter Param;
+        SMaterialParameter Param;
         return GetParameterValue(EMaterialParameterType::Scalar, Name, Param);
     }
 
     bool CMaterialInterface::HasVectorParameter(const FName& Name)
     {
-        FMaterialParameter Param;
+        SMaterialParameter Param;
         return GetParameterValue(EMaterialParameterType::Vector, Name, Param);
     }
 
     bool CMaterialInterface::HasTextureParameter(const FName& Name)
     {
-        FMaterialParameter Param;
+        SMaterialParameter Param;
         return GetParameterValue(EMaterialParameterType::Texture, Name, Param);
     }
 

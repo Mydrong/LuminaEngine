@@ -47,7 +47,7 @@ namespace Lumina
 
         /** Returns a handle to stop the shake with. Several shakes sum on the rendered view. */
         FUNCTION()
-        static uint32 PlayShake(CWorld* World, FCameraShakeParams Params);
+        static uint32 PlayShake(CWorld* World, SCameraShakeParams Params);
 
         /** An impact or explosion kick, where Intensity near one is a light bump and five a heavy blast. */
         FUNCTION()
@@ -65,15 +65,15 @@ namespace Lumina
 
         /** Projects a world point to pixel coordinates, origin top-left. Check bOnScreen before using it. */
         FUNCTION()
-        static FScreenProjection WorldToScreen(CWorld* World, FVector3 WorldLocation);
+        static SScreenProjection WorldToScreen(CWorld* World, FVector3 WorldLocation);
 
         /** Pixel coordinates to a world ray, the aiming and picking primitive. */
         FUNCTION()
-        static FWorldRay ScreenToWorldRay(CWorld* World, FVector2 ScreenPosition);
+        static SWorldRay ScreenToWorldRay(CWorld* World, FVector2 ScreenPosition);
 
         /** ScreenToWorldRay through the center of the viewport, which is where a crosshair sits. */
         FUNCTION()
-        static FWorldRay ViewportCenterRay(CWorld* World);
+        static SWorldRay ViewportCenterRay(CWorld* World);
 
         /** A point WorldDistance along the ray through ScreenPosition, measured from the near plane. */
         FUNCTION()

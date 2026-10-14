@@ -49,7 +49,7 @@ namespace Lumina
         TVector<float> PeakMax;
         bool bPeaksValid = false;
 
-        FAudioHandle PreviewHandle;
+        SAudioHandle PreviewHandle;
         bool   bPreviewPlaying = false;
         bool   bPreviewLoop    = false;
         float  PreviewVolume   = 1.0f;

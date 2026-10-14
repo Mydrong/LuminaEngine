@@ -8,7 +8,7 @@ namespace Lumina
 {
     // One test inside a transition's rule.
     REFLECT()
-    struct FAnimTransitionCondition
+    struct SAnimTransitionCondition
     {
         GENERATED_BODY()
 
@@ -54,7 +54,7 @@ namespace Lumina
 
         /** Tests gating this transition. An empty list fires the moment the source state is active. */
         PROPERTY(Editable, Category = "Transition")
-        TVector<FAnimTransitionCondition> Conditions;
+        TVector<SAnimTransitionCondition> Conditions;
 
         /** On, every condition must pass; off, any one of them does. */
         PROPERTY(Editable, Category = "Transition")

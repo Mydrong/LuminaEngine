@@ -33,7 +33,7 @@ namespace Lumina
     ENUM_CLASS_FLAGS(ECollisionProfiles);
     
     REFLECT()
-    struct FCollisionProfile
+    struct SCollisionProfile
     {
         GENERATED_BODY()
         
@@ -46,7 +46,7 @@ namespace Lumina
         ECollisionProfiles Mask     = ECollisionProfiles::Static | ECollisionProfiles::Dynamic;
         
         // Either side accepting is enough, which is the rule the engine's content was authored against.
-        NODISCARD FORCEINLINE bool ShouldCollide(const FCollisionProfile& Other) const
+        NODISCARD FORCEINLINE bool ShouldCollide(const SCollisionProfile& Other) const
         {
             return (Mask & Other.Layer) != (ECollisionProfiles)0 || (Other.Mask & Layer) != (ECollisionProfiles)0;
         }
@@ -69,7 +69,7 @@ namespace Lumina
     };
 
     /** Joint type for SPhysicsConstraintComponent / World.Physics constraints. Order is the wire contract
-        shared with the C# Physics facade and the native FConstraintDesc switch -- append only. */
+        shared with the C# Physics facade and the native SConstraintDesc switch -- append only. */
     REFLECT()
     enum class EPhysicsConstraintType : uint8
     {

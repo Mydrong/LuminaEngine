@@ -6,7 +6,7 @@
 #include "Containers/String.h"
 #include "Core/Math/Math.h"
 #include "GUID/GUID.h"
-#include "Assets/AssetRef.h"
+#include "UI/UIDocumentRef.h"
 #include "Networking/INetworkTransport.h"
 #include "World/Net/NetGUID.h"
 #include "Net/NetReplicationGraph.h"
@@ -39,7 +39,7 @@ namespace Lumina
         Welcome           = 9, // server to client, which level to load
         ClientReady       = 10,// client to server, map loaded, request baseline
         ObjectExport      = 11,// CObject net-index map
-        AssetExport       = 12,// FAssetRef net-index map
+        AssetExport       = 12,// SUIDocumentRef net-index map
         NameExport        = 13,// FName net-index map
         MoveCommands      = 14,// client to host, predicted character input
         MoveAck           = 15,// host to owner, the state a move produced
@@ -56,11 +56,11 @@ namespace Lumina
         uint32                     NextIndex = 1;  // 0 is null
     };
 
-    // FAssetRef net-index cache. Same export-once model as FNetObjectMap, keyed by GUID else Path.
+    // SUIDocumentRef net-index cache. Same export-once model as FNetObjectMap, keyed by GUID else Path.
     struct FNetAssetMap
     {
         THashMap<FName, uint32>     KeyToIndex;     // outgoing asset key index
-        THashMap<uint32, FAssetRef> IndexToRef;     // outgoing on assign, incoming from export
+        THashMap<uint32, SUIDocumentRef> IndexToRef;     // outgoing on assign, incoming from export
         TVector<uint32>             PendingExports; // outgoing, assigned but not yet sent
         uint32                      NextIndex = 1;  // 0 is null
     };

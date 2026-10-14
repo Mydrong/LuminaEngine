@@ -21,7 +21,7 @@ namespace Lumina
         b3QueryFilter Filter{};
 
         // Queries decide the pair in a callback, so the authored profile has to travel with the mover.
-        FCollisionProfile Profile{};
+        SCollisionProfile Profile{};
 
         FVector3    Position = FVector3(0.0f);
         FQuat       Rotation = FQuat::Identity();

@@ -41,6 +41,16 @@ namespace Lumina
         return Parameters.GetMutableMemory();
     }
 
+    void* SAnimationGraphComponent::GetParameterMemoryAs(FName TypeName)
+    {
+        if (!Graph.IsValid())
+        {
+            return nullptr;
+        }
+        CStruct* Struct = Graph->GetParameterStruct();
+        return Struct != nullptr && Struct->GetName() == TypeName ? GetParameterMemory() : nullptr;
+    }
+
     float SAnimationGraphComponent::GetEvaluatedParameter(const FName& ParameterName, float Default) const
     {
         if (!Graph.IsValid())

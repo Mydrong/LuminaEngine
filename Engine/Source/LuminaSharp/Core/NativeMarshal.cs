@@ -4,8 +4,7 @@ using System.Text;
 
 namespace LuminaSharp;
 
-// Zero-crossing readers over a native FString / TVector laid out in place (little-endian; layout guarded
-// by VerifyContainerInteropLayout). Returned views alias native storage: read synchronously, never retain.
+// Readers over a native FString or TVector in place, whose views alias native storage and must not be retained.
 public static unsafe class NativeMarshal
 {
     // Lumina::FString: 16-byte SSO/heap union, last byte = mode (top bit set => heap, ptr@0 size@8 as uint32).

@@ -8,12 +8,59 @@ using System.Runtime.InteropServices;
 
 namespace LuminaSharp;
 
-/// One argument of a data-event-* call; mirrors native RmlUi::FUIArg (UTF-8 ptr+len).
+// One argument of a data-event-* call, as UTF-8.
 [StructLayout(LayoutKind.Sequential)]
+[NativeLayout("FUIArg")]
 internal struct UIArg
 {
     public IntPtr Ptr;
     public int Len;
+}
+
+// What the view wrote into a two-way bound variable; Str is set for a string and valid only for the call.
+[StructLayout(LayoutKind.Sequential)]
+[NativeLayout("FUIDataSet")]
+internal unsafe struct UIDataSet
+{
+    public int Field;
+    public int Type;
+    public double Number;
+    public IntPtr Str;
+    public int StrLen;
+}
+
+// A data-event-* command the view fired.
+[StructLayout(LayoutKind.Sequential)]
+[NativeLayout("FUIDataEvent")]
+internal unsafe struct UIDataEvent
+{
+    public int CommandId;
+    public int ArgCount;
+    public UIArg* Args;
+}
+
+internal sealed unsafe class UIDataSetClosure : ScriptClosure
+{
+    public required UIDataModel Model;
+
+    public override ulong Invoke(ulong Payload)
+    {
+        UIDataSet* Set = (UIDataSet*)Payload;
+        Model.ApplyFromNative(Set->Field, Set->Number, Set->Str, Set->StrLen);
+        return 0;
+    }
+}
+
+internal sealed unsafe class UIDataEventClosure : ScriptClosure
+{
+    public required UIDataModel Model;
+
+    public override ulong Invoke(ulong Payload)
+    {
+        UIDataEvent* Fired = (UIDataEvent*)Payload;
+        Model.InvokeCommand(Fired->CommandId, Fired->ArgCount, Fired->Args);
+        return 0;
+    }
 }
 
 // Binds a ViewModel's or CUIScript's [Bind] members to a named RmlUi data model, comparing them once a frame so plain assignments reach the view.
@@ -25,8 +72,7 @@ public sealed unsafe class UIDataModel : IDisposable
     private readonly string _name;
     private readonly object _target;
     private readonly UIModelShape _shape;
-    private Lumina.FUIDataModel _native;
-    private GCHandle _self;
+    private Lumina.SUIDataModel _native;
 
     // Native field id per scalar and per list, parallel to the shape's lists. Negative when the bind failed.
     private readonly int[] _scalarField;
@@ -57,13 +103,11 @@ public sealed unsafe class UIDataModel : IDisposable
         _listField = new int[_shape.Lists.Count];
         _lastScalar = new object?[_shape.Scalars.Count];
         _lastList = new long[_shape.Lists.Count];
-        _self = GCHandle.Alloc(this);
 
         _native = Lumina.CUILibrary.CreateDataModel(UIWorld.FromHandle(World), Name,
-            (ulong)GCHandle.ToIntPtr(_self), (ulong)SetThunkPtr, (ulong)EventThunkPtr);
+            ScriptCallback.Bind(new UIDataSetClosure { Model = this }), ScriptCallback.Bind(new UIDataEventClosure { Model = this }));
         if (!_native.IsValid)
         {
-            _self.Free();
             return;
         }
 
@@ -276,7 +320,7 @@ public sealed unsafe class UIDataModel : IDisposable
 
     // ---- native -> managed ----
 
-    private void ApplyFromNative(int Field, double Number, IntPtr Str, int StrLen)
+    internal void ApplyFromNative(int Field, double Number, IntPtr Str, int StrLen)
     {
         int Index = Array.IndexOf(_scalarField, Field);
         if (Index < 0)
@@ -310,7 +354,7 @@ public sealed unsafe class UIDataModel : IDisposable
         }
     }
 
-    private void InvokeCommand(int CommandId, int ArgCount, UIArg* Args)
+    internal void InvokeCommand(int CommandId, int ArgCount, UIArg* Args)
     {
         if (CommandId < 0 || CommandId >= _shape.Commands.Count)
         {
@@ -353,44 +397,6 @@ public sealed unsafe class UIDataModel : IDisposable
             Interop.LogException(Exception);
         }
     }
-
-    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
-    private static void SetThunk(IntPtr Context, int Field, int Type, double Number, IntPtr Str, int StrLen)
-    {
-        try
-        {
-            if (GCHandle.FromIntPtr(Context).Target is UIDataModel Self)
-            {
-                Self.ApplyFromNative(Field, Number, Str, StrLen);
-            }
-        }
-        catch (Exception Exception)
-        {
-            Interop.LogException(Exception);
-        }
-    }
-
-    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
-    private static void EventThunk(IntPtr Context, int CommandId, int ArgCount, UIArg* Args)
-    {
-        try
-        {
-            if (GCHandle.FromIntPtr(Context).Target is UIDataModel Self)
-            {
-                Self.InvokeCommand(CommandId, ArgCount, Args);
-            }
-        }
-        catch (Exception Exception)
-        {
-            Interop.LogException(Exception);
-        }
-    }
-
-    private static readonly IntPtr SetThunkPtr =
-        (IntPtr)(delegate* unmanaged[Cdecl]<IntPtr, int, int, double, IntPtr, int, void>)&SetThunk;
-
-    private static readonly IntPtr EventThunkPtr =
-        (IntPtr)(delegate* unmanaged[Cdecl]<IntPtr, int, int, UIArg*, void>)&EventThunk;
 
     // Called by native once a frame per world, just before that world's UI updates.
     [ManagedExport]
@@ -449,10 +455,6 @@ public sealed unsafe class UIDataModel : IDisposable
         {
             Lumina.CUILibrary.DestroyDataModel(_native);
             _native = default;
-        }
-        if (_self.IsAllocated)
-        {
-            _self.Free();
         }
         if (_target is ViewModel Model && ReferenceEquals(Model.Binding, this))
         {

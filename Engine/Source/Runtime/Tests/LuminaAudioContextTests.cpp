@@ -116,8 +116,8 @@ TEST(LuminaAudioContext, PlaysAClipThroughToCompletion)
     // A tenth of a second, short enough that the device drains it well inside the poll budget.
     const TSharedPtr<FAudioData> Clip = MakeSineClip(4800);
 
-    FAudioPlayParams Params;
-    const FAudioHandle Handle = Context.PlayAudio(Clip, Params);
+    SAudioPlayParams Params;
+    const SAudioHandle Handle = Context.PlayAudio(Clip, Params);
     ASSERT_TRUE(Handle.IsValid());
 
     ASSERT_TRUE(PumpUntil(Context, [&]() { return Context.GetActiveVoiceCount() == 1u; }))
@@ -151,9 +151,9 @@ TEST(LuminaAudioContext, StopReleasesAVoiceAndItsSlot)
 
     const TSharedPtr<FAudioData> Clip = MakeSineClip(480000);
 
-    FAudioPlayParams Params;
+    SAudioPlayParams Params;
     Params.bLooping = true;
-    const FAudioHandle Handle = Context.PlayAudio(Clip, Params);
+    const SAudioHandle Handle = Context.PlayAudio(Clip, Params);
     ASSERT_TRUE(Handle.IsValid());
 
     ASSERT_TRUE(PumpUntil(Context, [&]() { return Context.GetActiveVoiceCount() == 1u; }));
@@ -191,11 +191,11 @@ TEST(LuminaAudioContext, ChurnsVoicesWithoutLosingSlots)
     // Start and stop far more voices than there are slots, so a leaked slot would starve the run.
     for (uint32 Round = 0; Round < 40; ++Round)
     {
-        TVector<FAudioHandle> Handles;
+        TVector<SAudioHandle> Handles;
         for (uint32 i = 0; i < 8; ++i)
         {
-            FAudioPlayParams Params;
-            const FAudioHandle Handle = Context.PlayAudio(Clip, Params);
+            SAudioPlayParams Params;
+            const SAudioHandle Handle = Context.PlayAudio(Clip, Params);
             EXPECT_TRUE(Handle.IsValid()) << "round " << Round << " voice " << i;
             Handles.push_back(Handle);
         }
@@ -203,7 +203,7 @@ TEST(LuminaAudioContext, ChurnsVoicesWithoutLosingSlots)
         Context.Update();
         Threading::Sleep(2);
 
-        for (FAudioHandle Handle : Handles)
+        for (SAudioHandle Handle : Handles)
         {
             Context.StopSound(Handle, EAudioStopMode::Immediate, 0.0f);
         }
@@ -236,7 +236,7 @@ TEST(LuminaAudioContext, StealingPlayingVoicesKeepsSlotAccountingIntact)
     const TSharedPtr<FAudioData> Clip = MakeSineClip(48000);
 
     // Low-priority loops fill every slot, so each later start has to steal one the mixer is still rendering.
-    FAudioPlayParams Background;
+    SAudioPlayParams Background;
     Background.bLooping = true;
     Background.Priority = 10;
     for (uint32 i = 0; i < Cap; ++i)
@@ -245,12 +245,12 @@ TEST(LuminaAudioContext, StealingPlayingVoicesKeepsSlotAccountingIntact)
     }
     ASSERT_TRUE(PumpUntil(Context, [&]() { return Context.GetActiveVoiceCount() == Cap; }));
 
-    FAudioPlayParams Urgent;
+    SAudioPlayParams Urgent;
     Urgent.bLooping = true;
     Urgent.Priority = 200;
     for (uint32 Round = 0; Round < 64; ++Round)
     {
-        const FAudioHandle Stolen = Context.PlayAudio(Clip, Urgent);
+        const SAudioHandle Stolen = Context.PlayAudio(Clip, Urgent);
         EXPECT_TRUE(Stolen.IsValid()) << "round " << Round;
         Context.Update();
         Threading::Sleep(1);
@@ -281,8 +281,8 @@ TEST(LuminaAudioContext, ProceduralStreamsPlayAndAreNeverAutoCollected)
     TVector<float> Block(1024, 0.25f);
     EXPECT_GT(Stream->Write(Block.data(), 1024), 0u);
 
-    FAudioPlayParams Params;
-    const FAudioHandle Handle = Context.PlayProceduralStream(Stream, Params);
+    SAudioPlayParams Params;
+    const SAudioHandle Handle = Context.PlayProceduralStream(Stream, Params);
     ASSERT_TRUE(Handle.IsValid());
 
     ASSERT_TRUE(PumpUntil(Context, [&]() { return Context.GetActiveVoiceCount() == 1u; }));

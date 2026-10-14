@@ -47,6 +47,10 @@ namespace Lumina
         /** Raw parameter memory, for the anim system's offset reads. Null when no struct is assigned. */
         void* GetParameterMemory();
 
+        // The parameter block when the graph names TypeName as its parameter struct, so a caller's mirror cannot misread it.
+        FUNCTION(ScriptInternal)
+        void* GetParameterMemoryAs(FName TypeName);
+
         // Brings Parameters up as an instance of the graph's struct, copying the graph's authored values.
         void EnsureParametersInitialized() const;
 

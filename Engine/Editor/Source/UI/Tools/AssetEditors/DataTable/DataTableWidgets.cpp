@@ -1,5 +1,5 @@
 ﻿#include "DataTableWidgets.h"
-#include "Scripting/ScriptDataStruct.h"
+#include "Scripting/ScriptTypeRegistry.h"
 #include "Scripting/ScriptStruct.h"
 
 #include "Assets/AssetTypes/DataTable/DataTable.h"
@@ -41,6 +41,10 @@ namespace Lumina::DataTableUI
             ImGui::TextDisabled("    REFLECT()");
             ImGui::TextDisabled("    struct SMyRow : public SDataTableRowBase");
             ImGui::TextDisabled("    { GENERATED_BODY() PROPERTY(Editable) float Health; };");
+            ImGui::TextDisabled("Or in a C# script.");
+            ImGui::TextDisabled("    [Reflect]");
+            ImGui::TextDisabled("    public sealed class MyRow : SDataTableRowBase");
+            ImGui::TextDisabled("    { [Property] public float Health; }");
             return nullptr;
         }
 

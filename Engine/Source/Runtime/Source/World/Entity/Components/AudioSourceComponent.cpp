@@ -29,7 +29,7 @@ namespace Lumina
 			return;
 		}
 
-		FAudioPlayParams Params;
+		SAudioPlayParams Params;
 		Params.Volume            = Volume;
 		Params.Pitch             = Pitch;
 		Params.bLooping          = bLooping;
@@ -70,7 +70,7 @@ namespace Lumina
 			Audio::Context().StopSound(ActiveHandle, Mode, FadeOutTime);
 		}
 
-		ActiveHandle = FAudioHandle::Invalid();
+		ActiveHandle = SAudioHandle::Invalid();
 		bPlaying = false;
 		bPaused  = false;
 		GraphInstance.reset();

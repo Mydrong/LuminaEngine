@@ -13,14 +13,14 @@ public sealed class UIEventSubscription : IDisposable
     internal static readonly UIEventSubscription Empty = new();
 
     private readonly ulong World;
-    private Lumina.FUIEventListener Listener;
+    private Lumina.SUIEventListener Listener;
     private DelegateBinding Binding;
 
     private UIEventSubscription()
     {
     }
 
-    internal UIEventSubscription(ulong World, Lumina.FUIEventListener Listener, DelegateBinding Binding)
+    internal UIEventSubscription(ulong World, Lumina.SUIEventListener Listener, DelegateBinding Binding)
     {
         this.World = World;
         this.Listener = Listener;

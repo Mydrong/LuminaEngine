@@ -29,7 +29,7 @@ namespace Lumina
     // One declared function input; mirrored from the editor's FunctionInput nodes on save so a call
     // node can build pins without loading the function's editor graph.
     REFLECT()
-    struct RUNTIME_API FMaterialFunctionInput
+    struct RUNTIME_API SMaterialFunctionInput
     {
         GENERATED_BODY()
 
@@ -49,7 +49,7 @@ namespace Lumina
 
     // One declared output of a material function.
     REFLECT()
-    struct RUNTIME_API FMaterialFunctionOutput
+    struct RUNTIME_API SMaterialFunctionOutput
     {
         GENERATED_BODY()
 
@@ -74,8 +74,8 @@ namespace Lumina
 
         bool IsAsset() const override { return true; }
 
-        const TVector<FMaterialFunctionInput>&  GetInputs() const  { return Inputs; }
-        const TVector<FMaterialFunctionOutput>& GetOutputs() const { return Outputs; }
+        const TVector<SMaterialFunctionInput>&  GetInputs() const  { return Inputs; }
+        const TVector<SMaterialFunctionOutput>& GetOutputs() const { return Outputs; }
 
         /** Human-readable summary shown in the call node tooltip / library. */
         PROPERTY(Editable, Category = "Material Function")
@@ -83,10 +83,10 @@ namespace Lumina
 
         /** Derived from the function graph's FunctionInput nodes on save; do not hand-edit. */
         PROPERTY()
-        TVector<FMaterialFunctionInput> Inputs;
+        TVector<SMaterialFunctionInput> Inputs;
 
         /** Derived from the function graph's FunctionOutput nodes on save; do not hand-edit. */
         PROPERTY()
-        TVector<FMaterialFunctionOutput> Outputs;
+        TVector<SMaterialFunctionOutput> Outputs;
     };
 }

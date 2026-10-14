@@ -116,10 +116,7 @@ namespace Lumina
     RUNTIME_API void MigrateStructByFieldName(const CStruct* From, const void* FromMemory,
         const CStruct* To, void* ToMemory);
 
-    // Registered name, or ScriptTypeName for a script candidate whose object name changes every load.
-    RUNTIME_API FName InstancedStructKey(CStruct* Type);
-
-    // The struct a serialized key names, or null. MetaBase scopes the script-candidate search.
+    // The struct a serialized key names, or null when it is not one MetaBase's slot can hold.
     RUNTIME_API CStruct* ResolveInstancedStructType(CStruct* MetaBase, const FName& Key);
 
     // Type key followed by the instance's tagged properties, so a hand-written operator<< can hold one.

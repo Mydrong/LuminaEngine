@@ -21,7 +21,6 @@ namespace Lumina
     class FAssetManager;
     class FApplication;
     class FWindow;
-    class CGameInstance;
     class CWorld;
 }
 
@@ -31,7 +30,7 @@ namespace Lumina
     DECLARE_MULTICAST_DELEGATE(FProjectLoadedDelegate);
 
     
-    class LUMINA_VISIBLE_TYPE FEngine : public IObjectReferenceProvider
+    class LUMINA_VISIBLE_TYPE FEngine
     {
     public:
         
@@ -101,14 +100,6 @@ namespace Lumina
         // to a single root when no explicit roots exist. Cooker iterates this for BFS seeds.
         RUNTIME_API TVector<FCookRoot> GetCookRoots() const;
 
-        RUNTIME_API CGameInstance* GetGameInstance() const { return GameInstance.Get(); }
-
-        //~ IObjectReferenceProvider: the engine holds the one live object no registry owns.
-
-        const char* GetReferenceProviderName() const override { return "engine"; }
-
-        RUNTIME_API void VisitObjectReferences(FObjectReferenceVisitor::FSlotFunc Func) override;
-
         // A tool's temporary frame rate cap, which wins over the saved setting until set back to a negative value.
         RUNTIME_API void SetFrameRateCapOverride(int32 Cap) { FrameRateCapOverride = Cap; }
         RUNTIME_API int32 GetFrameRateCapOverride() const { return FrameRateCapOverride; }
@@ -150,18 +141,11 @@ namespace Lumina
 
     protected:
 
-        /** Constructs Project.GameInstanceClass (or base CGameInstance) and calls Init. */
-        RUNTIME_API virtual void CreateGameInstance();
-
         /** Loads Project.GameStartupMap as a Game world. Editor overrides to no-op. */
         RUNTIME_API virtual void LoadStartupMap();
 
         // A headless process of -bots=N scripted clients that connect to a server, for load testing it.
         void LoadBotWorlds(FStringView MapName);
-
-        RUNTIME_API virtual void DestroyGameInstance();
-
-        void RepointGameInstanceContexts(CGameInstance* Instance);
 
         // The game's name, followed by engine and frame details in any build but Shipping.
         void RefreshWindowTitle(double AverageFrameSeconds = 0.0);
@@ -232,7 +216,6 @@ namespace Lumina
         FString                     ProjectName;
         FFixedString                ProjectPath;
         FArtifactCache              ArtifactCache;
-        TStrongObjectPtr<CGameInstance> GameInstance;
 
         // Read by MountProject, applied by StartProject once project settings are writable.
         TVector<FString>            LegacyCookRoots;

@@ -32,32 +32,7 @@ namespace Lumina::Reflection::Visitor
 	// Escapes characters that would otherwise break a C string literal in the generated output.
 	static std::string GetCursorComment(const CXCursor& Cursor)
 	{
-		const CXString CommentString = clang_Cursor_getBriefCommentText(Cursor);
-		std::string Result;
-		if (CommentString.data != nullptr)
-		{
-			const char* Raw = clang_getCString(CommentString);
-			if (Raw && Raw[0] != '\0')
-			{
-				for (const char* P = Raw; *P; ++P)
-				{
-					if (*P == '\\')
-					{
-						Result += "\\\\";
-					}
-					else if (*P == '"')
-					{
-						Result += "\\\"";
-					}
-					else
-					{
-						Result += *P;
-					}
-				}
-			}
-		}
-		clang_disposeString(CommentString);
-		return Result;
+		return ClangUtils::EscapeStringLiteral(ClangUtils::GetBriefComment(Cursor));
 	}
 
 	// The name a type registers under, from REFLECT(ReflectedName = "X"), or empty when unset.
@@ -1038,6 +1013,15 @@ namespace Lumina::Reflection::Visitor
 		return NewFunction != nullptr;
 	}
 
+	// Negative results are libclang layout errors, such as a type still incomplete where the parse saw it.
+	static void RecordNativeLayout(FReflectedType* Type, const CXType& RecordType)
+	{
+		const long long Size = clang_Type_getSizeOf(RecordType);
+		const long long Align = clang_Type_getAlignOf(RecordType);
+		Type->NativeSize = Size > 0 ? Size : -1;
+		Type->NativeAlign = Align > 0 ? Align : -1;
+	}
+
 	static void ReflectField(FClangParserContext* Context, FReflectedStruct* Struct, const CXCursor& Cursor)
 	{
 		std::string Specifiers;
@@ -1063,6 +1047,9 @@ namespace Lumina::Reflection::Visitor
 		NewProperty->GenerateMetadata(Specifiers);
 		ValidateSpecifiers(Cursor, ESpecifierTarget::Property, NewProperty->Metadata);
 		ApplyReflectAsOverride(Context, Struct, NewProperty, Cursor);
+
+		const long long OffsetInBits = clang_Cursor_getOffsetOfField(Cursor);
+		NewProperty->NativeOffset = OffsetInBits >= 0 && OffsetInBits % 8 == 0 ? OffsetInBits / 8 : -1;
 
 		if (std::string ConflictMessage; NewProperty->FindConflictingSpecifiers(ConflictMessage))
 		{
@@ -1113,6 +1100,8 @@ namespace Lumina::Reflection::Visitor
 		ReflectedStruct->GenerateMetadata(Template.MacroContents);
 		ReflectedStruct->Header = Template.Header;
 		ReflectedStruct->Type = FReflectedType::EType::Structure;
+
+		RecordNativeLayout(ReflectedStruct, Instantiation);
 
 		// Registered before its fields are walked, so an instantiation that reaches itself terminates.
 		Context->ReflectionDatabase.AddReflectedType(ReflectedStruct);
@@ -1309,6 +1298,7 @@ namespace Lumina::Reflection::Visitor
 		ReflectedStruct->Type = FReflectedType::EType::Structure;
 		ReflectedStruct->LineNumber = ClangUtils::GetCursorLineNumber(Cursor);
 		ReflectedStruct->Namespace = Context->CurrentNamespace;
+		RecordNativeLayout(ReflectedStruct, Target);
 
 		std::string AliasComment = GetCursorComment(Cursor);
 		if (!AliasComment.empty())
@@ -1392,6 +1382,7 @@ namespace Lumina::Reflection::Visitor
 		ReflectedStruct->Type = FReflectedType::EType::Structure;
 		ReflectedStruct->GeneratedBodyLineNumber = GeneratedBody.LineNumber;
 		ReflectedStruct->LineNumber = ClangUtils::GetCursorLineNumber(Cursor);
+		RecordNativeLayout(ReflectedStruct, clang_getCursorType(Cursor));
 
 		if (!Context->CurrentNamespace.empty())
 		{
@@ -1525,6 +1516,7 @@ namespace Lumina::Reflection::Visitor
 		ReflectedClass->Type = FReflectedType::EType::Class;
 		ReflectedClass->GeneratedBodyLineNumber = GeneratedBody.LineNumber;
 		ReflectedClass->LineNumber = ClangUtils::GetCursorLineNumber(Cursor);
+		RecordNativeLayout(ReflectedClass, clang_getCursorType(Cursor));
 		ReflectedClass->GenerateMetadata(Macro.MacroContents);
 		ValidateSpecifiers(Cursor, ESpecifierTarget::Reflect, ReflectedClass->Metadata);
 

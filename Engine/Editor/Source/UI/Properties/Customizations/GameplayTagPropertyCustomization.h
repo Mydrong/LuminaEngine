@@ -7,9 +7,9 @@
 
 namespace Lumina
 {
-    // Draws an FGameplayTag property as a combo that opens an organized, searchable FTreeListView of the
+    // Draws an SGameplayTag property as a combo that opens an organized, searchable FTreeListView of the
     // registered tags (e.g. Ability > Fire > Fireball), with a "+" button to author a new tag (interned +
-    // persisted to CGameplayTagsSettings). FGameplayTagContainer reuses this automatically: its Tags array
+    // persisted to CGameplayTagsSettings). SGameplayTagContainer reuses this automatically: its Tags array
     // renders each element with this picker.
     class FGameplayTagPropertyCustomization : public IPropertyTypeCustomization
     {
@@ -30,7 +30,7 @@ namespace Lumina
         // full dotted path as user data so selection can read it back.
         void BuildTagTree(FTreeListView& Tree);
 
-        FGameplayTag         Value;
+        SGameplayTag         Value;
         FPropertyEditSession EditSession;
         FTreeListView        TagTree;
         ImGuiTextFilter      TagFilter;

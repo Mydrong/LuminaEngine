@@ -26,7 +26,7 @@ namespace Lumina::Physics
         struct FWheelRay
         {
             b3BodyId            IgnoreBody{};
-            FCollisionProfile   Profile{};
+            SCollisionProfile   Profile{};
             bool                bPermissive = true;
             b3ShapeId           Shape = b3_nullShapeId;
             b3Vec3              Point{};
@@ -153,7 +153,7 @@ namespace Lumina::Physics
             FWheelRay Rays[MaxWheels];
             for (int32 Index = 0; Index < WheelCount; ++Index)
             {
-                FVehicleWheel& Wheel = Vehicle.Wheels[Index];
+                SVehicleWheel& Wheel = Vehicle.Wheels[Index];
                 const float Reach = Wheel.SuspensionTravel + Wheel.Radius;
                 const b3Pos Mount = b3Body_GetWorldPoint(Body, ToB3(Wheel.Position));
 
@@ -188,7 +188,7 @@ namespace Lumina::Physics
 
             for (int32 Index = 0; Index < WheelCount; ++Index)
             {
-                FVehicleWheel& Wheel = Vehicle.Wheels[Index];
+                SVehicleWheel& Wheel = Vehicle.Wheels[Index];
                 const FWheelRay& Ray = Rays[Index];
                 const bool bLocked = Vehicle.bHandbrake && Wheel.bHandbrake;
 
@@ -303,7 +303,7 @@ namespace Lumina::Physics
 
         Registry.View<SVehicleComponent>().ForEach([&](ECS::FEntity, const SVehicleComponent& Vehicle)
         {
-            for (const FVehicleWheel& Wheel : Vehicle.Wheels)
+            for (const SVehicleWheel& Wheel : Vehicle.Wheels)
             {
                 const ECS::FEntity Visual = Wheel.Visual;
                 STransformComponent* Transform = Visual != ECS::NullEntity ? Registry.TryGet<STransformComponent>(Visual) : nullptr;

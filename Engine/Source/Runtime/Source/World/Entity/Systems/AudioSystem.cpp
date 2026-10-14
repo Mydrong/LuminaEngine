@@ -111,7 +111,7 @@ namespace Lumina
 				if (Volume.bPlaying && Audio::Context().GetVoiceState(Volume.ActiveHandle) == EAudioVoiceState::Free)
 				{
 					Volume.bPlaying = false;
-					Volume.ActiveHandle = FAudioHandle::Invalid();
+					Volume.ActiveHandle = SAudioHandle::Invalid();
 					Volume.ResumeFrame = 0;
 					Volume.bFinishedThisVisit = !Volume.bLooping;
 				}
@@ -127,7 +127,7 @@ namespace Lumina
 							Volume.Gain          = Math::Max(Volume.Gain, Other->Gain);
 							Volume.AppliedVolume = Other->AppliedVolume;
 							Volume.bPlaying      = true;
-							Other->ActiveHandle  = FAudioHandle::Invalid();
+							Other->ActiveHandle  = SAudioHandle::Invalid();
 							Other->bPlaying      = false;
 							Other->Gain          = 0.0f;
 							break;
@@ -140,7 +140,7 @@ namespace Lumina
 				{
 					if (Volume.Gain > 0.0f && !Volume.bFinishedThisVisit && Volume.Sound != nullptr && Volume.Sound->IsPlayable())
 					{
-						FAudioPlayParams Params;
+						SAudioPlayParams Params;
 						Params.Volume       = Wanted;
 						Params.bLooping     = Volume.bLooping;
 						Params.bSpatialized = false;
@@ -187,7 +187,7 @@ namespace Lumina
 			if (Audio.bPlaying && Audio.ActiveHandle.IsValid())
 			{
 				Audio::Context().StopSound(Audio.ActiveHandle);
-				Audio.ActiveHandle = FAudioHandle::Invalid();
+				Audio.ActiveHandle = SAudioHandle::Invalid();
 				Audio.bPlaying = false;
 			}
 		});
@@ -198,7 +198,7 @@ namespace Lumina
 			if (Audio.bPlaying && Audio.ActiveHandle.IsValid())
 			{
 				Audio::Context().StopSound(Audio.ActiveHandle);
-				Audio.ActiveHandle = FAudioHandle::Invalid();
+				Audio.ActiveHandle = SAudioHandle::Invalid();
 				Audio.bPlaying = false;
 			}
 		});
@@ -294,7 +294,7 @@ namespace Lumina
 				{
 					Audio.bPlaying = false;
 					Audio.bPaused = false;
-					Audio.ActiveHandle = FAudioHandle::Invalid();
+					Audio.ActiveHandle = SAudioHandle::Invalid();
 				}
 
 				const bool bInRange = !Audio.bSpatialized || !Audio.bCullBeyondMaxDistance || !bHasListener ||
@@ -421,7 +421,7 @@ namespace Lumina
 				if (Audio.bPlaying && Audio::Context().GetVoiceState(Audio.ActiveHandle) == EAudioVoiceState::Free)
 				{
 					Audio.bPlaying = false;
-					Audio.ActiveHandle = FAudioHandle::Invalid();
+					Audio.ActiveHandle = SAudioHandle::Invalid();
 				}
 
 				if (Audio.bPlaying && Audio.ActiveHandle.IsValid())

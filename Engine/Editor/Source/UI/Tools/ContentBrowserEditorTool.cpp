@@ -5,6 +5,7 @@
 #include "EditorAssetActions.h"
 #include "EditorToolContext.h"
 #include "ReplaceReferencesModal.h"
+#include "Assets/AssetManager/AssetManager.h"
 #include "Assets/AssetRegistry/AssetRegistry.h"
 #include "Assets/AssetRegistry/TextAssetTypes.h"
 #include "Assets/AssetRegistry/TextAssetSidecar.h"
@@ -795,10 +796,13 @@ namespace Lumina
             if (HasFlag(Data->Flags, EAssetFlags::RuntimeOnly)) { AddFlag("Runtime-Only"); }
             if (HasFlag(Data->Flags, EAssetFlags::AlwaysCook))  { AddFlag("Always Cook"); }
             if (HasFlag(Data->Flags, EAssetFlags::NeverCook))   { AddFlag("Never Cook"); }
-            if (HasFlag(Data->Flags, EAssetFlags::Primary))     { AddFlag("Primary"); }
             if (!Flags.empty())
             {
                 ImGui::TextColored(kMenuTextDim, "Flags: %s", Flags.c_str());
+            }
+            if (const FName Group = FAssetManager::Get().GetGroupOfClass(Data->AssetClass); !Group.IsNone())
+            {
+                ImGui::TextColored(kMenuTextDim, "Group: %s", Group.c_str());
             }
 
             DrawItemSizeLine(Info);
@@ -2265,6 +2269,28 @@ namespace Lumina
                         case EFileAction::Removed: Reg.TextAssetDeleted(New); break;
                         case EFileAction::Renamed: Reg.TextAssetRenamed(FStringView(OldPath.c_str(), OldPath.size()), New); break;
                         default: break;
+                        }
+                    });
+                }
+
+                const bool bPackageLeftPath = Event.Action == EFileAction::Removed || Event.Action == EFileAction::Renamed;
+                const FFixedString LeftPath = Event.Action == EFileAction::Renamed ? MakeVirtualPath(Event.OldPath) : RelativePath;
+                if (bPackageLeftPath && VFS::HasExtension(LeftPath, ".lasset"))
+                {
+                    MainThread::Enqueue([LeftPath]
+                    {
+                        // Saves replace the file by rename, so only a path still missing now was really deleted or moved.
+                        const FStringView Path(LeftPath.c_str(), LeftPath.size());
+                        if (VFS::Exists(Path))
+                        {
+                            return;
+                        }
+
+                        FAssetRegistry& Reg = FAssetRegistry::Get();
+                        if (const FAssetData* Stale = Reg.GetAssetByPath(Path))
+                        {
+                            const FGuid StaleGUID = Stale->AssetGUID;
+                            Reg.AssetDeleted(StaleGUID);
                         }
                     });
                 }
@@ -3760,6 +3786,7 @@ namespace Lumina
             Contents += "using Lumina;\n\n";
             // Not "Game", which would shadow LuminaSharp.Game and break Game.OpenLevel in every script.
             Contents += "namespace GameScripts;\n\n";
+            Contents += "[Reflect]\n";
             Contents += "public sealed class ";
             Contents += ClassName.c_str();
             Contents += " : CEntityScript\n";

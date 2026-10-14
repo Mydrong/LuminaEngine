@@ -1,97 +1,57 @@
 using System;
-using System.Collections.Generic;
 using System.Runtime.CompilerServices;
-using System.Runtime.InteropServices;
 
 namespace LuminaSharp;
 
-internal interface IDelegateInvoker
+// A delegate listener, run inside its script's context with the broadcast's argument pack as the payload.
+internal abstract class DelegateInvoker : ScriptClosure
 {
-    void Invoke(IntPtr Payload);
+    public Lumina.CEntityScript? Owner;
+
+    protected abstract void Run(IntPtr Payload);
+
+    public sealed override ulong Invoke(ulong Payload)
+    {
+        if (Owner is { } Script)
+        {
+            using (Engine.Push(Script.World, Script.Entity))
+            {
+                Run((IntPtr)Payload);
+            }
+        }
+        else
+        {
+            Run((IntPtr)Payload);
+        }
+        return 0;
+    }
 }
 
-internal sealed class VoidInvoker : IDelegateInvoker
+internal sealed class VoidInvoker : DelegateInvoker
 {
     public Action Handler = null!;
-    public Lumina.CEntityScript? Owner;
 
-    public void Invoke(IntPtr Payload)
-    {
-        if (Owner is { } Script)
-        {
-            using (Engine.Push(Script.World, Script.Entity))
-            {
-                Handler();
-            }
-        }
-        else
-        {
-            Handler();
-        }
-    }
+    protected override void Run(IntPtr Payload) => Handler();
 }
 
-internal sealed class PayloadInvoker<T> : IDelegateInvoker where T : unmanaged
+internal sealed class PayloadInvoker<T> : DelegateInvoker where T : unmanaged
 {
     public Action<T> Handler = null!;
-    public Lumina.CEntityScript? Owner;
 
-    public unsafe void Invoke(IntPtr Payload)
-    {
-        T Argument = Unsafe.Read<T>((void*)Payload);
-        if (Owner is { } Script)
-        {
-            using (Engine.Push(Script.World, Script.Entity))
-            {
-                Handler(Argument);
-            }
-        }
-        else
-        {
-            Handler(Argument);
-        }
-    }
+    protected override unsafe void Run(IntPtr Payload) => Handler(Unsafe.Read<T>((void*)Payload));
 }
 
-// The bridge from a native broadcast into a managed handler. Holds no state: a binding's GCHandle belongs
-// to the native delegate from the moment Bind hands it over, so nothing here has to be tracked or drained.
+// The delegate owns the callback from the moment it is bound and releases it when the binding retires.
 internal static unsafe class DelegateBindings
 {
-    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
-    private static void Thunk(IntPtr Context, IntPtr Payload)
-    {
-        try
-        {
-            if (GCHandle.FromIntPtr(Context).Target is IDelegateInvoker Invoker)
-            {
-                Invoker.Invoke(Payload);
-            }
-        }
-        catch (Exception Exception)
-        {
-            Interop.LogException(Exception);
-        }
-    }
-
-    private static readonly IntPtr ThunkPtr =
-        (IntPtr)(delegate* unmanaged[Cdecl]<IntPtr, IntPtr, void>)&Thunk;
-
-    internal static DelegateBinding Bind(void* Address, IDelegateInvoker Invoker)
+    internal static DelegateBinding Bind(void* Address, DelegateInvoker Invoker)
     {
         if (Address == null)
         {
             return default;
         }
 
-        // Handed to the delegate, which frees it when the binding is unbound or the delegate dies.
-        GCHandle Handle = GCHandle.Alloc(Invoker);
-        ulong Id = Native.DelegateBind((IntPtr)Address, ThunkPtr, GCHandle.ToIntPtr(Handle));
-        if (Id == 0)
-        {
-            Handle.Free();
-            return default;
-        }
-
-        return new DelegateBinding((IntPtr)Address, Id);
+        ulong Id = Native.DelegateBind((IntPtr)Address, ScriptCallback.Bind(Invoker).Token);
+        return Id == 0 ? default : new DelegateBinding((IntPtr)Address, Id);
     }
 }

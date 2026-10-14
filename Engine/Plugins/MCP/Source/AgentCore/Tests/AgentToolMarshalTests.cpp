@@ -7,7 +7,7 @@
 #include "Animation/AnimNotifyDefaults.h"
 #include "Assets/AssetTypes/Animation/Montage/AnimationMontage.h"
 #include "Audio/AudioTypes.h"
-#include "Core/Engine/GameInstance.h"
+#include "Scripting/EntityScript.h"
 #include "Core/Reflection/Type/Properties/ClassProperty.h"
 #include "Core/Reflection/Type/Properties/SoftObjectProperty.h"
 #include "Containers/ContainerOps.h"
@@ -357,7 +357,7 @@ namespace
     constexpr FPropertyDesc GOptionalFloat{ .Name = "Regen", .Type = PropertyTypeOf<TOptional<float>> };
     constexpr FPropertyDesc GNotifySubStruct{ .Name = "NotifyType", .Type = PropertyTypeOf<TSubStructOf<SAnimNotify>> };
     constexpr FPropertyDesc GStartupMap{ .Name = "GameStartupMap", .Type = PropertyTypeOf<TSoftObjectPtr<CWorld>> };
-    constexpr FPropertyDesc GGameInstanceClass{ .Name = "GameInstanceClass", .Type = PropertyTypeOf<TSubclassOf<CGameInstance>> };
+    constexpr FPropertyDesc GScriptClass{ .Name = "ScriptClass", .Type = PropertyTypeOf<TSubclassOf<CEntityScript>> };
 
     struct FContainerFixtures
     {
@@ -374,7 +374,7 @@ namespace
         FOptionalProperty* OptionalFloat()        { return Build<FOptionalProperty>(GOptionalFloat); }
         FSubStructProperty* NotifySubStruct()     { return Build<FSubStructProperty>(GNotifySubStruct); }
         FSoftObjectProperty* StartupMap()         { return Build<FSoftObjectProperty>(GStartupMap); }
-        FClassProperty* GameInstance()            { return Build<FClassProperty>(GGameInstanceClass); }
+        FClassProperty* ScriptClass()             { return Build<FClassProperty>(GScriptClass); }
     };
 }
 
@@ -417,31 +417,31 @@ TEST(AgentToolMarshal, ASoftObjectGuidNamingNothingIsReported)
 TEST(AgentToolMarshal, AClassIsResolvedByName)
 {
     // The lookup goes by name, so the class has to exist before it runs.
-    StaticClass<CGameInstance>();
+    StaticClass<CEntityScript>();
 
     FContainerFixtures Fixtures;
-    FClassProperty* Property = Fixtures.GameInstance();
+    FClassProperty* Property = Fixtures.ScriptClass();
 
     CClass* Value = nullptr;
-    const FMarshalResult Read = ReadProperty("CGameInstance", Property, &Value, "GameInstanceClass");
+    const FMarshalResult Read = ReadProperty("CEntityScript", Property, &Value, "ScriptClass");
     ASSERT_TRUE(Read.IsValid()) << Read.Error.c_str();
     ASSERT_NE(Value, nullptr);
-    EXPECT_EQ(Value->GetName(), FName("CGameInstance"));
+    EXPECT_EQ(Value->GetName(), FName("CEntityScript"));
 
     nlohmann::json Out;
     ASSERT_TRUE(WriteProperty(Property, &Value, Out).IsValid());
-    EXPECT_EQ(Out, "CGameInstance");
+    EXPECT_EQ(Out, "CEntityScript");
 }
 
 TEST(AgentToolMarshal, AClassOutsideTheConstraintIsRefused)
 {
-    StaticClass<CGameInstance>();
+    StaticClass<CEntityScript>();
     StaticClass<CWorld>();
 
     FContainerFixtures Fixtures;
-    FClassProperty* Property = Fixtures.GameInstance();
+    FClassProperty* Property = Fixtures.ScriptClass();
 
-    const FMarshalResult Result = ValidatePropertyValue("CWorld", Property, "GameInstanceClass");
+    const FMarshalResult Result = ValidatePropertyValue("CWorld", Property, "ScriptClass");
     ASSERT_FALSE(Result.IsValid());
     EXPECT_NE(Result.Error.find("subclass"), FString::npos);
 }
@@ -449,9 +449,9 @@ TEST(AgentToolMarshal, AClassOutsideTheConstraintIsRefused)
 TEST(AgentToolMarshal, AnUnknownClassNameIsRefused)
 {
     FContainerFixtures Fixtures;
-    FClassProperty* Property = Fixtures.GameInstance();
+    FClassProperty* Property = Fixtures.ScriptClass();
 
-    const FMarshalResult Result = ValidatePropertyValue("CNoSuchClass", Property, "GameInstanceClass");
+    const FMarshalResult Result = ValidatePropertyValue("CNoSuchClass", Property, "ScriptClass");
     EXPECT_FALSE(Result.IsValid());
 }
 

@@ -4,6 +4,7 @@
 #include "Agent/AgentPropertyPath.h"
 #include "Agent/AgentToolMarshal.h"
 #include "Agent/AgentToolRegistry.h"
+#include "MCPEditorModule.h"
 #include "Agent/AgentToolSchema.h"
 #include "Asset/AssetOps.h"
 #include "MCPTextMatch.h"
@@ -30,7 +31,8 @@ namespace Lumina::MCP
             Write,
         };
 
-        bool ResolveSystem(const FString& Guid, EParticleAccess Access, CParticleSystem*& Out, FString& OutError)
+        // Held keeps a wrapped emitter asset's transient system alive for the call, since nothing else references it.
+        bool ResolveSystem(const FString& Guid, EParticleAccess Access, TStrongObjectPtr<CParticleSystem>& Held, CParticleSystem*& Out, FString& OutError)
         {
             CObject* Asset = nullptr;
             if (!Agent::ResolveAssetObject(FStringView(Guid), Asset, OutError))
@@ -38,17 +40,29 @@ namespace Lumina::MCP
                 return false;
             }
 
-            Out = Cast<CParticleSystem>(Asset);
+            // An emitter asset is edited through a transient system holding only it, as the particle editor does.
+            CParticleEmitter* EmitterAsset = Cast<CParticleEmitter>(Asset);
+            // Only the wrapper is held, since releasing a ref to a loaded system nothing else holds would free it.
+            if (EmitterAsset != nullptr)
+            {
+                // The wrapper's ref is the emitter's only one, so the session keeps it or the edit dies with the wrapper.
+                if (MCP::FServer* Server = FMCPEditorModule::GetServer())
+                {
+                    Server->KeepLoaded(EmitterAsset);
+                }
+                Held = ParticleOps::WrapEmitter(EmitterAsset);
+            }
+            Out = Held ? Held.Get() : Cast<CParticleSystem>(Asset);
             if (Out == nullptr)
             {
-                OutError = Lumina::Format("'{}' is a {}, not a particle system.", Guid, Asset->GetClass()->GetName());
+                OutError = Lumina::Format("'{}' is a {}, not a particle system or emitter.", Guid, Asset->GetClass()->GetName());
                 return false;
             }
 
             // The open editor keeps its own list of stacks, which an edit made here would silently diverge from.
             if (Access == EParticleAccess::Write)
             {
-                const FString OpenIn = NodeGraphOps::FindOpenEditorName(Out);
+                const FString OpenIn = NodeGraphOps::FindOpenEditorName(Asset);
                 if (!OpenIn.empty())
                 {
                     OutError = Lumina::Format("'{}' is open in {}, which would not see this change. Close it and try again.",
@@ -153,11 +167,16 @@ namespace Lumina::MCP
             }
         }
 
-        void MarkDirty(CParticleSystem* System)
+        // A shared emitter asset lives in its own package, and an emitter asset's wrapping system has none.
+        void MarkDirty(CParticleSystem* System, int32 Emitter = Constants::kIndexNone)
         {
-            if (CPackage* Package = System->GetPackage())
+            const bool bEmitter = Emitter >= 0 && Emitter < (int32)System->Emitters.size();
+            for (const CObject* Edited : { (const CObject*)System, bEmitter ? (const CObject*)System->Emitters[Emitter].Get() : nullptr })
             {
-                Package->MarkDirty();
+                if (CPackage* Package = Edited != nullptr ? Edited->GetPackage() : nullptr)
+                {
+                    Package->MarkDirty();
+                }
             }
         }
 
@@ -177,7 +196,7 @@ namespace Lumina::MCP
             return false;
         }
 
-        nlohmann::json ParameterValueJson(const FParticleParameter& Param)
+        nlohmann::json ParameterValueJson(const SParticleParameter& Param)
         {
             switch (Param.Type)
             {
@@ -189,7 +208,7 @@ namespace Lumina::MCP
             }
         }
 
-        bool ReadParameterValue(const nlohmann::json& Value, FParticleParameter& Param, FString& OutError)
+        bool ReadParameterValue(const nlohmann::json& Value, SParticleParameter& Param, FString& OutError)
         {
             switch (Param.Type)
             {
@@ -283,15 +302,16 @@ namespace Lumina::MCP
                 Agent::EToolEffect::ReadOnly, Agent::EToolThread::GameThread,
                 [](const SParticleSystemParams& In, SDescribeParticleSystemResult& Out)
                 {
+                    TStrongObjectPtr<CParticleSystem> Held;
                     CParticleSystem* System = nullptr;
                     FString Error;
-                    if (!ResolveSystem(In.System, EParticleAccess::Read, System, Error))
+                    if (!ResolveSystem(In.System, EParticleAccess::Read, Held, System, Error))
                     {
                         return Agent::FToolResult::Error(Error);
                     }
 
                     Out.Name = FString(System->GetName().ToString().c_str());
-                    for (const FParticleParameter& Param : System->UserParameters)
+                    for (const SParticleParameter& Param : System->UserParameters)
                     {
                         SParticleUserParameterInfo Info;
                         Info.Name  = FString(Param.Name.ToString().c_str());
@@ -312,6 +332,7 @@ namespace Lumina::MCP
                         Info.Index     = Index;
                         Info.Name      = Emitter->EmitterName;
                         Info.bCompiled = Emitter->HasCustomComputeShader();
+                        Info.SharedAsset = Emitter->GetPackage() != System->GetPackage() ? FString(Emitter->GetPackage()->GetPackagePath().c_str()) : FString();
                         Info.Settings  = EditableValues(Emitter->GetClass(), Emitter);
                         CollectModules(System, Index, EParticleModuleStage::Spawn, Info.SpawnModules);
                         CollectModules(System, Index, EParticleModuleStage::Update, Info.UpdateModules);
@@ -352,29 +373,23 @@ namespace Lumina::MCP
                         return Agent::FToolResult::Error(Lumina::Format("{} already exists.", Path));
                     }
 
-                    CParticleSystem* System = CFactory::CreateNewOf<CParticleSystem>(FStringView(Path.c_str(), Path.size()));
-
-                    // CreateNewOf skips the factory, which is what gives a new system its first emitter.
-                    if (System != nullptr && System->Emitters.empty())
-                    {
-                        System->AddEmitter();
-                    }
-
-                    if (System == nullptr || System->Emitters.empty())
+                    // Held strongly, since the export table only watches it and a compile job releasing its ref would free it.
+                    const TStrongObjectPtr<CParticleSystem> System(CFactoryRegistry::Get().FindFactory(CParticleSystem::StaticClass())->TryCreateNew<CParticleSystem>(FStringView(Path.c_str(), Path.size())));
+                    if (!System || System->Emitters.empty())
                     {
                         return Agent::FToolResult::Error(Lumina::Format("Could not create a particle system at {}.", Path));
                     }
 
-                    ParticleOps::FindOrCreateStack(System, 0);
+                    ParticleOps::FindOrCreateStack(System.Get(), 0);
                     if (!In.bStarterStack)
                     {
-                        ClearStacks(System, 0);
+                        ClearStacks(System.Get(), 0);
                     }
 
                     FParticleEmitterCompileOutput Compiled;
                     if (In.bStarterStack)
                     {
-                        ParticleOps::CompileEmitter(System, 0, Compiled);
+                        ParticleOps::CompileEmitter(System.Get(), 0, Compiled);
                     }
 
                     if (!CPackage::SavePackage(System->GetPackage(), Path))
@@ -382,7 +397,7 @@ namespace Lumina::MCP
                         return Agent::FToolResult::Error(Lumina::Format("Could not save {}.", Path));
                     }
 
-                    FAssetRegistry::Get().AssetCreated(System);
+                    FAssetRegistry::Get().AssetCreated(System.Get());
                     Out.Path = FString(Path.c_str());
                     Out.Guid = FString(System->GetGUID().ToString().c_str());
                     return Agent::FToolResult::Ok(Lumina::Format("Created {}.", Out.Path));
@@ -397,9 +412,10 @@ namespace Lumina::MCP
                 Agent::EToolEffect::Mutating, Agent::EToolThread::GameThread,
                 [](const SAddParticleEmitterParams& In, SAddParticleEmitterResult& Out)
                 {
+                    TStrongObjectPtr<CParticleSystem> Held;
                     CParticleSystem* System = nullptr;
                     FString Error;
-                    if (!ResolveSystem(In.System, EParticleAccess::Write, System, Error))
+                    if (!ResolveSystem(In.System, EParticleAccess::Write, Held, System, Error))
                     {
                         return Agent::FToolResult::Error(Error);
                     }
@@ -428,6 +444,93 @@ namespace Lumina::MCP
                 });
         }
 
+        void RegisterAddEmitterAsset(FStringView Owner)
+        {
+            Agent::FToolRegistry::Get().Register<SAddParticleEmitterAssetParams, SAddParticleEmitterResult>(
+                Owner, "particle.add_emitter_asset",
+                "Share a particle emitter asset in a particle system, so edits to the asset reach every system using it.",
+                Agent::EToolEffect::Mutating, Agent::EToolThread::GameThread,
+                [](const SAddParticleEmitterAssetParams& In, SAddParticleEmitterResult& Out)
+                {
+                    TStrongObjectPtr<CParticleSystem> Held;
+                    CParticleSystem* System = nullptr;
+                    CObject* Asset = nullptr;
+                    FString Error;
+                    if (!ResolveSystem(In.System, EParticleAccess::Write, Held, System, Error) || !Agent::ResolveAssetObject(FStringView(In.Asset), Asset, Error))
+                    {
+                        return Agent::FToolResult::Error(Error);
+                    }
+
+                    CParticleEmitter* Emitter = Cast<CParticleEmitter>(Asset);
+                    if (Emitter == nullptr || !Emitter->IsAsset())
+                    {
+                        return Agent::FToolResult::Error(Lumina::Format("'{}' is not a particle emitter asset.", In.Asset));
+                    }
+
+                    System->Emitters.push_back(Emitter);
+                    Out.Index = (int32)System->Emitters.size() - 1;
+                    Out.Name  = Emitter->EmitterName;
+                    MarkDirty(System);
+                    return Agent::FToolResult::Ok(Lumina::Format("Shared emitter asset '{}' as emitter {}.", Emitter->GetName().c_str(), Out.Index));
+                });
+        }
+
+        void RegisterSaveEmitterAsAsset(FStringView Owner)
+        {
+            Agent::FToolRegistry::Get().Register<SSaveParticleEmitterAssetParams, SCreateParticleSystemResult>(
+                Owner, "particle.save_emitter_as_asset",
+                "Save one of a system's emitters as its own particle emitter asset, which the system then shares.",
+                Agent::EToolEffect::Mutating, Agent::EToolThread::GameThread,
+                [](const SSaveParticleEmitterAssetParams& In, SCreateParticleSystemResult& Out)
+                {
+                    TStrongObjectPtr<CParticleSystem> Held;
+                    CParticleSystem* System = nullptr;
+                    FString Error;
+                    if (!ResolveSystem(In.System, EParticleAccess::Write, Held, System, Error) || !CheckEmitter(System, In.Emitter, Error))
+                    {
+                        return Agent::FToolResult::Error(Error);
+                    }
+
+                    CParticleEmitter* Asset = ParticleOps::SaveEmitterAsAsset(System, In.Emitter, FStringView(In.Path.c_str(), In.Path.size()));
+                    if (Asset == nullptr)
+                    {
+                        return Agent::FToolResult::Error(Lumina::Format("Could not save emitter {} to '{}'.", In.Emitter, In.Path));
+                    }
+
+                    Out.Guid = FString(Asset->GetGUID().ToString().c_str());
+                    Out.Path = FString(Asset->GetPackage()->GetPackagePath().c_str());
+                    MarkDirty(System);
+                    return Agent::FToolResult::Ok(Lumina::Format("Saved emitter {} as {}.", In.Emitter, Out.Path));
+                });
+        }
+
+        void RegisterMakeEmitterLocal(FStringView Owner)
+        {
+            Agent::FToolRegistry::Get().Register<SParticleEmitterParams, SParticleEditResult>(
+                Owner, "particle.make_emitter_local",
+                "Replace a shared emitter asset in a system with a copy the system owns, so later edits stop reaching other systems.",
+                Agent::EToolEffect::Mutating, Agent::EToolThread::GameThread,
+                [](const SParticleEmitterParams& In, SParticleEditResult& Out)
+                {
+                    TStrongObjectPtr<CParticleSystem> Held;
+                    CParticleSystem* System = nullptr;
+                    FString Error;
+                    if (!ResolveSystem(In.System, EParticleAccess::Write, Held, System, Error) || !CheckEmitter(System, In.Emitter, Error))
+                    {
+                        return Agent::FToolResult::Error(Error);
+                    }
+                    if (System->Emitters[In.Emitter]->GetPackage() == System->GetPackage())
+                    {
+                        return Agent::FToolResult::Error(Lumina::Format("Emitter {} already belongs to the system.", In.Emitter));
+                    }
+
+                    Out.bSucceeded = ParticleOps::MakeEmitterLocal(System, In.Emitter) != nullptr;
+                    MarkDirty(System);
+                    return Out.bSucceeded ? Agent::FToolResult::Ok(Lumina::Format("Emitter {} is now the system's own copy.", In.Emitter))
+                                          : Agent::FToolResult::Error("The copy failed.");
+                });
+        }
+
         void RegisterRemoveEmitter(FStringView Owner)
         {
             Agent::FToolRegistry::Get().Register<SParticleEmitterParams, SParticleEditResult>(
@@ -436,9 +539,10 @@ namespace Lumina::MCP
                 Agent::EToolEffect::Mutating, Agent::EToolThread::GameThread,
                 [](const SParticleEmitterParams& In, SParticleEditResult& Out)
                 {
+                    TStrongObjectPtr<CParticleSystem> Held;
                     CParticleSystem* System = nullptr;
                     FString Error;
-                    if (!ResolveSystem(In.System, EParticleAccess::Write, System, Error) || !CheckEmitter(System, In.Emitter, Error))
+                    if (!ResolveSystem(In.System, EParticleAccess::Write, Held, System, Error) || !CheckEmitter(System, In.Emitter, Error))
                     {
                         return Agent::FToolResult::Error(Error);
                     }
@@ -462,9 +566,10 @@ namespace Lumina::MCP
                 Agent::EToolEffect::Mutating, Agent::EToolThread::GameThread,
                 [](const SSetParticleEmitterPropertyParams& In, SParticlePropertyResult& Out)
                 {
+                    TStrongObjectPtr<CParticleSystem> Held;
                     CParticleSystem* System = nullptr;
                     FString Error;
-                    if (!ResolveSystem(In.System, EParticleAccess::Write, System, Error) || !CheckEmitter(System, In.Emitter, Error))
+                    if (!ResolveSystem(In.System, EParticleAccess::Write, Held, System, Error) || !CheckEmitter(System, In.Emitter, Error))
                     {
                         return Agent::FToolResult::Error(Error);
                     }
@@ -502,7 +607,7 @@ namespace Lumina::MCP
                     nlohmann::json After;
                     Agent::WriteProperty(Property.Property, Property.ValuePtr, After);
                     Out.Current = FString(After.dump().c_str());
-                    MarkDirty(System);
+                    MarkDirty(System, In.Emitter);
                     return Agent::FToolResult::Ok(Lumina::Format("Emitter {} {} is now {}.", In.Emitter, In.Path, Out.Current));
                 });
         }
@@ -515,9 +620,10 @@ namespace Lumina::MCP
                 Agent::EToolEffect::Mutating, Agent::EToolThread::GameThread,
                 [](const SAddParticleModuleParams& In, SAddParticleModuleResult& Out)
                 {
+                    TStrongObjectPtr<CParticleSystem> Held;
                     CParticleSystem* System = nullptr;
                     FString Error;
-                    if (!ResolveSystem(In.System, EParticleAccess::Write, System, Error) || !CheckEmitter(System, In.Emitter, Error))
+                    if (!ResolveSystem(In.System, EParticleAccess::Write, Held, System, Error) || !CheckEmitter(System, In.Emitter, Error))
                     {
                         return Agent::FToolResult::Error(Error);
                     }
@@ -546,7 +652,7 @@ namespace Lumina::MCP
 
                     Out.Stage  = ParticleOps::StageName(Stage);
                     Out.Values = EditableValues(Module->GetClass(), Module);
-                    MarkDirty(System);
+                    MarkDirty(System, In.Emitter);
                     return Agent::FToolResult::Ok(Lumina::Format("Added {} as {} module {} on '{}'. Compile before it takes effect.",
                         Module->GetDisplayName(), Out.Stage, Out.Index, EmitterName(System, In.Emitter)));
                 });
@@ -560,18 +666,19 @@ namespace Lumina::MCP
                 Agent::EToolEffect::Mutating, Agent::EToolThread::GameThread,
                 [](const SParticleModuleParams& In, SParticleEditResult& Out)
                 {
+                    TStrongObjectPtr<CParticleSystem> Held;
                     CParticleSystem* System = nullptr;
                     FString Error;
                     EParticleModuleStage Stage;
                     CParticleModule* Module = nullptr;
-                    if (!ResolveSystem(In.System, EParticleAccess::Write, System, Error)
+                    if (!ResolveSystem(In.System, EParticleAccess::Write, Held, System, Error)
                         || !ResolveModule(System, In.Emitter, In.Stage, In.Index, Stage, Module, Error))
                     {
                         return Agent::FToolResult::Error(Error);
                     }
 
                     Out.bSucceeded = ParticleOps::RemoveModule(System, In.Emitter, Stage, In.Index);
-                    MarkDirty(System);
+                    MarkDirty(System, In.Emitter);
                     return Agent::FToolResult::Ok(Lumina::Format("Removed {} module {}. Compile before it takes effect.", In.Stage, In.Index));
                 });
         }
@@ -584,11 +691,12 @@ namespace Lumina::MCP
                 Agent::EToolEffect::Mutating, Agent::EToolThread::GameThread,
                 [](const SMoveParticleModuleParams& In, SParticleEditResult& Out)
                 {
+                    TStrongObjectPtr<CParticleSystem> Held;
                     CParticleSystem* System = nullptr;
                     FString Error;
                     EParticleModuleStage Stage;
                     CParticleModule* Module = nullptr;
-                    if (!ResolveSystem(In.System, EParticleAccess::Write, System, Error)
+                    if (!ResolveSystem(In.System, EParticleAccess::Write, Held, System, Error)
                         || !ResolveModule(System, In.Emitter, In.Stage, In.Index, Stage, Module, Error))
                     {
                         return Agent::FToolResult::Error(Error);
@@ -600,7 +708,7 @@ namespace Lumina::MCP
                     }
 
                     Out.bSucceeded = true;
-                    MarkDirty(System);
+                    MarkDirty(System, In.Emitter);
                     return Agent::FToolResult::Ok(Lumina::Format("Moved {} module {} to {}. Compile before it takes effect.", In.Stage, In.Index, In.NewIndex));
                 });
         }
@@ -613,11 +721,12 @@ namespace Lumina::MCP
                 Agent::EToolEffect::Mutating, Agent::EToolThread::GameThread,
                 [](const SSetParticleModulePropertyParams& In, SParticlePropertyResult& Out)
                 {
+                    TStrongObjectPtr<CParticleSystem> Held;
                     CParticleSystem* System = nullptr;
                     FString Error;
                     EParticleModuleStage Stage;
                     CParticleModule* Module = nullptr;
-                    if (!ResolveSystem(In.System, EParticleAccess::Write, System, Error)
+                    if (!ResolveSystem(In.System, EParticleAccess::Write, Held, System, Error)
                         || !ResolveModule(System, In.Emitter, In.Stage, In.Index, Stage, Module, Error))
                     {
                         return Agent::FToolResult::Error(Error);
@@ -655,7 +764,7 @@ namespace Lumina::MCP
 
                     // An enum picks a code branch rather than a slot value, which only a recompile can change.
                     Out.bNeedsCompile = !ParticleOps::RefreshModuleParams(System, In.Emitter);
-                    MarkDirty(System);
+                    MarkDirty(System, In.Emitter);
                     return Agent::FToolResult::Ok(Lumina::Format("{} module {} {} is now {}{}", In.Stage, In.Index, In.Path, Out.Current,
                         Out.bNeedsCompile ? ". Compile before it takes effect." : ", live."));
                 });
@@ -669,9 +778,10 @@ namespace Lumina::MCP
                 Agent::EToolEffect::Mutating, Agent::EToolThread::GameThread,
                 [](const SSetParticleUserParameterParams& In, SParticleEditResult& Out)
                 {
+                    TStrongObjectPtr<CParticleSystem> Held;
                     CParticleSystem* System = nullptr;
                     FString Error;
-                    if (!ResolveSystem(In.System, EParticleAccess::Write, System, Error))
+                    if (!ResolveSystem(In.System, EParticleAccess::Write, Held, System, Error))
                     {
                         return Agent::FToolResult::Error(Error);
                     }
@@ -681,7 +791,7 @@ namespace Lumina::MCP
                         return Agent::FToolResult::Error("A parameter needs a name.");
                     }
 
-                    FParticleParameter Param;
+                    SParticleParameter Param;
                     Param.Name = FName(In.Name.c_str());
                     if (!ParseParameterType(In.Type, Param.Type))
                     {
@@ -695,7 +805,7 @@ namespace Lumina::MCP
                     }
 
                     bool bReplaced = false;
-                    for (FParticleParameter& Existing : System->UserParameters)
+                    for (SParticleParameter& Existing : System->UserParameters)
                     {
                         if (Existing.Name == Param.Name)
                         {
@@ -723,9 +833,10 @@ namespace Lumina::MCP
                 Agent::EToolEffect::Mutating, Agent::EToolThread::GameThread,
                 [](const SRemoveParticleUserParameterParams& In, SParticleEditResult& Out)
                 {
+                    TStrongObjectPtr<CParticleSystem> Held;
                     CParticleSystem* System = nullptr;
                     FString Error;
-                    if (!ResolveSystem(In.System, EParticleAccess::Write, System, Error))
+                    if (!ResolveSystem(In.System, EParticleAccess::Write, Held, System, Error))
                     {
                         return Agent::FToolResult::Error(Error);
                     }
@@ -754,9 +865,10 @@ namespace Lumina::MCP
                 Agent::EToolEffect::Mutating, Agent::EToolThread::GameThread,
                 [](const SParticleSystemParams& In, SCompileParticleSystemResult& Out)
                 {
+                    TStrongObjectPtr<CParticleSystem> Held;
                     CParticleSystem* System = nullptr;
                     FString Error;
-                    if (!ResolveSystem(In.System, EParticleAccess::Write, System, Error))
+                    if (!ResolveSystem(In.System, EParticleAccess::Write, Held, System, Error))
                     {
                         return Agent::FToolResult::Error(Error);
                     }
@@ -773,6 +885,7 @@ namespace Lumina::MCP
 
                         FParticleEmitterCompileOutput Compiled;
                         Out.bSucceeded &= ParticleOps::CompileEmitter(System, Index, Compiled);
+                        MarkDirty(System, Index);
                         const FString Prefix = EmitterName(System, Index) + ": ";
                         for (const FString& Item : Compiled.Errors)
                         {
@@ -784,7 +897,6 @@ namespace Lumina::MCP
                         }
                     }
 
-                    MarkDirty(System);
                     return Out.bSucceeded
                         ? Agent::FToolResult::Ok(Lumina::Format("Compiled {} emitter(s).", System->Emitters.size()))
                         : Agent::FToolResult::Ok(Lumina::Format("{} error(s) while compiling.", Out.Errors.size()));
@@ -798,6 +910,9 @@ namespace Lumina::MCP
         ParticleTools::RegisterDescribe(Owner);
         ParticleTools::RegisterCreate(Owner);
         ParticleTools::RegisterAddEmitter(Owner);
+        ParticleTools::RegisterAddEmitterAsset(Owner);
+        ParticleTools::RegisterSaveEmitterAsAsset(Owner);
+        ParticleTools::RegisterMakeEmitterLocal(Owner);
         ParticleTools::RegisterRemoveEmitter(Owner);
         ParticleTools::RegisterSetEmitterProperty(Owner);
         ParticleTools::RegisterAddModule(Owner);

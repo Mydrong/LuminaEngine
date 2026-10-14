@@ -31,25 +31,25 @@ namespace Lumina::Input
         return GetReceivingContext(World) != nullptr;
     }
 
-    const FInputActionState& GetActionState(const CWorld* World, const FInputActionHandle& Action)
+    const SInputActionState& GetActionState(const CWorld* World, const SInputActionHandle& Action)
     {
-        static const FInputActionState Empty;
+        static const SInputActionState Empty;
         const FInputContext* Context = GetReceivingContext(World);
         return Context != nullptr ? FInputActionMap::Get().GetActionState(Action, *Context) : Empty;
     }
 
-    bool  IsActionDown    (const CWorld* World, const FInputActionHandle& Action) { return GetActionState(World, Action).IsDown(); }
-    bool  IsActionPressed (const CWorld* World, const FInputActionHandle& Action) { return GetActionState(World, Action).IsPressed(); }
-    bool  IsActionReleased(const CWorld* World, const FInputActionHandle& Action) { return GetActionState(World, Action).IsReleased(); }
-    bool  IsActionHeld    (const CWorld* World, const FInputActionHandle& Action) { return GetActionState(World, Action).IsHeld(); }
-    bool  WasActionTapped (const CWorld* World, const FInputActionHandle& Action) { return GetActionState(World, Action).IsTapped(); }
+    bool  IsActionDown    (const CWorld* World, const SInputActionHandle& Action) { return GetActionState(World, Action).IsDown(); }
+    bool  IsActionPressed (const CWorld* World, const SInputActionHandle& Action) { return GetActionState(World, Action).IsPressed(); }
+    bool  IsActionReleased(const CWorld* World, const SInputActionHandle& Action) { return GetActionState(World, Action).IsReleased(); }
+    bool  IsActionHeld    (const CWorld* World, const SInputActionHandle& Action) { return GetActionState(World, Action).IsHeld(); }
+    bool  WasActionTapped (const CWorld* World, const SInputActionHandle& Action) { return GetActionState(World, Action).IsTapped(); }
 
-    float GetActionAxis   (const CWorld* World, const FInputActionHandle& Action) { return GetActionState(World, Action).X; }
-    float GetActionHeldTime(const CWorld* World, const FInputActionHandle& Action) { return GetActionState(World, Action).HeldTime; }
+    float GetActionAxis   (const CWorld* World, const SInputActionHandle& Action) { return GetActionState(World, Action).X; }
+    float GetActionHeldTime(const CWorld* World, const SInputActionHandle& Action) { return GetActionState(World, Action).HeldTime; }
 
-    FVector2 GetActionAxis2D(const CWorld* World, const FInputActionHandle& Action)
+    FVector2 GetActionAxis2D(const CWorld* World, const SInputActionHandle& Action)
     {
-        const FInputActionState& State = GetActionState(World, Action);
+        const SInputActionState& State = GetActionState(World, Action);
         return FVector2(State.X, State.Y);
     }
 
@@ -178,7 +178,7 @@ namespace Lumina::Input
         return Context != nullptr ? Context->GetInputMode() : EInputMode::Game;
     }
 
-    float GetAxisPair(const CWorld* World, const FInputActionHandle& Positive, const FInputActionHandle& Negative)
+    float GetAxisPair(const CWorld* World, const SInputActionHandle& Positive, const SInputActionHandle& Negative)
     {
         // Resolved once, since GetActionState would re-derive the context per side.
         const FInputContext* Context = GetReceivingContext(World);

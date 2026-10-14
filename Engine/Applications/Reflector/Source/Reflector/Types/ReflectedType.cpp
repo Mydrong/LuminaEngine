@@ -196,20 +196,12 @@ namespace Lumina::Reflection
 
     const std::string* FReflectedType::TryGetMetadata(std::string_view Key) const
     {
-        for (const FMetadataPair& Pair : Metadata)
-        {
-            if (Pair.Key == Key)
-            {
-                return &Pair.Value;
-            }
-        }
-        return nullptr;
+        return FindMetadata(Metadata, Key);
     }
 
     bool FReflectedType::HasMetadata(std::string_view Meta) const
     {
-        return std::any_of(Metadata.begin(), Metadata.end(),
-            [&](const FMetadataPair& Pair) { return Pair.Key == Meta; });
+        return FindMetadata(Metadata, Meta) != nullptr;
     }
 
     void FReflectedType::GenerateMetadata(const std::string& InMetadata)

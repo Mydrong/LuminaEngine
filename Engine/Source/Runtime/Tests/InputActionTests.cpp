@@ -372,7 +372,7 @@ TEST(InputActionTests, HandleResolvesOnceAndTracksIndex)
     FInputContext Context;
     const FInputActionMap& Map = FInputActionMap::Get();
 
-    FInputActionHandle Fire(FName("Fire"));
+    SInputActionHandle Fire(FName("Fire"));
     EXPECT_TRUE(Fire.IsSet());
 
     PressKey(Context, Lumina::EKey::F);
@@ -390,7 +390,7 @@ TEST(InputActionTests, HandleFollowsActionAcrossReorder)
     FInputContext Context;
     const FInputActionMap& Map = FInputActionMap::Get();
 
-    FInputActionHandle Fire(FName("Fire"));
+    SInputActionHandle Fire(FName("Fire"));
     PressKey(Context, Lumina::EKey::F);
     Tick(Context);
     ASSERT_TRUE(Map.GetActionState(Fire, Context).IsDown());
@@ -400,7 +400,7 @@ TEST(InputActionTests, HandleFollowsActionAcrossReorder)
     Tick(Context);
     EXPECT_TRUE(Map.GetActionState(Fire, Context).IsDown());
 
-    FInputActionHandle Jump(FName("Jump"));
+    SInputActionHandle Jump(FName("Jump"));
     EXPECT_FALSE(Map.GetActionState(Jump, Context).IsDown());
 }
 
@@ -410,14 +410,14 @@ TEST(InputActionTests, HandleForUnknownActionReadsZero)
     FInputContext Context;
     const FInputActionMap& Map = FInputActionMap::Get();
 
-    FInputActionHandle Missing(FName("NotAnAction"));
+    SInputActionHandle Missing(FName("NotAnAction"));
     PressKey(Context, Lumina::EKey::F);
     Tick(Context);
     EXPECT_FALSE(Map.GetActionState(Missing, Context).IsDown());
     EXPECT_EQ(Map.GetActionState(Missing, Context).X, 0.0f);
 
     // A default-constructed handle names nothing and must also read as zero rather than index 0.
-    FInputActionHandle Unset;
+    SInputActionHandle Unset;
     EXPECT_FALSE(Unset.IsSet());
     EXPECT_FALSE(Map.GetActionState(Unset, Context).IsDown());
 }
@@ -428,7 +428,7 @@ TEST(InputActionTests, HandleSetNameDropsTheOldAction)
     FInputContext Context;
     const FInputActionMap& Map = FInputActionMap::Get();
 
-    FInputActionHandle Handle(FName("Fire"));
+    SInputActionHandle Handle(FName("Fire"));
     PressKey(Context, Lumina::EKey::F);
     Tick(Context);
     ASSERT_TRUE(Map.GetActionState(Handle, Context).IsDown());

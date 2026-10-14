@@ -16,7 +16,7 @@ namespace Lumina
     {
         ECS::FEntity                    Entity              = ECS::NullEntity;
         FVector3                        AimPoint            = FVector3(0.0f);   // sight target point (origin + SightTargetOffset).
-        const FGameplayTagContainer*    AffiliationTags     = nullptr;
+        const SGameplayTagContainer*    AffiliationTags     = nullptr;
         uint8                           RegisteredSenses    = 0;                // EAISenseChannel bits.
     };
 

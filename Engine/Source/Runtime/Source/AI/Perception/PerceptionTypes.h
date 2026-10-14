@@ -42,7 +42,7 @@ namespace Lumina
         ECS::FEntity            Target      = ECS::NullEntity;   // damage victim; ECS::NullEntity for area noise.
         FVector3                Location    = FVector3(0.0f);
         float                   Strength    = 1.0f;         // noise loudness (radius scale) or damage amount.
-        FGameplayTagContainer   Tags;                       // optional affiliation override (empty => look up Instigator).
+        SGameplayTagContainer   Tags;                       // optional affiliation override (empty => look up Instigator).
     };
 
     // In-ECS dispatcher event mirrored by the C# EntityScript callbacks; native systems can subscribe via

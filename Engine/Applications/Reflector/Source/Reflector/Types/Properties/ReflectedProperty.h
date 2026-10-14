@@ -61,5 +61,8 @@ namespace Lumina
 
         // An element, key, value, payload or argument, described by the trait of what holds it.
         bool                          bInner = false;
+
+        // Byte offset inside the owning type as clang lays it out, or -1 for an inner or an unknown layout.
+        int64_t                       NativeOffset = -1;
     };
 }

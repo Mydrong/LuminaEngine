@@ -1,4 +1,5 @@
 ﻿#include "ConsoleLogEditorTool.h"
+#include "Core/Math/Math.h"
 #include "UI/EditorUI.h"
 
 #include <utility>
@@ -9,6 +10,8 @@
 
 namespace Lumina
 {
+    constexpr float kInputOverlayGap = 5.0f;
+
     namespace
     {
         // Recognizes both a managed stack frame and a Roslyn diagnostic, which spell the line number differently.
@@ -97,7 +100,8 @@ namespace Lumina
             "supports inclusive (foo) and exclusive (-bar) terms separated by commas.");
         DrawHelpTextRow("Console Commands",
             "Type a console variable or command at the bottom prompt; Tab/Up navigates autocomplete. "
-            "Up/Down with empty input cycles command history.");
+            "Up/Down with empty input cycles command history. The backtick key opens the log with the "
+            "prompt focused, and pressing it again from the prompt closes the drawer.");
         DrawHelpTextRow("Autocomplete",
             "Live-matched against registered CVars and exec commands. Description text comes from the "
             "FAutoConsoleVariable / FAutoConsoleCommand registration site.");
@@ -222,6 +226,7 @@ namespace Lumina
         ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0, 1));
 
         const float LogHeight = ImGui::GetContentRegionAvail().y - InputHeight;
+        LogTopY = ImGui::GetCursorScreenPos().y;
         ImGui::BeginChild("##LogMessages", ImVec2(0, LogHeight), true,
             ImGuiWindowFlags_HorizontalScrollbar);
 
@@ -469,6 +474,7 @@ namespace Lumina
             ImGuiInputTextFlags_CallbackCompletion |
             ImGuiInputTextFlags_CallbackHistory |
             ImGuiInputTextFlags_CallbackEdit |
+            ImGuiInputTextFlags_CallbackCharFilter |
             ImGuiInputTextFlags_CallbackAlways;
 
         const bool bExecuteCommand = ImGui::InputTextWithHint(
@@ -481,6 +487,12 @@ namespace Lumina
             this);
 
         const bool bInputActive = ImGui::IsItemActive();
+        InputRectMin = ImGui::GetItemRectMin();
+        InputWidth   = ImGui::GetItemRectSize().x;
+        if (bInputActive)
+        {
+            CommandInputActiveFrame = ImGui::GetFrameCount();
+        }
 
         if (bExecuteCommand)
         {
@@ -533,6 +545,16 @@ namespace Lumina
         }
     }
 
+    bool FConsoleLogEditorTool::IsCommandInputActive() const
+    {
+        return CommandInputActiveFrame >= ImGui::GetFrameCount() - 1;
+    }
+
+    float FConsoleLogEditorTool::GetInputOverlayMaxHeight() const
+    {
+        return Math::Max(InputRectMin.y - kInputOverlayGap - LogTopY, ImGui::GetFrameHeight());
+    }
+
     int FConsoleLogEditorTool::InputTextCallbackStub(ImGuiInputTextCallbackData* Data)
     {
         FConsoleLogEditorTool* Self = static_cast<FConsoleLogEditorTool*>(Data->UserData);
@@ -543,6 +565,11 @@ namespace Lumina
     {
         switch (Data->EventFlag)
         {
+            case ImGuiInputTextFlags_CallbackCharFilter:
+            {
+                // The backtick toggles the console, so it never lands in the command.
+                return Data->EventChar == '`' ? 1 : 0;
+            }
             case ImGuiInputTextFlags_CallbackAlways:
             {
                 if (bPendingBufferReplacement)
@@ -802,25 +829,20 @@ namespace Lumina
 
     void FConsoleLogEditorTool::DrawAutoCompletePopup()
     {
-        ImGui::SetNextWindowPos(ImVec2(ImGui::GetItemRectMin().x, ImGui::GetItemRectMin().y - 5), ImGuiCond_Always, ImVec2(0.0f, 1.0f));
-        ImGui::SetNextWindowSize(ImVec2(ImGui::GetItemRectSize().x, 0));
-
-        ImGuiWindowFlags PopupFlags = 
-            ImGuiWindowFlags_NoTitleBar |
-            ImGuiWindowFlags_NoResize |
-            ImGuiWindowFlags_NoMove |
-            ImGuiWindowFlags_NoScrollbar |
-            ImGuiWindowFlags_NoSavedSettings |
-            ImGuiWindowFlags_NoFocusOnAppearing |
-            ImGuiWindowFlags_NoNavFocus |
-            ImGuiWindowFlags_AlwaysAutoResize;
+        // Bottom-anchored on last frame's height, since a child only learns its auto size after drawing once.
+        const float MaxHeight = GetInputOverlayMaxHeight();
+        const float Height = Math::Min(AutoCompleteOverlayHeight > 0.0f ? AutoCompleteOverlayHeight : MaxHeight, MaxHeight);
+        ImGui::SetCursorScreenPos(ImVec2(InputRectMin.x, InputRectMin.y - kInputOverlayGap - Height));
+        ImGui::SetNextWindowSizeConstraints(ImVec2(InputWidth, 0.0f), ImVec2(InputWidth, MaxHeight));
 
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(8, 6));
         ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(8, 4));
-        ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.12f, 0.12f, 0.14f, 0.98f));
+        ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.12f, 0.12f, 0.14f, 0.98f));
         ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.3f, 0.3f, 0.35f, 1.0f));
 
-        if (ImGui::Begin("##AutoComplete", nullptr, PopupFlags))
+        if (ImGui::BeginChild("##AutoComplete", ImVec2(InputWidth, 0.0f),
+            ImGuiChildFlags_Borders | ImGuiChildFlags_AutoResizeY | ImGuiChildFlags_AlwaysUseWindowPadding,
+            ImGuiWindowFlags_NoNavFocus))
         {
             ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.6f, 1.0f), "Auto-Complete (%zu matches)", AutoCompleteCandidates.size());
             ImGui::Separator();
@@ -871,7 +893,8 @@ namespace Lumina
             ImGui::Separator();
             ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), LE_ICON_ARROW_UP_DOWN " Navigate  " LE_ICON_KEYBOARD_TAB " Accept  " LE_ICON_KEYBOARD_ESC " Cancel");
         }
-        ImGui::End();
+        AutoCompleteOverlayHeight = ImGui::GetWindowHeight();
+        ImGui::EndChild();
 
         ImGui::PopStyleColor(2);
         ImGui::PopStyleVar(2);
@@ -879,25 +902,18 @@ namespace Lumina
 
     void FConsoleLogEditorTool::DrawHistoryPopup()
     {
-        ImGui::SetNextWindowPos(ImVec2(
-            ImGui::GetItemRectMin().x,
-            ImGui::GetItemRectMin().y - 5
-        ), ImGuiCond_Always, ImVec2(0.0f, 1.0f));
-
-        ImGui::SetNextWindowSize(ImVec2(ImGui::GetItemRectSize().x, 300));
-
-        ImGuiWindowFlags PopupFlags = 
-            ImGuiWindowFlags_NoTitleBar |
-            ImGuiWindowFlags_NoResize |
-            ImGuiWindowFlags_NoMove |
-            ImGuiWindowFlags_NoSavedSettings;
+        constexpr float kHistoryHeight = 300.0f;
+        const float Height = Math::Min(kHistoryHeight, GetInputOverlayMaxHeight());
+        const ImVec2 HistoryMin(InputRectMin.x, InputRectMin.y - kInputOverlayGap - Height);
+        ImGui::SetCursorScreenPos(HistoryMin);
 
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(8, 6));
         ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(8, 3));
-        ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.12f, 0.12f, 0.14f, 0.98f));
+        ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.12f, 0.12f, 0.14f, 0.98f));
         ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.3f, 0.3f, 0.35f, 1.0f));
 
-        if (ImGui::Begin("##CommandHistory", nullptr, PopupFlags))
+        if (ImGui::BeginChild("##CommandHistory", ImVec2(InputWidth, Height),
+            ImGuiChildFlags_Borders | ImGuiChildFlags_AlwaysUseWindowPadding))
         {
             ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.6f, 1.0f), LE_ICON_HISTORY " Command History (%zu)", CommandHistory.size());
             
@@ -939,13 +955,13 @@ namespace Lumina
 
             ImGui::EndChild();
         }
-        ImGui::End();
+        ImGui::EndChild();
 
         ImGui::PopStyleColor(2);
         ImGui::PopStyleVar(2);
 
-        // Click outside to close
-        if (ImGui::IsMouseClicked(0) && !ImGui::IsWindowHovered(ImGuiHoveredFlags_AnyWindow))
+        const ImVec2 HistoryMax(HistoryMin.x + InputWidth, HistoryMin.y + Height);
+        if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !ImGui::IsMouseHoveringRect(HistoryMin, HistoryMax, false))
         {
             bShowHistory = false;
         }

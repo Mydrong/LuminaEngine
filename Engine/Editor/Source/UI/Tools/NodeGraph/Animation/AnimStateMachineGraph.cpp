@@ -113,7 +113,7 @@ namespace Lumina
         }
     }
 
-    FString FAnimTransitionCondition::ToText() const
+    FString SAnimTransitionCondition::ToText() const
     {
         switch (ConditionSource)
         {
@@ -154,7 +154,7 @@ namespace Lumina
             return;
         }
 
-        FAnimTransitionCondition& Migrated = Conditions.emplace_back();
+        SAnimTransitionCondition& Migrated = Conditions.emplace_back();
         Migrated.ConditionSource = ConditionSource;
         Migrated.ParameterName   = ConditionParameter;
         Migrated.Compare         = Compare;

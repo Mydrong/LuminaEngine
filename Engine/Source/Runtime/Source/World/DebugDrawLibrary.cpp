@@ -8,6 +8,7 @@
 
 namespace Lumina
 {
+    #if !defined(LE_SHIPPING)
     namespace
     {
         ESolidDrawMode ToSolidMode(EDebugFillMode Mode)
@@ -82,9 +83,11 @@ namespace Lumina
             return true;
         }
     }
+    #endif
 
     void FWorldDebugInterface::DrawSolidTriangles(TSpan<const SDebugDrawVertex> Input, EDebugFillMode Mode, float Duration)
     {
+        #if !defined(LE_SHIPPING)
         if (Input.empty() || Input.size() % 3 != 0)
         {
             return;
@@ -97,26 +100,32 @@ namespace Lumina
             Vertices.push_back({ Vertex.Position, PackColor(Vertex.Color) });
         }
         DrawSolidTriangles(std::move(Vertices), ToSolidMode(Mode), Duration);
+        #endif
     }
 
     void FWorldDebugInterface::DrawSolidTriangle(FVector3 A, FVector3 B, FVector3 C, FVector4 Color, EDebugFillMode Mode, float Duration)
     {
+        #if !defined(LE_SHIPPING)
         TVector<FSimpleElementVertex> Vertices;
         Vertices.reserve(3);
         AddTriangle(Vertices, A, B, C, PackColor(Color));
         DrawSolidTriangles(std::move(Vertices), ToSolidMode(Mode), Duration);
+        #endif
     }
 
     void FWorldDebugInterface::DrawSolidQuad(FVector3 A, FVector3 B, FVector3 C, FVector3 D, FVector4 Color, EDebugFillMode Mode, float Duration)
     {
+        #if !defined(LE_SHIPPING)
         TVector<FSimpleElementVertex> Vertices;
         Vertices.reserve(6);
         AddQuad(Vertices, A, B, C, D, PackColor(Color));
         DrawSolidTriangles(std::move(Vertices), ToSolidMode(Mode), Duration);
+        #endif
     }
 
     void FWorldDebugInterface::DrawSolidBox(FVector3 Center, FVector3 HalfExtents, FQuat Rotation, FVector4 Color, EDebugFillMode Mode, float Duration)
     {
+        #if !defined(LE_SHIPPING)
         const FVector3 Local[8] =
         {
             { -HalfExtents.x, -HalfExtents.y, -HalfExtents.z },
@@ -144,10 +153,12 @@ namespace Lumina
         AddQuad(Vertices, Corners[0], Corners[4], Corners[7], Corners[3], Packed);
         AddQuad(Vertices, Corners[1], Corners[2], Corners[6], Corners[5], Packed);
         DrawSolidTriangles(std::move(Vertices), ToSolidMode(Mode), Duration);
+        #endif
     }
 
     void FWorldDebugInterface::DrawSolidSphere(FVector3 Center, float Radius, FVector4 Color, EDebugFillMode Mode, float Duration)
     {
+        #if !defined(LE_SHIPPING)
         if (Radius <= 0.0f)
         {
             return;
@@ -169,10 +180,12 @@ namespace Lumina
                 Center + Axis * (Radius * Math::Sin(Second)), Radius * Math::Cos(Second), Right, Up, Packed, Segments);
         }
         DrawSolidTriangles(std::move(Vertices), ToSolidMode(Mode), Duration);
+        #endif
     }
 
     void FWorldDebugInterface::DrawSolidCylinder(FVector3 Start, FVector3 End, float Radius, FVector4 Color, EDebugFillMode Mode, float Duration)
     {
+        #if !defined(LE_SHIPPING)
         if (Radius <= 0.0f)
         {
             return;
@@ -192,10 +205,12 @@ namespace Lumina
         AddDisk(Vertices, Start, Radius, Right, Up, Packed, Segments);
         AddDisk(Vertices, End, Radius, Right, Up, Packed, Segments);
         DrawSolidTriangles(std::move(Vertices), ToSolidMode(Mode), Duration);
+        #endif
     }
 
     void FWorldDebugInterface::DrawSolidCone(FVector3 Apex, FVector3 Direction, float AngleRadians, float Length, FVector4 Color, EDebugFillMode Mode, float Duration)
     {
+        #if !defined(LE_SHIPPING)
         if (Length <= 0.0f || AngleRadians <= 0.0f || AngleRadians >= Math::HalfPi<float>())
         {
             return;
@@ -216,10 +231,12 @@ namespace Lumina
         AddRingBand(Vertices, Apex, 0.0f, Base, Radius, Right, Up, Packed, Segments);
         AddDisk(Vertices, Base, Radius, Right, Up, Packed, Segments);
         DrawSolidTriangles(std::move(Vertices), ToSolidMode(Mode), Duration);
+        #endif
     }
 
     void FWorldDebugInterface::DrawSolidCapsule(FVector3 Start, FVector3 End, float Radius, FVector4 Color, EDebugFillMode Mode, float Duration)
     {
+        #if !defined(LE_SHIPPING)
         if (Radius <= 0.0f)
         {
             return;
@@ -253,10 +270,12 @@ namespace Lumina
                 End + Axis * (Radius * Math::Sin(Second)), Radius * Math::Cos(Second), Right, Up, Packed, Segments);
         }
         DrawSolidTriangles(std::move(Vertices), ToSolidMode(Mode), Duration);
+        #endif
     }
 
     void FWorldDebugInterface::DrawSolidCircle(FVector3 Center, FVector3 Normal, float Radius, FVector4 Color, EDebugFillMode Mode, float Duration)
     {
+        #if !defined(LE_SHIPPING)
         if (Radius <= 0.0f)
         {
             return;
@@ -273,11 +292,13 @@ namespace Lumina
         Vertices.reserve(Segments * 3);
         AddDisk(Vertices, Center, Radius, Right, Up, PackColor(Color), Segments);
         DrawSolidTriangles(std::move(Vertices), ToSolidMode(Mode), Duration);
+        #endif
     }
 
     void FWorldDebugInterface::DrawSolidArc(FVector3 Center, FVector3 Normal, float Radius, float StartAngle,
         float SweepAngle, FVector4 Color, EDebugFillMode Mode, float Duration)
     {
+        #if !defined(LE_SHIPPING)
         if (Radius <= 0.0f || SweepAngle == 0.0f)
         {
             return;
@@ -301,11 +322,13 @@ namespace Lumina
                 Center + RingOffset(Right, Up, Radius, Second), Packed);
         }
         DrawSolidTriangles(std::move(Vertices), ToSolidMode(Mode), Duration);
+        #endif
     }
 
     void FWorldDebugInterface::DrawSolidArrow(FVector3 Start, FVector3 Direction, float Length, FVector4 Color,
         float HeadSize, EDebugFillMode Mode, float Duration)
     {
+        #if !defined(LE_SHIPPING)
         if (Length <= 0.0f || HeadSize <= 0.0f)
         {
             return;
@@ -330,220 +353,269 @@ namespace Lumina
         AddRingBand(Vertices, HeadBase, HeadSize, Tip, 0.0f, Right, Up, Packed, Segments);
         AddDisk(Vertices, HeadBase, HeadSize, Right, Up, Packed, Segments);
         DrawSolidTriangles(std::move(Vertices), ToSolidMode(Mode), Duration);
+        #endif
     }
 
     void CDebugDrawLibrary::DrawLine(CWorld* World, FVector3 Start, FVector3 End, FVector4 Color,
         float Thickness, float Duration, bool bDepthTest)
     {
+        #if !defined(LE_SHIPPING)
         if (World != nullptr)
         {
             World->GetDebugInterface()->DrawLine(Start, End, Color, Thickness, bDepthTest, Duration);
         }
+        #endif
     }
 
     void CDebugDrawLibrary::DrawSphere(CWorld* World, FVector3 Center, float Radius, FVector4 Color,
         float Thickness, float Duration, bool bDepthTest)
     {
+        #if !defined(LE_SHIPPING)
         if (World != nullptr)
         {
             World->GetDebugInterface()->DrawSphere(Center, Radius, Color, 16, Thickness, bDepthTest, Duration);
         }
+        #endif
     }
 
     void CDebugDrawLibrary::DrawBox(CWorld* World, FVector3 Center, FVector3 HalfExtents, FQuat Rotation,
         FVector4 Color, float Thickness, float Duration, bool bDepthTest)
     {
+        #if !defined(LE_SHIPPING)
         if (World != nullptr)
         {
             World->GetDebugInterface()->DrawBox(Center, HalfExtents, Rotation, Color, Thickness, bDepthTest, Duration);
         }
+        #endif
     }
 
     void CDebugDrawLibrary::DrawBoxCorners(CWorld* World, FVector3 Center, FVector3 HalfExtents, FQuat Rotation,
         FVector4 Color, float CornerFraction, float Thickness, float Duration, bool bDepthTest)
     {
+        #if !defined(LE_SHIPPING)
         if (World != nullptr)
         {
             World->GetDebugInterface()->DrawBoxCorners(Center, HalfExtents, Rotation, Color, CornerFraction, Thickness, bDepthTest, Duration);
         }
+        #endif
     }
 
     void CDebugDrawLibrary::DrawCapsule(CWorld* World, FVector3 Start, FVector3 End, float Radius, FVector4 Color,
         float Thickness, float Duration, bool bDepthTest)
     {
+        #if !defined(LE_SHIPPING)
         if (World != nullptr)
         {
             World->GetDebugInterface()->DrawCapsule(Start, End, Radius, Color, 16, Thickness, bDepthTest, Duration);
         }
+        #endif
     }
 
     void CDebugDrawLibrary::DrawCone(CWorld* World, FVector3 Apex, FVector3 Direction, float AngleRadians, float Length,
         FVector4 Color, float Thickness, float Duration, bool bDepthTest)
     {
+        #if !defined(LE_SHIPPING)
         if (World != nullptr)
         {
             World->GetDebugInterface()->DrawCone(Apex, Direction, AngleRadians, Length, Color, 16, 4, Thickness, bDepthTest, Duration);
         }
+        #endif
     }
 
     void CDebugDrawLibrary::DrawArrow(CWorld* World, FVector3 Start, FVector3 Direction, float Length, FVector4 Color,
         float HeadSize, float Thickness, float Duration, bool bDepthTest)
     {
+        #if !defined(LE_SHIPPING)
         if (World != nullptr)
         {
             World->GetDebugInterface()->DrawArrow(Start, Direction, Length, Color, Thickness, bDepthTest, Duration, HeadSize);
         }
+        #endif
     }
 
     void CDebugDrawLibrary::DrawCircle(CWorld* World, FVector3 Center, FVector3 Normal, float Radius, FVector4 Color,
         uint8 Segments, float Thickness, float Duration, bool bDepthTest)
     {
+        #if !defined(LE_SHIPPING)
         if (World != nullptr)
         {
             World->GetDebugInterface()->DrawCircle(Center, Normal, Radius, Color, Segments, Thickness, bDepthTest, Duration);
         }
+        #endif
     }
 
     void CDebugDrawLibrary::DrawArc(CWorld* World, FVector3 Center, FVector3 Normal, float Radius, float StartAngle,
         float SweepAngle, FVector4 Color, uint8 Segments, float Thickness, float Duration, bool bDepthTest)
     {
+        #if !defined(LE_SHIPPING)
         if (World != nullptr)
         {
             World->GetDebugInterface()->DrawArc(Center, Normal, Radius, StartAngle, SweepAngle, Color, Segments, Thickness, bDepthTest, Duration);
         }
+        #endif
     }
 
     void CDebugDrawLibrary::DrawCylinder(CWorld* World, FVector3 Start, FVector3 End, float Radius, FVector4 Color,
         uint8 Segments, float Thickness, float Duration, bool bDepthTest)
     {
+        #if !defined(LE_SHIPPING)
         if (World != nullptr)
         {
             World->GetDebugInterface()->DrawCylinder(Start, End, Radius, Color, Segments, Thickness, bDepthTest, Duration);
         }
+        #endif
     }
 
     void CDebugDrawLibrary::DrawAxes(CWorld* World, FVector3 Origin, FQuat Rotation, float Length,
         float Thickness, float Duration, bool bDepthTest)
     {
+        #if !defined(LE_SHIPPING)
         if (World != nullptr)
         {
             World->GetDebugInterface()->DrawAxes(Origin, Rotation, Length, Thickness, bDepthTest, Duration);
         }
+        #endif
     }
 
     void CDebugDrawLibrary::DrawPoint(CWorld* World, FVector3 Position, float Size, FVector4 Color,
         float Thickness, float Duration, bool bDepthTest)
     {
+        #if !defined(LE_SHIPPING)
         if (World != nullptr)
         {
             World->GetDebugInterface()->DrawPoint(Position, Size, Color, Thickness, bDepthTest, Duration);
         }
+        #endif
     }
 
     void CDebugDrawLibrary::DrawSolidTriangles(CWorld* World, const SDebugDrawVertex* Vertices, int32 Count,
         EDebugFillMode Mode, float Duration)
     {
+        #if !defined(LE_SHIPPING)
         if (World != nullptr && Vertices != nullptr && Count > 0 && Count % 3 == 0)
         {
             World->GetDebugInterface()->DrawSolidTriangles(TSpan<const SDebugDrawVertex>(Vertices, (size_t)Count), Mode, Duration);
         }
+        #endif
     }
 
     void CDebugDrawLibrary::DrawSolidTriangle(CWorld* World, FVector3 A, FVector3 B, FVector3 C, FVector4 Color,
         EDebugFillMode Mode, float Duration)
     {
+        #if !defined(LE_SHIPPING)
         if (World != nullptr)
         {
             World->GetDebugInterface()->DrawSolidTriangle(A, B, C, Color, Mode, Duration);
         }
+        #endif
     }
 
     void CDebugDrawLibrary::DrawSolidQuad(CWorld* World, FVector3 A, FVector3 B, FVector3 C, FVector3 D, FVector4 Color,
         EDebugFillMode Mode, float Duration)
     {
+        #if !defined(LE_SHIPPING)
         if (World != nullptr)
         {
             World->GetDebugInterface()->DrawSolidQuad(A, B, C, D, Color, Mode, Duration);
         }
+        #endif
     }
 
     void CDebugDrawLibrary::DrawSolidBox(CWorld* World, FVector3 Center, FVector3 HalfExtents, FQuat Rotation, FVector4 Color,
         EDebugFillMode Mode, float Duration)
     {
+        #if !defined(LE_SHIPPING)
         if (World != nullptr)
         {
             World->GetDebugInterface()->DrawSolidBox(Center, HalfExtents, Rotation, Color, Mode, Duration);
         }
+        #endif
     }
 
     void CDebugDrawLibrary::DrawSolidSphere(CWorld* World, FVector3 Center, float Radius, FVector4 Color,
         EDebugFillMode Mode, float Duration)
     {
+        #if !defined(LE_SHIPPING)
         if (World != nullptr)
         {
             World->GetDebugInterface()->DrawSolidSphere(Center, Radius, Color, Mode, Duration);
         }
+        #endif
     }
 
     void CDebugDrawLibrary::DrawSolidCylinder(CWorld* World, FVector3 Start, FVector3 End, float Radius, FVector4 Color,
         EDebugFillMode Mode, float Duration)
     {
+        #if !defined(LE_SHIPPING)
         if (World != nullptr)
         {
             World->GetDebugInterface()->DrawSolidCylinder(Start, End, Radius, Color, Mode, Duration);
         }
+        #endif
     }
 
     void CDebugDrawLibrary::DrawSolidCone(CWorld* World, FVector3 Apex, FVector3 Direction, float AngleRadians, float Length,
         FVector4 Color, EDebugFillMode Mode, float Duration)
     {
+        #if !defined(LE_SHIPPING)
         if (World != nullptr)
         {
             World->GetDebugInterface()->DrawSolidCone(Apex, Direction, AngleRadians, Length, Color, Mode, Duration);
         }
+        #endif
     }
 
     void CDebugDrawLibrary::DrawSolidCapsule(CWorld* World, FVector3 Start, FVector3 End, float Radius, FVector4 Color,
         EDebugFillMode Mode, float Duration)
     {
+        #if !defined(LE_SHIPPING)
         if (World != nullptr)
         {
             World->GetDebugInterface()->DrawSolidCapsule(Start, End, Radius, Color, Mode, Duration);
         }
+        #endif
     }
 
     void CDebugDrawLibrary::DrawSolidCircle(CWorld* World, FVector3 Center, FVector3 Normal, float Radius, FVector4 Color,
         EDebugFillMode Mode, float Duration)
     {
+        #if !defined(LE_SHIPPING)
         if (World != nullptr)
         {
             World->GetDebugInterface()->DrawSolidCircle(Center, Normal, Radius, Color, Mode, Duration);
         }
+        #endif
     }
 
     void CDebugDrawLibrary::DrawSolidArc(CWorld* World, FVector3 Center, FVector3 Normal, float Radius, float StartAngle,
         float SweepAngle, FVector4 Color, EDebugFillMode Mode, float Duration)
     {
+        #if !defined(LE_SHIPPING)
         if (World != nullptr)
         {
             World->GetDebugInterface()->DrawSolidArc(Center, Normal, Radius, StartAngle, SweepAngle, Color, Mode, Duration);
         }
+        #endif
     }
 
     void CDebugDrawLibrary::DrawSolidArrow(CWorld* World, FVector3 Start, FVector3 Direction, float Length, FVector4 Color,
         float HeadSize, EDebugFillMode Mode, float Duration)
     {
+        #if !defined(LE_SHIPPING)
         if (World != nullptr)
         {
             World->GetDebugInterface()->DrawSolidArrow(Start, Direction, Length, Color, HeadSize, Mode, Duration);
         }
+        #endif
     }
 
     void CDebugDrawLibrary::DrawText(CWorld* World, const FString& Text, FVector4 Color)
     {
+        #if !defined(LE_SHIPPING)
         if (World != nullptr)
         {
             World->GetDebugInterface()->DrawText(Text, Color);
         }
+        #endif
     }
 }

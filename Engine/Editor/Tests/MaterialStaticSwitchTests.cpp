@@ -30,7 +30,7 @@ TEST(MaterialStaticSwitch, AnUnnamedSwitchTakesItsDefaultAndClaimsNoKeyBit)
     EXPECT_TRUE(Compiler.ResolveStaticSwitch(NAME_None, true, nullptr));
     EXPECT_FALSE(Compiler.ResolveStaticSwitch(NAME_None, false, nullptr));
 
-    TVector<FMaterialStaticSwitch> Switches;
+    TVector<SMaterialStaticSwitch> Switches;
     Compiler.GetStaticSwitches(Switches);
     EXPECT_TRUE(Switches.empty());
     EXPECT_FALSE(Compiler.HasErrors());
@@ -56,7 +56,7 @@ TEST(MaterialStaticSwitch, TheManifestIsOrderedByNameSoTheKeySurvivesANodeReorde
     Compiler.ResolveStaticSwitch("Alpha", false, nullptr);
     Compiler.ResolveStaticSwitch("Mid", true, nullptr);
 
-    TVector<FMaterialStaticSwitch> Switches;
+    TVector<SMaterialStaticSwitch> Switches;
     Compiler.GetStaticSwitches(Switches);
 
     ASSERT_EQ(Switches.size(), (size_t)3);
@@ -78,7 +78,7 @@ TEST(MaterialStaticSwitch, TwoSwitchesSharingANameMustAgreeOnTheirDefault)
     Compiler.ResolveStaticSwitch("Shared", false, nullptr);
     EXPECT_TRUE(Compiler.HasErrors());
 
-    TVector<FMaterialStaticSwitch> Switches;
+    TVector<SMaterialStaticSwitch> Switches;
     Compiler.GetStaticSwitches(Switches);
     EXPECT_EQ(Switches.size(), (size_t)1);
 }
@@ -95,7 +95,7 @@ TEST(MaterialStaticSwitch, TheKeyIsAUint64SoTheSixtyFifthSwitchIsRefused)
     Compiler.ResolveStaticSwitch("OneTooMany", true, nullptr);
     EXPECT_TRUE(Compiler.HasErrors());
 
-    TVector<FMaterialStaticSwitch> Switches;
+    TVector<SMaterialStaticSwitch> Switches;
     Compiler.GetStaticSwitches(Switches);
     EXPECT_EQ(Switches.size(), (size_t)kMaxStaticSwitches);
 }

@@ -42,7 +42,7 @@ namespace Lumina
 
         /** Layer and mask controlling which bodies this one collides with. */
         PROPERTY(Editable, Category = "Physics")
-        FCollisionProfile CollisionProfile;
+        SCollisionProfile CollisionProfile;
 
         /** Bounciness override for this body (0 = no bounce, 1 = perfectly elastic). */
         PROPERTY(Editable, ClampMin = 0.001f, ClampMax = 1.0f, Category = "Physics")

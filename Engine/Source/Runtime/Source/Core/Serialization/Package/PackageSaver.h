@@ -59,7 +59,7 @@ namespace Lumina
     
     struct FObjectImport;
 
-    class FPackageSaver : public FMemoryWriter
+    class RUNTIME_API FPackageSaver : public FMemoryWriter
     {
     public:
 
@@ -83,6 +83,8 @@ namespace Lumina
         /** Folds the soft target's GUID into the ImportTable as a Soft edge;
          *  a GUID already present as a hard import keeps the hard slot. */
         virtual void RegisterSoftAssetReference(const FGuid& AssetGUID) override;
+
+        virtual FStringView SetSoftReferenceBundles(FStringView Bundles) override;
 
         /** Build the ImportTable: hard imports first (discovery order),
          *  then soft imports not already present as hard. */
@@ -112,6 +114,8 @@ namespace Lumina
         FPackageNameMap             NameMap;
         THashMap<CObject*, uint32>  ObjectToIndexMap;
         THashSet<FGuid>             SoftReferencedGUIDs;
+        THashMap<FGuid, TVector<FName>> SoftReferenceBundles;
+        FStringView                 CurrentBundles;
         TVector<uint8>              BulkBytes;
         uint32                      CurrentImportIndex = 0;
         const THashSet<CObject*>*   SavedExports = nullptr;

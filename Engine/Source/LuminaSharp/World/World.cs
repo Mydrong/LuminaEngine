@@ -34,69 +34,31 @@ public unsafe partial class CWorld
     }
 
     /// Spawns a prefab at the origin, unparented. Null entity if the prefab could not be spawned.
-    public FEntity SpawnPrefab(string Path) => CPrefabLibrary.SpawnPrefab(this, Path);
+    public FEntity SpawnPrefab(TSoftObjectPtr<CPrefab> Prefab) => CPrefabLibrary.SpawnPrefab(this, Prefab);
 
     /// Spawns a prefab already placed, in one native call. Null entity if the prefab could not be spawned.
-    public FEntity SpawnPrefab(string Path, FVector3 Location, FQuat? Rotation = null, FEntity? Parent = null)
-        => SpawnPrefab(Path, new FTransform(Location, Rotation ?? FQuat.Identity, FVector3.One), Parent);
+    public FEntity SpawnPrefab(TSoftObjectPtr<CPrefab> Prefab, FVector3 Location, FQuat? Rotation = null, FEntity? Parent = null)
+        => SpawnPrefab(Prefab, new FTransform(Location, Rotation ?? FQuat.Identity, FVector3.One), Parent);
 
     /// Spawns a prefab at a full transform, so an authored scale survives the spawn.
-    public FEntity SpawnPrefab(string Path, FTransform Transform, FEntity? Parent = null)
-        => CPrefabLibrary.SpawnPrefabAt(this, Path, Transform, Parent ?? FEntity.Null);
-
-    /// Spawns a prefab and runs Configure on the root before the next frame, so the values are in place for OnReady.
-    public FEntity SpawnPrefab(string Path, FTransform Transform, Action<FEntity> Configure, FEntity? Parent = null)
-    {
-        FEntity Spawned = CPrefabLibrary.SpawnPrefabAt(this, Path, Transform, Parent ?? FEntity.Null);
-        if (!Spawned.IsNull)
-        {
-            Configure(Spawned);
-        }
-        return Spawned;
-    }
-
-    // Prefabs are authored as an asset reference, so the reference types spawn without unwrapping to a path.
-
-    public FEntity SpawnPrefab(TSoftObjectPtr<CPrefab> Prefab) => SpawnPrefab(Prefab.Path.Path);
-
-    public FEntity SpawnPrefab(TSoftObjectPtr<CPrefab> Prefab, FVector3 Location, FQuat? Rotation = null, FEntity? Parent = null)
-        => SpawnPrefab(Prefab.Path.Path, Location, Rotation, Parent);
-
     public FEntity SpawnPrefab(TSoftObjectPtr<CPrefab> Prefab, FTransform Transform, FEntity? Parent = null)
-        => SpawnPrefab(Prefab.Path.Path, Transform, Parent);
+        => CPrefabLibrary.SpawnPrefabAt(this, Prefab, Transform, Parent ?? FEntity.Null);
 
-    public FEntity SpawnPrefab(TSoftObjectPtr<CPrefab> Prefab, FTransform Transform, Action<FEntity> Configure, FEntity? Parent = null)
-        => SpawnPrefab(Prefab.Path.Path, Transform, Configure, Parent);
-
-    public FEntity SpawnPrefab(FSoftObjectPath Prefab) => SpawnPrefab(Prefab.Path);
-
-    public FEntity SpawnPrefab(FSoftObjectPath Prefab, FVector3 Location, FQuat? Rotation = null, FEntity? Parent = null)
-        => SpawnPrefab(Prefab.Path, Location, Rotation, Parent);
-
-    public FEntity SpawnPrefab(FSoftObjectPath Prefab, FTransform Transform, FEntity? Parent = null)
-        => SpawnPrefab(Prefab.Path, Transform, Parent);
-
-    public FEntity SpawnPrefab(FSoftObjectPath Prefab, FTransform Transform, Action<FEntity> Configure, FEntity? Parent = null)
-        => SpawnPrefab(Prefab.Path, Transform, Configure, Parent);
-
-    /// Destroys the entity after Seconds. Zero or less leaves it alone; a second call retimes the countdown.
-    public void SetLifetime(FEntity Entity, float Seconds) => SetEntityLifetime(Entity, Seconds);
-
-    /// The first entity carrying Tag, or the null entity. Order is unspecified when several share the tag.
-    public FEntity FindByTag(string Tag) => GetEntityByTag(Tag);
-
-    /// Every entity carrying Tag. A fresh list per call; empty when nothing carries it.
-    public List<FEntity> FindAllByTag(string Tag) => new(GetEntitiesByTag(Tag));
-
-    // Every script of type T attached anywhere in this world, an abstract base matching each subclass. A fresh list per call.
-    public List<T> Scripts<T>() where T : CEntityScript
+    public List<T> Scripts<T>() where T : class
     {
-        TSubclassOf<CEntityScript> Class = LuminaSharp.NativeClass<T>.Of.AsBase<CEntityScript>();
+        if (!typeof(T).IsInterface && !typeof(CEntityScript).IsAssignableFrom(typeof(T)))
+        {
+            return new List<T>();
+        }
+
+        TSubclassOf<CEntityScript> Class = typeof(CEntityScript).IsAssignableFrom(typeof(T))
+            ? TSubclassOf<CEntityScript>.FromName(LuminaSharp.NativeTypeName.Of(typeof(T)))
+            : default;
         CEntityScript[] Found = CEntityScriptLibrary.FindScriptsInWorld(this, Class.IsValid ? Class : LuminaSharp.NativeClass<CEntityScript>.Of.AsBase<CEntityScript>());
         var Result = new List<T>(Found.Length);
         foreach (CEntityScript Script in Found)
         {
-            T? Typed = Script as T ?? (Class.IsValid ? LuminaSharp.Wrapper<T>.ForObject(Script.Handle) : null);
+            T? Typed = Script as T ?? LuminaSharp.Wrapper<T>.ForObject(Script.Handle);
             if (Typed != null)
             {
                 Result.Add(Typed);
@@ -115,7 +77,7 @@ public unsafe partial class CWorld
     }
 
     // The first script of type T in this world, for the one-of-a-kind ones like a game director, or null.
-    public T? FindScript<T>() where T : CEntityScript
+    public T? FindScript<T>() where T : class
     {
         List<T> Found = Scripts<T>();
         return Found.Count > 0 ? Found[0] : null;
@@ -124,10 +86,6 @@ public unsafe partial class CWorld
     /// A new named entity with a transform and nothing else.
     public FEntity CreateEntity(string Name, FVector3 Location = default, FQuat? Rotation = null, FVector3? Scale = null)
         => ConstructEntity(Name, new FTransform(Location, Rotation ?? FQuat.Identity, Scale ?? FVector3.One));
-
-    /// A new named entity at the given transform.
-    public FEntity CreateEntity(string Name, FTransform Transform)
-        => ConstructEntity(Name, Transform);
 
     /// A projectile that sweeps forward each frame, reports its first hit through its component's OnHit, and despawns after lifetime seconds.
     public FEntity SpawnProjectile(FVector3 position, FVector3 velocity, float damage = 0.0f, float lifetime = 5.0f)

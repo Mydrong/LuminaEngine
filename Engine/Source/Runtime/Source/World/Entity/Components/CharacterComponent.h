@@ -52,7 +52,7 @@ namespace Lumina
 
         /** Layer and mask controlling which bodies this character collides with. */
         PROPERTY(Editable, Category = "Physics")
-        FCollisionProfile CollisionProfile;
+        SCollisionProfile CollisionProfile;
 
         /** Half-height of the capsule cylinder in meters, so total height is 2*(HalfHeight+Radius). */
         PROPERTY(Editable, Category = "Collision", Units = "m")

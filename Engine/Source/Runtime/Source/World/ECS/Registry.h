@@ -256,6 +256,21 @@ namespace Lumina::ECS
             }
         }
 
+        //~ The same operations keyed by the dense type id, for a caller that knows the type only at runtime.
+
+        RUNTIME_API FSparseSet& AssureStorage(FComponentTypeID TypeID);
+
+        // The existing value, or a default one emplaced with OnConstruct fired. Null for a tag.
+        RUNTIME_API void* GetOrEmplaceRaw(FComponentTypeID TypeID, FEntity Entity);
+
+        // A copy of Source, or a default value when Source is null, firing OnConstruct when added and OnUpdate when replaced.
+        RUNTIME_API void* EmplaceOrReplaceRaw(FComponentTypeID TypeID, FEntity Entity, const void* Source);
+
+        RUNTIME_API bool RemoveRaw(FComponentTypeID TypeID, FEntity Entity);
+
+        // Fires OnUpdate for an entity that holds the component, after the caller wrote through its pointer.
+        RUNTIME_API void PatchRaw(FComponentTypeID TypeID, FEntity Entity);
+
         // Pre-sizes one pool, which removes the relocation a growing packed pool would otherwise pay.
         template<CComponent T>
         void ReserveComponents(size_t Count)

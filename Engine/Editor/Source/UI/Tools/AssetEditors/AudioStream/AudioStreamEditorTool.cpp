@@ -114,7 +114,7 @@ namespace Lumina
         {
             Audio::Context().StopSound(PreviewHandle);
         }
-        PreviewHandle   = FAudioHandle::Invalid();
+        PreviewHandle   = SAudioHandle::Invalid();
         bPreviewPlaying = false;
     }
 
@@ -159,7 +159,7 @@ namespace Lumina
 
         if (Elapsed >= Duration)
         {
-            PreviewHandle   = FAudioHandle::Invalid();
+            PreviewHandle   = SAudioHandle::Invalid();
             bPreviewPlaying = false;
             return ScrubTime;
         }

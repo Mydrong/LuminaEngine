@@ -21,7 +21,7 @@ namespace Lumina
         CMaterialInstance* CreateDynamicMaterialInstance(uint32 Slot);
 
         FUNCTION()
-        FAABB GetAABB() const;
+        SAABB GetAABB() const;
         
         FUNCTION()
         void SetStaticMesh(CStaticMesh* InMesh) { StaticMesh = InMesh; InvalidateRenderResolve(); }

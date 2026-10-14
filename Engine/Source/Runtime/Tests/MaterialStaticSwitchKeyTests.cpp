@@ -10,9 +10,9 @@ namespace Lumina
 {
     namespace
     {
-        FMaterialStaticSwitch MakeSwitch(const char* Name, bool bDefault, uint8 Bit)
+        SMaterialStaticSwitch MakeSwitch(const char* Name, bool bDefault, uint8 Bit)
         {
-            FMaterialStaticSwitch Switch;
+            SMaterialStaticSwitch Switch;
             Switch.ParameterName = Name;
             Switch.bDefaultValue = bDefault;
             Switch.BitIndex      = Bit;

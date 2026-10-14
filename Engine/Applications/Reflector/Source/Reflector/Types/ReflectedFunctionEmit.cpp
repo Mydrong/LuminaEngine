@@ -196,10 +196,11 @@ namespace Lumina::Reflection
                 ? std::string()
                 : (", .Params = " + ParamsTable + ", .NumParams = (Lumina::uint16)std::size(" + ParamsTable + ")");
 
-            Writer.Linef("{ .Name = \"%s\", .Flags = %s%s, .ReturnIndex = %d, .FrameSize = (Lumina::uint16)sizeof(%s), .Thunk = &%s },",
+            Writer.Linef("{ .Name = \"%s\", .Flags = %s%s, .ReturnIndex = %d, .FrameSize = (Lumina::uint16)sizeof(%s), .Thunk = &%s%s },",
                 Function->Name.c_str(), Flags.c_str(), Params.c_str(), Function->ReturnIndex,
                 Names::FunctionParmsStruct(DisplayName, Function->Name).c_str(),
-                Names::FunctionThunk(DisplayName, Function->Name).c_str());
+                Names::FunctionThunk(DisplayName, Function->Name).c_str(),
+                MetadataField("Func_" + Function->Name, Function->Metadata, ESpecifierTarget::Function).c_str());
         }
         Writer.PopIndent();
         Writer.Line("};");

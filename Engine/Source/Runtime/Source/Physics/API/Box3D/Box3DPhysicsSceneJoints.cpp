@@ -64,7 +64,7 @@ namespace Lumina::Physics
         return Count;
     }
 
-    uint32 FBox3DPhysicsScene::CreateConstraint(const FConstraintDesc& Desc)
+    uint32 FBox3DPhysicsScene::CreateConstraint(const SConstraintDesc& Desc)
     {
         auto RevisionOf = [&](ECS::FEntity Entity) -> uint64
         {
@@ -88,7 +88,7 @@ namespace Lumina::Physics
         return Handle;
     }
 
-    bool FBox3DPhysicsScene::CommitConstraint(uint32 Handle, const FConstraintDesc& Desc)
+    bool FBox3DPhysicsScene::CommitConstraint(uint32 Handle, const SConstraintDesc& Desc)
     {
         LUMINA_PROFILE_SCOPE();
 
@@ -464,7 +464,7 @@ namespace Lumina::Physics
             return false;
         }
 
-        FConstraintDesc Desc;
+        SConstraintDesc Desc;
         Desc.Type = Component->Type;
         Desc.BodyA = TargetEntity;
         Desc.BodyB = Entity;
@@ -551,7 +551,7 @@ namespace Lumina::Physics
         FPendingStaticGroup Request;
         Request.GroupID = NextStaticBodyGroupID++;
         Request.Owner = Owner;
-        FCollisionProfile Profile;
+        SCollisionProfile Profile;
         Profile.Layer = ECollisionProfiles::Static;
         for (const FStaticInstanceDesc& Instance : Instances)
         {

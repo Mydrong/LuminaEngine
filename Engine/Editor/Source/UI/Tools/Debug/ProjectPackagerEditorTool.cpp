@@ -39,7 +39,7 @@ namespace Lumina
     {
         DrawHelpTextRow("What this does",
             "Walks FAssetData dependencies from the cook roots (project + enabled-plugin CookRoots[], "
-            "plus every asset flagged EAssetFlags::Primary), strips EditorOnly properties via a cook-mode "
+            "plus every asset in a REFLECT(Group = ...) class), strips EditorOnly properties via a cook-mode "
             "FPackageSaver, and writes one .pak per chunk. The Main chunk also carries shared content "
             "(/Engine resources, shader cache, /Config) and a pre-baked /Engine/AssetRegistry.bin so the "
             "runtime skips the filesystem rescan.");
@@ -358,7 +358,7 @@ namespace Lumina
             ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.4f, 1.0f),
                 "Cook Roots: <none, open Project Settings > Maps > Cook Roots to add asset paths,");
             ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.4f, 1.0f),
-                "             or declare CookRoots in a .lplugin / flag assets EAssetFlags::Primary>");
+                "             or declare CookRoots in a .lplugin / put assets in a REFLECT(Group = ...) class>");
         }
         else
         {

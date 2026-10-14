@@ -72,7 +72,7 @@ namespace Lumina::SkeletalUtils
 
         if (const CSkeleton* Asset = GetSkeletonAsset(Mesh))
         {
-            if (const FMeshSocket* Socket = Asset->FindSocket(SocketOrBone))
+            if (const SMeshSocket* Socket = Asset->FindSocket(SocketOrBone))
             {
                 OutBoneIndex = Skeleton->FindBoneIndex(Socket->BoneName);
                 OutSocketOffset = Socket->RelativeTransform.GetMatrix();
@@ -110,7 +110,7 @@ namespace Lumina::SkeletalUtils
             return false;
         }
 
-        const FMeshSocket* Socket = Mesh.StaticMesh->FindSocket(SocketName);
+        const SMeshSocket* Socket = Mesh.StaticMesh->FindSocket(SocketName);
         if (Socket == nullptr)
         {
             return false;

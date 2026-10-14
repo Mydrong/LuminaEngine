@@ -46,7 +46,7 @@ namespace Lumina
         RebuildPreview();
 
         CGeometryCollection* Collection = Cast<CGeometryCollection>(Asset.Get());
-        const FAABB Bounds = Collection ? Collection->GetFractureData().SourceBounds : FAABB(FVector3(-1.0f), FVector3(1.0f));
+        const SAABB Bounds = Collection ? Collection->GetFractureData().SourceBounds : SAABB(FVector3(-1.0f), FVector3(1.0f));
         const float Radius = Math::Max(Math::Length(Bounds.GetSize() * 0.5f), 0.5f);
         SetOrbitTarget(Bounds.GetCenter(), Radius * 3.0f);
         SetCameraMode(EEditorCameraMode::Orbit);

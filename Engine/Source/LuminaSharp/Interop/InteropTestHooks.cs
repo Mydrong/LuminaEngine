@@ -39,9 +39,9 @@ internal sealed class FrameMarshalTarget
 
     // An opaque struct wrapper, which stays on the reflection path and is read through a view over the slot.
     [ScriptFunction]
-    public void MarshalStructView(Lumina.FAnimGraphBoneMaskBone Bone, out float Weight)
+    public void MarshalStructView(Lumina.SAnimGraphBoneMaskBone Bone, out float Weight)
     {
-        Weight = Bone == null ? -1.0f : Bone.Weight;
+        Weight = Bone.Ref.IsNull ? -1.0f : Bone.Weight;
     }
 
     // An async body that yields once, so the token is observably running before the tick completes it.
@@ -311,7 +311,7 @@ internal static unsafe class InteropTestHooks
     public static int Test_ResolveNullableKind(int* OutPayloadKind)
     {
         var Library = new TypeLibrary(new[] { typeof(FrameMarshalTarget) });
-        ScriptType Resolved = Library.ResolveType(typeof(float?), 0, new System.Collections.Generic.HashSet<Type>());
+        ScriptType Resolved = Library.ResolveType(typeof(float?));
 
         *OutPayloadKind = Resolved.Element == null ? -1 : (int)Resolved.Element.Kind;
         return (int)Resolved.Kind;
@@ -364,8 +364,7 @@ internal static unsafe class InteropTestHooks
         return Values.Length;
     }
 
-    // An out container of objects crosses as raw pointers and is rebuilt through the wrapper cache, so every
-    // element has to come back as the same managed instance rather than a fresh one per element.
+    // An out container of objects is rebuilt through the wrapper cache, so each element comes back as the same instance.
     [ManagedExport]
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
     public static int Test_ObjectArrayBinding(int Count, int* OutIdentical)
@@ -399,7 +398,7 @@ internal static unsafe class InteropTestHooks
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
     public static ulong Test_HandleStructRoundTrip(ulong Value)
     {
-        Lumina.FUIElement Handle = CInteropTestLibrary.MakeHandle(Value);
+        Lumina.SUIElement Handle = CInteropTestLibrary.MakeHandle(Value);
         if (Handle.Handle != Value || Handle.IsValid != (Value != 0))
         {
             return 0;
@@ -437,7 +436,7 @@ internal static unsafe class InteropTestHooks
     {
         CallbackPayload = 0xFFFFFFFFUL;
         CallbackRuns = 0;
-        return ScriptCallback.OfRepeating((float Value) =>
+        return ScriptCallback.OfFloat((float Value) =>
         {
             CallbackPayload = (ulong)(long)(Value * 1000.0f);
             ++CallbackRuns;
@@ -578,7 +577,7 @@ internal static unsafe class InteropTestHooks
     {
         FrameMarshal.Reset();
 
-        FrameMarshal.TryBind(StructProperty, typeof(Lumina.FAnimGraphBoneMaskBone), "CacheProbe", out _);
+        FrameMarshal.TryBind(StructProperty, typeof(Lumina.SAnimGraphBoneMaskBone), "CacheProbe", out _);
         FrameMarshal.TryBind(VectorProperty, typeof(Lumina.TVector<float>), "CacheProbe", out _);
 
         *OutBefore = FrameMarshal.CachedTypeCount;
@@ -602,7 +601,7 @@ internal static unsafe class InteropTestHooks
             (typeof(Lumina.TVector<float>), EElementKind.Vector),
             (typeof(Lumina.THashMap<int, float>), EElementKind.Map),
             (typeof(Lumina.FSoftObjectPath), EElementKind.SoftRef),
-            (typeof(Lumina.FAnimGraphBoneMaskBone), EElementKind.StructView),
+            (typeof(Lumina.SAnimGraphBoneMaskBone), EElementKind.StructView),
             (typeof(Lumina.CWorld), EElementKind.ObjectWrapper),
             (typeof(Lumina.TStrongObjectPtr<Lumina.CWorld>), EElementKind.ObjectRef),
 
@@ -637,7 +636,7 @@ internal static unsafe class InteropTestHooks
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
     public static int Test_MarshalledMapRoundTrip(IntPtr Storage)
     {
-        var Opaque = new Lumina.FInteropOpaqueStruct(Storage);
+        var Opaque = new Lumina.SInteropOpaqueStruct(Storage);
 
         Opaque.Weights.Set("alpha", 1.5f);
         Opaque.Weights.Set("beta", 2.5f);
@@ -681,7 +680,7 @@ internal static unsafe class InteropTestHooks
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
     public static int Test_MarshalledOptionalRoundTrip(IntPtr Storage)
     {
-        var Opaque = new Lumina.FInteropOpaqueStruct(Storage);
+        var Opaque = new Lumina.SInteropOpaqueStruct(Storage);
 
         int Result = Opaque.Note.HasValue ? 0 : 1;
 
@@ -822,9 +821,9 @@ internal static unsafe class InteropTestHooks
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
     public static float Test_OpaqueStructArgument(IntPtr Storage)
     {
-        Lumina.FInteropOpaqueStruct Opaque = Storage == IntPtr.Zero
-            ? null!
-            : new Lumina.FInteropOpaqueStruct(Storage);
+        Lumina.SInteropOpaqueStruct Opaque = Storage == IntPtr.Zero
+            ? default
+            : new Lumina.SInteropOpaqueStruct(Storage);
 
         return CInteropTestLibrary.ReadOpaqueValue(Opaque);
     }

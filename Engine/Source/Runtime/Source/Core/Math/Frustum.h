@@ -81,7 +81,7 @@ namespace Lumina
         NODISCARD bool IsInside(SIMD::VFloat4 Point) const   { return IntersectsSphere(Point, 0.0f); }
         NODISCARD bool IsInside(const FVector3& Point) const { return IntersectsSphere(Point, 0.0f); }
 
-        NODISCARD bool IsInside(const FAABB& aabb) const
+        NODISCARD bool IsInside(const SAABB& aabb) const
         {
             using namespace SIMD;
             const VFloat8 Nx = VFloat8::LoadAligned(SoaNx);

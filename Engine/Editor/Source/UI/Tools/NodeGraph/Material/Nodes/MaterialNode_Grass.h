@@ -8,7 +8,7 @@ namespace Lumina
 {
     /** One species this node scatters, and the painted layer that decides where. */
     REFLECT()
-    struct FGrassOutputEntry
+    struct SGrassOutputEntry
     {
         GENERATED_BODY()
 
@@ -50,6 +50,6 @@ namespace Lumina
         void GenerateDefinition(FMaterialCompiler& Compiler) override {}
 
         PROPERTY(Editable, Category = "Grass")
-        TVector<FGrassOutputEntry> Entries;
+        TVector<SGrassOutputEntry> Entries;
     };
 }

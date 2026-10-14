@@ -77,7 +77,7 @@ namespace Lumina
 
         /** World-local bounds of the committed mesh (empty until the first Commit). */
         FUNCTION()
-        FAABB GetAABB() const;
+        SAABB GetAABB() const;
 
         /** Declare a sub-range of the index buffer that draws with one material slot. Optional: with no
          *  sections, Commit() makes a single section covering every index on slot 0. */

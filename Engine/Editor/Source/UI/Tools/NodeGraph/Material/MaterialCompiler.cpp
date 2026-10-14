@@ -1537,7 +1537,7 @@ namespace Lumina
 		Out = BoundCollections;
 	}
 
-	void FMaterialCompiler::SeedManifest(const TVector<FMaterialParameter>& Params, const FMaterialUniforms& Uniforms,
+	void FMaterialCompiler::SeedManifest(const TVector<SMaterialParameter>& Params, const FMaterialUniforms& Uniforms,
 		const TVector<TStrongObjectPtr<CTexture>>& Textures,
 		const TVector<TStrongObjectPtr<CMaterialParameterCollection>>& Collections)
 	{
@@ -1554,7 +1554,7 @@ namespace Lumina
 		BoundImages.assign(Textures.begin(), Textures.begin() + NumTextures);
 		NumTextureParams = (uint16)NumTextures;
 
-		for (const FMaterialParameter& Param : Params)
+		for (const SMaterialParameter& Param : Params)
 		{
 			switch (Param.Type)
 			{
@@ -1592,7 +1592,7 @@ namespace Lumina
 		}
 
 		auto Existing = Algo::FindIf(StaticSwitches,
-			[&ParamID](const FMaterialStaticSwitch& Switch) { return Switch.ParameterName == ParamID; });
+			[&ParamID](const SMaterialStaticSwitch& Switch) { return Switch.ParameterName == ParamID; });
 
 		if (Existing == StaticSwitches.end())
 		{
@@ -1608,7 +1608,7 @@ namespace Lumina
 				return bDefaultValue;
 			}
 
-			FMaterialStaticSwitch Switch;
+			SMaterialStaticSwitch Switch;
 			Switch.ParameterName = ParamID;
 			Switch.bDefaultValue = bDefaultValue;
 			StaticSwitches.push_back(Switch);
@@ -1629,12 +1629,12 @@ namespace Lumina
 		return Override != StaticSwitchOverrides.end() ? Override->second : Existing->bDefaultValue;
 	}
 
-	void FMaterialCompiler::GetStaticSwitches(TVector<FMaterialStaticSwitch>& OutSwitches) const
+	void FMaterialCompiler::GetStaticSwitches(TVector<SMaterialStaticSwitch>& OutSwitches) const
 	{
 		OutSwitches = StaticSwitches;
 
 		// By name, so adding a node above an existing one does not renumber every instance's key.
-		Algo::Sort(OutSwitches, [](const FMaterialStaticSwitch& A, const FMaterialStaticSwitch& B)
+		Algo::Sort(OutSwitches, [](const SMaterialStaticSwitch& A, const SMaterialStaticSwitch& B)
 		{
 			// Two c_str() calls per compare, well inside FName's 4-slot suffix buffer.
 			return std::strcmp(A.ParameterName.c_str(), B.ParameterName.c_str()) < 0;
@@ -2142,11 +2142,11 @@ namespace Lumina
 		return Stats;
 	}
 
-	void FMaterialCompiler::GetParameters(TVector<FMaterialParameter>& OutParams, FMaterialUniforms& OutUniforms) const
+	void FMaterialCompiler::GetParameters(TVector<SMaterialParameter>& OutParams, FMaterialUniforms& OutUniforms) const
 	{
 		for (const auto& Pair : ScalarParameters)
 		{
-			FMaterialParameter Out;
+			SMaterialParameter Out;
 			Out.ParameterName = Pair.first;
 			Out.Type = EMaterialParameterType::Scalar;
 			Out.Index = Pair.second.Index;
@@ -2161,7 +2161,7 @@ namespace Lumina
 
 		for (const auto& Pair : VectorParameters)
 		{
-			FMaterialParameter Out;
+			SMaterialParameter Out;
 			Out.ParameterName = Pair.first;
 			Out.Type = EMaterialParameterType::Vector;
 			Out.Index = Pair.second.Index;
@@ -2176,7 +2176,7 @@ namespace Lumina
 
 		for (const auto& Pair : TextureParameters)
 		{
-			FMaterialParameter Out;
+			SMaterialParameter Out;
 			Out.ParameterName = Pair.first;
 			Out.Type = EMaterialParameterType::Texture;
 			Out.Index = Pair.second.Index;

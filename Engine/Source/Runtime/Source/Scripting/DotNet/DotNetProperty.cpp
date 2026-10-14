@@ -17,7 +17,8 @@
 #include "Core/Object/InstancedStruct.h"
 #include "Core/Reflection/Type/Properties/ClassProperty.h"
 #include "Core/Reflection/Type/Properties/SubStructProperty.h"
-#include "Scripting/ScriptDataStruct.h"
+#include "Scripting/ScriptCallback.h"
+#include "Scripting/ScriptTypeRegistry.h"
 #include "Core/Object/SoftObjectPtr.h"
 #include "Core/Reflection/Type/LuminaTypes.h"
 #include "Core/Reflection/Type/Properties/ArrayProperty.h"
@@ -31,6 +32,24 @@ using namespace Lumina;
 
 namespace
 {
+    // The caller sizes its buffer from the length returned here, so a reserved terminator costs a character.
+    int32 CopyOut(FStringView Text, char* Buf, int Cap)
+    {
+        const int32 Length = (int32)Text.size();
+        if (Buf != nullptr && Cap > 0 && Length > 0)
+        {
+            Memory::Memcpy(Buf, Text.data(), (size_t)Math::Min(Length, Cap));
+        }
+        return Length;
+    }
+
+    // c_str hands back a ring-buffer pointer, so the copy happens before anything can intern a name.
+    int32 CopyOut(const FName& Name, char* Buf, int Cap)
+    {
+        const char* Text = Name.c_str();
+        return CopyOut(Text != nullptr ? FStringView(Text, Name.length()) : FStringView(), Buf, Cap);
+    }
+
     const CStruct* FindReflectedType(const char* Type, int TLen)
     {
         if (Type == nullptr || TLen <= 0)
@@ -43,7 +62,7 @@ namespace
         {
             return AsClass;
         }
-        return ResolveDataStructByName(Name);
+        return ResolveStructByName(Name);
     }
 }
 
@@ -94,117 +113,7 @@ LUMINA_DOTNET_EXPORT(int32, PropertyOffsetByName)(const char* Type, int TLen, co
     return LuminaSharp_PropertyOffset(Property);
 }
 
-
-LUMINA_DOTNET_EXPORT(void, PropSetString)(void* C, const void* Prop, const char* Utf8, int Len)
-{
-    if (C == nullptr || Prop == nullptr)
-    {
-        return;
-    }
-    const FProperty* Property = static_cast<const FProperty*>(Prop);
-    FString& Value = *Property->GetValuePtr<FString>(C);
-    if (Len > 0)
-    {
-        Value.assign(Utf8, (size_t)Len);
-    }
-    else
-    {
-        Value.clear();
-    }
-}
-
-// The same buffer-fill shape as a string, with the setter building a name from the UTF-8 bytes.
-LUMINA_DOTNET_EXPORT(int32, PropGetName)(void* C, const void* Prop, char* Buf, int Cap)
-{
-    if (C == nullptr || Prop == nullptr)
-    {
-        return 0;
-    }
-    const FProperty* Property = static_cast<const FProperty*>(Prop);
-    const FName& Value = *Property->GetValuePtr<FName>(C);
-    const char* S = Value.c_str();
-    const int L = S ? (int)Value.length() : 0;
-    if (S && Buf && Cap > 0)
-    {
-        const int N = L < Cap ? L : Cap;
-        for (int i = 0; i < N; ++i)
-        {
-            Buf[i] = S[i];
-        }
-    }
-    return L;
-}
-
-LUMINA_DOTNET_EXPORT(void, PropSetName)(void* C, const void* Prop, const char* Utf8, int Len)
-{
-    if (C == nullptr || Prop == nullptr)
-    {
-        return;
-    }
-    const FProperty* Property = static_cast<const FProperty*>(Prop);
-    FName& Value = *Property->GetValuePtr<FName>(C);
-    Value = (Len > 0) ? FName(FStringView(Utf8, (size_t)Len)) : FName();
-}
-
-// Object/TStrongObjectPtr get/set.
-LUMINA_DOTNET_EXPORT(void, SetObjectPtr)(void*, void*); // defined in DotNetHost.cpp
-
-LUMINA_DOTNET_EXPORT(void*, PropGetObject)(void* C, const void* Prop)
-{
-    if (C == nullptr || Prop == nullptr)
-    {
-        return nullptr;
-    }
-    const FProperty* Property = static_cast<const FProperty*>(Prop);
-    const TStrongObjectPtr<CObject>& Value = *Property->GetValuePtr<TStrongObjectPtr<CObject>>(C);
-    return (void*)Value.Get();
-}
-
-LUMINA_DOTNET_EXPORT(void, PropSetObject)(void* C, const void* Prop, void* Obj)
-{
-    if (C == nullptr || Prop == nullptr)
-    {
-        return;
-    }
-    const FProperty* Property = static_cast<const FProperty*>(Prop);
-    LuminaSharp_SetObjectPtr(Property->GetValuePtr<TStrongObjectPtr<CObject>>(C), Obj);
-}
-
-// Kept as a property-kind exporter so the storage layout stays the path type's own business.
-LUMINA_DOTNET_EXPORT(int32, PropGetAssetPath)(void* C, const void* Prop, char* Buf, int Cap)
-{
-    if (C == nullptr || Prop == nullptr)
-    {
-        return 0;
-    }
-    const FProperty* Property = static_cast<const FProperty*>(Prop);
-    const FStringView Path = Property->GetValuePtr<FSoftObjectPath>(C)->GetPath();
-    const int Length = (int)Path.size();
-    if (Buf != nullptr && Cap > 0 && Length > 0)
-    {
-        const int Count = Length < Cap ? Length : Cap;
-        for (int Index = 0; Index < Count; ++Index)
-        {
-            Buf[Index] = Path[Index];
-        }
-    }
-    return Length;
-}
-
-LUMINA_DOTNET_EXPORT(void, PropSetAssetPath)(void* C, const void* Prop, const char* Utf8, int Len)
-{
-    if (C == nullptr || Prop == nullptr)
-    {
-        return;
-    }
-    const FProperty* Property = static_cast<const FProperty*>(Prop);
-    FSoftObjectPath* Value = Property->GetValuePtr<FSoftObjectPath>(C);
-    *Value = (Len > 0) ? FSoftObjectPath(FString(Utf8, (size_t)Len)) : FSoftObjectPath();
-}
-
-// Works for an array appended to a minted script class, where no generated code exists.
 // TSubclassOf is one CClass* at offset 0, but a raw write would skip the MetaClass check its Set does.
-
 LUMINA_DOTNET_EXPORT(void*, PropGetClass)(void* C, const void* Prop)
 {
     if (C == nullptr || Prop == nullptr)
@@ -245,16 +154,7 @@ LUMINA_DOTNET_EXPORT(void*, FindClassByName)(const char* Name, int Len)
     return FindObject<CClass>(FName(FStringView(Name, (size_t)Len)));
 }
 
-/**
- * Constructs a CObject from script, the managed face of NewObject.
- *
- * Package null means the engine transient package, so an object a script makes is not accidentally part of
- * anything that gets saved. Name empty means the class picks a unique one, exactly as native construction does.
- *
- * The object comes back with no strong reference held on its behalf, which is what native construction does
- * too: the caller is expected to store it somewhere that owns it, a [Property] holding a TStrongObjectPtr being the
- * usual answer. Nothing collects it in the meantime, since lifetime here is refcounting rather than a GC.
- */
+// Constructs a CObject from script, in the transient package when Package is null, with no reference held for the caller.
 LUMINA_DOTNET_EXPORT(void*, NewObject)(void* Class, void* Package, const char* Name, int NameLen)
 {
     CClass* ObjectClass = static_cast<CClass*>(Class);
@@ -264,8 +164,7 @@ LUMINA_DOTNET_EXPORT(void*, NewObject)(void* Class, void* Package, const char* N
         return nullptr;
     }
 
-    // Defensive: every generated class carries a factory, but a hand-written one may omit DEFINE_CLASS_FACTORY,
-    // and EmplaceInstance would assert on it rather than saying which class was at fault.
+    // Every generated class carries a factory, but a hand-written one may omit it and EmplaceInstance would assert without naming it.
     if (ObjectClass->FactoryFunction == nullptr)
     {
         LOG_ERROR("NewObject from script: '{}' cannot be instantiated, it has no factory", ObjectClass->GetName());
@@ -281,8 +180,7 @@ LUMINA_DOTNET_EXPORT(void*, NewObject)(void* Class, void* Package, const char* N
     return NewObject(ObjectClass, Outer, ObjectName, FGuid::New());
 }
 
-//~ Reflected functions. The managed dispatcher walks these to read a call frame, which it can do with the
-//  property accessors above because a frame is a container like any other.
+// Reflected functions, which the managed dispatcher walks to read a call frame like any other container.
 
 LUMINA_DOTNET_EXPORT(int32, FunctionParamCount)(const void* Function)
 {
@@ -325,16 +223,7 @@ LUMINA_DOTNET_EXPORT(int32, FunctionGetName)(const void* Function, char* Buf, in
     {
         return 0;
     }
-    const FName& Name = static_cast<const FFunction*>(Function)->GetFunctionName();
-    const char* S = Name.c_str();
-    const int L = S ? (int)Name.length() : 0;
-    // The caller sizes its buffer from the length returned here, so a reserved terminator costs a character.
-    if (S && Buf && Cap > 0)
-    {
-        const int Count = L < Cap ? L : Cap;
-        Memory::Memcpy(Buf, (void*)S, (size_t)Count);
-    }
-    return L;
+    return CopyOut(static_cast<const FFunction*>(Function)->GetFunctionName(), Buf, Cap);
 }
 
 LUMINA_DOTNET_EXPORT(int32, ClassGetName)(void* Class, char* Buf, int Cap)
@@ -343,17 +232,7 @@ LUMINA_DOTNET_EXPORT(int32, ClassGetName)(void* Class, char* Buf, int Cap)
     {
         return 0;
     }
-    const FString Name = static_cast<CClass*>(Class)->GetName().ToString();
-    const int Length = (int)Name.size();
-    if (Buf != nullptr && Cap > 0 && Length > 0)
-    {
-        const int Count = Length < Cap ? Length : Cap;
-        for (int Index = 0; Index < Count; ++Index)
-        {
-            Buf[Index] = Name[Index];
-        }
-    }
-    return Length;
+    return CopyOut(static_cast<CClass*>(Class)->GetName(), Buf, Cap);
 }
 
 LUMINA_DOTNET_EXPORT(void*, ClassGetDefaultObject)(void* Class)
@@ -411,7 +290,7 @@ LUMINA_DOTNET_EXPORT(void*, FindStructByName)(const char* Name, int Len)
     {
         return nullptr;
     }
-    return ResolveDataStructByName(FName(FStringView(Name, (size_t)Len)));
+    return ResolveStructByName(FName(FStringView(Name, (size_t)Len)));
 }
 
 LUMINA_DOTNET_EXPORT(int32, StructGetName)(void* Struct, char* Buf, int Cap)
@@ -420,17 +299,7 @@ LUMINA_DOTNET_EXPORT(int32, StructGetName)(void* Struct, char* Buf, int Cap)
     {
         return 0;
     }
-    const FString Name = static_cast<CStruct*>(Struct)->GetName().ToString();
-    const int Length = (int)Name.size();
-    if (Buf != nullptr && Cap > 0 && Length > 0)
-    {
-        const int Count = Length < Cap ? Length : Cap;
-        for (int Index = 0; Index < Count; ++Index)
-        {
-            Buf[Index] = Name[Index];
-        }
-    }
-    return Length;
+    return CopyOut(static_cast<CStruct*>(Struct)->GetName(), Buf, Cap);
 }
 
 // Addressed by raw pointer rather than property, so the same calls serve a member and a container element.
@@ -448,17 +317,7 @@ LUMINA_DOTNET_EXPORT(int32, InstancedStructGetType)(void* Ptr, char* Buf, int Ca
         return 0;
     }
 
-    const FString Key = InstancedStructKey(Type).ToString();
-    const int Length = (int)Key.size();
-    if (Buf != nullptr && Cap > 0 && Length > 0)
-    {
-        const int Count = Length < Cap ? Length : Cap;
-        for (int Index = 0; Index < Count; ++Index)
-        {
-            Buf[Index] = Key[Index];
-        }
-    }
-    return Length;
+    return CopyOut(StructIdentity(Type), Buf, Cap);
 }
 
 LUMINA_DOTNET_EXPORT(void*, InstancedStructGetMemory)(void* Ptr)
@@ -474,7 +333,7 @@ LUMINA_DOTNET_EXPORT(int32, InstancedStructIsA)(void* Ptr, const char* TypeName,
         return 0;
     }
     CStruct* Stored = static_cast<FInstancedStruct*>(Ptr)->GetScriptStruct();
-    CStruct* Wanted = ResolveDataStructByName(FName(FStringView(TypeName, (size_t)Len)));
+    CStruct* Wanted = ResolveStructByName(FName(FStringView(TypeName, (size_t)Len)));
     return (Stored != nullptr && Wanted != nullptr && Stored->IsChildOf(Wanted)) ? 1 : 0;
 }
 
@@ -485,7 +344,7 @@ LUMINA_DOTNET_EXPORT(void, InstancedStructInitializeAs)(void* Ptr, const char* T
         return;
     }
     CStruct* Type = (TypeName != nullptr && Len > 0)
-        ? ResolveDataStructByName(FName(FStringView(TypeName, (size_t)Len)))
+        ? ResolveStructByName(FName(FStringView(TypeName, (size_t)Len)))
         : nullptr;
 
     if (Type == nullptr && Len > 0)
@@ -511,17 +370,7 @@ LUMINA_DOTNET_EXPORT(int32, SoftPathGet)(const void* PathPtr, char* Buf, int Cap
     {
         return 0;
     }
-    const FStringView Path = static_cast<const FSoftObjectPath*>(PathPtr)->GetPath();
-    const int Length = (int)Path.size();
-    if (Buf != nullptr && Cap > 0 && Length > 0)
-    {
-        const int Count = Length < Cap ? Length : Cap;
-        for (int Index = 0; Index < Count; ++Index)
-        {
-            Buf[Index] = Path[Index];
-        }
-    }
-    return Length;
+    return CopyOut(static_cast<const FSoftObjectPath*>(PathPtr)->GetPath(), Buf, Cap);
 }
 
 LUMINA_DOTNET_EXPORT(void, SoftPathSet)(void* PathPtr, const char* Utf8, int Len)
@@ -633,6 +482,22 @@ LUMINA_DOTNET_EXPORT(const void*, PropVectorOps)(const void* Prop)
     return static_cast<const FArrayProperty*>(Property)->GetOps();
 }
 
+LUMINA_DOTNET_EXPORT(void, SetObjectPtr)(void* Member, void* Value)
+{
+    if (Member != nullptr)
+    {
+        *reinterpret_cast<Lumina::TStrongObjectPtr<Lumina::CObject>*>(Member) = static_cast<Lumina::CObject*>(Value);
+    }
+}
+
+// Through TStrongObjectPtr::Get, so a slot that has moved on reads as null rather than as reclaimed memory.
+LUMINA_DOTNET_EXPORT(void*, GetObjectPtr)(const void* Member)
+{
+    return Member != nullptr
+        ? static_cast<void*>(reinterpret_cast<const Lumina::TStrongObjectPtr<Lumina::CObject>*>(Member)->Get())
+        : nullptr;
+}
+
 // Reading needs no export, since the managed marshal decodes the native string in place.
 LUMINA_DOTNET_EXPORT(void, StringAssign)(void* StringPtr, const char* Utf8, int Len)
 {
@@ -667,19 +532,7 @@ LUMINA_DOTNET_EXPORT(int32, NameToString)(const void* NamePtr, char* Buf, int Ca
     {
         return 0;
     }
-    // c_str hands back a ring-buffer pointer, so the copy happens before anything can intern a name.
-    const FName& Value = *static_cast<const FName*>(NamePtr);
-    const char* S = Value.c_str();
-    const int L = S ? (int)Value.length() : 0;
-    if (S && Buf && Cap > 0)
-    {
-        const int N = L < Cap ? L : Cap;
-        for (int i = 0; i < N; ++i)
-        {
-            Buf[i] = S[i];
-        }
-    }
-    return L;
+    return CopyOut(*static_cast<const FName*>(NamePtr), Buf, Cap);
 }
 
 // The key/value ops table for a map property, the associative counterpart of PropVectorOps.
@@ -699,14 +552,14 @@ LUMINA_DOTNET_EXPORT(const void*, PropMapOps)(const void* Prop)
 
 // Script delegate bind/unbind. Game thread only.
 
-LUMINA_DOTNET_EXPORT(uint64, DelegateBind)(void* DelegatePtr, void* Thunk, void* Context)
+LUMINA_DOTNET_EXPORT(uint64, DelegateBind)(void* DelegatePtr, uint64 Callback)
 {
-    if (DelegatePtr == nullptr || Thunk == nullptr)
+    if (DelegatePtr == nullptr)
     {
+        Scripting::ReleaseScriptCallback(SScriptCallback{ Callback });
         return 0;
     }
-    return static_cast<FScriptDelegateBase*>(DelegatePtr)->BindManaged(
-        reinterpret_cast<FScriptDelegateBase::FManagedThunk>(Thunk), Context);
+    return static_cast<FScriptDelegateBase*>(DelegatePtr)->BindManaged(SScriptCallback{ Callback });
 }
 
 // A delegate's argument properties, so the managed side can bind frame slots the way a function does.
@@ -737,14 +590,8 @@ LUMINA_DOTNET_SIGNATURES(
     LUMINA_DOTNET_SIG(PropertyOffset),
     LUMINA_DOTNET_SIG(PropertySize),
     LUMINA_DOTNET_SIG(PropertyOffsetByName),
-    LUMINA_DOTNET_SIG(PropSetString),
-    LUMINA_DOTNET_SIG(PropGetName),
-    LUMINA_DOTNET_SIG(PropSetName),
     LUMINA_DOTNET_SIG(SetObjectPtr),
-    LUMINA_DOTNET_SIG(PropGetObject),
-    LUMINA_DOTNET_SIG(PropSetObject),
-    LUMINA_DOTNET_SIG(PropGetAssetPath),
-    LUMINA_DOTNET_SIG(PropSetAssetPath),
+    LUMINA_DOTNET_SIG(GetObjectPtr),
     LUMINA_DOTNET_SIG(PropGetClass),
     LUMINA_DOTNET_SIG(PropSetClass),
     LUMINA_DOTNET_SIG(FindClassByName),

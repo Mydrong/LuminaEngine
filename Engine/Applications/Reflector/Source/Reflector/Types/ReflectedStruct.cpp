@@ -61,6 +61,14 @@ namespace Lumina::Reflection
                 EmitMetadataArray(Writer, Prop->Name, Prop->Metadata, ESpecifierTarget::Property);
             }
         }
+
+        for (const auto& Function : Functions)
+        {
+            if (Function->bReflectNatively)
+            {
+                EmitMetadataArray(Writer, "Func_" + Function->Name, Function->Metadata, ESpecifierTarget::Function);
+            }
+        }
     }
 
     void FReflectedStruct::EmitPropertyTable(FCodeWriter& Writer) const
@@ -94,6 +102,25 @@ namespace Lumina::Reflection
         Writer.PopIndent();
         Writer.Line("};");
         Writer.Line();
+    }
+
+    void FReflectedStruct::EmitLayoutAsserts(FCodeWriter& Writer) const
+    {
+        if (NativeSize > 0 && Type != EType::Class)
+        {
+            Writer.Linef("static_assert(sizeof(%s) == %lld, \"%s changed size since the reflector laid it out; rebuild so the C# bindings match.\");",
+                EmittedCppQualifiedName().c_str(), (long long)NativeSize, DisplayName.c_str());
+        }
+
+        for (const auto& Prop : Props)
+        {
+            if (Prop->bInner || Prop->NativeOffset < 0)
+            {
+                continue;
+            }
+            Writer.Linef("static_assert(offsetof(%s, %s) == %lld, \"%s::%s moved since the reflector laid it out; rebuild so the C# bindings match.\");",
+                Prop->Outer.c_str(), Prop->Name.c_str(), (long long)Prop->NativeOffset, DisplayName.c_str(), Prop->Name.c_str());
+        }
     }
 
     std::string FReflectedStruct::MemberTableFields() const
@@ -187,6 +214,7 @@ namespace Lumina::Reflection
         EmitMetadataArrays(Writer);
         EmitPropertyTable(Writer);
         EmitFunctionTable(Writer);
+        EmitLayoutAsserts(Writer);
 
         const std::string Super = Parent.empty() ? std::string() : (", .Super = &" + Cpp + "::Super::StaticStruct");
         Writer.Linef("static constexpr Lumina::FStructDesc Desc = { .Name = \"%s\"%s, .MakeOps = &MakeOps, "

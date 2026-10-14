@@ -1,21 +1,15 @@
 ﻿using System;
+using Lumina;
 using System.Collections.Generic;
 using System.Reflection;
 
 namespace LuminaSharp;
 
-// Which side of the physics step a script's OnUpdate runs on, mirroring EScriptUpdatePhase.
-public enum EScriptPhase
-{
-    PrePhysics,
-    PostPhysics,
-}
-
-// The C# spelling of a C++ REFLECT(...), carrying the same class specifiers to the class native mints. A class needs none of it to be discovered.
-[AttributeUsage(AttributeTargets.Class, AllowMultiple = false, Inherited = false)]
+// The C# spelling of a C++ REFLECT(...), and what registers a class extending a native struct, as REFLECT does for a C++ struct.
+[AttributeUsage(AttributeTargets.Class | AttributeTargets.Struct | AttributeTargets.Enum, AllowMultiple = false, Inherited = false)]
 public sealed class ReflectAttribute : Attribute
 {
-    private EScriptPhase UpdatePhaseValue;
+    private EScriptUpdatePhase UpdatePhaseValue;
     private bool InteractiveValue;
     private bool ShowOnStartValue = true;
 
@@ -31,6 +25,19 @@ public sealed class ReflectAttribute : Attribute
     // The .rml a UI script shows when the entity leaves its Document property empty.
     public string? UIDocument { get; set; }
 
+    // Backs a settings class with this config file, which the config system loads and saves its properties to.
+    public string? ConfigFile { get; set; }
+
+    // Puts every asset of this class and its subclasses in the named asset group, the same as a C++ REFLECT(Group = ...).
+    public string? Group { get; set; }
+
+    public bool HideInComponentList { get; set; }
+
+    public bool HideInDetails { get; set; }
+
+    // Keeps the class out of the node graph's placeable node registry.
+    public bool NotPlaceable { get; set; }
+
     // OnUpdate and OnFixedUpdate touch only this entity and change no structure, so the driver runs it in parallel.
     public bool ParallelUpdate { get; set; }
 
@@ -43,7 +50,7 @@ public sealed class ReflectAttribute : Attribute
     // Runs only where something is drawn or played, never on a dedicated server, a bot or a headless process.
     public bool Cosmetic { get; set; }
 
-    public EScriptPhase UpdatePhase
+    public EScriptUpdatePhase UpdatePhase
     {
         get => UpdatePhaseValue;
         set
@@ -119,6 +126,26 @@ public sealed class ReflectAttribute : Attribute
         {
             yield return new(nameof(UIDocument), UIDocument);
         }
+        if (ConfigFile != null)
+        {
+            yield return new(nameof(ConfigFile), ConfigFile);
+        }
+        if (Group != null)
+        {
+            yield return new(nameof(Group), Group);
+        }
+        if (HideInComponentList)
+        {
+            yield return new(nameof(HideInComponentList), "");
+        }
+        if (HideInDetails)
+        {
+            yield return new(nameof(HideInDetails), "");
+        }
+        if (NotPlaceable)
+        {
+            yield return new(nameof(NotPlaceable), "");
+        }
         if (ParallelUpdate)
         {
             yield return new(nameof(ParallelUpdate), "");
@@ -173,7 +200,7 @@ internal sealed class DispatchWhenAttribute : Attribute
 }
 
 /// <summary>Declares a prior name this element was serialized under, so saved data survives a rename. Repeatable.</summary>
-[AttributeUsage(AttributeTargets.Class | AttributeTargets.Field | AttributeTargets.Property, AllowMultiple = true, Inherited = false)]
+[AttributeUsage(AttributeTargets.Class | AttributeTargets.Struct | AttributeTargets.Enum | AttributeTargets.Field | AttributeTargets.Property, AllowMultiple = true, Inherited = false)]
 public sealed class AliasAttribute : Attribute
 {
     public AliasAttribute(string Name)
@@ -181,45 +208,8 @@ public sealed class AliasAttribute : Attribute
         this.Name = Name;
     }
 
-    /// <summary>A prior name, a full type name on a class or a member name on a property.</summary>
+    /// <summary>A prior name, the type's name on a class, struct or enum, or a member name on a property.</summary>
     public string Name { get; }
-}
-
-/// <summary>
-/// Base for the markers that publish a C# data type to the engine as a subtype of a native reflected
-/// struct. A marked type is discovered and minted on every script load whether or not anything
-/// references it, and the engine sees it as deriving from <see cref="NativeBase"/>, so it appears
-/// wherever that base is accepted.
-/// </summary>
-/// <remarks>
-/// C# structs cannot inherit, so the base relationship has to be carried by an attribute rather than
-/// expressed in the type. The native base is named here rather than inferred from the C# type's shape
-/// or name: the engine resolves it through the reflection registry, so a wrong name is a load-time
-/// warning naming both types instead of a type that silently fails to appear in a picker.
-/// </remarks>
-[AttributeUsage(AttributeTargets.Struct | AttributeTargets.Class, AllowMultiple = false, Inherited = false)]
-public abstract class ScriptStructBaseAttribute : Attribute
-{
-    protected ScriptStructBaseAttribute(string NativeBase)
-    {
-        this.NativeBase = NativeBase;
-    }
-
-    /// <summary>Registered name of the native CStruct the minted type derives from.</summary>
-    public string NativeBase { get; }
-}
-
-/// <summary>
-/// Publishes this type as a data table row shape. Its [Property] members become the columns of any
-/// data table asset that selects it as its row struct.
-/// </summary>
-[AttributeUsage(AttributeTargets.Struct | AttributeTargets.Class, AllowMultiple = false, Inherited = false)]
-public sealed class DataTableRowAttribute : ScriptStructBaseAttribute
-{
-    public DataTableRowAttribute()
-        : base("SDataTableRowBase")
-    {
-    }
 }
 
 /// <summary>Resets this [Property] (or every [Property] on the class) to its default on a C# hot reload instead of carrying the previous value into the reloaded instance.</summary>
@@ -299,6 +289,12 @@ public sealed class PropertyAttribute : Attribute
     // Turns a string into a picker of those file kinds, such as "rml" or "rml,rcss", the same as a C++ PROPERTY(AssetType = ...).
     public string? AssetType { get; set; }
 
+    // Soft references in this field load with their owner when the named bundle is asked for, the same as a C++ PROPERTY(Bundle = ...).
+    public string? Bundle { get; set; }
+
+    // Narrows an SAssetId field's picker to one asset group, the same as a C++ PROPERTY(Group = ...).
+    public string? Group { get; set; }
+
     /// <summary>
     /// Reflected flags for this property, on top of the Editable one <see cref="PropertyAttribute"/> implies.
     ///
@@ -319,7 +315,9 @@ public sealed class SerializeAttribute : Attribute
 {
 }
 
-// Written into save games whole, and stored natively without [Property], so a save-only field stays out of the inspector.
+/// <summary>
+/// Written into save games whole, and stored natively without [Property], so a save-only field stays out of the inspector.
+/// </summary>
 [AttributeUsage(AttributeTargets.Field | AttributeTargets.Property, AllowMultiple = false)]
 public sealed class SaveGameAttribute : Attribute
 {
@@ -331,21 +329,6 @@ public sealed class HideAttribute : Attribute
 {
 }
 
-/// <summary>Marks a [Property] field as an instanced (polymorphic) object. The inspector shows a type
-/// picker of the concrete classes deriving from the field's declared type and edits the chosen
-/// instance's own [Property] members inline. Opt-in only; an unmarked field is never instanced.</summary>
-[AttributeUsage(AttributeTargets.Field | AttributeTargets.Property, AllowMultiple = false)]
-public sealed class InstancedAttribute : Attribute
-{
-}
-
-/// <summary>Stamped by the Reflector on the generated C# wrapper of a <c>REFLECT(Scriptable)</c> native class,
-/// marking it as a base a user may subclass. The runtime discovers Scriptable user types by looking for a class
-/// whose base chain carries this attribute. Never hand-written.</summary>
-[AttributeUsage(AttributeTargets.Class, AllowMultiple = false, Inherited = false)]
-public sealed class ScriptableTypeAttribute : Attribute
-{
-}
 
 /// <summary>Marks a generated wrapper method as a native reflected virtual that a C# subclass of a
 /// <c>REFLECT(Scriptable)</c> class may override. Emitted by the Reflector, never hand-written. <see cref="Index"/>

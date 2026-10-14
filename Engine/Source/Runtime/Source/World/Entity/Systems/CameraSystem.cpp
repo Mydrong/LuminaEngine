@@ -440,7 +440,7 @@ namespace Lumina
         return Registry.TryGet<SCameraComponent>(GetActiveCameraEntity(Registry));
     }
 
-    uint32 SCameraSystem::PlayCameraShake(ECS::FRegistry& Registry, const FCameraShakeParams& Params)
+    uint32 SCameraSystem::PlayCameraShake(ECS::FRegistry& Registry, const SCameraShakeParams& Params)
     {
         FCameraGlobalState& State = Registry.Ctx().Get<FCameraGlobalState>();
 
