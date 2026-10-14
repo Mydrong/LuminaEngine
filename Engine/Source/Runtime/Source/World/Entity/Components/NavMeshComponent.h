@@ -12,13 +12,11 @@ namespace Lumina
 {
 
     /** Cached collider AABB for change detection; key = (entity << 8 | colliderType). */
-    struct FNavSourceEntity
+    // The footprint of a nav source that moved, appeared, vanished or changed shape.
+    struct FNavSourceBounds
     {
-        FVector3   AABBMin = FVector3( FLT_MAX);
-        FVector3   AABBMax = FVector3(-FLT_MAX);
-
-        // Fingerprints the geometry itself, so a swapped, re-imported or sculpted mesh still dirties its tiles.
-        uint64     ContentId = 0;
+        FVector3 Min = FVector3( FLT_MAX);
+        FVector3 Max = FVector3(-FLT_MAX);
     };
 
     /** Per-tile rebake task in flight. */
@@ -38,8 +36,6 @@ namespace Lumina
         std::atomic<bool>           bDone{ false };
     };
 
-    struct FNavFoliageCache;
-
     struct FNavMeshRuntime
     {
         TUniquePtr<FNavMesh>            Mesh;
@@ -54,14 +50,8 @@ namespace Lumina
 
         bool                            bRuntimeDirty = true;   // Tiles changed; rebuild next tick.
 
-        /** Cached per-collider AABBs from previous tick. */
-        THashMap<uint64, FNavSourceEntity>      EntityAABBs;
-
-        // Foliage is tracked per entity with cached instance bounds, since walking every instance each scan stalled the frame.
-        TSharedPtr<FNavFoliageCache>            FoliageCache;
-
-        // Until set, a scan adopts what it finds, because a hydrated bake already holds the world it was loaded with.
-        bool                                    bSourcesSeeded = false;
+        // Changed source footprints inside the volume, turned into dirty tiles at the next scan.
+        TVector<FNavSourceBounds>               PendingSourceChanges;
 
         /** Tile coords waiting to be rebuilt. */
         THashSet<uint64>                        DirtyTiles;

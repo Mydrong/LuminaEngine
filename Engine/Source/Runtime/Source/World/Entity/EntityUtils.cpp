@@ -830,66 +830,123 @@ namespace Lumina::ECS::Utils
         TVector<uint8>                SlotMarks;
         TVector<STransformComponent*> SlotTransforms;
 
-        // Published moved-transform channel, off until a consumer opts in; duplicates are fine.
-        std::atomic<bool> bPublishMoved{ false };
-        FDirtyQueue       MovedTransforms;
-
-        // One buffer per thread slot, since thousands of concurrent enqueues from a parallel pose overflow the ring into its spill lock.
+        // Published moved-transform channel, one copy per consumer and off while none has opted in; duplicates are fine.
         struct alignas(64) FMovedSlot
         {
             FMutex                Lock;
             TVector<ECS::FEntity> Items;
         };
-        TVector<TUniquePtr<FMovedSlot>> MovedSlots;
-        uint32                          NumMovedSlots = 0;
 
-        FORCEINLINE void PublishMoved(ECS::FEntity Entity)
+        // One buffer per thread slot, since thousands of concurrent enqueues from a parallel pose overflow the ring into its spill lock.
+        struct FMovedConsumer
         {
-            if (!bPublishMoved.load(std::memory_order_relaxed))
+            TVector<TUniquePtr<FMovedSlot>> Slots;
+            FDirtyQueue                     Overflow;
+        };
+
+        static constexpr uint32 kMaxMovedConsumers = 4;
+
+        // Never freed once made, so a worker publishing while a consumer leaves still writes into live memory.
+        TUniquePtr<FMovedConsumer> MovedConsumers[kMaxMovedConsumers];
+        std::atomic<uint32>        MovedConsumerMask{ 0 };
+        uint32                     NumMovedSlots = 0;
+
+        template<typename FnAppend>
+        FORCEINLINE void PublishToConsumers(FnAppend&& Append)
+        {
+            const uint32 Mask = MovedConsumerMask.load(std::memory_order_acquire);
+            if (Mask == 0)
             {
                 return;
             }
 
             const uint32 Slot = Jobs::IsInitialized() ? Jobs::GetWorkerIndex() : Constants::kIndexNoneU32;
-            if (Slot < NumMovedSlots)
+            for (uint32 Bits = Mask; Bits != 0; Bits &= Bits - 1)
             {
-                FMovedSlot& Moved = *MovedSlots[Slot];
-                TScopeLock<FMutex> Guard(Moved.Lock);
-                Moved.Items.push_back(Entity);
-                return;
+                FMovedConsumer& Consumer = *MovedConsumers[(uint32)Math::CountTrailingZeros64(Bits)];
+                if (Slot < NumMovedSlots)
+                {
+                    FMovedSlot& Moved = *Consumer.Slots[Slot];
+                    TScopeLock<FMutex> Guard(Moved.Lock);
+                    Append(Moved.Items);
+                }
+                else
+                {
+                    TVector<ECS::FEntity> Spill;
+                    Append(Spill);
+                    Consumer.Overflow.EnqueueBulk(Spill.data(), Spill.size());
+                }
             }
+        }
 
-            MovedTransforms.Enqueue(Entity);
+        FORCEINLINE void PublishMoved(ECS::FEntity Entity)
+        {
+            PublishToConsumers([Entity](TVector<ECS::FEntity>& Items) { Items.push_back(Entity); });
         }
 
         void PublishMovedBulk(const ECS::FEntity* Entities, size_t Count)
         {
-            if (Count == 0 || !bPublishMoved.load(std::memory_order_relaxed))
+            if (Count == 0)
             {
                 return;
             }
-
-            const uint32 Slot = Jobs::IsInitialized() ? Jobs::GetWorkerIndex() : Constants::kIndexNoneU32;
-            if (Slot < NumMovedSlots)
-            {
-                FMovedSlot& Moved = *MovedSlots[Slot];
-                TScopeLock<FMutex> Guard(Moved.Lock);
-                Moved.Items.insert(Moved.Items.end(), Entities, Entities + Count);
-                return;
-            }
-
-            MovedTransforms.EnqueueBulk(Entities, Count);
+            PublishToConsumers([Entities, Count](TVector<ECS::FEntity>& Items) { Items.insert(Items.end(), Entities, Entities + Count); });
         }
 
-        void DrainMovedSlots(TVector<ECS::FEntity>& Out)
+        uint32 AddMovedConsumer()
         {
-            for (uint32 Slot = 0; Slot < NumMovedSlots; ++Slot)
+            for (uint32 Index = 0; Index < kMaxMovedConsumers; ++Index)
             {
-                FMovedSlot& Moved = *MovedSlots[Slot];
-                TScopeLock<FMutex> Guard(Moved.Lock);
-                Out.insert(Out.end(), Moved.Items.begin(), Moved.Items.end());
-                Moved.Items.clear();
+                if ((MovedConsumerMask.load(std::memory_order_relaxed) & (1u << Index)) != 0)
+                {
+                    continue;
+                }
+                if (!MovedConsumers[Index])
+                {
+                    MovedConsumers[Index] = MakeUnique<FMovedConsumer>();
+                    MovedConsumers[Index]->Slots.reserve(NumMovedSlots);
+                    for (uint32 Slot = 0; Slot < NumMovedSlots; ++Slot)
+                    {
+                        MovedConsumers[Index]->Slots.push_back(MakeUnique<FMovedSlot>());
+                    }
+                }
+                MovedConsumerMask.fetch_or(1u << Index, std::memory_order_release);
+                return Index;
             }
+            return Constants::kIndexNoneU32;
+        }
+
+        void DrainMovedConsumer(uint32 Index, TVector<ECS::FEntity>& Out)
+        {
+            if (Index >= kMaxMovedConsumers || !MovedConsumers[Index])
+            {
+                return;
+            }
+            FMovedConsumer& Consumer = *MovedConsumers[Index];
+            for (TUniquePtr<FMovedSlot>& Slot : Consumer.Slots)
+            {
+                TScopeLock<FMutex> Guard(Slot->Lock);
+                Out.insert(Out.end(), Slot->Items.begin(), Slot->Items.end());
+                Slot->Items.clear();
+            }
+
+            ECS::FEntity Batch[256];
+            size_t Count;
+            while ((Count = Consumer.Overflow.DequeueBulk(Batch, 256)) != 0)
+            {
+                Out.insert(Out.end(), Batch, Batch + Count);
+            }
+        }
+
+        void RemoveMovedConsumer(uint32 Index)
+        {
+            if (Index >= kMaxMovedConsumers)
+            {
+                return;
+            }
+            MovedConsumerMask.fetch_and(~(1u << Index), std::memory_order_acq_rel);
+            TVector<ECS::FEntity> Discard;
+            DrainMovedConsumer(Index, Discard);
         }
 
         FTransformDirtyState()
@@ -897,11 +954,6 @@ namespace Lumina::ECS::Utils
             const uint32 Slots = Jobs::IsInitialized() ? Jobs::GetNumThreadSlots() : 1;
             HierBySlot.resize(Slots);
             NumMovedSlots = Slots;
-            MovedSlots.reserve(Slots);
-            for (uint32 Slot = 0; Slot < Slots; ++Slot)
-            {
-                MovedSlots.push_back(MakeUnique<FMovedSlot>());
-            }
         }
     };
     
@@ -1114,9 +1166,18 @@ namespace Lumina::ECS::Utils
         return World;
     }
 
-    void SetPublishMovedTransforms(ECS::FRegistry& Registry, bool bEnable)
+    uint32 AddMovedTransformConsumer(ECS::FRegistry& Registry)
     {
-        EnsureTransformDirtyState(Registry)->bPublishMoved.store(bEnable, std::memory_order_release);
+        return EnsureTransformDirtyState(Registry)->AddMovedConsumer();
+    }
+
+    void RemoveMovedTransformConsumer(ECS::FRegistry& Registry, uint32 Consumer)
+    {
+        TUniquePtr<FTransformDirtyState>* Holder = Registry.Ctx().Find<TUniquePtr<FTransformDirtyState>>();
+        if (Holder != nullptr && Holder->get() != nullptr)
+        {
+            (*Holder)->RemoveMovedConsumer(Consumer);
+        }
     }
 
     void PublishMovedTransform(ECS::FRegistry& Registry, ECS::FEntity Entity)
@@ -1128,7 +1189,7 @@ namespace Lumina::ECS::Utils
         }
     }
 
-    bool DrainMovedTransforms(ECS::FRegistry& Registry, TVector<ECS::FEntity>& Out)
+    bool DrainMovedTransforms(ECS::FRegistry& Registry, uint32 Consumer, TVector<ECS::FEntity>& Out)
     {
         TUniquePtr<FTransformDirtyState>* Holder = Registry.Ctx().Find<TUniquePtr<FTransformDirtyState>>();
         FTransformDirtyState* State = Holder ? Holder->get() : nullptr;
@@ -1138,15 +1199,7 @@ namespace Lumina::ECS::Utils
         }
 
         const SIZE_T Before = Out.size();
-
-        State->DrainMovedSlots(Out);
-
-        ECS::FEntity Batch[256];
-        std::size_t Count;
-        while ((Count = State->MovedTransforms.DequeueBulk(Batch, 256)) != 0)
-        {
-            Out.insert(Out.end(), Batch, Batch + Count);
-        }
+        State->DrainMovedConsumer(Consumer, Out);
 
         // Bumping the epoch opens the next publish window, so no clearing pass over drained entities.
         State->PublishEpoch.fetch_add(1, std::memory_order_relaxed);

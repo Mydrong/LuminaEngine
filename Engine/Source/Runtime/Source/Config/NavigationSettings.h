@@ -49,20 +49,28 @@ namespace Lumina
         ENavRegionPartition RegionPartition = ENavRegionPartition::Layers;
 
         /** Longest polygon corridor a single FindPath may walk. Raising it costs stack in the query. */
-        PROPERTY(Editable, Category = "Query", ClampMin = 16, ClampMax = 1024)
-        int32 MaxPathPolys = 512;
+        PROPERTY(Editable, Category = "Query", ClampMin = 16, ClampMax = 4096)
+        int32 MaxPathPolys = 4096;
 
         /** Corners a straightened path may return. A path needing more comes back flagged truncated. */
         PROPERTY(Editable, Category = "Query", ClampMin = 8, ClampMax = 512)
-        int32 MaxPathCorners = 256;
+        int32 MaxPathCorners = 512;
 
         /** Search nodes each pooled query allocates. Bounds how far a single path may explore. */
         PROPERTY(Editable, Category = "Query", ClampMin = 64)
         int32 QueryNodePoolSize = 2048;
 
+        // Paths at least this far apart plan over tile clusters first, so the node pool only ever searches a few tiles ahead. Zero turns it off.
+        PROPERTY(Editable, Category = "Query", ClampMin = 0.0f)
+        float HierarchicalPathDistance = 64.0f;
+
         /** Pooled dtNavMeshQuery objects beyond one per worker. Each costs its node pool, and running
          *  out makes a query fail rather than wait, so a little slack is cheaper than the alternative. */
         PROPERTY(Editable, Category = "Query", ClampMin = 0)
         int32 QueryPoolSlack = 2;
+
+        // Nav sources rechecked each tick in case gameplay code wrote a collider without raising its update signal.
+        PROPERTY(Editable, Category = "Bake", ClampMin = 0)
+        int32 SourceVerifyBudget = 256;
     };
 }

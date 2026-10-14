@@ -864,6 +864,12 @@ namespace Lumina
 
             // A back-to-prefab edit leaves zero divergent leaves, which clears the override record.
             CPrefab::RecaptureComponentOverrides(Registry, Entity, Event.OuterType);
+
+            // The edit was a raw store, so listeners such as navigation hear of it through the update signal once it is committed.
+            if (Event.bIsCommit)
+            {
+                WantOps->Patch(Registry, Entity);
+            }
         });
     }
 

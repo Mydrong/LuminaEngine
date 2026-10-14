@@ -184,7 +184,7 @@ TEST(TransformBench, DISABLED_HierarchicalWithPublishMoved)
     TVector<ECS::FEntity> Entities;
     MakeHierarchical(Registry, Entities, Count);
 
-    ECS::Utils::SetPublishMovedTransforms(Registry, true);
+    const uint32 Consumer = ECS::Utils::AddMovedTransformConsumer(Registry);
 
     double SetTotal = 0.0;
     double ResolveTotal = 0.0;
@@ -206,7 +206,7 @@ TEST(TransformBench, DISABLED_HierarchicalWithPublishMoved)
         const auto ResolveEnd = Lumina::PlatformTime::Cycles();
 
         Drained.clear();
-        ECS::Utils::DrainMovedTransforms(Registry, Drained);
+        ECS::Utils::DrainMovedTransforms(Registry, Consumer, Drained);
         const auto DrainEnd = Lumina::PlatformTime::Cycles();
 
         SetTotal     += (Lumina::PlatformTime::ToSeconds(SetEnd - SetStart) * 1e9);

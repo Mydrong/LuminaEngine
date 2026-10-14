@@ -1,0 +1,127 @@
+#include "RuntimePCH.h"
+#include "NavOctree.h"
+
+namespace Lumina
+{
+    FNavOctree::FNavOctree(float InRootHalfSize, float InMinHalfSize)
+        : RootHalfSize(InRootHalfSize)
+        , MinHalfSize(InMinHalfSize)
+    {
+        Clear();
+    }
+
+    void FNavOctree::Clear()
+    {
+        Nodes.clear();
+        Elements.clear();
+        FreeElements.clear();
+        Count = 0;
+
+        FNode Root;
+        Root.HalfSize = RootHalfSize;
+        Nodes.push_back(Move(Root));
+    }
+
+    uint32 FNavOctree::NodeFor(const FVector3& Min, const FVector3& Max)
+    {
+        const FVector3 Center = (Min + Max) * 0.5f;
+        const FVector3 HalfExtent = (Max - Min) * 0.5f;
+        const float Size = Math::Max(HalfExtent.x, Math::Max(HalfExtent.y, HalfExtent.z));
+
+        uint32 Node = 0;
+        for (;;)
+        {
+            const float ChildHalf = Nodes[Node].HalfSize * 0.5f;
+            const FVector3 NodeCenter = Nodes[Node].Center;
+            const FVector3 Offset = Center - NodeCenter;
+
+            // Past the root's own box nothing deeper can hold it, so it stays at the root.
+            const bool bInside = std::fabs(Offset.x) <= Nodes[Node].HalfSize && std::fabs(Offset.y) <= Nodes[Node].HalfSize && std::fabs(Offset.z) <= Nodes[Node].HalfSize;
+            if (ChildHalf < MinHalfSize || Size > ChildHalf || !bInside)
+            {
+                return Node;
+            }
+
+            if (Nodes[Node].FirstChild == kNone)
+            {
+                const uint32 First = (uint32)Nodes.size();
+                Nodes[Node].FirstChild = First;
+                for (uint32 Octant = 0; Octant < 8; ++Octant)
+                {
+                    FNode Child;
+                    Child.HalfSize = ChildHalf;
+                    Child.Center = NodeCenter + FVector3((Octant & 1) ? ChildHalf : -ChildHalf, (Octant & 2) ? ChildHalf : -ChildHalf, (Octant & 4) ? ChildHalf : -ChildHalf);
+                    Nodes.push_back(Move(Child));
+                }
+            }
+
+            const uint32 Octant = (Offset.x >= 0.0f ? 1u : 0u) | (Offset.y >= 0.0f ? 2u : 0u) | (Offset.z >= 0.0f ? 4u : 0u);
+            Node = Nodes[Node].FirstChild + Octant;
+        }
+    }
+
+    void FNavOctree::Link(uint32 Element, uint32 Node)
+    {
+        FElement& E = Elements[Element];
+        E.Node = Node;
+        E.Slot = (uint32)Nodes[Node].Elements.size();
+        Nodes[Node].Elements.push_back(Element);
+    }
+
+    void FNavOctree::Unlink(uint32 Element)
+    {
+        FElement& E = Elements[Element];
+        TVector<uint32>& Slots = Nodes[E.Node].Elements;
+        const uint32 Moved = Slots.back();
+        Slots[E.Slot] = Moved;
+        Elements[Moved].Slot = E.Slot;
+        Slots.pop_back();
+        E.Node = kNone;
+    }
+
+    uint32 FNavOctree::Add(const FVector3& Min, const FVector3& Max, uint32 Payload)
+    {
+        uint32 Element;
+        if (!FreeElements.empty())
+        {
+            Element = FreeElements.back();
+            FreeElements.pop_back();
+        }
+        else
+        {
+            Element = (uint32)Elements.size();
+            Elements.emplace_back();
+        }
+
+        FElement& E = Elements[Element];
+        E.Min = Min;
+        E.Max = Max;
+        E.Payload = Payload;
+        Link(Element, NodeFor(Min, Max));
+        ++Count;
+        return Element;
+    }
+
+    void FNavOctree::Update(uint32 Element, const FVector3& Min, const FVector3& Max)
+    {
+        const uint32 Node = NodeFor(Min, Max);
+        Elements[Element].Min = Min;
+        Elements[Element].Max = Max;
+        if (Node != Elements[Element].Node)
+        {
+            Unlink(Element);
+            Link(Element, Node);
+        }
+    }
+
+    void FNavOctree::Remove(uint32 Element)
+    {
+        if (Element >= Elements.size() || Elements[Element].Node == kNone)
+        {
+            return;
+        }
+        Unlink(Element);
+        FreeElements.push_back(Element);
+        --Count;
+    }
+}

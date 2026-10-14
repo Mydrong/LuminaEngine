@@ -684,7 +684,7 @@ namespace Lumina
         JoinInstanceBlockBounds();
 
         MovedTransformScratch.clear();
-        ECS::Utils::DrainMovedTransforms(Registry, MovedTransformScratch);
+        ECS::Utils::DrainMovedTransforms(Registry, MovedTransformConsumer, MovedTransformScratch);
         ScenePrimitives.Sync(*World, TSpan<const ECS::FEntity>(MovedTransformScratch.data(), MovedTransformScratch.size()));
 
         PublishRetainedUpload();

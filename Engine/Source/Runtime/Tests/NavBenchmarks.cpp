@@ -1,0 +1,513 @@
+#include "gtest/gtest.h"
+
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
+
+#include "AI/Navigation/NavMesh.h"
+#include "AI/Navigation/NavMeshBuilder.h"
+#include "AI/Navigation/NavTypes.h"
+#include "Config/NavigationSettings.h"
+#include "Core/Math/Math.h"
+#include "Platform/Time/PlatformTime.h"
+#include "TaskSystem/TaskSystem.h"
+#include "NavWorldTestUtil.h"
+
+// Run with --gtest_also_run_disabled_tests --gtest_filter=NavBenchmark.* and LUMINA_NAV_BENCH_SIZE as the world edge in meters.
+
+using namespace Lumina;
+
+namespace
+{
+    struct FOpenWorldSpec
+    {
+        float  Size        = 1024.0f;
+        float  TerrainStep = 2.0f;
+        int32  Buildings   = 0;
+        int32  Rocks       = 0;
+        uint32 Seed        = 7;
+    };
+
+    // Deterministic, so two runs of a benchmark measure the same world.
+    struct FRandom
+    {
+        uint64 State;
+
+        explicit FRandom(uint64 Seed) : State(Seed * 0x9E3779B97F4A7C15ull + 1) {}
+
+        uint32 Next()
+        {
+            State ^= State << 13;
+            State ^= State >> 7;
+            State ^= State << 17;
+            return (uint32)(State >> 16);
+        }
+
+        float Range(float Min, float Max)
+        {
+            return Min + (Max - Min) * ((float)(Next() & 0xFFFFFF) / (float)0xFFFFFF);
+        }
+    };
+
+    // Rolling hills steep enough in places to break the walkable surface into islands, as real terrain does.
+    float TerrainHeight(float X, float Z)
+    {
+        return 18.0f * std::sin(X * 0.004f) * std::cos(Z * 0.0035f)
+             + 6.0f * std::sin(X * 0.017f + 1.3f) * std::sin(Z * 0.021f)
+             + 1.5f * std::sin(X * 0.09f) * std::cos(Z * 0.07f + 0.4f);
+    }
+
+    void AddTerrain(FNavBuildInput& In, const FOpenWorldSpec& Spec)
+    {
+        const int32 Quads = (int32)(Spec.Size / Spec.TerrainStep);
+        const float Half = Spec.Size * 0.5f;
+        const uint32 Base = (uint32)In.Vertices.size();
+        for (int32 Row = 0; Row <= Quads; ++Row)
+        {
+            for (int32 Col = 0; Col <= Quads; ++Col)
+            {
+                const float X = -Half + (float)Col * Spec.TerrainStep;
+                const float Z = -Half + (float)Row * Spec.TerrainStep;
+                In.Vertices.push_back(FVector3(X, TerrainHeight(X, Z), Z));
+            }
+        }
+        const uint32 Stride = (uint32)Quads + 1;
+        for (uint32 Row = 0; Row < (uint32)Quads; ++Row)
+        {
+            for (uint32 Col = 0; Col < (uint32)Quads; ++Col)
+            {
+                const uint32 A = Base + Row * Stride + Col;
+                const uint32 B = A + 1;
+                const uint32 C = A + Stride;
+                const uint32 D = C + 1;
+                In.Indices.insert(In.Indices.end(), { A, C, B, B, C, D });
+            }
+        }
+    }
+
+    // A yawed box standing on the terrain, wound so its top faces up like any authored collider.
+    void AddBox(FNavBuildInput& In, float X, float Z, const FVector3& Half, float Yaw)
+    {
+        const float Y = TerrainHeight(X, Z) + Half.y - 0.5f;
+        const float C = std::cos(Yaw);
+        const float S = std::sin(Yaw);
+        const uint32 Base = (uint32)In.Vertices.size();
+        for (int32 Corner = 0; Corner < 8; ++Corner)
+        {
+            const float LX = (Corner & 1) ? Half.x : -Half.x;
+            const float LY = (Corner & 2) ? Half.y : -Half.y;
+            const float LZ = (Corner & 4) ? Half.z : -Half.z;
+            In.Vertices.push_back(FVector3(X + LX * C - LZ * S, Y + LY, Z + LX * S + LZ * C));
+        }
+        constexpr uint32 Faces[12][3] = {
+            {2, 6, 7}, {2, 7, 3}, {0, 1, 5}, {0, 5, 4}, {0, 4, 6}, {0, 6, 2},
+            {1, 3, 7}, {1, 7, 5}, {4, 5, 7}, {4, 7, 6}, {0, 2, 3}, {0, 3, 1},
+        };
+        for (const auto& Face : Faces)
+        {
+            In.Indices.insert(In.Indices.end(), { Base + Face[0], Base + Face[1], Base + Face[2] });
+        }
+    }
+
+    FNavBuildInput MakeOpenWorld(const FOpenWorldSpec& Spec)
+    {
+        FNavBuildInput In;
+        In.Settings.TileSizeVoxels = 128;
+        AddTerrain(In, Spec);
+
+        FRandom Random(Spec.Seed);
+        const float Half = Spec.Size * 0.5f - 8.0f;
+        for (int32 i = 0; i < Spec.Buildings; ++i)
+        {
+            AddBox(In, Random.Range(-Half, Half), Random.Range(-Half, Half),
+                FVector3(Random.Range(3.0f, 9.0f), Random.Range(3.0f, 8.0f), Random.Range(3.0f, 9.0f)), Random.Range(0.0f, 3.14f));
+        }
+        for (int32 i = 0; i < Spec.Rocks; ++i)
+        {
+            AddBox(In, Random.Range(-Half, Half), Random.Range(-Half, Half),
+                FVector3(Random.Range(0.4f, 1.6f), Random.Range(0.5f, 1.5f), Random.Range(0.4f, 1.6f)), Random.Range(0.0f, 3.14f));
+        }
+
+        In.BoundsMin = FVector3(-Spec.Size * 0.5f, -40.0f, -Spec.Size * 0.5f);
+        In.BoundsMax = FVector3( Spec.Size * 0.5f,  40.0f,  Spec.Size * 0.5f);
+        return In;
+    }
+
+    FOpenWorldSpec SpecFromEnvironment()
+    {
+        FOpenWorldSpec Spec;
+        if (const char* Size = std::getenv("LUMINA_NAV_BENCH_SIZE"))
+        {
+            Spec.Size = Math::Max(128.0f, (float)std::atof(Size));
+        }
+        // Density held per square kilometer, so a bigger world is the same world, only more of it.
+        const float SquareKm = (Spec.Size * Spec.Size) / 1.0e6f;
+        Spec.Buildings = (int32)(1500.0f * SquareKm);
+        Spec.Rocks     = (int32)(12000.0f * SquareKm);
+        return Spec;
+    }
+
+    struct FBakedWorld
+    {
+        FOpenWorldSpec       Spec;
+        FNavBuildOutput      Layout;
+        TUniquePtr<FNavMesh> Mesh;
+        TVector<FVector3>    Points;
+    };
+
+    void Bake(FBakedWorld& World)
+    {
+        World.Spec = SpecFromEnvironment();
+        FNavBuildInput Input = MakeOpenWorld(World.Spec);
+        std::printf("[NavBench] world %.0f m, %zu verts, %zu tris (%d buildings, %d rocks)\n",
+            World.Spec.Size, Input.Vertices.size(), Input.Indices.size() / 3, World.Spec.Buildings, World.Spec.Rocks);
+
+        PlatformTime::FStopwatch BakeWatch;
+        FNavBuildOutput Output;
+        const bool bBaked = NavMeshBuilder::BakeSync(Move(Input), Output);
+        const double BakeMs = BakeWatch.ElapsedMilliseconds();
+
+        size_t Bytes = 0;
+        int32 Walkable = 0;
+        for (const SNavTileData& Tile : Output.Tiles)
+        {
+            Bytes += Tile.Blob.size();
+            Walkable += Tile.Blob.empty() ? 0 : 1;
+        }
+        std::printf("[NavBench] bake %s in %.0f ms, %d tiles (%d walkable, %dx%d grid, %.1f m each), %.1f MiB\n",
+            bBaked ? "ok" : "FAILED", BakeMs, (int32)Output.Tiles.size(), Walkable, Output.TilesX, Output.TilesY,
+            Output.TileWorldSize, (double)Bytes / (1024.0 * 1024.0));
+
+        World.Layout = Output;
+        World.Layout.Tiles.clear();
+
+        PlatformTime::FStopwatch HydrateWatch;
+        World.Mesh = MakeUnique<FNavMesh>();
+        World.Mesh->Initialize(Output.Origin, Output.TileWorldSize, Math::Max(1, (int32)Output.Tiles.size()), Output.MaxPolysPerTile, Move(Output.Tiles));
+        std::printf("[NavBench] hydrate %.0f ms\n", HydrateWatch.ElapsedMilliseconds());
+
+        // Every query starts and ends on the mesh, so a miss means the query failed rather than the sample.
+        FRandom Random(World.Spec.Seed + 11);
+        const float Half = World.Spec.Size * 0.5f - 4.0f;
+        FNavQueryFilter Filter;
+        int32 Attempts = 0;
+        while (World.Points.size() < 4096 && Attempts++ < 100000)
+        {
+            const float X = Random.Range(-Half, Half);
+            const float Z = Random.Range(-Half, Half);
+            FVector3 OnMesh;
+            // Ground only, since a rooftop or a rock top is an island no path from the ground can reach.
+            if (World.Mesh->ProjectPoint(FVector3(X, TerrainHeight(X, Z), Z), FVector3(2.0f, 8.0f, 2.0f), Filter, OnMesh)
+                && std::fabs(OnMesh.y - TerrainHeight(OnMesh.x, OnMesh.z)) < 0.5f)
+            {
+                World.Points.push_back(OnMesh);
+            }
+        }
+    }
+
+    struct FPathBand
+    {
+        const char* Name;
+        float MinDistance;
+        float MaxDistance;
+    };
+
+    struct FPathStats
+    {
+        int32  Succeeded = 0;
+        int32  Partial = 0;
+        int32  Truncated = 0;
+        int32  Corners = 0;
+        double Total = 0.0;
+        double Worst = 0.0;
+
+        void Add(const FNavPath& Path, bool bFound, double Ms)
+        {
+            Total += Ms;
+            Worst = Math::Max(Worst, Ms);
+            Succeeded += bFound && !Path.bPartial ? 1 : 0;
+            Partial += Path.bPartial ? 1 : 0;
+            Truncated += Path.bTruncated ? 1 : 0;
+            Corners += (int32)Path.Corners.size();
+        }
+
+        void Print(const char* Band, const char* Mode, int32 Ran) const
+        {
+            std::printf("[NavBench] path %-6s %-6s %4d queries, %8.1f us avg, %7.2f ms worst, %5.1f%% full, %5.1f%% partial, %5.1f%% truncated, %.0f corners avg\n",
+                Band, Mode, Ran, Ran ? Total * 1000.0 / Ran : 0.0, Worst, Ran ? 100.0 * Succeeded / Ran : 0.0,
+                Ran ? 100.0 * Partial / Ran : 0.0, Ran ? 100.0 * Truncated / Ran : 0.0, Ran ? (double)Corners / Ran : 0.0);
+        }
+    };
+
+    float PathLength(const FNavPath& Path)
+    {
+        float Length = 0.0f;
+        for (size_t i = 1; i < Path.Corners.size(); ++i)
+        {
+            Length += Math::Length(Path.Corners[i] - Path.Corners[i - 1]);
+        }
+        return Length;
+    }
+
+    // Holds the hierarchical threshold for one query, so the same pair can be asked both ways.
+    bool FindPathWithThreshold(const FBakedWorld& World, const FVector3& A, const FVector3& B, float Threshold, FNavPath& Path, double& Ms)
+    {
+        float& Setting = GetMutableDefault<CNavigationSettings>()->HierarchicalPathDistance;
+        const float Saved = Setting;
+        Setting = Threshold;
+        FNavQueryFilter Filter;
+        PlatformTime::FStopwatch Watch;
+        const bool bFound = World.Mesh->FindPath(A, B, Filter, Path);
+        Ms = Watch.ElapsedMilliseconds();
+        Setting = Saved;
+        return bFound;
+    }
+
+    // Every pair runs as one flat Detour search and as a tiered one, and where both arrive their lengths are compared.
+    void RunPathBand(const FBakedWorld& World, const FPathBand& Band, int32 Count)
+    {
+        const float Tiered = GetDefault<CNavigationSettings>()->HierarchicalPathDistance;
+        FRandom Random(World.Spec.Seed + 101);
+        FPathStats Direct, Hierarchical;
+        int32 Ran = 0, Compared = 0, Lost = 0;
+        double LengthRatio = 0.0;
+        int32 Attempts = 0;
+        while (Ran < Count && Attempts < Count * 200)
+        {
+            ++Attempts;
+            const FVector3& A = World.Points[Random.Next() % World.Points.size()];
+            const FVector3& B = World.Points[Random.Next() % World.Points.size()];
+            const float Distance = std::sqrt((A.x - B.x) * (A.x - B.x) + (A.z - B.z) * (A.z - B.z));
+            if (Distance < Band.MinDistance || Distance >= Band.MaxDistance)
+            {
+                continue;
+            }
+
+            FNavPath DirectPath, TieredPath;
+            double DirectMs = 0.0, TieredMs = 0.0;
+            const bool bDirect = FindPathWithThreshold(World, A, B, 0.0f, DirectPath, DirectMs);
+            const bool bTiered = FindPathWithThreshold(World, A, B, Tiered, TieredPath, TieredMs);
+            Direct.Add(DirectPath, bDirect, DirectMs);
+            Hierarchical.Add(TieredPath, bTiered, TieredMs);
+            ++Ran;
+
+            Lost += DirectPath.Result == ENavPathResult::Success && TieredPath.Result != ENavPathResult::Success ? 1 : 0;
+            if (DirectPath.Result == ENavPathResult::Success && TieredPath.Result == ENavPathResult::Success)
+            {
+                LengthRatio += PathLength(TieredPath) / Math::Max(0.01f, PathLength(DirectPath));
+                ++Compared;
+            }
+        }
+        Direct.Print(Band.Name, "direct", Ran);
+        Hierarchical.Print(Band.Name, "tiered", Ran);
+        if (Compared > 0)
+        {
+            std::printf("[NavBench] path %-6s tiered length is %.3fx direct over %d pairs both completed, %d direct completed that tiered did not\n",
+                Band.Name, LengthRatio / Compared, Compared, Lost);
+        }
+    }
+
+    void RunPathQueries(const FBakedWorld& World)
+    {
+        const FPathBand Bands[] = {
+            { "short",  5.0f,    50.0f },
+            { "medium", 50.0f,   250.0f },
+            { "long",   250.0f,  1000.0f },
+            { "huge",   1000.0f, 1.0e9f },
+        };
+        for (const FPathBand& Band : Bands)
+        {
+            RunPathBand(World, Band, 400);
+        }
+    }
+
+    // The shape of a crowd repathing at once, every worker asking at the same moment.
+    void RunParallelPaths(const FBakedWorld& World)
+    {
+        constexpr uint32 Queries = 8192;
+        std::atomic<int32> Unavailable{ 0 };
+        PlatformTime::FStopwatch Watch;
+        Task::ParallelFor(Queries, [&](uint32 Index)
+        {
+            FRandom Random(Index * 2654435761u + 3);
+            const FVector3& A = World.Points[Random.Next() % World.Points.size()];
+            const FVector3& B = World.Points[Random.Next() % World.Points.size()];
+            FNavPath Path;
+            FNavQueryFilter Filter;
+            World.Mesh->FindPath(A, B, Filter, Path);
+            if (Path.bQueryUnavailable)
+            {
+                Unavailable.fetch_add(1, std::memory_order_relaxed);
+            }
+        });
+        const double Ms = Watch.ElapsedMilliseconds();
+        std::printf("[NavBench] parallel %u random paths in %.1f ms (%.0f paths/s), %d refused for want of a query slot\n",
+            Queries, Ms, Queries / (Ms / 1000.0), Unavailable.load());
+    }
+
+    void RunPointQueries(const FBakedWorld& World)
+    {
+        FNavQueryFilter Filter;
+        FRandom Random(World.Spec.Seed + 202);
+
+        constexpr int32 Projects = 100000;
+        PlatformTime::FStopwatch ProjectWatch;
+        int32 Hits = 0;
+        for (int32 i = 0; i < Projects; ++i)
+        {
+            const FVector3& P = World.Points[Random.Next() % World.Points.size()];
+            FVector3 Out;
+            Hits += World.Mesh->ProjectPoint(P + FVector3(0.5f, 1.0f, -0.5f), FVector3(2.0f, 8.0f, 2.0f), Filter, Out) ? 1 : 0;
+        }
+        std::printf("[NavBench] project %d points, %.2f us avg, %d hit\n", Projects, ProjectWatch.ElapsedMilliseconds() * 1000.0 / Projects, Hits);
+
+        constexpr int32 Rays = 20000;
+        PlatformTime::FStopwatch RayWatch;
+        int32 Blocked = 0;
+        for (int32 i = 0; i < Rays; ++i)
+        {
+            const FVector3& A = World.Points[Random.Next() % World.Points.size()];
+            const FVector3 B = A + FVector3(Random.Range(-40.0f, 40.0f), 0.0f, Random.Range(-40.0f, 40.0f));
+            SNavRaycastResult Hit;
+            World.Mesh->Raycast(A, B, Filter, Hit);
+            Blocked += Hit.bHit ? 1 : 0;
+        }
+        std::printf("[NavBench] raycast %d rays up to 40 m, %.2f us avg, %d blocked\n", Rays, RayWatch.ElapsedMilliseconds() * 1000.0 / Rays, Blocked);
+
+        constexpr int32 Randoms = 20000;
+        PlatformTime::FStopwatch RandomWatch;
+        for (int32 i = 0; i < Randoms; ++i)
+        {
+            FVector3 Out;
+            World.Mesh->FindRandomPoint(World.Points[Random.Next() % World.Points.size()], 30.0f, Filter, Out);
+        }
+        std::printf("[NavBench] random point %d within 30 m, %.2f us avg\n", Randoms, RandomWatch.ElapsedMilliseconds() * 1000.0 / Randoms);
+    }
+
+    // What a hot rebake of a few dirty tiles costs once the world is big, the case dynamic rebuild lives on.
+    void RunTileRebake(FBakedWorld& World)
+    {
+        FNavBuildInput Input = MakeOpenWorld(World.Spec);
+        TVector<FNavTileCoord> Coords;
+        const int32 CX = World.Layout.TilesX / 2;
+        const int32 CY = World.Layout.TilesY / 2;
+        for (int32 DY = 0; DY < 4; ++DY)
+        {
+            for (int32 DX = 0; DX < 4; ++DX)
+            {
+                Coords.push_back(FNavTileCoord{ CX + DX, CY + DY });
+            }
+        }
+
+        PlatformTime::FStopwatch Watch;
+        TVector<SNavTileData> Baked;
+        NavMeshBuilder::BakeTiles(Input, World.Layout, Coords, Baked);
+        const double BakeMs = Watch.ElapsedMilliseconds();
+
+        PlatformTime::FStopwatch SwapWatch;
+        for (SNavTileData& Tile : Baked)
+        {
+            World.Mesh->RebuildTile(Tile.X, Tile.Y, Move(Tile.Blob));
+        }
+        std::printf("[NavBench] rebake 16 tiles from the whole world's %zu tris in %.1f ms, swap %.2f ms\n",
+            Input.Indices.size() / 3, BakeMs, SwapWatch.ElapsedMilliseconds());
+
+        // The first long path after a change relabels the cluster islands, which every later one reuses.
+        FNavQueryFilter Filter;
+        const FVector3 From = World.Points.front();
+        const FVector3 To = World.Points.back();
+        for (const char* When : { "first", "second" })
+        {
+            FNavPath Path;
+            PlatformTime::FStopwatch PathWatch;
+            World.Mesh->FindPath(From, To, Filter, Path);
+            std::printf("[NavBench] %s path after the rebake, %.0f m apart, %.2f ms\n", When, Math::Length(To - From), PathWatch.ElapsedMilliseconds());
+        }
+    }
+}
+
+// One test, so the world bakes once and every measurement reads the same mesh.
+TEST(NavBenchmark, DISABLED_OpenWorld)
+{
+    FBakedWorld World;
+    Bake(World);
+    ASSERT_TRUE(World.Mesh && World.Mesh->IsReady());
+    ASSERT_FALSE(World.Points.empty());
+
+    RunPathQueries(World);
+    RunParallelPaths(World);
+    RunPointQueries(World);
+    RunTileRebake(World);
+}
+
+// The engine side of open world navigation, where every collider in the level is a source the system tracks.
+TEST(NavBenchmark, DISABLED_WorldSources)
+{
+    float Size = 2048.0f;
+    if (const char* Env = std::getenv("LUMINA_NAV_BENCH_SIZE"))
+    {
+        Size = Math::Max(256.0f, (float)std::atof(Env));
+    }
+    int32 ObstacleCount = 100000;
+    if (const char* Env = std::getenv("LUMINA_NAV_BENCH_SOURCES"))
+    {
+        ObstacleCount = Math::Max(0, std::atoi(Env));
+    }
+
+    NavTest::FNavWorld World;
+    PlatformTime::FStopwatch BuildWatch;
+    World.Create(Size);
+    TVector<ECS::FEntity> Obstacles;
+    Obstacles.reserve(ObstacleCount);
+    FRandom Random(99);
+    const float Half = Size * 0.5f - 4.0f;
+    for (int32 i = 0; i < ObstacleCount; ++i)
+    {
+        const FVector3 Extent(Random.Range(0.4f, 3.0f), Random.Range(0.5f, 2.5f), Random.Range(0.4f, 3.0f));
+        Obstacles.push_back(NavTest::SpawnBox(World.Registry(), FVector3(Random.Range(-Half, Half), Extent.y, Random.Range(-Half, Half)), Extent));
+    }
+    World.Nav().Settings.TileSizeVoxels = 128;
+    std::printf("[NavBench] world %.0f m with %d obstacles built in %.0f ms\n", Size, ObstacleCount, BuildWatch.ElapsedMilliseconds());
+
+    PlatformTime::FStopwatch StartWatch;
+    World.Start();
+    std::printf("[NavBench] system start, seeding the source index, %.0f ms\n", StartWatch.ElapsedMilliseconds());
+
+    PlatformTime::FStopwatch BakeWatch;
+    const bool bReady = World.WaitReady(600000.0);
+    std::printf("[NavBench] bake to ready %s in %.0f ms, %d tiles\n", bReady ? "ok" : "TIMED OUT", BakeWatch.ElapsedMilliseconds(), (int32)World.Nav().Tiles.size());
+    ASSERT_TRUE(bReady);
+
+    double Idle = 0.0, IdleWorst = 0.0;
+    constexpr int32 IdleTicks = 20;
+    for (int32 i = 0; i < IdleTicks; ++i)
+    {
+        const double Ms = World.Tick();
+        Idle += Ms;
+        IdleWorst = Math::Max(IdleWorst, Ms);
+    }
+    std::printf("[NavBench] idle tick with every source unchanged, %.2f ms avg, %.2f ms worst\n", Idle / IdleTicks, IdleWorst);
+
+    // A handful of things moving each frame, a door, a cart, a crate kicked across a yard.
+    double Moving = 0.0, MovingWorst = 0.0;
+    constexpr int32 MoveTicks = 20;
+    for (int32 i = 0; i < MoveTicks; ++i)
+    {
+        for (int32 Moved = 0; Moved < 10; ++Moved)
+        {
+            STransformComponent& Transform = World.Registry().Get<STransformComponent>(Obstacles[Random.Next() % Obstacles.size()]);
+            Transform.SetLocation(Transform.GetLocation() + FVector3(Random.Range(-2.0f, 2.0f), 0.0f, Random.Range(-2.0f, 2.0f)));
+        }
+        const double Ms = World.Tick();
+        Moving += Ms;
+        MovingWorst = Math::Max(MovingWorst, Ms);
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    std::printf("[NavBench] tick with 10 sources moving, %.2f ms avg, %.2f ms worst\n", Moving / MoveTicks, MovingWorst);
+
+    PlatformTime::FStopwatch DrainWatch;
+    const bool bDrained = World.WaitSettled(120000.0);
+    std::printf("[NavBench] dirty tiles drained %s in %.0f ms\n", bDrained ? "ok" : "TIMED OUT", DrainWatch.ElapsedMilliseconds());
+
+    World.Stop();
+}

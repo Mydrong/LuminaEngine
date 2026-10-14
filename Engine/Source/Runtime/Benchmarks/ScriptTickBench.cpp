@@ -65,7 +65,7 @@ namespace LuminaScriptTickBench
             Entities.push_back(Entity);
         }
 
-        ECS::Utils::SetPublishMovedTransforms(Registry, bPublish);
+        const uint32 Consumer = bPublish ? ECS::Utils::AddMovedTransformConsumer(Registry) : Constants::kIndexNoneU32;
         auto Storage = Registry.GetStorage<STransformComponent>();
         TVector<ECS::FEntity> Drained;
 
@@ -87,7 +87,7 @@ namespace LuminaScriptTickBench
             const uint64 YawEnd = PlatformTime::Cycles();
 
             Drained.clear();
-            ECS::Utils::DrainMovedTransforms(Registry, Drained);
+            ECS::Utils::DrainMovedTransforms(Registry, Consumer, Drained);
             ECS::Utils::ResolveAllDirtyTransforms(Registry);
             const uint64 DrainEnd = PlatformTime::Cycles();
 

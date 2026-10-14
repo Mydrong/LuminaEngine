@@ -85,6 +85,149 @@ namespace Lumina
             }
             return true;
         }
+
+        void PolyCenter(const dtNavMesh& Mesh, dtPolyRef Ref, float* Out)
+        {
+            const dtMeshTile* Tile = nullptr;
+            const dtPoly* Poly = nullptr;
+            Mesh.getTileAndPolyByRefUnsafe(Ref, &Tile, &Poly);
+            dtVset(Out, 0.0f, 0.0f, 0.0f);
+            for (int32 i = 0; i < Poly->vertCount; ++i)
+            {
+                dtVadd(Out, Out, &Tile->verts[Poly->verts[i] * 3]);
+            }
+            dtVscale(Out, Out, 1.0f / (float)Math::Max<int32>(1, Poly->vertCount));
+        }
+
+        // False once the corridor is full. A poly already near the tail cuts the loop back to it, where a segment doubled back.
+        bool AppendCorridor(dtPolyRef* Path, int32& PathLen, int32 MaxPath, const dtPolyRef* Segment, int32 Count)
+        {
+            constexpr int32 kLoopLookback = 64;
+            for (int32 i = 0; i < Count; ++i)
+            {
+                int32 Seen = -1;
+                for (int32 j = PathLen - 1; j >= Math::Max(0, PathLen - kLoopLookback) && Seen < 0; --j)
+                {
+                    Seen = Path[j] == Segment[i] ? j : -1;
+                }
+                if (Seen >= 0)
+                {
+                    PathLen = Seen + 1;
+                    continue;
+                }
+                if (PathLen == MaxPath)
+                {
+                    return false;
+                }
+                Path[PathLen++] = Segment[i];
+            }
+            return true;
+        }
+
+        // Plans over tile clusters, then has Detour search two segments ahead and keeps one, so its node pool never sees the whole distance.
+        bool FindLongCorridor(const dtNavMesh& Mesh, const FNavClusterGraph& Clusters, dtNavMeshQuery& Query, const dtQueryFilter& Filter,
+                              dtPolyRef StartRef, dtPolyRef EndRef, const float* StartPos, const float* EndPos, float SegmentLength,
+                              dtPolyRef* Path, int32& PathLen, int32 MaxPath, dtStatus& OutStatus)
+        {
+            TVector<FNavClusterGraph::FStep> Route;
+            const FNavClusterGraph::ERoute Planned = Clusters.FindRoute(Mesh, Filter, StartRef, EndRef, Unpack(StartPos), Unpack(EndPos), Route);
+            if (Planned == FNavClusterGraph::ERoute::Failed)
+            {
+                return false;
+            }
+
+            // An unreachable goal is swapped for the nearest point the start can reach, which Detour then walks to in full.
+            const bool bReachable = Planned == FNavClusterGraph::ERoute::Reached;
+            float GoalPos[3];
+            dtVcopy(GoalPos, EndPos);
+            const dtPolyRef GoalRef = bReachable ? EndRef : Clusters.NearestPoly(Mesh, Route.back().Key, Unpack(EndPos));
+            if (!bReachable)
+            {
+                PolyCenter(Mesh, GoalRef, GoalPos);
+            }
+            const dtStatus Arrived = bReachable ? DT_SUCCESS : (DT_SUCCESS | DT_PARTIAL_RESULT);
+
+            constexpr int32 kSegmentPolys = 1024;
+            dtPolyRef Segment[kSegmentPolys];
+            dtPolyRef CurrentRef = StartRef;
+            float CurrentPos[3];
+            dtVcopy(CurrentPos, StartPos);
+            int32 Progress = 0;
+            PathLen = 0;
+
+            const int32 MaxSegments = 2 * (int32)Route.size() + 8;
+            for (int32 Iteration = 0; Iteration < MaxSegments; ++Iteration)
+            {
+                int32 Target = Progress;
+                while (Target + 1 < (int32)Route.size() && Route[Target].Distance - Route[Progress].Distance < 2.0f * SegmentLength)
+                {
+                    ++Target;
+                }
+                const bool bFinal = Target + 1 >= (int32)Route.size();
+                const dtPolyRef TargetRef = bFinal ? GoalRef : Route[Target].EntryRef;
+                float TargetPos[3];
+                if (bFinal)
+                {
+                    dtVcopy(TargetPos, GoalPos);
+                }
+                else
+                {
+                    PolyCenter(Mesh, TargetRef, TargetPos);
+                }
+
+                int32 Count = 0;
+                const dtStatus Status = Query.findPath(CurrentRef, TargetRef, CurrentPos, TargetPos, &Filter, Segment, &Count, kSegmentPolys);
+                if (dtStatusFailed(Status) || Count == 0)
+                {
+                    return false;
+                }
+                const bool bReached = Segment[Count - 1] == TargetRef;
+                // Short of a target the clusters say is connected, and not for want of nodes, means the filter disagrees with the plan.
+                if (!bReached && (Status & DT_OUT_OF_NODES) == 0)
+                {
+                    return false;
+                }
+                if (bFinal && bReached)
+                {
+                    OutStatus = AppendCorridor(Path, PathLen, MaxPath, Segment, Count) ? Arrived : (DT_SUCCESS | DT_PARTIAL_RESULT | DT_BUFFER_TOO_SMALL);
+                    return true;
+                }
+
+                int32 Keep = 1;
+                float Covered = 0.0f;
+                float Previous[3];
+                dtVcopy(Previous, CurrentPos);
+                while (Keep < Count && Covered < SegmentLength)
+                {
+                    float Center[3];
+                    PolyCenter(Mesh, Segment[Keep], Center);
+                    Covered += dtVdist(Previous, Center);
+                    dtVcopy(Previous, Center);
+                    ++Keep;
+                }
+                if (!AppendCorridor(Path, PathLen, MaxPath, Segment, Keep))
+                {
+                    OutStatus = DT_SUCCESS | DT_PARTIAL_RESULT | DT_BUFFER_TOO_SMALL;
+                    return true;
+                }
+                CurrentRef = Path[PathLen - 1];
+                PolyCenter(Mesh, CurrentRef, CurrentPos);
+
+                int32 Nearest = Progress;
+                float NearestDistance = FLT_MAX;
+                for (int32 i = Progress; i <= Target; ++i)
+                {
+                    const float Distance = dtVdist(&Route[i].Center.x, CurrentPos);
+                    if (Distance < NearestDistance)
+                    {
+                        NearestDistance = Distance;
+                        Nearest = i;
+                    }
+                }
+                Progress = Math::Min(Math::Max(Nearest, Progress + 1), (int32)Route.size() - 1);
+            }
+            return false;
+        }
 #endif
     }
 
@@ -179,6 +322,8 @@ namespace Lumina
                 ++Added;
             }
         }
+        Clusters.Rebuild(*NavMesh);
+
         if (Stale > 0)
         {
             LOG_ERROR("FNavMesh::Initialize: {} of {} non-empty tiles were baked against a different Detour layout. Re-bake this navmesh.",
@@ -245,6 +390,7 @@ namespace Lumina
         if (NavMesh) dtFreeNavMesh(NavMesh);
 #endif
         QueryPool.clear();
+        Clusters.Reset(0);
         NavMesh = nullptr;
         bReady = false;
     }
@@ -332,14 +478,21 @@ namespace Lumina
 
         // Both buffers live on a half-megabyte fiber stack, so the corridor can afford to be generous.
         // The settings are clamped to these ceilings rather than sized dynamically, keeping the query heap free.
-        constexpr int32 MaxPolysCeiling = 1024;
+        constexpr int32 MaxPolysCeiling = 4096;
         constexpr int32 MaxStraightCeiling = 512;
+        constexpr float kSegmentTiles = 1.5f;
         const CNavigationSettings& NavSettings = *GetDefault<CNavigationSettings>();
         const int32 MaxPolys = Math::Clamp(NavSettings.MaxPathPolys, 16, MaxPolysCeiling);
 
         dtPolyRef Path[MaxPolysCeiling];
         int32 PathLen = 0;
-        const dtStatus PathStatus = Q.Get()->findPath(SRef, ERef, SNear, ENear, &F, Path, &PathLen, MaxPolys);
+        dtStatus PathStatus = 0;
+        const bool bLong = NavSettings.HierarchicalPathDistance > 0.0f && dtVdist2D(SNear, ENear) >= NavSettings.HierarchicalPathDistance
+            && FindLongCorridor(*NavMesh, Clusters, *Q.Get(), F, SRef, ERef, SNear, ENear, TileWorldSize * kSegmentTiles, Path, PathLen, MaxPolys, PathStatus);
+        if (!bLong)
+        {
+            PathStatus = Q.Get()->findPath(SRef, ERef, SNear, ENear, &F, Path, &PathLen, MaxPolys);
+        }
         if (dtStatusFailed(PathStatus) || PathLen == 0)
         {
             Out.Result = ENavPathResult::NoRoute;
@@ -589,6 +742,7 @@ namespace Lumina
             dtFree(Owned);
             return false;
         }
+        Clusters.AddTile(*NavMesh, *NavMesh->getTileByRef(NewRef));
         return true;
 #else
         (void)TileX; (void)TileY; (void)Blob;
@@ -607,6 +761,7 @@ namespace Lumina
         if (OldRef != 0)
         {
             NavMesh->removeTile(OldRef, nullptr, nullptr);
+            Clusters.RemoveTile(*NavMesh, NavMesh->decodePolyIdTile(OldRef), TileX, TileY);
         }
         return true;
 #else

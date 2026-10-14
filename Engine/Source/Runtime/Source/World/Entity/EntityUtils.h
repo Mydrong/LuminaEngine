@@ -128,16 +128,12 @@ namespace Lumina::ECS::Utils
 	// The bulk form, for entities a parallel writer already marked dirty with SetFromPhysicsUnqueued.
 	RUNTIME_API void QueueDirtyTransforms(FTransformDirtyGate* Gate, const ECS::FEntity* Entities, size_t Count);
 
-	// Start recording which entities the resolve actually moved, so a downstream cache (the render
-	// scene's persistent primitive table) can refresh just those instead of rescanning every entity.
-	// Off by default: nothing accumulates until a consumer opts in.
-	//
-	// The resolve is what clears bWorldDirty, so this is the only point where "who moved" is still
-	// observable. It reports the resolve's own output rather than duplicating its bookkeeping.
-	RUNTIME_API void SetPublishMovedTransforms(ECS::FRegistry& Registry, bool bEnable);
+	// Start recording which entities the resolve moved for one more consumer, such as the render scene or navigation, each draining its own copy.
+	RUNTIME_API uint32 AddMovedTransformConsumer(ECS::FRegistry& Registry);
+	RUNTIME_API void RemoveMovedTransformConsumer(ECS::FRegistry& Registry, uint32 Consumer);
 
-	// Appends every entity moved since the last drain. Game thread. False when none.
-	RUNTIME_API bool DrainMovedTransforms(ECS::FRegistry& Registry, TVector<ECS::FEntity>& Out);
+	// Appends every entity moved since this consumer last drained. Game thread. False when none.
+	RUNTIME_API bool DrainMovedTransforms(ECS::FRegistry& Registry, uint32 Consumer, TVector<ECS::FEntity>& Out);
 
 	// Reports an entity whose drawn pose changed while its transform did not.
 	RUNTIME_API void PublishMovedTransform(ECS::FRegistry& Registry, ECS::FEntity Entity);

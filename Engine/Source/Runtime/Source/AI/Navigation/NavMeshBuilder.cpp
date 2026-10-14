@@ -104,48 +104,100 @@ namespace Lumina::NavMeshBuilder
             TY1 = Math::Clamp((int32)std::floor((MaxZ - Grid.Origin.z) / Grid.TileWorldSize), 0, Grid.TilesY - 1);
         }
 
-        void BuildTileBins(const FNavBuildInput& In, const FTileGrid& Grid, FTileBins& Out)
+        // The tiles a bin pass fills, as a rectangle of the grid mapped to bin slots, with kIndexNone for tiles nobody asked for.
+        struct FBinTarget
         {
-            const int32 TileCount = Grid.TilesX * Grid.TilesY;
-            const int32 NumTris   = (int32)(In.Indices.size() / 3);
-            Out.Offsets.assign((size_t)TileCount + 1, 0u);
-            if (NumTris == 0 || In.Vertices.empty())
+            int32         X0 = 0;
+            int32         Y0 = 0;
+            int32         Width = 0;
+            int32         Height = 0;
+            int32         NumSlots = 0;
+            TVector<int32> SlotOf;
+        };
+
+        FBinTarget WholeGrid(const FTileGrid& Grid)
+        {
+            FBinTarget Target{ 0, 0, Grid.TilesX, Grid.TilesY, Grid.TilesX * Grid.TilesY };
+            Target.SlotOf.resize((size_t)Target.NumSlots);
+            Algo::Iota(Target.SlotOf.begin(), Target.SlotOf.end(), 0);
+            return Target;
+        }
+
+        template <typename TVisit>
+        FORCEINLINE void ForEachTriSlot(const FNavBuildInput& In, const FTileGrid& Grid, const FBinTarget& Target, int32 Tri, TVisit&& Visit)
+        {
+            int32 TX0, TY0, TX1, TY1;
+            TriTileRange(In, Grid, Tri, TX0, TY0, TX1, TY1);
+            TX0 = Math::Max(TX0, Target.X0);
+            TY0 = Math::Max(TY0, Target.Y0);
+            TX1 = Math::Min(TX1, Target.X0 + Target.Width - 1);
+            TY1 = Math::Min(TY1, Target.Y0 + Target.Height - 1);
+            for (int32 ty = TY0; ty <= TY1; ++ty)
+            {
+                for (int32 tx = TX0; tx <= TX1; ++tx)
+                {
+                    const int32 Slot = Target.SlotOf[(size_t)((ty - Target.Y0) * Target.Width + (tx - Target.X0))];
+                    if (Slot != Constants::kIndexNone)
+                    {
+                        Visit(Slot);
+                    }
+                }
+            }
+        }
+
+        // A counting sort split into chunks of triangles, each with its own tally row, so both passes run in parallel and keep the serial order.
+        void BuildTileBins(const FNavBuildInput& In, const FTileGrid& Grid, const FBinTarget& Target, FTileBins& Out)
+        {
+            constexpr uint32 kMinChunkTris = 16384;
+            const uint32 NumTris = (uint32)(In.Indices.size() / 3);
+            const uint32 NumSlots = (uint32)Target.NumSlots;
+            Out.Offsets.assign((size_t)NumSlots + 1, 0u);
+            Out.TriIndices.clear();
+            if (NumTris == 0 || NumSlots == 0 || In.Vertices.empty())
             {
                 return;
             }
 
-            // A counting sort, so tally per tile, prefix-sum into offsets, then scatter.
-            for (int32 t = 0; t < NumTris; ++t)
-            {
-                int32 TX0, TY0, TX1, TY1;
-                TriTileRange(In, Grid, t, TX0, TY0, TX1, TY1);
-                for (int32 ty = TY0; ty <= TY1; ++ty)
-                {
-                    for (int32 tx = TX0; tx <= TX1; ++tx)
-                    {
-                        ++Out.Offsets[(size_t)(ty * Grid.TilesX + tx) + 1];
-                    }
-                }
-            }
-            for (int32 i = 0; i < TileCount; ++i)
-            {
-                Out.Offsets[i + 1] += Out.Offsets[i];
-            }
+            // Capped by worker count rather than triangle count, since every chunk carries a tally for every slot.
+            const uint32 MaxChunks = Math::Max(1u, Jobs::GetNumWorkers() * 4);
+            const uint32 Chunks = Math::Clamp((NumTris + kMinChunkTris - 1) / kMinChunkTris, 1u, MaxChunks);
+            const uint32 ChunkTris = (NumTris + Chunks - 1) / Chunks;
+            TVector<uint32> Cursors((size_t)Chunks * NumSlots, 0u);
 
-            Out.TriIndices.resize(Out.Offsets[TileCount]);
-            TVector<uint32> Cursor(Out.Offsets.begin(), Out.Offsets.begin() + TileCount);
-            for (int32 t = 0; t < NumTris; ++t)
+            Task::ParallelFor(Chunks, [&](uint32 Chunk)
             {
-                int32 TX0, TY0, TX1, TY1;
-                TriTileRange(In, Grid, t, TX0, TY0, TX1, TY1);
-                for (int32 ty = TY0; ty <= TY1; ++ty)
+                uint32* Tally = &Cursors[(size_t)Chunk * NumSlots];
+                const uint32 End = Math::Min(NumTris, (Chunk + 1) * ChunkTris);
+                for (uint32 t = Chunk * ChunkTris; t < End; ++t)
                 {
-                    for (int32 tx = TX0; tx <= TX1; ++tx)
-                    {
-                        Out.TriIndices[Cursor[(size_t)(ty * Grid.TilesX + tx)]++] = t;
-                    }
+                    ForEachTriSlot(In, Grid, Target, (int32)t, [Tally](int32 Slot) { ++Tally[Slot]; });
+                }
+            }, 1, ETaskPriority::Background);
+
+            uint32 Running = 0;
+            for (uint32 Slot = 0; Slot < NumSlots; ++Slot)
+            {
+                Out.Offsets[Slot] = Running;
+                for (uint32 Chunk = 0; Chunk < Chunks; ++Chunk)
+                {
+                    uint32& Cursor = Cursors[(size_t)Chunk * NumSlots + Slot];
+                    const uint32 Count = Cursor;
+                    Cursor = Running;
+                    Running += Count;
                 }
             }
+            Out.Offsets[NumSlots] = Running;
+            Out.TriIndices.resize(Running);
+
+            Task::ParallelFor(Chunks, [&](uint32 Chunk)
+            {
+                uint32* Cursor = &Cursors[(size_t)Chunk * NumSlots];
+                const uint32 End = Math::Min(NumTris, (Chunk + 1) * ChunkTris);
+                for (uint32 t = Chunk * ChunkTris; t < End; ++t)
+                {
+                    ForEachTriSlot(In, Grid, Target, (int32)t, [&Out, Cursor, t](int32 Slot) { Out.TriIndices[Cursor[Slot]++] = (int32)t; });
+                }
+            }, 1, ETaskPriority::Background);
         }
 
 #if defined(LUMINA_HAS_RECAST)
@@ -530,7 +582,7 @@ namespace Lumina::NavMeshBuilder
 
         // Bin triangles per tile once so each tile bakes only its overlapping geometry.
         FTileBins Bins;
-        BuildTileBins(Input, Grid, Bins);
+        BuildTileBins(Input, Grid, WholeGrid(Grid), Bins);
 
         // Aggregate per-tile failures into one log line.
         std::atomic<uint32> FailCount{ 0 };
@@ -662,35 +714,37 @@ namespace Lumina::NavMeshBuilder
 
         const FTileGrid Grid = GridFromLayout(Input, BaseLayout);
 
-        THashMap<uint64, int32> SlotByKey;
-        SlotByKey.reserve(Coords.size());
+        // Only the rectangle around the requested tiles gets slots, so a triangle anywhere else costs its bounds and nothing more.
+        FBinTarget Target;
+        Target.X0 = Grid.TilesX;
+        Target.Y0 = Grid.TilesY;
+        int32 X1 = -1, Y1 = -1;
         for (int32 i = 0; i < (int32)Coords.size(); ++i)
         {
-            SlotByKey[NavTile::PackKey(Coords[i].X, Coords[i].Y)] = i;
             Out[i].X = Coords[i].X;
             Out[i].Y = Coords[i].Y;
-        }
-
-        // One pass over the geometry fills every requested tile, instead of one pass per tile.
-        TVector<TVector<int32>> Bins;
-        Bins.resize(Coords.size());
-        const int32 NumTris = (int32)(Input.Indices.size() / 3);
-        for (int32 t = 0; t < NumTris; ++t)
-        {
-            int32 TX0, TY0, TX1, TY1;
-            TriTileRange(Input, Grid, t, TX0, TY0, TX1, TY1);
-            for (int32 ty = TY0; ty <= TY1; ++ty)
+            if (Coords[i].X >= 0 && Coords[i].X < Grid.TilesX && Coords[i].Y >= 0 && Coords[i].Y < Grid.TilesY)
             {
-                for (int32 tx = TX0; tx <= TX1; ++tx)
-                {
-                    auto It = SlotByKey.find(NavTile::PackKey(tx, ty));
-                    if (It != SlotByKey.end())
-                    {
-                        Bins[It->second].push_back(t);
-                    }
-                }
+                Target.X0 = Math::Min(Target.X0, Coords[i].X);
+                Target.Y0 = Math::Min(Target.Y0, Coords[i].Y);
+                X1 = Math::Max(X1, Coords[i].X);
+                Y1 = Math::Max(Y1, Coords[i].Y);
             }
         }
+        Target.Width = Math::Max(0, X1 - Target.X0 + 1);
+        Target.Height = Math::Max(0, Y1 - Target.Y0 + 1);
+        Target.NumSlots = (int32)Coords.size();
+        Target.SlotOf.assign((size_t)Target.Width * Target.Height, Constants::kIndexNone);
+        for (int32 i = 0; i < (int32)Coords.size(); ++i)
+        {
+            if (Coords[i].X >= Target.X0 && Coords[i].X <= X1 && Coords[i].Y >= Target.Y0 && Coords[i].Y <= Y1)
+            {
+                Target.SlotOf[(size_t)((Coords[i].Y - Target.Y0) * Target.Width + (Coords[i].X - Target.X0))] = i;
+            }
+        }
+
+        FTileBins Bins;
+        BuildTileBins(Input, Grid, Target, Bins);
 
         // A tile is several milliseconds no one can preempt, so a runtime rebake takes a few lanes rather than every worker the frame needs.
         const uint32 Lanes = Math::Clamp(Jobs::GetNumWorkers() / kRebakeWorkerShare, 1u, (uint32)Coords.size());
@@ -700,8 +754,9 @@ namespace Lumina::NavMeshBuilder
             for (uint32 i = NextTile.fetch_add(1, std::memory_order_relaxed); i < (uint32)Coords.size();
                  i = NextTile.fetch_add(1, std::memory_order_relaxed))
             {
-                const TVector<int32>& Tris = Bins[i];
-                BakeTile(Input, Grid, Coords[i].X, Coords[i].Y, Tris.empty() ? nullptr : Tris.data(), (int32)Tris.size(), Out[i]);
+                const uint32 Begin = Bins.Offsets[i];
+                const uint32 End = Bins.Offsets[i + 1];
+                BakeTile(Input, Grid, Coords[i].X, Coords[i].Y, End > Begin ? &Bins.TriIndices[Begin] : nullptr, (int32)(End - Begin), Out[i]);
             }
         }, 1, ETaskPriority::Background);
     }

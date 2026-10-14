@@ -75,7 +75,7 @@ namespace Lumina
         {
             ECS::FRegistry& Registry = ECS::GetWorldRegistry(*World);
 
-            ECS::Utils::SetPublishMovedTransforms(Registry, true);
+            MovedTransformConsumer = ECS::Utils::AddMovedTransformConsumer(Registry);
 
             ScenePrimitives.Reset(&Registry);
         }
@@ -233,10 +233,8 @@ namespace Lumina
         if (World != nullptr)
         {
             ECS::FRegistry& Registry = ECS::GetWorldRegistry(*World);
-            ECS::Utils::SetPublishMovedTransforms(Registry, false);
-            MovedTransformScratch.clear();
-            ECS::Utils::DrainMovedTransforms(Registry, MovedTransformScratch);
-            MovedTransformScratch.clear();
+            ECS::Utils::RemoveMovedTransformConsumer(Registry, MovedTransformConsumer);
+            MovedTransformConsumer = Constants::kIndexNoneU32;
 
             ScenePrimitives.Reset(&Registry);
         }

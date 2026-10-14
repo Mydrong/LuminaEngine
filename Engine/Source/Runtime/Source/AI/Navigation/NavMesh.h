@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cfloat>
+#include "AI/Navigation/NavClusterGraph.h"
 #include "AI/Navigation/NavTypes.h"
 #include "Core/Threading/Sync.h"
 
@@ -151,6 +152,9 @@ namespace Lumina
     private:
 
         dtNavMesh*                          NavMesh = nullptr;
+
+        // Written only under the exclusive topology lock, alongside the tiles it describes.
+        FNavClusterGraph                    Clusters;
 
         // Shared by every query, exclusive for tile mutation. addTile rewrites the link arrays of up to
         // eight neighbours, so a tile swap is never local and the whole mesh is the only safe granularity.

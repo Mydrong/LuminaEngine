@@ -1,11 +1,13 @@
 #include "gtest/gtest.h"
 
 #include <cfloat>
+#include <cmath>
 
 #include "AI/Navigation/NavMesh.h"
 #include "AI/Navigation/NavMeshBuilder.h"
 #include "AI/Navigation/NavTileStreamer.h"
 #include "AI/Navigation/NavTypes.h"
+#include "Config/NavigationSettings.h"
 #include <atomic>
 #include <vector>
 
@@ -990,4 +992,147 @@ TEST(NavMeshBuild, LargeRaisedMeshLeavesNoRingOfEmptyTiles)
     const int32 EdgeRing = 2 * (Out.TilesX + Out.TilesY);
     EXPECT_LE(Empty, EdgeRing) << Empty << " empty tiles on a " << Out.TilesX << "x" << Out.TilesY
                                << " grid:\n" << Map;
+}
+
+namespace
+{
+    // The query pool is sized from the settings when a mesh initializes, so a test holds them until it is done.
+    struct FQuerySettingsScope
+    {
+        CNavigationSettings& Settings = *GetMutableDefault<CNavigationSettings>();
+        int32 SavedPool = Settings.QueryNodePoolSize;
+        float SavedDistance = Settings.HierarchicalPathDistance;
+
+        explicit FQuerySettingsScope(int32 NodePool) { Settings.QueryNodePoolSize = NodePool; }
+        ~FQuerySettingsScope()
+        {
+            Settings.QueryNodePoolSize = SavedPool;
+            Settings.HierarchicalPathDistance = SavedDistance;
+        }
+    };
+
+    constexpr float kMazeHalf = 80.0f;
+    constexpr float kMazeWallSpacing = 16.0f;
+    constexpr int32 kMazeWalls = 9;
+    constexpr float kMazeGap = 6.0f;
+    const FVector3 kMazeStart(-75.0f, 0.0f, 0.0f);
+    const FVector3 kMazeEnd(75.0f, 0.0f, 0.0f);
+
+    float MazeWallX(int32 Wall)
+    {
+        return -kMazeWallSpacing * (kMazeWalls / 2) + kMazeWallSpacing * (float)Wall;
+    }
+
+    // Walls across the whole floor with the gap at alternating ends, so the only route zigzags many times its straight length.
+    FNavBuildInput MakeSerpentine(int32 ClosedWall = -1)
+    {
+        FNavBuildInput In;
+        In.Settings.CellSize = 0.5f;
+        In.Settings.CellHeight = 0.2f;
+        In.Settings.AgentRadius = 0.4f;
+        In.Settings.AgentHeight = 1.8f;
+        In.Settings.TileSizeVoxels = 32;
+        AddGroundQuad(In, -kMazeHalf, -kMazeHalf, kMazeHalf, kMazeHalf, 0.0f);
+        for (int32 Wall = 0; Wall < kMazeWalls; ++Wall)
+        {
+            const bool bGapHigh = Wall % 2 == 0;
+            const float MinZ = bGapHigh || Wall == ClosedWall ? -kMazeHalf - 4.0f : -kMazeHalf + kMazeGap;
+            const float MaxZ = !bGapHigh || Wall == ClosedWall ? kMazeHalf + 4.0f : kMazeHalf - kMazeGap;
+            In.AreaVolumes.push_back(MakeBoxVolume(MazeWallX(Wall) - 1.0f, MinZ, MazeWallX(Wall) + 1.0f, MaxZ, -2.0f, 2.0f, (uint8)ENavArea::Null));
+        }
+        GrowBounds(In, 3.0f);
+        return In;
+    }
+
+    FNavPath FindMazePath(const FNavMesh& Mesh, float HierarchicalDistance, const FVector3& Start = kMazeStart, const FVector3& End = kMazeEnd)
+    {
+        GetMutableDefault<CNavigationSettings>()->HierarchicalPathDistance = HierarchicalDistance;
+        FNavQueryFilter Filter;
+        FNavPath Path;
+        Mesh.FindPath(Start, End, Filter, Path);
+        return Path;
+    }
+
+    // Rebakes the tile columns under one wall from Input, the way a dynamic obstacle swaps tiles under a live mesh.
+    void RebakeWall(FNavMesh& Mesh, const FNavBuildOutput& Layout, const FNavBuildInput& Input, int32 Wall)
+    {
+        TVector<FNavTileCoord> Coords;
+        for (float X : { MazeWallX(Wall) - 1.5f, MazeWallX(Wall) + 1.5f })
+        {
+            const int32 Column = (int32)std::floor((X - Layout.Origin.x) / Layout.TileWorldSize);
+            for (int32 Row = 0; Row < Layout.TilesY; ++Row)
+            {
+                Coords.push_back(FNavTileCoord{ Column, Row });
+            }
+        }
+        TVector<SNavTileData> Baked;
+        NavMeshBuilder::BakeTiles(Input, Layout, Coords, Baked);
+        for (SNavTileData& Tile : Baked)
+        {
+            Mesh.RebuildTile(Tile.X, Tile.Y, Move(Tile.Blob));
+        }
+    }
+}
+
+TEST(NavHierarchy, AMazeTooBigForTheNodePoolStillPathsEndToEnd)
+{
+    FQuerySettingsScope Scope(128);
+    TUniquePtr<FNavMesh> Mesh = BakeAndHydrate(MakeSerpentine());
+    ASSERT_NE(Mesh, nullptr);
+
+    const FNavPath Direct = FindMazePath(*Mesh, 0.0f);
+    EXPECT_NE(Direct.Result, ENavPathResult::Success) << "the maze has to outgrow the node pool, or this proves nothing";
+
+    const FNavPath Tiered = FindMazePath(*Mesh, 32.0f);
+    ASSERT_EQ(Tiered.Result, ENavPathResult::Success) << ToString(Tiered.Result);
+    EXPECT_LT(Math::Length(Tiered.Corners.back() - kMazeEnd), 0.5f);
+
+    float Length = 0.0f;
+    for (size_t i = 1; i < Tiered.Corners.size(); ++i)
+    {
+        Length += Math::Length(Tiered.Corners[i] - Tiered.Corners[i - 1]);
+    }
+    EXPECT_GT(Length, (float)kMazeWalls * kMazeHalf) << "a path this short went through a wall instead of round it";
+}
+
+TEST(NavHierarchy, AnUnreachableGoalComesBackPartialAtTheNearestReachablePoint)
+{
+    FQuerySettingsScope Scope(2048);
+    FNavBuildInput In;
+    ApplyTestSettings(In);
+    AddGroundQuad(In, -60.0f, -8.0f, -20.0f, 8.0f, 0.0f);
+    AddGroundQuad(In,  20.0f, -8.0f,  60.0f, 8.0f, 0.0f);
+    GrowBounds(In, 3.0f);
+    TUniquePtr<FNavMesh> Mesh = BakeAndHydrate(std::move(In));
+    ASSERT_NE(Mesh, nullptr);
+
+    const FNavPath Path = FindMazePath(*Mesh, 32.0f, FVector3(-55.0f, 0.0f, 0.0f), FVector3(55.0f, 0.0f, 0.0f));
+    EXPECT_EQ(Path.Result, ENavPathResult::Partial) << ToString(Path.Result);
+    EXPECT_FALSE(Path.bTruncated);
+    ASSERT_FALSE(Path.Corners.empty());
+    EXPECT_GT(Path.Corners.back().x, -22.0f) << "the partial path stops at the edge facing the goal";
+}
+
+TEST(NavHierarchy, RebakedTilesThatCloseAndReopenAGapChangeTheRoute)
+{
+    FQuerySettingsScope Scope(2048);
+    const FNavBuildInput Open = MakeSerpentine();
+    const FNavBuildInput Closed = MakeSerpentine(kMazeWalls / 2);
+
+    FNavBuildOutput Out;
+    ASSERT_TRUE(NavMeshBuilder::BakeSync(FNavBuildInput(Open), Out));
+    FNavBuildOutput Layout = Out;
+    Layout.Tiles.clear();
+    FNavMesh Mesh;
+    ASSERT_TRUE(Mesh.Initialize(Out.Origin, Out.TileWorldSize, Out.MaxTiles, Out.MaxPolysPerTile, std::move(Out.Tiles)));
+    ASSERT_EQ(FindMazePath(Mesh, 32.0f).Result, ENavPathResult::Success);
+
+    RebakeWall(Mesh, Layout, Closed, kMazeWalls / 2);
+    const FNavPath Blocked = FindMazePath(Mesh, 32.0f);
+    EXPECT_EQ(Blocked.Result, ENavPathResult::Partial) << ToString(Blocked.Result);
+    ASSERT_FALSE(Blocked.Corners.empty());
+    EXPECT_LT(Blocked.Corners.back().x, MazeWallX(kMazeWalls / 2)) << "the closed wall stops the path on its near side";
+
+    RebakeWall(Mesh, Layout, Open, kMazeWalls / 2);
+    EXPECT_EQ(FindMazePath(Mesh, 32.0f).Result, ENavPathResult::Success);
 }

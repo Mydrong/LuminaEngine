@@ -1797,6 +1797,7 @@ namespace Lumina
 
         FScenePrimitiveSet                      ScenePrimitives;
         TVector<ECS::FEntity>                   MovedTransformScratch;
+        uint32                                  MovedTransformConsumer = Constants::kIndexNoneU32;
         TVector<uint64>                         DirtySlotBits;
 
         // Merge scratch, sized by draw slots (not by entities). Members so capacity survives frames.
