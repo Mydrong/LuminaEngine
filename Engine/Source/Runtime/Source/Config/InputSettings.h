@@ -17,11 +17,11 @@ namespace Lumina
     public:
 
         /** Named gameplay inputs and the keys/buttons that fire them. */
-        PROPERTY(Editable, Category = "Action Mappings")
+        PROPERTY(Editable, Category = "Action Mappings", TitleProperty = "Name")
         TVector<SInputAction> Actions;
 
         /** Named layers a world can push to change what input means, e.g. a Menu layer that blocks gameplay. */
-        PROPERTY(Editable, Category = "Mapping Contexts")
+        PROPERTY(Editable, Category = "Mapping Contexts", TitleProperty = "Name")
         TVector<SInputMappingContext> MappingContexts;
 
         // Push the loaded actions into the live FInputActionMap.

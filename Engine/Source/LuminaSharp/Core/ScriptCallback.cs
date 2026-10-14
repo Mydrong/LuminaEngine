@@ -18,9 +18,9 @@ public static class ScriptCallback
     }
 
     // The payload is the entity the operation produced, or the null entity when it produced none.
-    public static FScriptCallback Of(Action<Entity> Handler)
+    public static FScriptCallback Of(Action<FEntity> Handler)
     {
-        return Bind(Payload => Handler(new Entity((uint)Payload)));
+        return Bind(Payload => Handler(new FEntity((uint)Payload)));
     }
 
     // Fires every time native invokes it, until native releases it. The closure outlives one call.

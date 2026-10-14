@@ -237,9 +237,9 @@ namespace Lumina
                 const FVector3& B = Shape->TriangleVertices[Shape->TriangleIndices[i + 1]];
                 const FVector3& C = Shape->TriangleVertices[Shape->TriangleIndices[i + 2]];
 
-                World->DrawLine(A, B, TriMeshColor, 1.0f, false);
-                World->DrawLine(B, C, TriMeshColor, 1.0f, false);
-                World->DrawLine(C, A, TriMeshColor, 1.0f, false);
+                World->GetDebugInterface()->DrawLine(A, B, TriMeshColor, 1.0f, false);
+                World->GetDebugInterface()->DrawLine(B, C, TriMeshColor, 1.0f, false);
+                World->GetDebugInterface()->DrawLine(C, A, TriMeshColor, 1.0f, false);
             }
             return;
         }
@@ -258,17 +258,17 @@ namespace Lumina
             switch (Primitive.Type)
             {
             case ECollisionPrimitiveType::Box:
-                World->DrawBox(Center, Primitive.HalfExtent, FQuat(Math::Radians(Primitive.Rotation)), Color, Thickness, false);
+                World->GetDebugInterface()->DrawBox(Center, Primitive.HalfExtent, FQuat(Math::Radians(Primitive.Rotation)), Color, Thickness, false);
                 break;
 
             case ECollisionPrimitiveType::Sphere:
-                World->DrawSphere(Center, Primitive.Radius, Color, 16, Thickness, false);
+                World->GetDebugInterface()->DrawSphere(Center, Primitive.Radius, Color, 16, Thickness, false);
                 break;
 
             case ECollisionPrimitiveType::Capsule:
                 {
                     const FVector3 Axis = Math::Normalize(FVector3(Matrix[1]));
-                    World->DrawCapsule(Center - Axis * Primitive.HalfHeight, Center + Axis * Primitive.HalfHeight,
+                    World->GetDebugInterface()->DrawCapsule(Center - Axis * Primitive.HalfHeight, Center + Axis * Primitive.HalfHeight,
                                        Primitive.Radius, Color, 16, Thickness, false);
                 }
                 break;
@@ -285,7 +285,7 @@ namespace Lumina
                     {
                         const FVector3 A = FVector3(Matrix * FVector4(Wire.Vertices[Wire.Edges[e]], 1.0f));
                         const FVector3 B = FVector3(Matrix * FVector4(Wire.Vertices[Wire.Edges[e + 1]], 1.0f));
-                        World->DrawLine(A, B, Color, Thickness, false);
+                        World->GetDebugInterface()->DrawLine(A, B, Color, Thickness, false);
                     }
                 }
                 break;

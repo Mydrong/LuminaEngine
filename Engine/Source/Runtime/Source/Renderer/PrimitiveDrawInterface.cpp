@@ -221,7 +221,7 @@ namespace Lumina
                 FVector3 p1 = End + Radius * (cos(latAngle1) * radialDir + sin(latAngle1) * direction);
                 FVector3 p2 = End + Radius * (cos(latAngle2) * radialDir + sin(latAngle2) * direction);
                 
-                DrawLine(p1, p2, Color, Thickness, Duration);
+                DrawLine(p1, p2, Color, Thickness, bDepthTest, Duration);
             }
             
             for (uint8 lat = 0; lat < Segments / 2; ++lat)
@@ -358,5 +358,89 @@ namespace Lumina
     void IPrimitiveDrawInterface::DrawViewVolume(const FViewVolume& ViewVolume, const FVector4& Color, float Thickness, bool bDepthTest, float Duration)
     {
         DrawFrustum(ViewVolume.GetViewProjectionMatrix(), ViewVolume.GetNear(), ViewVolume.GetFar(), Color, Thickness, bDepthTest, Duration);
+    }
+
+    void IPrimitiveDrawInterface::DrawCircle(const FVector3& Center, const FVector3& Normal, float Radius, const FVector4& Color, uint8 Segments, float Thickness, bool bDepthTest, float Duration)
+    {
+        DrawArc(Center, Normal, Radius, 0.0f, Math::TwoPi<float>(), Color, Segments >= 3 ? Segments : 3, Thickness, bDepthTest, Duration);
+    }
+
+    void IPrimitiveDrawInterface::DrawArc(const FVector3& Center, const FVector3& Normal, float Radius, float StartAngle, float SweepAngle, const FVector4& Color, uint8 Segments, float Thickness, bool bDepthTest, float Duration)
+    {
+        const float NormalLength = Math::Length(Normal);
+        if (Radius <= 0.0f || NormalLength <= 0.0f || SweepAngle == 0.0f)
+        {
+            return;
+        }
+
+        const FVector3 Axis = Normal / NormalLength;
+        const FVector3 Reference = Math::Abs(Axis.y) < 0.99f ? FVector3(0.0f, 1.0f, 0.0f) : FVector3(1.0f, 0.0f, 0.0f);
+        const FVector3 Right = Math::Normalize(Math::Cross(Reference, Axis));
+        const FVector3 Up = Math::Cross(Axis, Right);
+        const int32 Count = Segments > 0 ? Segments : 1;
+
+        FVector3 Previous = Center + Radius * (Math::Cos(StartAngle) * Right + Math::Sin(StartAngle) * Up);
+        for (int32 Index = 1; Index <= Count; ++Index)
+        {
+            const float Angle = StartAngle + SweepAngle * (float)Index / (float)Count;
+            const FVector3 Current = Center + Radius * (Math::Cos(Angle) * Right + Math::Sin(Angle) * Up);
+            DrawLine(Previous, Current, Color, Thickness, bDepthTest, Duration);
+            Previous = Current;
+        }
+    }
+
+    void IPrimitiveDrawInterface::DrawCylinder(const FVector3& Start, const FVector3& End, float Radius, const FVector4& Color, uint8 Segments, float Thickness, bool bDepthTest, float Duration)
+    {
+        const FVector3 Delta = End - Start;
+        const float Length = Math::Length(Delta);
+        if (Radius <= 0.0f || Length <= 0.0f)
+        {
+            return;
+        }
+
+        const FVector3 Axis = Delta / Length;
+        const FVector3 Reference = Math::Abs(Axis.y) < 0.99f ? FVector3(0.0f, 1.0f, 0.0f) : FVector3(1.0f, 0.0f, 0.0f);
+        const FVector3 Right = Math::Normalize(Math::Cross(Reference, Axis));
+        const FVector3 Up = Math::Cross(Axis, Right);
+        const int32 Count = Segments >= 3 ? Segments : 3;
+
+        FVector3 PreviousOffset = Radius * Right;
+        for (int32 Index = 1; Index <= Count; ++Index)
+        {
+            const float Angle = Math::TwoPi<float>() * (float)Index / (float)Count;
+            const FVector3 Offset = Radius * (Math::Cos(Angle) * Right + Math::Sin(Angle) * Up);
+            DrawLine(Start + PreviousOffset, Start + Offset, Color, Thickness, bDepthTest, Duration);
+            DrawLine(End + PreviousOffset, End + Offset, Color, Thickness, bDepthTest, Duration);
+            if ((Index - 1) % (Count / 4 > 0 ? Count / 4 : 1) == 0)
+            {
+                DrawLine(Start + PreviousOffset, End + PreviousOffset, Color, Thickness, bDepthTest, Duration);
+            }
+            PreviousOffset = Offset;
+        }
+    }
+
+    void IPrimitiveDrawInterface::DrawAxes(const FVector3& Origin, const FQuat& Rotation, float Length, float Thickness, bool bDepthTest, float Duration)
+    {
+        if (Length <= 0.0f)
+        {
+            return;
+        }
+
+        const float HeadSize = Length * 0.15f;
+        DrawArrow(Origin, Math::Rotate(Rotation, FVector3(1.0f, 0.0f, 0.0f)), Length, FVector4(1.0f, 0.2f, 0.2f, 1.0f), Thickness, bDepthTest, Duration, HeadSize);
+        DrawArrow(Origin, Math::Rotate(Rotation, FVector3(0.0f, 1.0f, 0.0f)), Length, FVector4(0.2f, 1.0f, 0.2f, 1.0f), Thickness, bDepthTest, Duration, HeadSize);
+        DrawArrow(Origin, Math::Rotate(Rotation, FVector3(0.0f, 0.0f, 1.0f)), Length, FVector4(0.2f, 0.4f, 1.0f, 1.0f), Thickness, bDepthTest, Duration, HeadSize);
+    }
+
+    void IPrimitiveDrawInterface::DrawPoint(const FVector3& Position, float Size, const FVector4& Color, float Thickness, bool bDepthTest, float Duration)
+    {
+        if (Size <= 0.0f)
+        {
+            return;
+        }
+
+        DrawLine(Position - FVector3(Size, 0.0f, 0.0f), Position + FVector3(Size, 0.0f, 0.0f), Color, Thickness, bDepthTest, Duration);
+        DrawLine(Position - FVector3(0.0f, Size, 0.0f), Position + FVector3(0.0f, Size, 0.0f), Color, Thickness, bDepthTest, Duration);
+        DrawLine(Position - FVector3(0.0f, 0.0f, Size), Position + FVector3(0.0f, 0.0f, Size), Color, Thickness, bDepthTest, Duration);
     }
 }

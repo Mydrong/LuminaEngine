@@ -49,11 +49,11 @@ public static class Networking
     // A host and a standalone world are always in session, and a client is once it has joined.
     public static bool IsConnected => !Engine.World.IsClient || NetNative.IsJoined(Engine.World.WorldHandle) != 0;
 
-    // The entity Connection owns, preferring one with a character controller, or Entity.Null.
-    public static Entity PawnOf(Connection Connection) => new(NetNative.GetOwnedPawn(Engine.World.WorldHandle, Connection.Id));
+    // The entity Connection owns, preferring one with a character controller, or FEntity.Null.
+    public static FEntity PawnOf(Connection Connection) => new(NetNative.GetOwnedPawn(Engine.World.WorldHandle, Connection.Id));
 
     // This peer's own pawn, found by ownership.
-    public static Entity LocalPawn => PawnOf(Connection.Local);
+    public static FEntity LocalPawn => PawnOf(Connection.Local);
 
     internal static uint LocalConnectionId(Lumina.CWorld World)
     {
@@ -101,15 +101,15 @@ public static class Networking
 public readonly struct EntityNetwork
 {
     private readonly Lumina.CWorld World;
-    private readonly Entity Entity;
+    private readonly FEntity Entity;
 
-    public EntityNetwork(Lumina.CWorld World, Entity Entity)
+    public EntityNetwork(Lumina.CWorld World, FEntity Entity)
     {
         this.World = World;
         this.Entity = Entity;
     }
 
-    public static EntityNetwork Of(Entity Entity) => new(Engine.World, Entity);
+    public static EntityNetwork Of(FEntity Entity) => new(Engine.World, Entity);
 
     // Needs an SNetworkComponent on the entity.
     public bool IsNetworked => World.IsNetworked && NetNative.IsEntityNetworked(World.WorldHandle, Entity.Id) != 0;

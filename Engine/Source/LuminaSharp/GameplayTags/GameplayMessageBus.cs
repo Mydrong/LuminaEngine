@@ -24,7 +24,7 @@ public readonly unsafe struct GameplayMessageBus
     }
 
     public IDisposable Subscribe<T>(GameplayTag Channel, Action<T> Handler, GameplayTagMatch Match = GameplayTagMatch.Partial)
-        => Listen<T>(Entity.Null, Channel, Message => { Handler(Message); return false; }, Match);
+        => Listen<T>(FEntity.Null, Channel, Message => { Handler(Message); return false; }, Match);
 
     public IDisposable Subscribe<T>(string Channel, Action<T> Handler, GameplayTagMatch Match = GameplayTagMatch.Partial)
         => Subscribe(GameplayTag.Request(Channel), Handler, Match);
@@ -40,20 +40,20 @@ public readonly unsafe struct GameplayMessageBus
         => SubscribeOnce(GameplayTag.Request(Channel), Handler, Match);
 
     // Hears routed sends that reach Owner, and the bus drops it when the entity dies.
-    public IDisposable Subscribe<T>(Entity Owner, GameplayTag Channel, Action<T> Handler, GameplayTagMatch Match = GameplayTagMatch.Partial)
+    public IDisposable Subscribe<T>(FEntity Owner, GameplayTag Channel, Action<T> Handler, GameplayTagMatch Match = GameplayTagMatch.Partial)
         => Owner.IsNull ? GameplayMessageSubscription.Empty : Listen<T>(Owner, Channel, Message => { Handler(Message); return false; }, Match);
 
-    public IDisposable Subscribe<T>(Entity Owner, string Channel, Action<T> Handler, GameplayTagMatch Match = GameplayTagMatch.Partial)
+    public IDisposable Subscribe<T>(FEntity Owner, string Channel, Action<T> Handler, GameplayTagMatch Match = GameplayTagMatch.Partial)
         => Subscribe(Owner, GameplayTag.Request(Channel), Handler, Match);
 
     // Returning true marks the message handled, so no further ancestor or descendant receives it.
-    public IDisposable Subscribe<T>(Entity Owner, GameplayTag Channel, Func<T, bool> Handler, GameplayTagMatch Match = GameplayTagMatch.Partial)
+    public IDisposable Subscribe<T>(FEntity Owner, GameplayTag Channel, Func<T, bool> Handler, GameplayTagMatch Match = GameplayTagMatch.Partial)
         => Owner.IsNull ? GameplayMessageSubscription.Empty : Listen(Owner, Channel, Handler, Match);
 
-    public IDisposable Subscribe<T>(Entity Owner, string Channel, Func<T, bool> Handler, GameplayTagMatch Match = GameplayTagMatch.Partial)
+    public IDisposable Subscribe<T>(FEntity Owner, string Channel, Func<T, bool> Handler, GameplayTagMatch Match = GameplayTagMatch.Partial)
         => Subscribe(Owner, GameplayTag.Request(Channel), Handler, Match);
 
-    public void UnsubscribeAll(Entity Owner)
+    public void UnsubscribeAll(FEntity Owner)
     {
         if (!Owner.IsNull && IsLive)
         {
@@ -62,29 +62,29 @@ public readonly unsafe struct GameplayMessageBus
     }
 
     // Partial listeners on the channel's ancestors hear it too.
-    public void Broadcast<T>(GameplayTag Channel, T Message) => Send(Route.Broadcast, Entity.Null, Channel, Message, true);
+    public void Broadcast<T>(GameplayTag Channel, T Message) => Send(Route.Broadcast, FEntity.Null, Channel, Message, true);
 
     public void Broadcast<T>(string Channel, T Message) => Broadcast(GameplayTag.Request(Channel), Message);
 
-    public void SendUp<T>(Entity Source, GameplayTag Channel, T Message, bool IncludeSelf = true)
+    public void SendUp<T>(FEntity Source, GameplayTag Channel, T Message, bool IncludeSelf = true)
         => Send(Route.Up, Source, Channel, Message, IncludeSelf);
 
-    public void SendUp<T>(Entity Source, string Channel, T Message, bool IncludeSelf = true)
+    public void SendUp<T>(FEntity Source, string Channel, T Message, bool IncludeSelf = true)
         => SendUp(Source, GameplayTag.Request(Channel), Message, IncludeSelf);
 
-    public void SendDown<T>(Entity Source, GameplayTag Channel, T Message, bool IncludeSelf = true)
+    public void SendDown<T>(FEntity Source, GameplayTag Channel, T Message, bool IncludeSelf = true)
         => Send(Route.Down, Source, Channel, Message, IncludeSelf);
 
-    public void SendDown<T>(Entity Source, string Channel, T Message, bool IncludeSelf = true)
+    public void SendDown<T>(FEntity Source, string Channel, T Message, bool IncludeSelf = true)
         => SendDown(Source, GameplayTag.Request(Channel), Message, IncludeSelf);
 
-    public void SendTo<T>(Entity Target, GameplayTag Channel, T Message) => Send(Route.To, Target, Channel, Message, true);
+    public void SendTo<T>(FEntity Target, GameplayTag Channel, T Message) => Send(Route.To, Target, Channel, Message, true);
 
-    public void SendTo<T>(Entity Target, string Channel, T Message) => SendTo(Target, GameplayTag.Request(Channel), Message);
+    public void SendTo<T>(FEntity Target, string Channel, T Message) => SendTo(Target, GameplayTag.Request(Channel), Message);
 
     private bool IsLive => World is { IsValid: true };
 
-    private IDisposable Listen<T>(Entity Owner, GameplayTag Channel, Func<T, bool> Handler, GameplayTagMatch Match)
+    private IDisposable Listen<T>(FEntity Owner, GameplayTag Channel, Func<T, bool> Handler, GameplayTagMatch Match)
     {
         if (!Channel.IsValid || !IsLive)
         {
@@ -98,7 +98,7 @@ public readonly unsafe struct GameplayMessageBus
         return Id == 0 ? GameplayMessageSubscription.Empty : new GameplayMessageSubscription(World, Id);
     }
 
-    private void Send<T>(Route Route, Entity Target, GameplayTag Channel, T Message, bool IncludeSelf)
+    private void Send<T>(Route Route, FEntity Target, GameplayTag Channel, T Message, bool IncludeSelf)
     {
         if (!Channel.IsValid || (Route != Route.Broadcast && Target.IsNull) || Message is null || !IsLive)
         {

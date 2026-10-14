@@ -86,6 +86,7 @@ namespace Lumina
         // The one file selected in the Content Browser, asset or not, for slots that take loose files.
         NODISCARD FFixedString GetContentBrowserSelectedFilePath() const;
         void OnDestroyAsset(CObject* InAsset) override;
+        void OnAssetDeleted(FStringView AssetPath);
 
 
         template<typename T, typename... Args>
@@ -407,6 +408,7 @@ namespace Lumina
 
         // Retry hook for tabs whose asset had not been scanned into the registry yet at restore time.
         FDelegateHandle                                 SessionRestoreRetryHandle;
+        FDelegateHandle                                 AssetDeletedHandle;
 
         // Session keys already handed to OpenAssetEditor/OpenFileEditor. The retry pass runs on every
         // registry change, and re-opening an open tool focuses it -- which yanks focus away from whatever

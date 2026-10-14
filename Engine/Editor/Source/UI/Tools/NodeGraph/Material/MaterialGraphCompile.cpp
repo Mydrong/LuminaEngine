@@ -120,6 +120,12 @@ namespace Lumina
             case EMaterialShaderStage::Deferred:             return "Deferred";
             case EMaterialShaderStage::MeshShadowMasked:     return "Masked Shadow Geometry";
             case EMaterialShaderStage::ShadowMaskedPixel:    return "Masked Shadow Pixel";
+            case EMaterialShaderStage::MeshShadowVertex:           return "Shadow Geometry (vertex path)";
+            case EMaterialShaderStage::MeshBaseVertex:             return "Base Geometry (vertex path)";
+            case EMaterialShaderStage::VisBufferVertex:            return "VisBuffer Geometry (vertex path)";
+            case EMaterialShaderStage::VisBufferVertexMasked:      return "Masked VisBuffer Geometry (vertex path)";
+            case EMaterialShaderStage::MeshShadowMaskedVertex:     return "Masked Shadow Geometry (vertex path)";
+            case EMaterialShaderStage::MaskedVisBufferPixelVertex: return "Masked VisBuffer Pixel (vertex path)";
             default:                                         return "Unknown";
             }
         }
@@ -427,6 +433,19 @@ namespace Lumina
             DispatchStage(Result.VertexSource, Move(VSOptions), EMaterialShaderStage::Vertex);
         }
 
+        // A geometry template carries both paths, MeshMain for Stage and VertexMain for its vertex-path twin.
+        auto DispatchGeometryStage = [&DispatchStage](const FString& Source, const FShaderCompileOptions& StageOptions, EMaterialShaderStage Stage)
+        {
+            FShaderCompileOptions VertexOptions = StageOptions;
+            VertexOptions.EntryPoint = "VertexMain";
+            VertexOptions.DebugName += " [vertex path]";
+            DispatchStage(Source, Move(VertexOptions), VertexPathStage(Stage));
+
+            FShaderCompileOptions MeshOptions = StageOptions;
+            MeshOptions.EntryPoint = "MeshMain";
+            DispatchStage(Source, Move(MeshOptions), Stage);
+        };
+
         // Separate compiles rather than spec-constant variants, since they declare different OUTPUT types.
         if (MaterialDomain::IsMeshlet(Material->GetMaterialType()))
         {
@@ -451,7 +470,7 @@ namespace Lumina
                 {
                     CompileOptions.MacroDefinitions.emplace_back(Geo.Define);
                 }
-                DispatchStage(*Geo.Source, Move(CompileOptions), Geo.Stage);
+                DispatchGeometryStage(*Geo.Source, CompileOptions, Geo.Stage);
             }
 
             if (IsStageRequired(Material, EMaterialShaderStage::VisBufferMeshMasked))
@@ -462,19 +481,24 @@ namespace Lumina
                 FShaderCompileOptions VisMaskedOptions; VisMaskedOptions.DebugName = MatName + " [VBMM]";
                 VisMaskedOptions.MacroDefinitions.emplace_back("VISBUFFER_MASKED_GEOM");
                 AddMaskedInterpolantDefines(MaskedIO, false, VisMaskedOptions.MacroDefinitions);
-                DispatchStage(VisSource, Move(VisMaskedOptions), EMaterialShaderStage::VisBufferMeshMasked);
+                DispatchGeometryStage(VisSource, VisMaskedOptions, EMaterialShaderStage::VisBufferMeshMasked);
 
                 const FString MaskedPSSource = Compiler.BuildPixelShaderFromTemplate(MeshShaderDir + "VisBufferMaskedPixel.slang");
                 FShaderCompileOptions MaskedPSOptions; MaskedPSOptions.DebugName = MatName + " [MVBP]";
-                MaskedPSOptions.MacroDefinitions.emplace_back("VISBUFFER_PRIMID");
                 AddMaskedInterpolantDefines(MaskedIO, false, MaskedPSOptions.MacroDefinitions);
+
+                // The vertex path hands VisID over as a varying, since it cannot write a primitive ID.
+                FShaderCompileOptions MaskedPSVertexOptions = MaskedPSOptions;
+                MaskedPSVertexOptions.DebugName += " [vertex path]";
+                MaskedPSVertexOptions.MacroDefinitions.emplace_back("MESHLET_VERTEX_PATH");
+                DispatchStage(MaskedPSSource, Move(MaskedPSVertexOptions), EMaterialShaderStage::MaskedVisBufferPixelVertex);
                 DispatchStage(MaskedPSSource, Move(MaskedPSOptions), EMaterialShaderStage::MaskedVisBufferPixel);
 
                 // The shadow lane too, so a cut-out casts its own silhouette and not its quad.
                 FShaderCompileOptions ShadowMaskedOptions; ShadowMaskedOptions.DebugName = MatName + " [MSSM]";
                 ShadowMaskedOptions.MacroDefinitions.emplace_back("MESHLET_MESH_MASKED_SHADOW");
                 AddMaskedInterpolantDefines(MaskedIO, true, ShadowMaskedOptions.MacroDefinitions);
-                DispatchStage(MeshSource, Move(ShadowMaskedOptions), EMaterialShaderStage::MeshShadowMasked);
+                DispatchGeometryStage(MeshSource, ShadowMaskedOptions, EMaterialShaderStage::MeshShadowMasked);
 
                 const FString ShadowPSSource = Compiler.BuildPixelShaderFromTemplate(MeshShaderDir + "ShadowMaskedPixel.slang");
                 FShaderCompileOptions ShadowPSOptions; ShadowPSOptions.DebugName = MatName + " [SMP]";

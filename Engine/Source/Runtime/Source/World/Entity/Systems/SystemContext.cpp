@@ -157,37 +157,37 @@ namespace Lumina
 
     void FSystemContext::DrawDebugLine(const FVector3& Start, const FVector3& End, const FVector4& Color, float Thickness, float Duration) const
     {
-        World->DrawLine(Start, End, Color, Thickness, true, Duration);
+        World->GetDebugInterface()->DrawLine(Start, End, Color, Thickness, true, Duration);
     }
 
     void FSystemContext::DrawDebugBox(const FVector3& Center, const FVector3& Extents, const FQuat& Rotation, const FVector4& Color, float Thickness, float Duration) const
     {
-        World->DrawBox(Center, Extents, Rotation, Color, Thickness, true, Duration);
+        World->GetDebugInterface()->DrawBox(Center, Extents, Rotation, Color, Thickness, true, Duration);
     }
 
     void FSystemContext::DrawDebugSphere(const FVector3& Center, float Radius, const FVector4& Color, uint8 Segments, float Thickness, float Duration) const
     {
-        World->DrawSphere(Center, Radius, Color, Segments, Thickness, true, Duration);
+        World->GetDebugInterface()->DrawSphere(Center, Radius, Color, Segments, Thickness, true, Duration);
     }
 
     void FSystemContext::DrawDebugCone(const FVector3& Apex, const FVector3& Direction, float AngleRadians, float Length, const FVector4& Color, uint8 Segments, uint8 Stacks, float Thickness, float Duration) const
     {
-        World->DrawCone(Apex, Direction, AngleRadians, Length, Color, Segments, Stacks, Thickness, true, Duration);
+        World->GetDebugInterface()->DrawCone(Apex, Direction, AngleRadians, Length, Color, Segments, Stacks, Thickness, true, Duration);
     }
 
     void FSystemContext::DrawFrustum(const FMatrix4& Matrix, float zNear, float zFar, const FVector4& Color, float Thickness, float Duration) const
     {
-        World->DrawFrustum(Matrix, zNear, zFar, Color, Thickness, true, Duration);
+        World->GetDebugInterface()->DrawFrustum(Matrix, zNear, zFar, Color, Thickness, true, Duration);
     }
 
     void FSystemContext::DrawDebugArrow(const FVector3& Start, const FVector3& Direction, float Length, const FVector4& Color, float Thickness, float Duration, float HeadSize) const
     {
-        World->DrawArrow(Start, Direction, Length, Color, Thickness, true, Duration, HeadSize);
+        World->GetDebugInterface()->DrawArrow(Start, Direction, Length, Color, Thickness, true, Duration, HeadSize);
     }
 
     void FSystemContext::DrawDebugSolidTriangles(TVector<FSimpleElementVertex>&& Vertices, ESolidDrawMode Mode, float Duration) const
     {
-        World->DrawSolidTriangles(std::move(Vertices), Mode, Duration);
+        World->GetDebugInterface()->DrawSolidTriangles(std::move(Vertices), Mode, Duration);
     }
 
     ECS::FEntity FSystemContext::Create(const FTransform& Transform, FName EntityName) const

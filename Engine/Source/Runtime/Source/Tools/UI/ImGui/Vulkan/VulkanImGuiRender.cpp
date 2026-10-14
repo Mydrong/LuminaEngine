@@ -156,7 +156,7 @@ namespace Lumina
         }
     }
 
-    void FVulkanImGuiRender::OnEndFrame_NewRHI(RHI::FCmdListH CL, RHI::FTextureH Target, const FUIntVector2& Extent, ImDrawData* DrawData)
+    void FVulkanImGuiRender::OnEndFrame(RHI::FCmdListH CL, RHI::FTextureH Target, const FUIntVector2& Extent, ImDrawData* DrawData)
     {
         RecordDrawData_NewRHI(CL, DrawData, Target, Extent);
     }

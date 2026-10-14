@@ -866,6 +866,16 @@ namespace Lumina
         uint32 SubDrawCount[kMeshletSliceCount];
     };
     static_assert(sizeof(FRenderBucketGPU) == 80, "FRenderBucketGPU layout must match FRenderBucket in Common.slang");
+
+    // One meshlet sub-draw, read as mesh-task group counts or as an unindexed instanced draw, so both paths share one argument layout.
+    struct FMeshletDrawArgs
+    {
+        uint32 Words[4];
+    };
+    static_assert(sizeof(FMeshletDrawArgs) == 16, "FMeshletDrawArgs must match BuildMeshletCullArgs.slang.");
+
+    // A vertex-path sub-draw is one instanced draw, with no workgroup limit to split it under.
+    constexpr uint32 kVertexPathMeshletsPerDraw = 1u << 30;
     // Shaders reach this with loadAligned<16>, which needs every element 16-aligned.
     static_assert(sizeof(FRenderBucketGPU) % 16 == 0, "FRenderBucketGPU stride must stay 16-byte aligned for loadAligned<16>");
 

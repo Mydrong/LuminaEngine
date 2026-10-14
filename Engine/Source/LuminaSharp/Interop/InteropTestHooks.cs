@@ -215,12 +215,12 @@ internal static unsafe class InteropTestHooks
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
     public static int Test_FrameReadEntity(IntPtr Frame, IntPtr Property, uint* OutId)
     {
-        if (!FrameMarshal.TryBind(Property, typeof(Entity), "Test_FrameReadEntity", out FrameMarshal.FSlot Slot))
+        if (!FrameMarshal.TryBind(Property, typeof(FEntity), "Test_FrameReadEntity", out FrameMarshal.FSlot Slot))
         {
             return 0;
         }
 
-        *OutId = ((Entity)FrameMarshal.Read(Frame, Slot)!).Id;
+        *OutId = ((FEntity)FrameMarshal.Read(Frame, Slot)!).Id;
         return 1;
     }
 
@@ -359,7 +359,7 @@ internal static unsafe class InteropTestHooks
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
     public static int Test_VectorBindingEntities(int Count, uint* OutLast)
     {
-        Entity[] Values = CInteropTestLibrary.MakeEntityRange(Count);
+        var Values = CInteropTestLibrary.MakeEntityRange(Count);
         *OutLast = Values.Length > 0 ? Values[Values.Length - 1].Id : 0;
         return Values.Length;
     }
@@ -423,7 +423,7 @@ internal static unsafe class InteropTestHooks
     {
         CallbackPayload = 0xFFFFFFFFUL;
         CallbackRuns = 0;
-        return ScriptCallback.Of((Entity Spawned) =>
+        return ScriptCallback.Of((FEntity Spawned) =>
         {
             CallbackPayload = Spawned.Id;
             ++CallbackRuns;

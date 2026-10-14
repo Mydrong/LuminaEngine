@@ -7,6 +7,7 @@
 #include "CoreTypeCustomization.h"
 #include "Tools/UI/ImGui/ImGuiDragDrop.h"
 #include "Tools/UI/ImGui/ImGuiX.h"
+#include "Tools/UI/ImGui/ImGuiXNumeric.h"
 
 namespace Lumina
 {
@@ -372,7 +373,7 @@ namespace Lumina
 
                 float Time = Key.Time;
                 ImGui::SetNextItemWidth(EditorWidth);
-                if (ImGui::DragFloat("##StopTime", &Time, 0.005f, 0.0f, 0.0f, "Time %.3f"))
+                if (ImGuiX::DragFloat("##StopTime", &Time, 0.005f, 0.0f, 0.0f, "Time %.3f"))
                 {
                     Key.Time = Time;
                     Value.SortKeys();

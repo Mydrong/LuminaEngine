@@ -68,7 +68,7 @@ namespace Lumina
     enum class EMaterialShaderStage : uint8
     {
         Pixel,
-        Vertex,                     // Non-meshlet domains only, since PBR geometry is mesh shaded end to end.
+        Vertex,                     // Non-meshlet domains only, since meshlet geometry has stages of its own.
         MeshShadow,                 // MeshletMesh.slang, depth only.
         MeshBase,                   // MeshletMesh.slang with MESHLET_MESH_BASE, for blended geometry.
         VisBufferMesh,              // MeshletVisBuffer.slang, position only.
@@ -77,9 +77,33 @@ namespace Lumina
         Deferred,                   // DeferredMaterial.slang.
         MeshShadowMasked,           // MeshletMesh.slang with MESHLET_MESH_MASKED_SHADOW.
         ShadowMaskedPixel,          // ShadowMaskedPixel.slang, the alpha test for shadow maps.
+        MeshShadowVertex,           // The VertexMain entry of MeshShadow, for a device without mesh shading.
+        MeshBaseVertex,             // The VertexMain entry of MeshBase.
+        VisBufferVertex,            // The VertexMain entry of VisBufferMesh.
+        VisBufferVertexMasked,      // The VertexMain entry of VisBufferMeshMasked.
+        MeshShadowMaskedVertex,     // The VertexMain entry of MeshShadowMasked.
+        MaskedVisBufferPixelVertex, // MaskedVisBufferPixel reading VisID as the vertex path writes it.
 
         Count,
     };
+
+    // The stage the vertex path draws in place of Stage, which is Stage itself for one it shares with the mesh path.
+    constexpr EMaterialShaderStage VertexPathStage(EMaterialShaderStage Stage)
+    {
+        switch (Stage)
+        {
+        case EMaterialShaderStage::MeshShadow:           return EMaterialShaderStage::MeshShadowVertex;
+        case EMaterialShaderStage::MeshBase:             return EMaterialShaderStage::MeshBaseVertex;
+        case EMaterialShaderStage::VisBufferMesh:        return EMaterialShaderStage::VisBufferVertex;
+        case EMaterialShaderStage::VisBufferMeshMasked:  return EMaterialShaderStage::VisBufferVertexMasked;
+        case EMaterialShaderStage::MeshShadowMasked:     return EMaterialShaderStage::MeshShadowMaskedVertex;
+        case EMaterialShaderStage::MaskedVisBufferPixel: return EMaterialShaderStage::MaskedVisBufferPixelVertex;
+        default:                                         return Stage;
+        }
+    }
+
+    // Stage as this device draws it, through mesh shaders where it has them and the vertex path otherwise.
+    RUNTIME_API EMaterialShaderStage ActiveMeshletStage(EMaterialShaderStage Stage);
 
     // What each domain consumes of a material, asked by the editor, the graph compile and the passes alike.
     namespace MaterialDomain

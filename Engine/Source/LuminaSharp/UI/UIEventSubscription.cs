@@ -41,7 +41,7 @@ public sealed class UIEventSubscription : IDisposable
         Binding.Dispose();
         Binding = default;
 
-        Lumina.CUILibrary.RemoveEventListener(UI.WorldOf(World), Listener);
+        Lumina.CUILibrary.RemoveEventListener(UIWorld.FromHandle(World), Listener);
         Listener = default;
     }
 }

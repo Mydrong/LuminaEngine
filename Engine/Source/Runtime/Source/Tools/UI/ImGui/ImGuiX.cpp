@@ -284,6 +284,58 @@ namespace Lumina::ImGuiX
         return bClicked;
     }
 
+    bool ToggleSwitch(const char* Label, bool* Value)
+    {
+        const ImGuiStyle& Style = ImGui::GetStyle();
+        const float Height = ImGui::GetFrameHeight();
+        const float TrackHeight = Height * 0.72f;
+        const float TrackWidth = Height * 1.8f;
+        const float KnobRadius = TrackHeight * 0.37f;
+        const char* Status = *Value ? "On" : "Off";
+        const char* LabelEnd = ImGui::FindRenderedTextEnd(Label);
+        const float StatusWidth = ImMax(ImGui::CalcTextSize("On").x, ImGui::CalcTextSize("Off").x);
+        const float LabelWidth = LabelEnd != Label ? Style.ItemInnerSpacing.x + ImGui::CalcTextSize(Label, LabelEnd).x : 0.0f;
+        const float Width = TrackWidth + Style.ItemInnerSpacing.x + StatusWidth + LabelWidth;
+
+        const ImVec2 Position = ImGui::GetCursorScreenPos();
+        const bool Pressed = ImGui::InvisibleButton(Label, ImVec2(Width, Height));
+        if (Pressed)
+        {
+            *Value = !*Value;
+            ImGui::MarkItemEdited(ImGui::GetItemID());
+            Status = *Value ? "On" : "Off";
+        }
+
+        const bool Hovered = ImGui::IsItemHovered();
+        if (Hovered)
+        {
+            ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+        }
+
+        const float CenterY = Position.y + Height * 0.5f;
+        const ImVec2 TrackMin(Position.x, CenterY - TrackHeight * 0.5f);
+        const ImVec2 TrackMax(Position.x + TrackWidth, CenterY + TrackHeight * 0.5f);
+        const float KnobX = *Value ? TrackMax.x - TrackHeight * 0.5f : TrackMin.x + TrackHeight * 0.5f;
+        ImDrawList* DrawList = ImGui::GetWindowDrawList();
+        const ImGuiCol TrackColor = *Value
+            ? (Hovered ? ImGuiCol_SliderGrabActive : ImGuiCol_SliderGrab)
+            : (Hovered ? ImGuiCol_FrameBgHovered : ImGuiCol_FrameBg);
+        DrawList->AddRectFilled(TrackMin, TrackMax, ImGui::GetColorU32(TrackColor), TrackHeight * 0.5f);
+        DrawList->AddRect(TrackMin, TrackMax, ImGui::GetColorU32(ImGuiCol_Border), TrackHeight * 0.5f);
+        DrawList->AddCircleFilled(ImVec2(KnobX, CenterY), KnobRadius, ImGui::GetColorU32(ImGuiCol_Text));
+
+        const ImVec2 StatusPosition(TrackMax.x + Style.ItemInnerSpacing.x,
+            CenterY - ImGui::GetFontSize() * 0.5f);
+        DrawList->AddText(StatusPosition, ImGui::GetColorU32(*Value ? ImGuiCol_Text : ImGuiCol_TextDisabled), Status);
+        if (LabelWidth > 0.0f)
+        {
+            DrawList->AddText(ImVec2(StatusPosition.x + StatusWidth + Style.ItemInnerSpacing.x, StatusPosition.y),
+                ImGui::GetColorU32(ImGuiCol_Text), Label, LabelEnd);
+        }
+        ImGui::RenderNavCursor(ImRect(Position, ImVec2(Position.x + Width, Position.y + Height)), ImGui::GetItemID());
+        return Pressed;
+    }
+
     bool ButtonEx(char const* pIcon, char const* pLabel, ImVec2 const& size, const ImColor& backgroundColor, const ImColor& iconColor, const ImColor& foregroundColor, bool shouldCenterContents)
     {
     	// Taken from Esoterica.

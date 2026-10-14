@@ -54,7 +54,7 @@ internal static unsafe partial class ScriptStructLayout
 
     private static bool IsScriptStruct(Type Type)
     {
-        return Type.IsValueType && !Type.IsPrimitive && !Type.IsEnum && Type != typeof(FString) && Type != typeof(Entity)
+        return Type.IsValueType && !Type.IsPrimitive && !Type.IsEnum && Type != typeof(FString) && Type != typeof(FEntity)
             && NativeNameOf(Type) == null && Nullable.GetUnderlyingType(Type) == null;
     }
 
@@ -102,7 +102,7 @@ internal static unsafe partial class ScriptStructLayout
             (int Size, int Alignment) = NativeLayoutOf(EPropertyType.String, "");
             return (Size, Alignment, true);
         }
-        if (Type == typeof(Entity))
+        if (Type == typeof(FEntity))
         {
             (int Size, int Alignment) = NativeLayoutOf(EPropertyType.Entity, "");
             return (Size, Alignment, false);

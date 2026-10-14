@@ -34,20 +34,6 @@ public sealed class BindCommandAttribute : Attribute
     }
 }
 
-/// <summary>
-/// Base class for an MVVM view-model bound to an RmlUi document. Expose <see cref="BindAttribute">[Bind]</see>
-/// properties and <see cref="BindCommandAttribute">[BindCommand]</see> methods, then register the model with
-/// <see cref="UI.AddModel"/> BEFORE loading the document that references it. The view updates automatically
-/// when a bound property changes through <see cref="Set{T}"/>; commands flow back from <c>data-event-*</c>.
-/// <code>
-/// public sealed class HudModel : ViewModel
-/// {
-///     private int _health = 100;
-///     [Bind] public int Health { get => _health; set => Set(ref _health, value); }
-///     [BindCommand] public void Respawn() { /* ... */ }
-/// }
-/// </code>
-/// </summary>
 public abstract class ViewModel
 {
     /// <summary>The live binding, or null while the model is not registered. Set by <see cref="UIDataModel"/>.</summary>

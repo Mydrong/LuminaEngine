@@ -59,6 +59,9 @@ namespace Lumina
         virtual void OnUpdate(float DeltaTime) {}
 
         FUNCTION()
+        virtual void OnDebugDraw(bool bSelected) {}
+
+        FUNCTION()
         virtual void OnFixedUpdate(float FixedDeltaTime) {}
 
         FUNCTION()
@@ -262,7 +265,7 @@ namespace Lumina
         SEntityScriptComponent() = default;
         ~SEntityScriptComponent();
         SEntityScriptComponent(SEntityScriptComponent&&) = default;
-        SEntityScriptComponent& operator=(SEntityScriptComponent&& Other);
+        SEntityScriptComponent& operator=(SEntityScriptComponent&& Other) noexcept;
 
         // A script is a per-entity subobject, so a copy (prefab stamp, component duplicate) clones it.
         SEntityScriptComponent(const SEntityScriptComponent& Other);
@@ -296,6 +299,10 @@ namespace Lumina
         /** Drains pending OnReady (PrePhysics only), then runs OnUpdate on the scripts declaring Phase. */
         RUNTIME_API void Tick(ECS::FRegistry& Registry, float DeltaTime,
             EScriptUpdatePhase Phase = EScriptUpdatePhase::PrePhysics);
+
+        #if USING(WITH_EDITOR)
+        RUNTIME_API void DebugDraw(ECS::FRegistry& Registry);
+        #endif
 
         // Bumped by anything that changes which scripts are attached or able to tick, so a batched update knows when to stop.
         RUNTIME_API void NoteStructureChange();

@@ -87,6 +87,7 @@ namespace Lumina::Reflection
     X(ReadOnly,             Flag,   Editor,    "Shows the property in the details panel with editing disabled. Do not combine with Editable.") \
     X(Category,             Value,  Editor,    "Groups the property under a named heading. Nested headings separate with a pipe.") \
     X(DisplayName,          Value,  Editor,    "Overrides the label shown for the property.") \
+    X(TitleProperty,        Value,  Editor,    "Uses a struct member as the label for elements of an array property.") \
     X(ToolTip,              Value,  Editor,    "Hover text for the property. Filled from the declaration's doc comment when not written by hand.") \
     X(ClampMin,             Number,  Editor,    "Lower bound applied to a numeric property by the editor widget.") \
     X(ClampMax,             Number,  Editor,    "Upper bound applied to a numeric property by the editor widget.") \

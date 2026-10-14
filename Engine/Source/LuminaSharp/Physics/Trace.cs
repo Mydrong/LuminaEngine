@@ -10,7 +10,7 @@ public struct Trace
     private FVector3 From;
     private FVector3 To;
     private float Radius;
-    private Entity IgnoreEntity;
+    private FEntity IgnoreEntity;
     private ECollisionProfiles Mask;
 
     private static Trace Begin(FVector3 From, FVector3 To)
@@ -19,7 +19,7 @@ public struct Trace
         T.World = Engine.World;
         T.From = From;
         T.To = To;
-        T.IgnoreEntity = Entity.Null;
+        T.IgnoreEntity = FEntity.Null;
         T.Mask = ECollisionProfiles.All;
         return T;
     }
@@ -40,7 +40,7 @@ public struct Trace
     }
 
     /// Skip one entity's body, typically the caster's.
-    public Trace Ignore(Entity Entity)
+    public Trace Ignore(FEntity Entity)
     {
         IgnoreEntity = Entity;
         return this;
@@ -66,7 +66,7 @@ public struct Trace
         if (Radius > 0.0f)
         {
             SRayResult[] Hits = CPhysicsLibrary.SphereCast(World, From, To, Radius, IgnoreEntity);
-            return Hits.Length > 0 ? Hits[0] : default;
+            return Hits.Length > 0 ? Hits[0] : new SRayResult { Start = From, End = To };
         }
         return CPhysicsLibrary.Raycast(World, From, To, IgnoreEntity, Mask);
     }

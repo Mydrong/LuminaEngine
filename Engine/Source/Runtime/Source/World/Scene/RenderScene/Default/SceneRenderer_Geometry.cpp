@@ -172,7 +172,9 @@ namespace Lumina
 
         LUMINA_PROFILE_SECTION_COLORED("VisBuffer Geometry Pass", tracy::Color::Red);
 
-        static const FShaderH VisPixel = FShaderLibrary::Get("VisBufferPixel.slang");
+        static const FString  VertexPathDefine("MESHLET_VERTEX_PATH");
+        static const FShaderH VisPixel = FShaderLibrary::Get("VisBufferPixel.slang",
+            RHI::SupportsMeshShaders() ? TSpan<const FString>() : TSpan<const FString>(&VertexPathDefine, 1));
         bHasDraws = bHasDraws && VisPixel != nullptr;
         if (!bHasDraws && !bClear)
         {
@@ -181,7 +183,7 @@ namespace Lumina
 
         RHI::CmdBarrier(CL,
             RHI::EStageFlags::Compute, RHI::EAccessFlags::ShaderWrite,
-            RHI::EStageFlags::MeshShader | RHI::EStageFlags::IndirectArguments | RHI::EStageFlags::PixelShader,
+            RHI::EStageFlags::MeshShader | RHI::EStageFlags::VertexShader | RHI::EStageFlags::IndirectArguments | RHI::EStageFlags::PixelShader,
             RHI::EAccessFlags::ShaderRead | RHI::EAccessFlags::ShaderWrite | RHI::EAccessFlags::IndirectRead);
 
         const FSceneImage& VisRT   = GetNamedImage(ENamedImage::VisBuffer);
@@ -313,7 +315,9 @@ namespace Lumina
     {
         // Consecutive views sit one view of indirect slots apart only while each slice holds a single sub-draw.
         const uint32 ViewsPerDraw = Math::Min(RHI::GetMaxViewports(), kMaxShadowViewportsPerDraw);
-        if (!CVarMultiViewShadowDraws.GetValue() || Run.Views.empty() || !Run.bContiguous || MeshSubDrawsPerSlice != 1u || ViewsPerDraw < 2u)
+        // The vertex path writes no viewport index, so it draws its views one at a time.
+        if (!CVarMultiViewShadowDraws.GetValue() || !RHI::SupportsMeshShaders() || Run.Views.empty() || !Run.bContiguous
+            || MeshSubDrawsPerSlice != 1u || ViewsPerDraw < 2u)
         {
             return false;
         }

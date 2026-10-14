@@ -14,6 +14,7 @@
 #include "Memory/MemoryTracking.h"
 #include "Paths/Paths.h"
 #include "Renderer/RenderManager.h"
+#include "Renderer/RHI.h"
 #include "Renderer/RHITexture.h"
 #include "Renderer/ShaderCache.h"
 #include "Renderer/ShaderCompiler.h"
@@ -133,6 +134,12 @@ namespace Lumina
             { "_DM",   ERHIShaderType::Compute  },
             { "_MSSM", ERHIShaderType::Mesh     },
             { "_SMP",  ERHIShaderType::Fragment },
+            { "_MSV",  ERHIShaderType::Vertex   },
+            { "_MSBV", ERHIShaderType::Vertex   },
+            { "_VBV",  ERHIShaderType::Vertex   },
+            { "_VBVM", ERHIShaderType::Vertex   },
+            { "_MSSMV", ERHIShaderType::Vertex  },
+            { "_MVBPV", ERHIShaderType::Fragment },
         };
         static_assert(std::size(GMaterialStages) == (size_t)EMaterialShaderStage::Count, "GMaterialStages must cover every EMaterialShaderStage");
 
@@ -256,7 +263,7 @@ namespace Lumina
 
         // Compiles one builtin stage from a template. The result lands as binaries, which PostLoad commits.
         void CompileBuiltinStage(IShaderCompiler& Compiler, CMaterial* Material, EMaterialShaderStage Stage, const char* TemplateFile,
-                                 const char* Define, std::initializer_list<FTemplateToken> Tokens)
+                                 const char* Define, std::initializer_list<FTemplateToken> Tokens, const char* EntryPoint = nullptr)
         {
             const FString TemplatePath = FString(kMaterialShaderDirectory) + TemplateFile;
 
@@ -272,11 +279,23 @@ namespace Lumina
             {
                 Options.MacroDefinitions.emplace_back(Define);
             }
+            if (EntryPoint != nullptr)
+            {
+                Options.EntryPoint = EntryPoint;
+            }
 
             Compiler.CompilerShaderRaw(Move(Source), Move(Options), [Material, Stage](const FShaderHeader& Header) mutable
             {
                 Material->SetStageBinaries(Stage, TSpan<const uint32>(Header.Binaries.data(), Header.Binaries.size()));
             });
+        }
+
+        // A geometry template carries both paths, MeshMain for Stage and VertexMain for its vertex-path twin.
+        void CompileBuiltinGeometryStage(IShaderCompiler& Compiler, CMaterial* Material, EMaterialShaderStage Stage, const char* TemplateFile,
+                                         const char* Define, std::initializer_list<FTemplateToken> Tokens)
+        {
+            CompileBuiltinStage(Compiler, Material, Stage, TemplateFile, Define, Tokens, "MeshMain");
+            CompileBuiltinStage(Compiler, Material, VertexPathStage(Stage), TemplateFile, Define, Tokens, "VertexMain");
         }
 
         // Builtins are rebuilt in place, so a compile still in flight lands before the old one is unrooted. Null when there is no compiler.
@@ -762,6 +781,11 @@ namespace Lumina
         return Refreshed;
     }
 
+    EMaterialShaderStage ActiveMeshletStage(EMaterialShaderStage Stage)
+    {
+        return RHI::SupportsMeshShaders() ? Stage : VertexPathStage(Stage);
+    }
+
     bool CMaterial::IsStageRequired(EMaterialShaderStage Stage) const
     {
         const bool bMeshlet = MaterialDomain::IsMeshlet(MaterialType);
@@ -774,10 +798,16 @@ namespace Lumina
         case EMaterialShaderStage::MeshShadow:
         case EMaterialShaderStage::MeshBase:
         case EMaterialShaderStage::VisBufferMesh:
+        case EMaterialShaderStage::MeshShadowVertex:
+        case EMaterialShaderStage::MeshBaseVertex:
+        case EMaterialShaderStage::VisBufferVertex:
         case EMaterialShaderStage::Deferred:             return bMeshlet;
         case EMaterialShaderStage::VisBufferMeshMasked:
         case EMaterialShaderStage::MaskedVisBufferPixel:
         case EMaterialShaderStage::MeshShadowMasked:
+        case EMaterialShaderStage::VisBufferVertexMasked:
+        case EMaterialShaderStage::MaskedVisBufferPixelVertex:
+        case EMaterialShaderStage::MeshShadowMaskedVertex:
         case EMaterialShaderStage::ShadowMaskedPixel:    return bMeshlet && bMasked;
         default:                                         return false;
         }
@@ -1248,11 +1278,11 @@ namespace Lumina
         // A built-in material moves no vertices, so its world position offset is a no-op.
         const FString NoOffset = "\tMaterial.WorldPositionOffset = float3(0.0, 0.0, 0.0);\n";
 
-        CompileBuiltinStage(*Compiler, Material, EMaterialShaderStage::MeshShadow,          "MeshletMesh.slang",      nullptr,                      { { kVertexInputsToken, NoOffset } });
-        CompileBuiltinStage(*Compiler, Material, EMaterialShaderStage::MeshBase,            "MeshletMesh.slang",      "MESHLET_MESH_BASE",          { { kVertexInputsToken, NoOffset } });
-        CompileBuiltinStage(*Compiler, Material, EMaterialShaderStage::VisBufferMesh,       "MeshletVisBuffer.slang", nullptr,                      { { kVertexInputsToken, NoOffset } });
-        CompileBuiltinStage(*Compiler, Material, EMaterialShaderStage::VisBufferMeshMasked, "MeshletVisBuffer.slang", "VISBUFFER_MASKED_GEOM",      { { kVertexInputsToken, NoOffset } });
-        CompileBuiltinStage(*Compiler, Material, EMaterialShaderStage::MeshShadowMasked,    "MeshletMesh.slang",      "MESHLET_MESH_MASKED_SHADOW", { { kVertexInputsToken, NoOffset } });
+        CompileBuiltinGeometryStage(*Compiler, Material, EMaterialShaderStage::MeshShadow,          "MeshletMesh.slang",      nullptr,                      { { kVertexInputsToken, NoOffset } });
+        CompileBuiltinGeometryStage(*Compiler, Material, EMaterialShaderStage::MeshBase,            "MeshletMesh.slang",      "MESHLET_MESH_BASE",          { { kVertexInputsToken, NoOffset } });
+        CompileBuiltinGeometryStage(*Compiler, Material, EMaterialShaderStage::VisBufferMesh,       "MeshletVisBuffer.slang", nullptr,                      { { kVertexInputsToken, NoOffset } });
+        CompileBuiltinGeometryStage(*Compiler, Material, EMaterialShaderStage::VisBufferMeshMasked, "MeshletVisBuffer.slang", "VISBUFFER_MASKED_GEOM",      { { kVertexInputsToken, NoOffset } });
+        CompileBuiltinGeometryStage(*Compiler, Material, EMaterialShaderStage::MeshShadowMasked,    "MeshletMesh.slang",      "MESHLET_MESH_MASKED_SHADOW", { { kVertexInputsToken, NoOffset } });
         CompileBuiltinStage(*Compiler, Material, EMaterialShaderStage::Pixel,               "BasePixelPass.slang",    nullptr,                      { { kPixelInputsToken, PixelInputs } });
 
         // The deferred compute shader carries both graphs, the offset reconstruction and the pixel inputs.

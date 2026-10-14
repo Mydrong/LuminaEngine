@@ -1,7 +1,7 @@
-#include "Includes/SceneGlobals.slang"
+#include "Includes/MeshletGeometry.slang"
 
 [shader("fragment")]
-uint FragmentMain(uint VisID : SV_PrimitiveID) : SV_Target0
+uint FragmentMain(VIS_ID_INPUT) : SV_Target0
 {
     return VisID;
 }

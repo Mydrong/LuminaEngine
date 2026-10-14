@@ -986,9 +986,16 @@ namespace Lumina
     }
 
     // The foldout version of DrawHeaderLabel, drawing the text itself over a header whose own label is hidden.
-    static bool CollapsingHeaderEllipsis(const char* Label, ImGuiTreeNodeFlags Flags, bool& bOutClipped)
+    static bool CollapsingHeaderEllipsis(const char* Label, ImGuiTreeNodeFlags Flags, bool& bOutClipped, const void* StableId = nullptr)
     {
-        ImGui::PushID(Label);
+        if (StableId != nullptr)
+        {
+            ImGui::PushID(StableId);
+        }
+        else
+        {
+            ImGui::PushID(Label);
+        }
         const bool bOpen = ImGui::CollapsingHeader("##Header", Flags);
         ImGui::PopID();
 
@@ -1761,24 +1768,73 @@ namespace Lumina
         ChangeOp = EPropertyChangeOp::None;
     }
 
+    FString FStructPropertyRow::GetHeaderLabel() const
+    {
+        if (!IsArrayElementProperty())
+        {
+            return StructProperty->GetPropertyDisplayName().c_str();
+        }
+
+        FString Label = "[";
+        Label += std::to_string(PropertyHandle->Index).c_str();
+        Label += "]";
+        const FArrayPropertyRow* ArrayRow = static_cast<const FArrayPropertyRow*>(ParentRow);
+        FProperty* ArrayProperty = ArrayRow->GetPropertyHandle()->Property;
+        FCStringView TitleName = ArrayProperty->GetMetadata("TitleProperty");
+        if (TitleName.empty())
+        {
+            TitleName = "Name";
+        }
+
+        FProperty* TitleProperty = StructProperty->GetStruct()->GetProperty(FName(FStringView(TitleName.c_str(), TitleName.size())));
+        void* StructValue = PropertyHandle->GetValuePtr();
+        if (TitleProperty == nullptr || StructValue == nullptr)
+        {
+            return Label;
+        }
+
+        FString Title;
+        if (TitleProperty->GetType() == EPropertyTypeFlags::Name)
+        {
+            FName Value;
+            TitleProperty->GetValue(StructValue, &Value);
+            if (!Value.IsNone())
+            {
+                Title = Value.ToString();
+            }
+        }
+        else if (TitleProperty->GetType() == EPropertyTypeFlags::String)
+        {
+            TitleProperty->GetValue(StructValue, &Title);
+        }
+
+        if (!Title.empty())
+        {
+            Label += "  ";
+            Label += Title;
+        }
+        return Label;
+    }
+
     void FStructPropertyRow::DrawHeader(float Offset, const FPropertyDrawArgs& Args)
     {
         ImGui::Dummy(ImVec2(Offset, 0));
         ImGui::SameLine();
 
+        const FString Label = GetHeaderLabel();
+
         // A customization draws the whole value in one row, so there is nothing for an arrow to fold.
         if (Customization)
         {
-            bool bLabelClipped = false;
-            if (IsArrayElementProperty())
+            const bool bLabelClipped = DrawHeaderLabel(Label.c_str());
+            if (IsArrayElementProperty() && bLabelClipped && ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
             {
-                ImGui::Text("%lld", static_cast<long long>(PropertyHandle->Index));
+                ImGuiX::WrappedTooltip_Internal(Label);
             }
             else
             {
-                bLabelClipped = DrawHeaderLabel(StructProperty->GetPropertyDisplayName().c_str());
+                DrawPropertyTooltip(StructProperty, bLabelClipped);
             }
-            DrawPropertyTooltip(StructProperty, bLabelClipped);
             return;
         }
 
@@ -1787,10 +1843,17 @@ namespace Lumina
         ImGui::PushStyleColor(ImGuiCol_HeaderActive, 0);
         ImGui::PushStyleColor(ImGuiCol_HeaderHovered, 0);
         bool bClipped = false;
-        bExpanded = CollapsingHeaderEllipsis(StructProperty->GetPropertyDisplayName().c_str(), 0, bClipped);
+        bExpanded = CollapsingHeaderEllipsis(Label.c_str(), 0, bClipped, this);
         ImGui::PopStyleColor(3);
 
-        DrawPropertyTooltip(StructProperty, bClipped);
+        if (IsArrayElementProperty() && bClipped && ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
+        {
+            ImGuiX::WrappedTooltip_Internal(Label);
+        }
+        else
+        {
+            DrawPropertyTooltip(StructProperty, bClipped);
+        }
     }
 
     void FStructPropertyRow::DrawEditor(const FPropertyDrawArgs& Args)
@@ -1812,7 +1875,8 @@ namespace Lumina
 
     float FStructPropertyRow::GetMeasuredHeaderTextWidth() const
     {
-        const float LabelWidth = ImGui::CalcTextSize(StructProperty->GetPropertyDisplayName().c_str()).x;
+        const FString Label = GetHeaderLabel();
+        const float LabelWidth = ImGui::CalcTextSize(Label.c_str()).x;
         return Customization ? LabelWidth : ImGui::GetTreeNodeToLabelSpacing() + LabelWidth;
     }
 

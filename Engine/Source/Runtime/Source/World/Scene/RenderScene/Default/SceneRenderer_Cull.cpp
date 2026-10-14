@@ -615,18 +615,17 @@ namespace Lumina
             }
 
             // Read after the resize, because last frame's value describes the other ring slot's buffer.
-            const uint32 MaxGroups = Math::Max(RHI::GetMaxMeshWorkGroupCount(), 1u);
+            const uint32 MaxGroups = MeshletsPerSubDraw();
             const uint32 WantedSubDraws = (DrawListCapacity == 0u) ? 1u : (((DrawListCapacity - 1u) / MaxGroups) + 1u);
             const SIZE_T NumBucketSlices = NumArgSlots * (SIZE_T)kMeshletSliceCount;
             // One spare view of slots, since a multi-view shadow draw's strided range runs a whole view past its last read.
             const SIZE_T SpareViewSlots = (SIZE_T)Math::Max(NumDraws, 1u) * (SIZE_T)kMeshletSliceCount * (SIZE_T)WantedSubDraws;
             const SIZE_T MeshDrawArgsSize = Math::Max<SIZE_T>(
-                sizeof(RHI::FDrawMeshTasksIndirectArguments),
-                (NumBucketSlices * (SIZE_T)WantedSubDraws + SpareViewSlots)
-                    * sizeof(RHI::FDrawMeshTasksIndirectArguments));
+                sizeof(FMeshletDrawArgs),
+                (NumBucketSlices * (SIZE_T)WantedSubDraws + SpareViewSlots) * sizeof(FMeshletDrawArgs));
 
             ReserveBuffer(CL, MeshDrawArgsRing[Slot], MeshDrawArgsSize);
-            const uint32 AllocatedArgSlots = MeshDrawArgsRing[Slot].CapacityOf<RHI::FDrawMeshTasksIndirectArguments>();
+            const uint32 AllocatedArgSlots = MeshDrawArgsRing[Slot].CapacityOf<FMeshletDrawArgs>();
             MeshSubDrawsPerSlice = (uint32)Math::Min<SIZE_T>(WantedSubDraws, AllocatedArgSlots / NumBucketSlices);
 
             if (MeshSubDrawsPerSlice > LoggedSubDrawPeak)
@@ -1453,7 +1452,7 @@ namespace Lumina
             DispatchCompute(CL, DrawPrefixShader, PC, 1u, 1u, 1u);
 
             RHI::CmdBarrier(CL, RHI::EStageFlags::Compute, RHI::EAccessFlags::ShaderWrite,
-                RHI::EStageFlags::Compute | RHI::EStageFlags::MeshShader |
+                RHI::EStageFlags::Compute | RHI::EStageFlags::MeshShader | RHI::EStageFlags::VertexShader |
                 RHI::EStageFlags::IndirectArguments | RHI::EStageFlags::Transfer, RHI::EAccessFlags::TransferRead | RHI::EAccessFlags::TransferWrite | RHI::EAccessFlags::ShaderRead | RHI::EAccessFlags::ShaderWrite | RHI::EAccessFlags::IndirectRead);
         }
 
@@ -1585,16 +1584,21 @@ namespace Lumina
             uint32 SubDrawsPerSlice;
             uint32 bSplitPhases;
             uint32 bDeferCascades;
+            uint32 VertexPathCorners;
+            uint32 Pad0;
+            uint32 Pad1;
+            uint32 Pad2;
             RHI::TGPUSpan<FRenderBucketGPU> Buckets;
             RHI::TGPUSpan<RHI::FDispatchIndirectArguments> OutCullDispatchArgs;
-            RHI::TGPUSpan<RHI::FDrawMeshTasksIndirectArguments> OutMeshDrawArgs;
+            RHI::TGPUSpan<FMeshletDrawArgs> OutMeshDrawArgs;
         } APC = {};
-        static_assert(sizeof(FCullArgsPC) == 80, "FCullArgsPC must match BuildMeshletCullArgs.slang.");
+        static_assert(sizeof(FCullArgsPC) == 96, "FCullArgsPC must match BuildMeshletCullArgs.slang.");
 
         APC.NumViews                = NumViews;
         APC.NumDraws                = NumDraws;
         APC.Slice                   = (uint32)Slice;
-        APC.MaxMeshGroups           = Math::Max(RHI::GetMaxMeshWorkGroupCount(), 1u);
+        APC.MaxMeshGroups           = MeshletsPerSubDraw();
+        APC.VertexPathCorners       = RHI::SupportsMeshShaders() ? 0u : (uint32)MESHLET_MAX_TRIANGLES * 3u;
         APC.SubDrawsPerSlice        = MeshSubDrawsPerSlice;
         APC.bSplitPhases            = bSplitMeshletPhasesThisFrame ? 1u : 0u;
         APC.bDeferCascades          = bCascadePhase ? 2u : (bShadowReceiverCullThisFrame ? 1u : 0u);
@@ -1651,7 +1655,7 @@ namespace Lumina
         DispatchComputeIndirect(CL, CullShader, CPC, GetMeshletCullDispatchArgs());
         RHI::CmdBarrier(CL,
             RHI::EStageFlags::Compute, RHI::EAccessFlags::ShaderWrite,
-            RHI::EStageFlags::Compute | RHI::EStageFlags::MeshShader | RHI::EStageFlags::IndirectArguments,
+            RHI::EStageFlags::Compute | RHI::EStageFlags::MeshShader | RHI::EStageFlags::VertexShader | RHI::EStageFlags::IndirectArguments,
             RHI::EAccessFlags::ShaderRead | RHI::EAccessFlags::ShaderWrite | RHI::EAccessFlags::IndirectRead);
 
         // Turn what it appended into the slice every draw indexes, and the counts they draw from.
@@ -1659,7 +1663,7 @@ namespace Lumina
         DispatchCompute(CL, ArgsShader, APC, PostGroups, 1u, 1u);
 
         RHI::CmdBarrier(CL, RHI::EStageFlags::Compute, RHI::EAccessFlags::ShaderWrite,
-            RHI::EStageFlags::Compute | RHI::EStageFlags::MeshShader |
+            RHI::EStageFlags::Compute | RHI::EStageFlags::MeshShader | RHI::EStageFlags::VertexShader |
             RHI::EStageFlags::IndirectArguments | RHI::EStageFlags::PixelShader, RHI::EAccessFlags::ShaderRead | RHI::EAccessFlags::ShaderWrite | RHI::EAccessFlags::IndirectRead);
     }
 
@@ -1695,7 +1699,7 @@ namespace Lumina
         Push.Buckets              = { GetRenderBuckets() };
         Push.ArgBase              = ArgIndex;
         Push.Slice                = Slice;
-        Push.MaxMeshGroups        = Math::Max(RHI::GetMaxMeshWorkGroupCount(), 1u);
+        Push.MaxMeshGroups        = MeshletsPerSubDraw();
         Push.CullViewIndex        = Ctx.CullViewIndex;
         Push.ShadowDataIndex      = Ctx.ShadowDataIndex;
         Push.ViewIndex            = Ctx.ShadowViewIndex;
@@ -1705,18 +1709,28 @@ namespace Lumina
         Push.ArgViewStride        = NumDrawsPerView;
         Push.Pad0                 = 0;
 
-        // One mesh workgroup per surviving meshlet, so the grid IS the survivor count.
+        // One mesh workgroup or one vertex-path instance per surviving meshlet, so the grid is the survivor count.
         const uint32 SliceArgBase = (ArgIndex * kMeshletSliceCount + Slice) * MeshSubDrawsPerSlice;
+        const RHI::FGPURange SliceArgs = GetMeshDrawArgs().Skip(SliceArgBase * sizeof(FMeshletDrawArgs));
+        const bool bMeshShaders = RHI::SupportsMeshShaders();
 
         if (Ctx.ShadowViews.Count > 0u)
         {
             // An empty view's slot holds zero groups, so it costs the command processor a read and nothing more.
-            ASSERT(MeshSubDrawsPerSlice == 1u);
-            const uint32 ViewStride = NumDrawsPerView * kMeshletSliceCount * sizeof(RHI::FDrawMeshTasksIndirectArguments);
-            RHI::CmdDrawMeshTasksIndirect(CL, MakeArgs(Push), GetMeshDrawArgs().Skip(SliceArgBase * sizeof(RHI::FDrawMeshTasksIndirectArguments)), Ctx.ShadowViews.Count, ViewStride);
+            ASSERT(MeshSubDrawsPerSlice == 1u && bMeshShaders);
+            const uint32 ViewStride = NumDrawsPerView * kMeshletSliceCount * sizeof(FMeshletDrawArgs);
+            RHI::CmdDrawMeshTasksIndirect(CL, MakeArgs(Push), SliceArgs, Ctx.ShadowViews.Count, ViewStride);
             return;
         }
 
-        RHI::CmdDrawMeshTasksIndirectCount(CL, MakeArgs(Push), GetMeshDrawArgs().Skip(SliceArgBase * sizeof(RHI::FDrawMeshTasksIndirectArguments)), GetRenderBuckets().Skip(ArgIndex * sizeof(FRenderBucketGPU) + offsetof(FRenderBucketGPU, SubDrawCount) + Slice * sizeof(uint32)), MeshSubDrawsPerSlice, sizeof(RHI::FDrawMeshTasksIndirectArguments));
+        const RHI::FGPURange SubDrawCount = GetRenderBuckets().Skip(ArgIndex * sizeof(FRenderBucketGPU) + offsetof(FRenderBucketGPU, SubDrawCount) + Slice * sizeof(uint32));
+        if (bMeshShaders)
+        {
+            RHI::CmdDrawMeshTasksIndirectCount(CL, MakeArgs(Push), SliceArgs, SubDrawCount, MeshSubDrawsPerSlice, sizeof(FMeshletDrawArgs));
+        }
+        else
+        {
+            RHI::CmdDrawIndirectCount(CL, MakeArgs(Push), SliceArgs, SubDrawCount, MeshSubDrawsPerSlice, sizeof(FMeshletDrawArgs));
+        }
     }
 }

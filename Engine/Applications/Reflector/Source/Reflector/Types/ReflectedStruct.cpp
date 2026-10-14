@@ -65,13 +65,24 @@ namespace Lumina::Reflection
 
     void FReflectedStruct::EmitPropertyTable(FCodeWriter& Writer) const
     {
-        const bool bAnyMember = std::any_of(Props.begin(), Props.end(), [](const auto& Prop) { return !Prop->bInner; });
-        if (!bAnyMember)
+        const size_t Count = std::count_if(Props.begin(), Props.end(), [](const auto& Prop) { return !Prop->bInner; });
+        if (Count == 0)
         {
             return;
         }
 
-        Writer.Line("static constexpr Lumina::FPropertyDesc Properties[] =");
+        Writer.Linef("static const Lumina::FPropertyDesc Properties[%zu];", Count);
+        Writer.Line();
+    }
+
+    void FReflectedStruct::DefinePropertyTable(FCodeWriter& Writer) const
+    {
+        if (std::none_of(Props.begin(), Props.end(), [](const auto& Prop) { return !Prop->bInner; }))
+        {
+            return;
+        }
+
+        Writer.Linef("constexpr Lumina::FPropertyDesc %s::Properties[] =", TypeInfoName().c_str());
         Writer.BeginBlock();
         for (const auto& Prop : Props)
         {
@@ -185,6 +196,9 @@ namespace Lumina::Reflection
 
         Writer.PopIndent();
         Writer.Line("};");
+        DefinePropertyTable(Writer);
+        DefineFunctionParameterTables(Writer);
+        DefineFunctionTable(Writer);
         CloseNamespace(Writer);
 
         EmitTypeFunctions(Writer, HasMetadata("Component") ? ("Lumina::Meta::RegisterComponentMeta<" + Cpp + ">();") : std::string());

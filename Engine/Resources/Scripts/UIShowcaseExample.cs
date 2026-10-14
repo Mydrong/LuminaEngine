@@ -197,14 +197,14 @@ public sealed class UIShowcaseExample : CEntityScript
         _Model = new ShowcaseModel();
 
         // Must precede LoadDocument: RmlUi resolves data bindings while parsing, and never retries.
-        _Binding = World.UI.AddModel("showcase", _Model);
+        _Binding = new UIDataModel(World, "showcase", _Model);
         if (!_Binding.IsValid)
         {
             Debug.LogError("UIShowcaseExample: failed to register the 'showcase' data model.");
             return;
         }
 
-        _Doc = World.UI.LoadDocument(Document);
+        _Doc = new UIDocument(World, Lumina.CUILibrary.LoadDocument(World, Document));
         if (!_Doc.IsValid)
         {
             Debug.LogError($"UIShowcaseExample: failed to load '{Document}'.");
@@ -215,7 +215,8 @@ public sealed class UIShowcaseExample : CEntityScript
         _Doc.Show();
 
         // The tabs, sliders and text fields all need a real cursor and keyboard focus.
-        World.UI.EnableCursor();
+        Lumina.CInputLibrary.SetInputMode(World, Lumina.EInputMode.GameAndUI);
+        Lumina.CInputLibrary.SetMouseMode(World, Lumina.EMouseMode.Normal);
         Debug.Log("UIShowcaseExample: showcase open. Walk the tabs; the last two are live-bound.");
     }
 
@@ -232,6 +233,7 @@ public sealed class UIShowcaseExample : CEntityScript
         // Reverse order, so the managed callbacks outlive the document that can still fire them.
         _Doc.Close();
         _Binding?.Dispose();
-        World.UI.DisableCursor();
+        Lumina.CInputLibrary.SetInputMode(World, Lumina.EInputMode.Game);
+        Lumina.CInputLibrary.SetMouseMode(World, Lumina.EMouseMode.Captured);
     }
 }

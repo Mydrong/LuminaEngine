@@ -492,6 +492,7 @@ namespace Lumina
     {
         // Before any tool exists, so a reinstance during startup still finds this holder.
         FObjectReferenceProviders::Register(this);
+        AssetDeletedHandle = FCoreEditorDelegates::OnAssetDeleted.AddMember(this, &FEditorUI::OnAssetDeleted);
 
         // A prefab save rewrites placed instances, and recording that keeps later undos from replaying stale entities.
         CPrefab::SetLoadedWorldRefreshHook([this](CWorld* World, bool bBegin)
@@ -694,6 +695,7 @@ namespace Lumina
 
     void FEditorUI::Deinitialize(const FUpdateContext& UpdateContext)
     {
+        FCoreEditorDelegates::OnAssetDeleted.Remove(AssetDeletedHandle);
         FObjectReferenceProviders::Unregister(this);
         CPrefab::SetLoadedWorldRefreshHook({});
         GApp->GetEventProcessor().UnregisterEventHandler(&ShortcutLayer);
@@ -1987,10 +1989,17 @@ namespace Lumina
                 ImGuiX::Notifications::NotifyInfo("Undo history was cleared, since it could restore instances of the deleted prefab.");
             }
         }
+    }
 
-        if (ActiveAssetTools.find(InAsset) != ActiveAssetTools.end())
+    void FEditorUI::OnAssetDeleted(FStringView AssetPath)
+    {
+        for (FEditorTool* Tool : EditorTools)
         {
-            ToolsPendingDestroy.push(ActiveAssetTools.at(InAsset));
+            const FFixedString ToolPath = Tool->GetAssetVirtualPath();
+            if (!ToolPath.empty() && FStringView(ToolPath.c_str(), ToolPath.size()) == AssetPath)
+            {
+                ToolsPendingDestroy.push(Tool);
+            }
         }
     }
 

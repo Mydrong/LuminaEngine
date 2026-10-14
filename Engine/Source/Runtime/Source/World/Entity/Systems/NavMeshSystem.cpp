@@ -2478,7 +2478,7 @@ namespace Lumina
             const FVector3 LiftV(0.0f, Lift, 0.0f);
             for (size_t i = 1; i < Path.Corners.size(); ++i)
             {
-                World->DrawLine(Path.Corners[i - 1] + LiftV, Path.Corners[i] + LiftV, Color, Thickness, true, Duration);
+                World->GetDebugInterface()->DrawLine(Path.Corners[i - 1] + LiftV, Path.Corners[i] + LiftV, Color, Thickness, true, Duration);
             }
             // Corner spheres so kinks read at a glance; goal sphere distinguished.
             const float R = 0.12f;
@@ -2486,12 +2486,12 @@ namespace Lumina
             {
                 const bool bGoal = (i + 1 == Path.Corners.size());
                 const FVector4 SphColor = bGoal ? FVector4(1.0f, 1.0f, 1.0f, 1.0f) : Color;
-                World->DrawSphere(Path.Corners[i] + LiftV, bGoal ? R * 1.6f : R, SphColor, 10, 1.0f, true, Duration);
+                World->GetDebugInterface()->DrawSphere(Path.Corners[i] + LiftV, bGoal ? R * 1.6f : R, SphColor, 10, 1.0f, true, Duration);
             }
             // Partial paths are easy to misread; flag them with a red marker on the last corner.
             if (Path.bPartial)
             {
-                World->DrawSphere(Path.Corners.back() + LiftV, 0.25f, FVector4(1.0f, 0.2f, 0.2f, 1.0f), 12, 1.0f, true, Duration);
+                World->GetDebugInterface()->DrawSphere(Path.Corners.back() + LiftV, 0.25f, FVector4(1.0f, 0.2f, 0.2f, 1.0f), 12, 1.0f, true, Duration);
             }
         }
 

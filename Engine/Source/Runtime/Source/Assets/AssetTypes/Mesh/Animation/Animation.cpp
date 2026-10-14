@@ -1,5 +1,6 @@
 ﻿#include "RuntimePCH.h"
 #include "Memory/MemoryTracking.h"
+#include <algorithm>
 #include "Animation.h"
 
 #include "Animation/BindPose.h"

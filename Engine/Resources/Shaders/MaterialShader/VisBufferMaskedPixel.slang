@@ -36,7 +36,7 @@ bool MaskedVisKeep(FMaskedVertexOutput Input)
 }
 
 [shader("fragment")]
-uint FragmentMain(FMaskedVertexOutput Input, uint VisID : SV_PrimitiveID) : SV_Target0
+uint FragmentMain(FMaskedVertexOutput Input, VIS_ID_INPUT) : SV_Target0
 {
     if (!MaskedVisKeep(Input))
     {

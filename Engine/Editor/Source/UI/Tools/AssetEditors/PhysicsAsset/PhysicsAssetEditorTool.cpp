@@ -529,7 +529,7 @@ namespace Lumina
                 const int32 ParentIndex = Resource->GetBone(i).ParentIndex;
                 if (ParentIndex != Constants::kIndexNone)
                 {
-                    World->DrawLine(FVector3(BoneWorldTransforms[ParentIndex][3]), FVector3(BoneWorldTransforms[i][3]), BoneLineColor, 1.0f, false);
+                    World->GetDebugInterface()->DrawLine(FVector3(BoneWorldTransforms[ParentIndex][3]), FVector3(BoneWorldTransforms[i][3]), BoneLineColor, 1.0f, false);
                 }
             }
         }
@@ -636,16 +636,16 @@ namespace Lumina
             case ERagdollBodyShape::Capsule:
                 {
                     const FVector3 Axis = Math::Normalize(FVector3(BodyMatrix[1]));
-                    World->DrawCapsule(Center - Axis * Body.HalfHeight, Center + Axis * Body.HalfHeight, Body.Radius, Color, 16, Thickness, false);
+                    World->GetDebugInterface()->DrawCapsule(Center - Axis * Body.HalfHeight, Center + Axis * Body.HalfHeight, Body.Radius, Color, 16, Thickness, false);
                 }
                 break;
 
             case ERagdollBodyShape::Sphere:
-                World->DrawSphere(Center, Body.Radius, Color, 16, Thickness, false);
+                World->GetDebugInterface()->DrawSphere(Center, Body.Radius, Color, 16, Thickness, false);
                 break;
 
             case ERagdollBodyShape::Box:
-                World->DrawBox(Center, Body.HalfExtent, Math::ToQuat(BodyMatrix), Color, Thickness, false);
+                World->GetDebugInterface()->DrawBox(Center, Body.HalfExtent, Math::ToQuat(BodyMatrix), Color, Thickness, false);
                 break;
             }
 
@@ -653,9 +653,9 @@ namespace Lumina
             if (bSelected)
             {
                 constexpr float AxisLength = 0.12f;
-                World->DrawLine(Center, Center + Math::Normalize(FVector3(BodyMatrix[0])) * AxisLength, FVector4(1.0f, 0.2f, 0.2f, 1.0f), 2.5f, false);
-                World->DrawLine(Center, Center + Math::Normalize(FVector3(BodyMatrix[1])) * AxisLength, FVector4(0.2f, 1.0f, 0.2f, 1.0f), 2.5f, false);
-                World->DrawLine(Center, Center + Math::Normalize(FVector3(BodyMatrix[2])) * AxisLength, FVector4(0.2f, 0.4f, 1.0f, 1.0f), 2.5f, false);
+                World->GetDebugInterface()->DrawLine(Center, Center + Math::Normalize(FVector3(BodyMatrix[0])) * AxisLength, FVector4(1.0f, 0.2f, 0.2f, 1.0f), 2.5f, false);
+                World->GetDebugInterface()->DrawLine(Center, Center + Math::Normalize(FVector3(BodyMatrix[1])) * AxisLength, FVector4(0.2f, 1.0f, 0.2f, 1.0f), 2.5f, false);
+                World->GetDebugInterface()->DrawLine(Center, Center + Math::Normalize(FVector3(BodyMatrix[2])) * AxisLength, FVector4(0.2f, 0.4f, 1.0f, 1.0f), 2.5f, false);
             }
         }
     }
@@ -690,12 +690,12 @@ namespace Lumina
             const int32 ParentIndex = Resource->FindBoneIndex(Constraint.ParentBone);
             if (ParentIndex != Constants::kIndexNone && ParentIndex < (int32)BoneWorldTransforms.size())
             {
-                World->DrawLine(Pivot, FVector3(BoneWorldTransforms[ParentIndex][3]), Color, Thickness, false);
+                World->GetDebugInterface()->DrawLine(Pivot, FVector3(BoneWorldTransforms[ParentIndex][3]), Color, Thickness, false);
             }
 
             const FVector3 TwistAxis = Math::Normalize(FVector3(ChildMatrix[1]));
             const float ConeLength = bSelected ? 0.18f : 0.12f;
-            World->DrawCone(Pivot, TwistAxis, Math::Radians(Constraint.Swing1LimitDegrees), ConeLength, Color, 16, 4, Thickness, false);
+            World->GetDebugInterface()->DrawCone(Pivot, TwistAxis, Math::Radians(Constraint.Swing1LimitDegrees), ConeLength, Color, 16, 4, Thickness, false);
         }
     }
 
@@ -964,8 +964,8 @@ namespace Lumina
 
         Scene->AddForceAtTarget(GrabbedTarget, Force, AttachPoint);
 
-        World->DrawLine(AttachPoint, Target, FVector4(1.0f, 0.85f, 0.2f, 1.0f), 2.5f, false);
-        World->DrawSphere(Target, 0.035f, FVector4(1.0f, 0.85f, 0.2f, 1.0f), 10, 2.0f, false);
+        World->GetDebugInterface()->DrawLine(AttachPoint, Target, FVector4(1.0f, 0.85f, 0.2f, 1.0f), 2.5f, false);
+        World->GetDebugInterface()->DrawSphere(Target, 0.035f, FVector4(1.0f, 0.85f, 0.2f, 1.0f), 10, 2.0f, false);
     }
 
     FMatrix4 FPhysicsAssetEditorTool::GetGizmoMatrix()
@@ -1323,7 +1323,7 @@ namespace Lumina
             const STransformComponent& FloorTransform = World->GetComponent<STransformComponent>(FloorBodyEntity);
             if (const SBoxColliderComponent* FloorBox = World->TryGetComponent<SBoxColliderComponent>(FloorBodyEntity))
             {
-                World->DrawBox(FloorTransform.GetLocation(), FloorBox->HalfExtent, FloorTransform.GetRotation(),
+                World->GetDebugInterface()->DrawBox(FloorTransform.GetLocation(), FloorBox->HalfExtent, FloorTransform.GetRotation(),
                     FVector4(0.25f, 1.0f, 0.45f, 1.0f), 2.0f, false);
             }
 
@@ -1360,14 +1360,14 @@ namespace Lumina
             const FVector3 Position = FVector3(BoneWorld[3]);
 
             const bool bHasBody = GetAsset<CPhysicsAsset>()->FindBodyIndex(Resource->GetBone(i).Name) != Constants::kIndexNone;
-            World->DrawSphere(Position, bHasBody ? 0.03f : 0.015f,
+            World->GetDebugInterface()->DrawSphere(Position, bHasBody ? 0.03f : 0.015f,
                 bHasBody ? BodyColor : FVector4(0.5f, 0.5f, 0.55f, 1.0f), 8, 2.0f, false);
 
             const int32 ParentIndex = Resource->GetBone(i).ParentIndex;
             if (ParentIndex != Constants::kIndexNone)
             {
                 const FMatrix4 ParentWorld = EntityMatrix * (MeshComponent->BoneTransforms[ParentIndex] * Math::Inverse(Resource->GetBone(ParentIndex).InvBindMatrix));
-                World->DrawLine(FVector3(ParentWorld[3]), Position, BoneLineColor, 1.5f, false);
+                World->GetDebugInterface()->DrawLine(FVector3(ParentWorld[3]), Position, BoneLineColor, 1.5f, false);
             }
         }
     }

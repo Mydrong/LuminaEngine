@@ -2730,7 +2730,11 @@ namespace Lumina
 
         const FShaderEntry* NamedEntry = PSEntry != nullptr ? PSEntry : (MSEntry != nullptr ? MSEntry : VSEntry);
 
-        return [VS = CopyStage(MSEntry != nullptr ? nullptr : VSEntry), MS = CopyStage(MSEntry), PS = CopyStage(PSEntry),
+        // A meshlet stage resolves to its vertex-path twin on a device without mesh shading, so it is drawn as a vertex stage.
+        const bool bMeshStage = MSEntry != nullptr && MSEntry->Type == ERHIShaderType::Mesh;
+        const FShaderEntry* VertexEntry = bMeshStage ? nullptr : (MSEntry != nullptr ? MSEntry : VSEntry);
+
+        return [VS = CopyStage(VertexEntry), MS = CopyStage(bMeshStage ? MSEntry : nullptr), PS = CopyStage(PSEntry),
                 Key, SpecConsts, StatsShader = Key.PS, Name = NamedEntry->Path]() -> RHI::FPipelineH
         {
             RHI::FRasterDesc Desc;
@@ -2780,7 +2784,7 @@ namespace Lumina
     FShaderH FDefaultSceneRenderer::DefaultMaterialStage(EMaterialShaderStage Stage)
     {
         const CMaterial* DefaultMaterial = CMaterial::GetDefaultMaterial();
-        return IsValid(DefaultMaterial) ? DefaultMaterial->GetStage(Stage) : FShaderH{};
+        return IsValid(DefaultMaterial) ? DefaultMaterial->GetStage(ActiveMeshletStage(Stage)) : FShaderH{};
     }
 
     RHI::FPipelineH FDefaultSceneRenderer::GetOrCreatePipeline(const FGraphicsPipelineKey& Key)

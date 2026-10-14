@@ -159,17 +159,6 @@ namespace Lumina::RmlUi
 
     RUNTIME_API void EnumerateEditorSlots(Rml::Context* Context, TVector<FRmlEditorSlot>& OutSlots);
 
-    //--------------------------------------------------------------------------------------------
-    // Scripting surface: screen documents + element manipulation + event listeners.
-    //
-    // These drive a world's own full-screen Rml::Context (the HUD/menu context input is already
-    // forwarded to, see FInputViewport) -- distinct from world-space SWidgetComponents and editor
-    // previews. Every call takes the bridge StateMutex, which also guards re-entrant event
-    // callbacks. Documents/elements cross as opaque handles (Rml::ElementDocument*
-    // / Rml::Element* as void*); they are valid while the owning document is loaded. Backs LuminaSharp's
-    // World.UI facade (LuminaSharp_UI_* exports in DotNetGameplay.cpp).
-    //--------------------------------------------------------------------------------------------
-
     // Blittable payload handed to a managed UI event callback; mirrors LuminaSharp's UIEventData.
     struct FUIEventData
     {

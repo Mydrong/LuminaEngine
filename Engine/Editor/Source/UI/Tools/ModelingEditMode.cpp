@@ -135,7 +135,7 @@ namespace Lumina
 
         void DrawWireBox(CWorld* World, const FVector3& Center, const FVector3& HalfExtents, const FVector4& Color, float Thickness)
         {
-            World->DrawBox(Center, HalfExtents, FQuat::Identity(), Color, Thickness, false, -1.0f);
+            World->GetDebugInterface()->DrawBox(Center, HalfExtents, FQuat::Identity(), Color, Thickness, false, -1.0f);
         }
     }
 
@@ -408,10 +408,10 @@ namespace Lumina
         const FVector3 C(Center.x + SizeX * 0.5f, Center.y, Center.z + SizeZ * 0.5f);
         const FVector3 D(Center.x - SizeX * 0.5f, Center.y, Center.z + SizeZ * 0.5f);
 
-        World->DrawLine(A, B, kSurfaceColor, 2.0f, false, -1.0f);
-        World->DrawLine(B, C, kSurfaceColor, 2.0f, false, -1.0f);
-        World->DrawLine(C, D, kSurfaceColor, 2.0f, false, -1.0f);
-        World->DrawLine(D, A, kSurfaceColor, 2.0f, false, -1.0f);
+        World->GetDebugInterface()->DrawLine(A, B, kSurfaceColor, 2.0f, false, -1.0f);
+        World->GetDebugInterface()->DrawLine(B, C, kSurfaceColor, 2.0f, false, -1.0f);
+        World->GetDebugInterface()->DrawLine(C, D, kSurfaceColor, 2.0f, false, -1.0f);
+        World->GetDebugInterface()->DrawLine(D, A, kSurfaceColor, 2.0f, false, -1.0f);
     }
 
     void FModelingEditMode::RebindShapeSettings(CWorld* World)

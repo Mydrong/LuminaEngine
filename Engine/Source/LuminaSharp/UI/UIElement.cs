@@ -193,7 +193,7 @@ public readonly unsafe struct UIElement
         // RmlUi dispatches outside every script callback, so the handler re-enters the subscriber's context.
         Lumina.CEntityScript? Owner = Engine.ActiveScript;
 
-        Lumina.FUIEventListener Listener = Lumina.CUILibrary.AddEventListener(UI.WorldOf(WorldId), Handle, EventType);
+        Lumina.FUIEventListener Listener = Lumina.CUILibrary.AddEventListener(UIWorld.FromHandle(WorldId), Handle, EventType);
         if (!Listener.IsValid)
         {
             return UIEventSubscription.Empty;
@@ -209,14 +209,14 @@ public readonly unsafe struct UIElement
                 {
                     using Engine.Scope Scope = Owner != null && !Owner.Entity.IsNull
                         ? Engine.Push(Owner.World, Owner.Entity, Owner)
-                        : Engine.Push(UI.WorldOf(WorldId));
+                        : Engine.Push(UIWorld.FromHandle(WorldId));
                     Handler(new UIEvent(WorldId, Data));
                 },
             });
 
         if (!Binding.IsValid)
         {
-            Lumina.CUILibrary.RemoveEventListener(UI.WorldOf(WorldId), Listener);
+            Lumina.CUILibrary.RemoveEventListener(UIWorld.FromHandle(WorldId), Listener);
             return UIEventSubscription.Empty;
         }
 

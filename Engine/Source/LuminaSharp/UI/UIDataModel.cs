@@ -19,7 +19,6 @@ internal struct UIArg
 // Binds a ViewModel's or CUIScript's [Bind] members to a named RmlUi data model, comparing them once a frame so plain assignments reach the view.
 public sealed unsafe class UIDataModel : IDisposable
 {
-    // Game-thread only, so a plain dictionary is fine. Lets World.UI.GetModel re-fetch a model by name.
     private static readonly Dictionary<(ulong World, string Name), UIDataModel> Registry = new();
 
     private readonly ulong _world;
@@ -43,6 +42,11 @@ public sealed unsafe class UIDataModel : IDisposable
     // Set while applying a value the view sent, so the property setter's Set() does not echo it back.
     private bool _applyingFromNative;
 
+    public UIDataModel(Lumina.CWorld World, string Name, ViewModel Target)
+        : this(World.WorldHandle, Name, Target)
+    {
+    }
+
     internal UIDataModel(ulong World, string Name, object Target)
     {
         _world = World;
@@ -55,7 +59,7 @@ public sealed unsafe class UIDataModel : IDisposable
         _lastList = new long[_shape.Lists.Count];
         _self = GCHandle.Alloc(this);
 
-        _native = Lumina.CUILibrary.CreateDataModel(UI.WorldOf(World), Name,
+        _native = Lumina.CUILibrary.CreateDataModel(UIWorld.FromHandle(World), Name,
             (ulong)GCHandle.ToIntPtr(_self), (ulong)SetThunkPtr, (ulong)EventThunkPtr);
         if (!_native.IsValid)
         {
@@ -83,6 +87,8 @@ public sealed unsafe class UIDataModel : IDisposable
     public object Target => _target;
 
     internal ulong World => _world;
+
+    public static UIDataModel? Find(Lumina.CWorld World, string Name) => Find(World.WorldHandle, Name);
 
     internal static UIDataModel? Find(ulong World, string Name)
         => Registry.TryGetValue((World, Name), out UIDataModel? Model) ? Model : null;

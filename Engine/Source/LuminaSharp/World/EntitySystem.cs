@@ -8,8 +8,6 @@ public partial class CEntitySystem
     // Valid from Configure onwards, read from the native object that owns the value for both languages.
     public CWorld World => GetWorld();
 
-    public EntityRegistry Registry => World.Registry;
-
     // The tick context for the stage currently running, only meaningful inside the callbacks.
     public SystemContext Context => new(Native.WorldGetSystemContext(World.WorldHandle));
 

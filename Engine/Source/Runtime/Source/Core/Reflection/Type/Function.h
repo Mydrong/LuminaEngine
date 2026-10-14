@@ -54,18 +54,6 @@ namespace Lumina
 
     ENUM_CLASS_FLAGS(EFunctionFlags);
 
-    /**
-     * A reflected function: its parameters as FProperty, and a thunk that calls the real one.
-     *
-     * Deliberately not a CObject. Unreal's UFunction is one, which buys a name, an outer and a class at the
-     * cost of an object-array slot, a refcount and a vtable per function; none of that is wanted for what is
-     * a call descriptor. This is a plain type in the owning struct's property arena, sized like an FProperty
-     * and trivially destructible, so a type's whole reflected surface is still one allocation.
-     *
-     * Parameters are FProperty because that is what makes every reflected type callable for free: the frame
-     * is described by offsets and the properties themselves know how to construct, destruct, copy and
-     * serialize their kind. Adding a property type does not teach this anything.
-     */
     class FFunction
     {
     public:

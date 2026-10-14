@@ -237,7 +237,7 @@ namespace Lumina
 
         if (Emitter->VisibilityRadius > 0.0f)
         {
-            World->DrawSphere(Origin, Emitter->VisibilityRadius, BoundsColor, {}, {}, {});
+            World->GetDebugInterface()->DrawSphere(Origin, Emitter->VisibilityRadius, BoundsColor, {}, {}, {});
         }
 
         const CParticleEmitterStack* Stack = GetStackFor(SelectedEmitter);
@@ -259,13 +259,13 @@ namespace Lumina
             {
             case EParticleEmitterShape::Sphere:
             case EParticleEmitterShape::Hemisphere:
-                World->DrawSphere(Origin, Size.x, ShapeColor, {}, {}, {});
+                World->GetDebugInterface()->DrawSphere(Origin, Size.x, ShapeColor, {}, {}, {});
                 break;
             case EParticleEmitterShape::Box:
-                World->DrawBox(Origin, Size, FQuat::Identity(), ShapeColor, {}, {}, {});
+                World->GetDebugInterface()->DrawBox(Origin, Size, FQuat::Identity(), ShapeColor, {}, {}, {});
                 break;
             case EParticleEmitterShape::Cone:
-                World->DrawCone(Origin, FVector3(0.0f, 1.0f, 0.0f), Math::Atan2(Size.x, Math::Max(Size.y, 1e-4f)), Size.y, ShapeColor, {}, {}, {});
+                World->GetDebugInterface()->DrawCone(Origin, FVector3(0.0f, 1.0f, 0.0f), Math::Atan2(Size.x, Math::Max(Size.y, 1e-4f)), Size.y, ShapeColor, {}, {}, {});
                 break;
             case EParticleEmitterShape::Ring:
             case EParticleEmitterShape::Disk:
@@ -277,7 +277,7 @@ namespace Lumina
                     {
                         const float A = Math::TwoPi<float>() * (float)Index / (float)Segments;
                         const float B = Math::TwoPi<float>() * (float)(Index + 1) / (float)Segments;
-                        World->DrawLine(Origin + FVector3(Math::Cos(A), 0.0f, Math::Sin(A)) * Radius,
+                        World->GetDebugInterface()->DrawLine(Origin + FVector3(Math::Cos(A), 0.0f, Math::Sin(A)) * Radius,
                                         Origin + FVector3(Math::Cos(B), 0.0f, Math::Sin(B)) * Radius, ShapeColor, {}, {}, {});
                     }
                 }
@@ -403,16 +403,7 @@ namespace Lumina
             return;
         }
 
-        const float Spacing = ImGui::GetStyle().ItemSpacing.x;
-        const float Pad     = ImGui::GetStyle().FramePadding.x;
-        const float BtnW    = ImGui::CalcTextSize(LE_ICON_DELETE).x + Pad * 2.0f;
-        const float CheckW  = ImGui::GetFrameHeight();
-        const float Cluster = CheckW + BtnW * 3.0f + Spacing * 4.0f;
-
         const bool bSelected = (SelectedObject == (CObject*)Emitter);
-
-        // Captured before the header consumes the line, since SameLine's offset is window-local.
-        const float HeaderRight = ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x;
 
         // OpenOnArrow splits the jobs, or selecting an emitter also collapses the stack being read.
         ImGuiTreeNodeFlags Flags = ImGuiTreeNodeFlags_CollapsingHeader
@@ -426,11 +417,18 @@ namespace Lumina
         }
 
         ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(6, 6));
+        const float Spacing = ImGui::GetStyle().ItemSpacing.x;
+        const float Pad = ImGui::GetStyle().FramePadding.x;
+        const float BtnW = ImGui::CalcTextSize(LE_ICON_DELETE).x + Pad * 2.0f;
+        const float CheckW = ImGui::GetFrameHeight();
+        const float Cluster = CheckW + BtnW * 3.0f + Spacing * 4.0f;
+        const ImVec2 HeaderPos = ImGui::GetCursorScreenPos();
+        const float HeaderRight = HeaderPos.x + ImGui::GetContentRegionAvail().x;
+
         ImGui::PushStyleColor(ImGuiCol_Text, Emitter->bEnabled ? IM_COL32(235, 220, 160, 255)
                                                                : IM_COL32(125, 125, 130, 255));
         const bool bOpen = ImGui::TreeNodeEx("##emhdr", Flags, "%s", Emitter->EmitterName.c_str());
         ImGui::PopStyleColor();
-        ImGui::PopStyleVar();
 
         if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen())
         {
@@ -438,8 +436,7 @@ namespace Lumina
             SelectObject(Emitter);
         }
 
-        // Controls overlaid on the header bar, right-aligned, so they stay reachable when collapsed.
-        ImGui::SameLine(HeaderRight - Cluster);
+        ImGui::SetCursorScreenPos(ImVec2(HeaderRight - Cluster, HeaderPos.y));
 
         bool bEnabled = Emitter->bEnabled;
         if (ImGui::Checkbox("##emen", &bEnabled))
@@ -480,6 +477,7 @@ namespace Lumina
             PendingRemoveEmitter = Emitter;
         }
         ImGui::EndDisabled();
+        ImGui::PopStyleVar();
 
         if (bOpen)
         {
@@ -510,14 +508,15 @@ namespace Lumina
         const float Spacing = ImGui::GetStyle().ItemSpacing.x;
         const float Pad     = ImGui::GetStyle().FramePadding.x;
         const float BtnW    = ImGui::CalcTextSize(LE_ICON_DELETE).x + Pad * 2.0f;
-        const float Cluster = BtnW * 3.0f + Spacing * 3.0f; // up + down + delete, plus the gaps
+        const float ActionsWidth = BtnW * 3.0f + Spacing * 2.0f;
 
-        // Section header with a right-aligned + add button.
-        const float HeaderWidth = ImGui::GetContentRegionAvail().x;
+        const ImVec2 SectionPos = ImGui::GetCursorScreenPos();
+        const float SectionRight = SectionPos.x + ImGui::GetContentRegionAvail().x;
         ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(120, 200, 130, 255));
+        ImGui::AlignTextToFramePadding();
         ImGui::TextUnformatted(Label);
         ImGui::PopStyleColor();
-        ImGui::SameLine(HeaderWidth - BtnW);
+        ImGui::SetCursorScreenPos(ImVec2(SectionRight - BtnW, SectionPos.y));
         if (ImGui::Button(LE_ICON_PLUS"##add", ImVec2(BtnW, 0)))
         {
             PendingAddStage   = Stage;
@@ -538,6 +537,9 @@ namespace Lumina
 
             ImGui::PushID(i);
 
+            const ImVec2 RowPos = ImGui::GetCursorScreenPos();
+            const float RowRight = RowPos.x + ImGui::GetContentRegionAvail().x;
+            const float RowHeight = ImGui::GetFrameHeight();
             bool bEnabled = Module->bEnabled;
             if (ImGui::Checkbox("##en", &bEnabled))
             {
@@ -550,9 +552,8 @@ namespace Lumina
             const uint32 Accent = Module->GetAccentColor();
             ImGui::PushStyleColor(ImGuiCol_Text, bEnabled ? Accent : IM_COL32(120, 120, 125, 255));
             const bool bSelected = (SelectedModule == Module);
-            const float Remaining = ImGui::GetContentRegionAvail().x - Cluster;
-            const float RowWidth = Remaining > 40.0f ? Remaining : 40.0f;
-            if (ImGui::Selectable(Module->GetDisplayName().c_str(), bSelected, 0, ImVec2(RowWidth, 0)))
+            const float RowWidth = Math::Max(40.0f, RowRight - ActionsWidth - Spacing - ImGui::GetCursorScreenPos().x);
+            if (ImGui::Selectable(Module->GetDisplayName().c_str(), bSelected, 0, ImVec2(RowWidth, RowHeight)))
             {
                 SelectedEmitter = EmitterIndex;
                 SelectModule(Module);
@@ -563,7 +564,7 @@ namespace Lumina
                 ImGui::SetTooltip("%s", Module->GetTooltip().c_str());
             }
 
-            ImGui::SameLine();
+            ImGui::SetCursorScreenPos(ImVec2(RowRight - ActionsWidth, RowPos.y));
             ImGui::BeginDisabled(i == 0);
             if (ImGui::Button(LE_ICON_ARROW_UP"##up", ImVec2(BtnW, 0))) { EmitterStack->MoveModule(Module, -1); Asset->GetPackage()->MarkDirty(); DirtyEmitter = EmitterIndex; }
             ImGui::EndDisabled();

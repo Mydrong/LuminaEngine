@@ -18,7 +18,9 @@ namespace Lumina
     {
     public:
 
-        virtual ~IImGuiRenderer() = default;
+        IImGuiRenderer()            = default;
+        virtual ~IImGuiRenderer()   = default;
+        LE_NO_COPYMOVE(IImGuiRenderer);
 
         virtual void Initialize();
         virtual void Deinitialize();
@@ -33,7 +35,7 @@ namespace Lumina
 
         // Draw DrawData into the acquired swapchain image (Target). The frame loop has set the heap
         // and the acquire barrier.
-        virtual void OnEndFrame_NewRHI(RHI::FCmdListH CL, RHI::FTextureH Target, const FUIntVector2& Extent, ImDrawData* DrawData) {}
+        virtual void OnEndFrame(RHI::FCmdListH CL, RHI::FTextureH Target, const FUIntVector2& Extent, ImDrawData* DrawData) {}
 
         // Multi-viewport: windows dragged out of the main window into their own OS windows. Each is
         // recorded from its live draw data and presented to its own swapchain.

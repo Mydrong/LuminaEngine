@@ -38,27 +38,27 @@ public static class Navigation
     public static string Describe(ENavPathResult Result) => CNavigationLibrary.DescribePathResult(Result);
 
     /// Sends the agent to a world location, adding the path-follow component if it has none.
-    public static SPathFollowComponent MoveTo(CWorld World, Entity Agent, FVector3 Destination, float Speed = 1.0f)
+    public static SPathFollowComponent MoveTo(CWorld World, FEntity Agent, FVector3 Destination, float Speed = 1.0f)
     {
-        SPathFollowComponent Follow = World.Registry.Emplace<SPathFollowComponent>(Agent)!;
+        SPathFollowComponent Follow = World.GetOrEmplaceComponent<SPathFollowComponent>(Agent)!;
         Follow.Speed = Speed;
         Follow.SetTargetLocation(Destination);
         return Follow;
     }
 
     /// Makes the agent chase a target, repathing as the target moves.
-    public static SPathFollowComponent Follow(CWorld World, Entity Agent, Entity Target, float Speed = 1.0f)
+    public static SPathFollowComponent Follow(CWorld World, FEntity Agent, FEntity Target, float Speed = 1.0f)
     {
-        SPathFollowComponent Follow = World.Registry.Emplace<SPathFollowComponent>(Agent)!;
+        SPathFollowComponent Follow = World.GetOrEmplaceComponent<SPathFollowComponent>(Agent)!;
         Follow.Speed = Speed;
         Follow.SetTargetEntity(Target);
         return Follow;
     }
 
     /// Clears the agent's goal and cached path. A no-op when it has none.
-    public static void StopMoving(CWorld World, Entity Agent)
+    public static void StopMoving(CWorld World, FEntity Agent)
     {
-        World.Registry.TryGet<SPathFollowComponent>(Agent)?.Stop();
+        World.TryGetComponent<SPathFollowComponent>(Agent)?.Stop();
     }
 }
 

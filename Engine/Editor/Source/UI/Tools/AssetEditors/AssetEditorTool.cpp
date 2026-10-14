@@ -301,18 +301,14 @@ namespace Lumina
 
     FFixedString FAssetEditorTool::GetAssetVirtualPath() const
     {
-        if (!Asset.IsValid())
+        if (Asset.IsValid())
         {
-            return {};
+            if (CPackage* Package = Asset->GetPackage())
+            {
+                AssetVirtualPath = Package->GetPackagePath();
+            }
         }
 
-        CPackage* Package = Asset->GetPackage();
-        if (Package == nullptr)
-        {
-            return {};
-        }
-
-        // The mount-relative virtual path with the .lasset extension, as the browser tiles carry it.
-        return Package->GetPackagePath();
+        return AssetVirtualPath;
     }
 }

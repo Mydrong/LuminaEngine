@@ -3,8 +3,6 @@
 
 // Compiled twice via VISBUFFER_MASKED_GEOM since the cases need different output types; VisID is per primitive, stored +1.
 
-// SV_DrawIndex selects the sub-draw, whose base comes from the same ViewDrawOffsets the task stage appended through.
-
 struct FVisPrimitive
 {
     uint VisID          : SV_PrimitiveID;
@@ -26,6 +24,52 @@ FMaterialVertexInputs EvalMaterialVertex(FGPUInstance* Inst, float4x4 ModelMatri
     FMaterialVertexInputs Material;
     $MATERIAL_VERTEX_INPUTS
     return Material;
+}
+
+// What every vertex of one meshlet reads alike, loaded once per mesh workgroup and once per vertex on the vertex path.
+struct FVisVertexContext
+{
+    float4x4 ModelMatrix;
+    float3x3 NormalMatrix;
+    float4x4 CameraView;
+    float4x4 CameraProj;
+#ifdef VISBUFFER_MASKED_GEOM
+    uint     MaterialIndex;
+#endif
+};
+
+FVisVertexContext LoadVisVertexContext(FMeshletRef Ref)
+{
+    FVisVertexContext Ctx;
+    Ctx.ModelMatrix   = Ref.ModelMatrix;
+    Ctx.NormalMatrix  = CalculateNormalMatrix(Ctx.ModelMatrix);
+    Ctx.CameraView    = GetCameraView();
+    Ctx.CameraProj    = GetCameraProjection();
+#ifdef VISBUFFER_MASKED_GEOM
+    Ctx.MaterialIndex = Ref.Inst.MaterialIndex;
+#endif
+    return Ctx;
+}
+
+// Both entry points emit their vertices through this, so the mesh and vertex paths place geometry identically.
+FVisVertexOutput VisBufferVertex(FMeshletRef Ref, uint LocalVertex, FVisVertexContext Ctx)
+{
+    FVertexData VertexData = LoadMeshletVertexData(Ref, LocalVertex);
+    FMeshletWorldVertex W  = TransformMeshletVertex(VertexData, Ctx.ModelMatrix, Ctx.NormalMatrix);
+
+    float4 WorldPos = float4(W.WorldPos, 1.0);
+    const FMaterialVertexInputs Material =
+        EvalMaterialVertex(Ref.Inst, Ctx.ModelMatrix, VertexData, WorldPos,
+                           W.NormalWS, W.TangentWS.xyz, W.TangentWS.w);
+    WorldPos.xyz += Material.WorldPositionOffset;
+
+#ifdef VISBUFFER_MASKED_GEOM
+    return MakeMaskedVertexOutput(Ref, W, WorldPos.xyz, Ctx.CameraView, Ctx.CameraProj, Ctx.MaterialIndex);
+#else
+    FVisVertexOutput VOut = (FVisVertexOutput)0;
+    VOut.Position = CameraClipPosition(CameraViewPosition(WorldPos.xyz, Ctx.CameraView), Ctx.CameraProj);
+    return VOut;
+#endif
 }
 
 [shader("mesh")]
@@ -61,14 +105,8 @@ void MeshMain(
     // Workgroup-uniform; an unresolved meshlet leaves VertCount 0 and Ref.Inst possibly null.
     if (VertCount > 0u)
     {
-        // Every workgroup-uniform matrix load is issued before the vertex fetch so all four are in flight together.
-        const float4x4 ModelMatrix  = Ref.ModelMatrix;
-        const float3x3 NormalMatrix = CalculateNormalMatrix(ModelMatrix);
-        const float4x4 CameraView   = GetCameraView();
-        const float4x4 CameraProj   = GetCameraProjection();
-#ifdef VISBUFFER_MASKED_GEOM
-        const uint     MaterialIndex = Ref.Inst.MaterialIndex;
-#endif
+        // Every workgroup-uniform load is issued before the vertex fetch so they are in flight together.
+        const FVisVertexContext Ctx = LoadVisVertexContext(Ref);
 
         [ForceUnroll]
         for (uint v = 0; v < MESHLET_VERT_ITERS; ++v)
@@ -77,23 +115,8 @@ void MeshMain(
             const uint StoreSlot = ThreadID + v * MESHLET_MESH_GROUP_SIZE;
             const uint LoadSlot  = min(StoreSlot, VertCount - 1u);
 
-            FVertexData VertexData = LoadMeshletVertexData(Ref, LoadSlot);
-            FMeshletWorldVertex W  = TransformMeshletVertex(VertexData, ModelMatrix, NormalMatrix);
-
-            float4 WorldPos = float4(W.WorldPos, 1.0);
-            const FMaterialVertexInputs Material =
-                EvalMaterialVertex(Ref.Inst, ModelMatrix, VertexData, WorldPos,
-                                   W.NormalWS, W.TangentWS.xyz, W.TangentWS.w);
-            WorldPos.xyz += Material.WorldPositionOffset;
-
-#ifdef VISBUFFER_MASKED_GEOM
-            FVisVertexOutput VOut = MakeMaskedVertexOutput(Ref, W, WorldPos.xyz, CameraView, CameraProj, MaterialIndex);
-            Clip[v] = VOut.Position;   // taken from the output so it cannot drift from the exported position
-#else
-            FVisVertexOutput VOut = (FVisVertexOutput)0;
-            Clip[v]       = CameraClipPosition(CameraViewPosition(WorldPos.xyz, CameraView), CameraProj);
-            VOut.Position = Clip[v];
-#endif
+            const FVisVertexOutput VOut = VisBufferVertex(Ref, LoadSlot, Ctx);
+            Clip[v] = VOut.Position;
 
             // Clamped lanes skip the store but still write Clip[], which the shuffle reads by lane.
             if (StoreSlot < VertCount)
@@ -124,9 +147,32 @@ void MeshMain(
             {
                 // The slot is the source triangle index, so the deferred pass re-fetches it from the meshlet's own array.
                 Tris[StoreT]                = Idx;
-                Prims[StoreT].VisID         = ((MeshletSlot << 7u) | (StoreT & 0x7Fu)) + 1u;
+                Prims[StoreT].VisID         = PackVisID(MeshletSlot, StoreT);
                 Prims[StoreT].CullPrimitive = bCull;
             }
         }
     }
+}
+
+struct FVisVertexStageOutput
+{
+    FVisVertexOutput     Vertex;
+    nointerpolation uint VisID : VISID;
+};
+
+// The fallback without mesh shading, one instance per surviving meshlet, with an invalid corner left at the origin with no area.
+[shader("vertex")]
+FVisVertexStageOutput VertexMain(uint VertexIndex   : SV_VulkanVertexID,
+                                 uint InstanceIndex : SV_VulkanInstanceID,
+                                 uint DrawIndex     : SV_DrawIndex)
+{
+    const FMeshletCorner Corner = ResolveMeshletCorner(DrawIndex, InstanceIndex, VertexIndex);
+
+    FVisVertexStageOutput Out = (FVisVertexStageOutput)0;
+    Out.VisID = PackVisID(Corner.MeshletSlot, Corner.TriIdx);
+    if (Corner.bValid)
+    {
+        Out.Vertex = VisBufferVertex(Corner.Ref, Corner.LocalVertex, LoadVisVertexContext(Corner.Ref));
+    }
+    return Out;
 }

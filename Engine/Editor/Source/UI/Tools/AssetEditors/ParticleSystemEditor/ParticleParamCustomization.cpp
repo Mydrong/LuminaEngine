@@ -8,6 +8,7 @@
 #include "Core/Reflection/Type/Properties/StructProperty.h"
 #include "Tools/UI/ImGui/ImGuiDesignIcons.h"
 #include "Tools/UI/ImGui/ImGuiX.h"
+#include "Tools/UI/ImGui/ImGuiXNumeric.h"
 #include "Containers/StringFormat.h"
 
 namespace Lumina
@@ -145,26 +146,26 @@ namespace Lumina
             case EParticleParameterType::Int:
             {
                 int32 Int = (int32)Value.Constant.x;
-                if (ImGui::DragInt("##Value", &Int, 1.0f, (int32)Min, (int32)Max))
+                if (ImGuiX::DragInt("##Value", &Int, 1.0f, (int32)Min, (int32)Max))
                 {
                     Value.Constant.x = (float)Int;
                 }
                 break;
             }
             case EParticleParameterType::Vec2:
-                ImGui::DragFloat2("##Value", &Value.Constant.x, 0.01f, Min, Max);
+                ImGuiX::DragFloat2("##Value", &Value.Constant.x, 0.01f, Min, Max);
                 break;
             case EParticleParameterType::Vec3:
-                ImGui::DragFloat3("##Value", &Value.Constant.x, 0.01f, Min, Max);
+                ImGuiX::DragFloat3("##Value", &Value.Constant.x, 0.01f, Min, Max);
                 break;
             case EParticleParameterType::Vec4:
-                ImGui::DragFloat4("##Value", &Value.Constant.x, 0.01f, Min, Max);
+                ImGuiX::DragFloat4("##Value", &Value.Constant.x, 0.01f, Min, Max);
                 break;
             case EParticleParameterType::Color:
                 ImGui::ColorEdit4("##Value", &Value.Constant.x, ImGuiColorEditFlags_AlphaBar);
                 break;
             default:
-                ImGui::DragFloat("##Value", &Value.Constant.x, 0.01f, Min, Max);
+                ImGuiX::DragFloat("##Value", &Value.Constant.x, 0.01f, Min, Max);
                 break;
             }
             ImGui::PopItemWidth();

@@ -67,6 +67,9 @@ namespace Lumina::Reflection
 
         Writer.PopIndent();
         Writer.Line("};");
+        DefinePropertyTable(Writer);
+        DefineFunctionParameterTables(Writer);
+        DefineFunctionTable(Writer);
         CloseNamespace(Writer);
 
         EmitTypeFunctions(Writer);

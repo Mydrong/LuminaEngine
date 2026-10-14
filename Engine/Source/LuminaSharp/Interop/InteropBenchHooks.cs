@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -218,7 +218,7 @@ internal static unsafe partial class InteropBenchHooks
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
     public static double Bench_SystemViewWalk(nint World, int Ticks, int* OutEntities)
     {
-        var Registry = new EntityRegistry((ulong)World);
+        var Registry = Wrapper<Lumina.CWorld>.ForObject(World)!;
 
         int Seen = 0;
         float Total = 0.0f;
@@ -226,7 +226,7 @@ internal static unsafe partial class InteropBenchHooks
         for (int Tick = 0; Tick < Ticks; ++Tick)
         {
             Seen = 0;
-            foreach ((Entity _, Lumina.STransformComponent Transform) in Registry.View<Lumina.STransformComponent>())
+            foreach ((FEntity _, Lumina.STransformComponent Transform) in Registry.View<Lumina.STransformComponent>())
             {
                 Total += Transform.LocalTransform.Location.X;
                 ++Seen;
@@ -243,14 +243,14 @@ internal static unsafe partial class InteropBenchHooks
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
     public static double Bench_SystemViewWrite(nint World, int Ticks, int* OutEntities)
     {
-        var Registry = new EntityRegistry((ulong)World);
+        var Registry = Wrapper<Lumina.CWorld>.ForObject(World)!;
 
         int Seen = 0;
         long Start = Stopwatch.GetTimestamp();
         for (int Tick = 0; Tick < Ticks; ++Tick)
         {
             Seen = 0;
-            foreach ((Entity _, Lumina.STransformComponent Transform) in Registry.View<Lumina.STransformComponent>())
+            foreach ((FEntity _, Lumina.STransformComponent Transform) in Registry.View<Lumina.STransformComponent>())
             {
                 FTransform Local = Transform.LocalTransform;
                 Local.Location.X += 1.0f;
@@ -268,7 +268,7 @@ internal static unsafe partial class InteropBenchHooks
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
     public static double Bench_SystemViewStepOnly(nint World, int Ticks, int* OutEntities)
     {
-        var Registry = new EntityRegistry((ulong)World);
+        var Registry = Wrapper<Lumina.CWorld>.ForObject(World)!;
 
         int Seen = 0;
         long Start = Stopwatch.GetTimestamp();
@@ -292,7 +292,7 @@ internal static unsafe partial class InteropBenchHooks
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
     public static double Bench_SystemRandomGet(nint World, int Ticks, uint* Entities, int Count)
     {
-        var Registry = new EntityRegistry((ulong)World);
+        var Registry = Wrapper<Lumina.CWorld>.ForObject(World)!;
 
         float Total = 0.0f;
         long Start = Stopwatch.GetTimestamp();
@@ -301,7 +301,7 @@ internal static unsafe partial class InteropBenchHooks
             for (int Index = 0; Index < Count; ++Index)
             {
                 Lumina.STransformComponent? Transform =
-                    Registry.TryGet<Lumina.STransformComponent>(new Entity(Entities[Index]));
+                    Registry.TryGetComponent<Lumina.STransformComponent>(new FEntity(Entities[Index]));
                 if (Transform != null)
                 {
                     Total += Transform.LocalTransform.Location.X;

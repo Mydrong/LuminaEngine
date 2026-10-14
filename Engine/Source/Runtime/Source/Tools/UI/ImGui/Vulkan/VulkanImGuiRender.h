@@ -18,9 +18,7 @@ namespace Lumina
 {
     class FUpdateContext;
 
-    // New-RHI ImGui backend: records draws via RHI:: into the swapchain image, samples the
-    // global texture heap by ResourceID. ImGui_ImplGlfw kept for input; one DrawIndexed per
-    // ImDrawCmd, vertex-pull by device address. Fonts live in RHI::Textures (new heap).
+    // Vulkan ImGui backend.
     class FVulkanImGuiRender : public IImGuiRenderer
     {
     public:
@@ -29,7 +27,7 @@ namespace Lumina
         void Deinitialize() override;
 
         void OnStartFrame(const FUpdateContext& UpdateContext) override;
-        void OnEndFrame_NewRHI(RHI::FCmdListH CL, RHI::FTextureH Target, const FUIntVector2& Extent, ImDrawData* DrawData) override;
+        void OnEndFrame(RHI::FCmdListH CL, RHI::FTextureH Target, const FUIntVector2& Extent, ImDrawData* DrawData) override;
         void ProcessTextureUpdates() override;
 
         void RenderSecondaryViewports() override;
@@ -46,11 +44,7 @@ namespace Lumina
         // main viewport and every secondary window.
         void RecordDrawLists(RHI::FCmdListH CL, ImDrawData* DrawData, float FBW, float FBH);
 
-        // Multi-viewport window-lifecycle hooks (ImGuiPlatformIO::Renderer_*), run from
-        // ImGui::UpdatePlatformWindows. CreateWindow records the window and creates its window-system
-        // surface (GLFW window calls are main-thread only); the swapchain is built lazily on first
-        // render. DestroyWindow waits for the GPU and tears everything down here, because ImGui
-        // destroys the GLFW window immediately after it returns.
+        // Multi-viewport window-lifecycle hooks.
         static void OnRendererCreateWindow(ImGuiViewport* Viewport);
         static void OnRendererDestroyWindow(ImGuiViewport* Viewport);
 

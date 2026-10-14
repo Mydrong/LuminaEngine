@@ -31,7 +31,7 @@ public class MaterialApiExample : CEntityScript
 
     public override void OnReady()
     {
-        var Mesh = Registry.TryGet<SStaticMeshComponent>(Entity);
+        var Mesh = World.TryGetComponent<SStaticMeshComponent>(Entity);
         if (Mesh == null)
         {
             Debug.Log("MaterialApiExample: no static mesh component on this entity.");

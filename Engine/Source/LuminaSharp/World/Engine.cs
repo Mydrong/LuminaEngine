@@ -58,7 +58,7 @@ public static partial class Engine
     public static T? GetInstance<T>() where T : Lumina.CGameInstance => Instance as T;
 
     [ThreadStatic] private static Lumina.CWorld? ActiveWorld;
-    [ThreadStatic] private static Entity ActiveEntity;
+    [ThreadStatic] private static FEntity ActiveEntity;
     [ThreadStatic] private static bool ActiveHasEntity;
     [ThreadStatic] private static Lumina.CEntityScript? ActiveScriptField;
     [ThreadStatic] private static object? EventTarget;
@@ -71,8 +71,8 @@ public static partial class Engine
     /// <summary>True while a gameplay callback is running (so <see cref="World"/> is available).</summary>
     public static bool InWorld => ActiveWorld != null || EventWorld() != null;
 
-    // The entity whose script callback is running (Entity.Null in a system tick). Used by Trace.IgnoreSelf.
-    internal static Entity CurrentEntity => ActiveHasEntity ? ActiveEntity : (EventTarget as Lumina.CEntityScript)?.Entity ?? Entity.Null;
+    // The entity whose script callback is running (FEntity.Null in a system tick). Used by Trace.IgnoreSelf.
+    internal static FEntity CurrentEntity => ActiveHasEntity ? ActiveEntity : (EventTarget as Lumina.CEntityScript)?.Entity ?? FEntity.Null;
 
     // The script whose callback is currently running, or null.
     internal static Lumina.CEntityScript? ActiveScript => ActiveScriptField ?? EventTarget as Lumina.CEntityScript;
@@ -111,7 +111,7 @@ public static partial class Engine
         EventWorldCache = null;
     }
 
-    internal static Scope Push(Lumina.CWorld World, Entity Entity)
+    internal static Scope Push(Lumina.CWorld World, FEntity Entity)
     {
         Scope Prior = Capture();
         ActiveWorld = World;
@@ -122,7 +122,7 @@ public static partial class Engine
         return Prior;
     }
 
-    internal static Scope Push(Lumina.CWorld World, Entity Entity, Lumina.CEntityScript Script)
+    internal static Scope Push(Lumina.CWorld World, FEntity Entity, Lumina.CEntityScript Script)
     {
         Scope Prior = Capture();
         ActiveWorld = World;
@@ -161,13 +161,13 @@ public static partial class Engine
     public readonly struct Scope : IDisposable
     {
         private readonly Lumina.CWorld? World;
-        private readonly Entity Entity;
+        private readonly FEntity Entity;
         private readonly bool HasEntity;
         private readonly Lumina.CEntityScript? Script;
         private readonly object? Target;
         private readonly Lumina.CWorld? TargetWorld;
 
-        internal Scope(Lumina.CWorld? World, Entity Entity, bool HasEntity, Lumina.CEntityScript? Script, object? Target, Lumina.CWorld? TargetWorld)
+        internal Scope(Lumina.CWorld? World, FEntity Entity, bool HasEntity, Lumina.CEntityScript? Script, object? Target, Lumina.CWorld? TargetWorld)
         {
             this.World = World;
             this.Entity = Entity;

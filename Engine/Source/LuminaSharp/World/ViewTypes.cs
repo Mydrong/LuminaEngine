@@ -27,7 +27,7 @@ public readonly unsafe struct View<T1>
         this.Filter = Filter;
     }
 
-    public void Each(Action<Entity, T1> Body)
+    public void Each(Action<FEntity, T1> Body)
     {
         const int N = 1;
         T1 W0 = ViewWrapper<T1>.New();
@@ -53,7 +53,7 @@ public readonly unsafe struct View<T1>
                     for (int i = 0; i < Count; ++i)
                     {
                         W0.Handle = P[i * N + 0];
-                        Body(new Entity(E[i]), W0);
+                        Body(new FEntity(E[i]), W0);
                     }
                 }
             }
@@ -88,13 +88,13 @@ public readonly unsafe struct View<T1>
             Index = -1;
         }
 
-        public (Entity, T1) Current
+        public (FEntity, T1) Current
         {
             get
             {
                 int i = Index;
                 W0.Handle = Ptrs[i * N + 0];
-                return (new Entity(Entities[i]), W0);
+                return (new FEntity(Entities[i]), W0);
             }
         }
 
@@ -153,7 +153,7 @@ public readonly unsafe struct View<T1, T2>
         this.Filter = Filter;
     }
 
-    public void Each(Action<Entity, T1, T2> Body)
+    public void Each(Action<FEntity, T1, T2> Body)
     {
         const int N = 2;
         T1 W0 = ViewWrapper<T1>.New();
@@ -181,7 +181,7 @@ public readonly unsafe struct View<T1, T2>
                     {
                         W0.Handle = P[i * N + 0];
                         W1.Handle = P[i * N + 1];
-                        Body(new Entity(E[i]), W0, W1);
+                        Body(new FEntity(E[i]), W0, W1);
                     }
                 }
             }
@@ -218,14 +218,14 @@ public readonly unsafe struct View<T1, T2>
             Index = -1;
         }
 
-        public (Entity, T1, T2) Current
+        public (FEntity, T1, T2) Current
         {
             get
             {
                 int i = Index;
                 W0.Handle = Ptrs[i * N + 0];
                 W1.Handle = Ptrs[i * N + 1];
-                return (new Entity(Entities[i]), W0, W1);
+                return (new FEntity(Entities[i]), W0, W1);
             }
         }
 
@@ -287,7 +287,7 @@ public readonly unsafe struct View<T1, T2, T3>
         this.Filter = Filter;
     }
 
-    public void Each(Action<Entity, T1, T2, T3> Body)
+    public void Each(Action<FEntity, T1, T2, T3> Body)
     {
         const int N = 3;
         T1 W0 = ViewWrapper<T1>.New();
@@ -317,7 +317,7 @@ public readonly unsafe struct View<T1, T2, T3>
                         W0.Handle = P[i * N + 0];
                         W1.Handle = P[i * N + 1];
                         W2.Handle = P[i * N + 2];
-                        Body(new Entity(E[i]), W0, W1, W2);
+                        Body(new FEntity(E[i]), W0, W1, W2);
                     }
                 }
             }
@@ -356,7 +356,7 @@ public readonly unsafe struct View<T1, T2, T3>
             Index = -1;
         }
 
-        public (Entity, T1, T2, T3) Current
+        public (FEntity, T1, T2, T3) Current
         {
             get
             {
@@ -364,7 +364,7 @@ public readonly unsafe struct View<T1, T2, T3>
                 W0.Handle = Ptrs[i * N + 0];
                 W1.Handle = Ptrs[i * N + 1];
                 W2.Handle = Ptrs[i * N + 2];
-                return (new Entity(Entities[i]), W0, W1, W2);
+                return (new FEntity(Entities[i]), W0, W1, W2);
             }
         }
 
@@ -429,7 +429,7 @@ public readonly unsafe struct View<T1, T2, T3, T4>
         this.Filter = Filter;
     }
 
-    public void Each(Action<Entity, T1, T2, T3, T4> Body)
+    public void Each(Action<FEntity, T1, T2, T3, T4> Body)
     {
         const int N = 4;
         T1 W0 = ViewWrapper<T1>.New();
@@ -461,7 +461,7 @@ public readonly unsafe struct View<T1, T2, T3, T4>
                         W1.Handle = P[i * N + 1];
                         W2.Handle = P[i * N + 2];
                         W3.Handle = P[i * N + 3];
-                        Body(new Entity(E[i]), W0, W1, W2, W3);
+                        Body(new FEntity(E[i]), W0, W1, W2, W3);
                     }
                 }
             }
@@ -502,7 +502,7 @@ public readonly unsafe struct View<T1, T2, T3, T4>
             Index = -1;
         }
 
-        public (Entity, T1, T2, T3, T4) Current
+        public (FEntity, T1, T2, T3, T4) Current
         {
             get
             {
@@ -511,7 +511,7 @@ public readonly unsafe struct View<T1, T2, T3, T4>
                 W1.Handle = Ptrs[i * N + 1];
                 W2.Handle = Ptrs[i * N + 2];
                 W3.Handle = Ptrs[i * N + 3];
-                return (new Entity(Entities[i]), W0, W1, W2, W3);
+                return (new FEntity(Entities[i]), W0, W1, W2, W3);
             }
         }
 

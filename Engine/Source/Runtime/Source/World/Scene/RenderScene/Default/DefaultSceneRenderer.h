@@ -1158,6 +1158,12 @@ namespace Lumina
 
         void DrawMeshletBatch(RHI::FCmdListH CL, const FMeshDrawCommand& Batch, const FMeshletPassContext& Ctx);
 
+        // Survivors one sub-draw covers, the mesh workgroup limit or one unsplit instanced draw on the vertex path.
+        static uint32 MeshletsPerSubDraw()
+        {
+            return RHI::SupportsMeshShaders() ? Math::Max(RHI::GetMaxMeshWorkGroupCount(), 1u) : kVertexPathMeshletsPerDraw;
+        }
+
         // Fallback rewrites the key to one that can stand in while the material's own pipeline compiles, or returns false to skip the batch.
         template<typename TSetup, typename TBound, typename TFallback>
         void ForEachMeshletBatch(RHI::FCmdListH CL, const TVector<uint32>& DrawList,

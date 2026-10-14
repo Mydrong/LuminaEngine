@@ -1228,6 +1228,11 @@ namespace Lumina::RHI
         // Reported rather than fatal: a renderer that never dispatches a mesh shader still runs here.
         Result.MeshReason = [&]() -> FString
         {
+            if (EnumHasAnyFlags(DeviceDesc.DisabledFeatures, EDeviceFeature::MeshShading))
+            {
+                return "turned off at launch";
+            }
+
             if (!HasExtension(VK_EXT_MESH_SHADER_EXTENSION_NAME))
             {
                 return "no VK_EXT_mesh_shader extension";
@@ -2447,7 +2452,7 @@ namespace Lumina::RHI
 
         if (!Chosen.bMeshCapable)
         {
-            LOG_DISPLAY("Mesh shading unavailable ({}); the mesh path is disabled.", Chosen.MeshReason);
+            LOG_DISPLAY("Mesh shading unavailable ({}); meshlets draw through the vertex path.", Chosen.MeshReason);
         }
 
         // A driver reporting the maximum means no limit, but every derived divide then overflows.
@@ -4837,6 +4842,11 @@ namespace Lumina::RHI
         vkDestroyShaderModule(*GDevice, ShaderModule, Vulkan::HostAllocator());
 
         return GDevice->Pipelines.Emplace(Pipeline, VK_PIPELINE_BIND_POINT_COMPUTE);
+    }
+
+    bool SupportsMeshShaders()
+    {
+        return GDevice != nullptr && GDevice->bMeshShaderSupported;
     }
 
     uint32 GetMaxMeshWorkGroupCount()
@@ -7984,6 +7994,46 @@ namespace Lumina::RHI
 
         PushDrawArgs(VkCmdBuf, DrawArgs);
         vkCmdDrawMeshTasksIndirectEXT(VkCmdBuf, Indirect.Buffer, Indirect.Offset + Offset, DrawCount, Stride);
+    }
+
+    void CmdDrawIndirectCount(FCmdListH CL, GPUPtr Args, FGPURange Arguments, FGPURange CountRange, uint32 MaxDrawCount, uint32 Stride)
+    {
+        if (!GDevice->CommandLists[CL].bGraphicsPipelineBound)
+        {
+            return;
+        }
+
+        DEBUG_ASSERT((uint64)MaxDrawCount * Stride <= Arguments.Size, "Indirect count draw reads past its argument range.");
+        DEBUG_ASSERT(sizeof(uint32) <= CountRange.Size, "Indirect count draw reads past its count range.");
+        const GPUPtr IndirectBuffer = Arguments.Address;
+        const GPUPtr CountBuffer    = CountRange.Address;
+        VkCommandBuffer VkCmdBuf = GDevice->CommandLists[CL].CommandBuffer;
+
+        if (UseAddressCommands())
+        {
+            PushDrawArgs(VkCmdBuf, Args);
+
+            const VkDrawIndirectCount2InfoKHR Info
+            {
+                .sType             = VK_STRUCTURE_TYPE_DRAW_INDIRECT_COUNT_2_INFO_KHR,
+                .addressRange      = StridedRange(IndirectBuffer, (uint64)MaxDrawCount * Stride, Stride),
+                .addressFlags      = kEngineAddressFlags,
+                .countAddressRange = AddressRange(CountBuffer, sizeof(uint32)),
+                .countAddressFlags = kEngineAddressFlags,
+                .maxDrawCount      = MaxDrawCount,
+            };
+            vkCmdDrawIndirectCount2KHR(VkCmdBuf, &Info);
+            return;
+        }
+
+        FBufferRange Indirect, Count;
+        if (!ResolveBuffers(IndirectBuffer, Indirect, CountBuffer, Count))
+        {
+            return;
+        }
+
+        PushDrawArgs(VkCmdBuf, Args);
+        vkCmdDrawIndirectCount(VkCmdBuf, Indirect.Buffer, Indirect.Offset, Count.Buffer, Count.Offset, MaxDrawCount, Stride);
     }
 
     void CmdDrawMeshTasksIndirectCount(FCmdListH CL, GPUPtr DrawArgs, FGPURange Arguments, FGPURange CountRange, uint32 MaxDrawCount, uint32 Stride)

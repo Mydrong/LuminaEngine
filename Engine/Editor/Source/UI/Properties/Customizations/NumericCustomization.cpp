@@ -10,6 +10,7 @@
 #include "Core/Reflection/Type/Properties/StructProperty.h"
 #include "Tools/UI/ImGui/ImGuiDesignIcons.h"
 #include "Tools/UI/ImGui/ImGuiX.h"
+#include "Tools/UI/ImGui/ImGuiXNumeric.h"
 
 namespace Lumina
 {
@@ -82,7 +83,7 @@ namespace Lumina
 
                 ImGui::SameLine(0.0f, 0.0f);
                 ImGui::SetNextItemWidth(FieldW);
-                if (ImGui::DragScalar("##V", ImGuiDataType_Float, &Values[Axis], Speed, nullptr, nullptr, Format))
+                if (ImGuiX::DragScalar("##V", ImGuiDataType_Float, &Values[Axis], Speed, nullptr, nullptr, Format))
                 {
                     Op = EPropertyChangeOp::Updated;
                 }
@@ -125,11 +126,11 @@ namespace Lumina
         {
             // An UNSCALED base, so the plus and minus buttons step the same amount every press.
             float Step = ResolveBaseStep(Prop, 0.01f);
-            ImGui::InputScalarN("##", ImGuiDataType_Float, Math::ValuePtr(DisplayValue), 2, &Step, nullptr, Format);
+            ImGuiX::InputScalarN("##", ImGuiDataType_Float, Math::ValuePtr(DisplayValue), 2, &Step, nullptr, Format);
         }
         else
         {
-            ImGui::DragFloat2("##", Math::ValuePtr(DisplayValue), Speed, Min, Max, Format);
+            ImGuiX::DragFloat2("##", Math::ValuePtr(DisplayValue), Speed, Min, Max, Format);
         }
 
         ImGui::PopItemWidth();
@@ -190,11 +191,11 @@ namespace Lumina
             {
                 // An UNSCALED base, so the plus and minus buttons step the same amount every press.
                 float Step = ResolveBaseStep(Prop, 0.01f);
-                ImGui::InputScalarN("##", ImGuiDataType_Float, Math::ValuePtr(DisplayValue), 3, &Step, nullptr, Format);
+                ImGuiX::InputScalarN("##", ImGuiDataType_Float, Math::ValuePtr(DisplayValue), 3, &Step, nullptr, Format);
             }
             else
             {
-                ImGui::DragFloat3("##", Math::ValuePtr(DisplayValue), Speed, Min, Max, Format);
+                ImGuiX::DragFloat3("##", Math::ValuePtr(DisplayValue), Speed, Min, Max, Format);
             }
         }
         
@@ -256,11 +257,11 @@ namespace Lumina
             {
                 // An UNSCALED base, so the plus and minus buttons step the same amount every press.
                 float Step = ResolveBaseStep(Prop, 0.01f);
-                ImGui::InputScalarN("##", ImGuiDataType_Float, Math::ValuePtr(DisplayValue), 4, &Step, nullptr, Format);
+                ImGuiX::InputScalarN("##", ImGuiDataType_Float, Math::ValuePtr(DisplayValue), 4, &Step, nullptr, Format);
             }
             else
             {
-                ImGui::DragFloat4("##", Math::ValuePtr(DisplayValue), Speed, Min, Max, Format);
+                ImGuiX::DragFloat4("##", Math::ValuePtr(DisplayValue), Speed, Min, Max, Format);
             }
         }
 
@@ -304,7 +305,7 @@ namespace Lumina
     {
         ImGui::PushItemWidth(ImGui::GetContentRegionAvail().x);
 
-        ImGui::DragFloat4("##", Math::ValuePtr(DisplayValue), 0.01f * MouseAdaptiveDragScale());
+        ImGuiX::DragFloat4("##", Math::ValuePtr(DisplayValue), 0.01f * MouseAdaptiveDragScale());
 
         ImGui::PopItemWidth();
         

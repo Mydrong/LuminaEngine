@@ -513,6 +513,9 @@ namespace Lumina::RHI
         // Leave empty to take any GPU that can present.
         EDeviceFeature RequiredFeatures = EDeviceFeature::None;
 
+        // Left off even where supported, which is how a launch flag exercises a fallback on capable hardware.
+        EDeviceFeature DisabledFeatures = EDeviceFeature::None;
+
         // MiB of device-local memory a GPU must report to be considered. Zero takes any amount.
         uint32 MinDeviceLocalMemoryMiB = 0;
 
@@ -615,6 +618,8 @@ namespace Lumina::RHI
     // The most one of SliceCount ring slices may take of a small CPU-visible aperture, or no limit with ReBAR.
     RUNTIME_API uint64         GetCPUWriteSliceCap(uint32 SliceCount);
     
+    RUNTIME_API bool           SupportsMeshShaders();
+
     RUNTIME_API uint32         GetMaxMeshWorkGroupCount();
 
     // How many viewports one draw can address, which caps the views a multi-view shadow draw covers.
@@ -915,6 +920,7 @@ namespace Lumina::RHI
     RUNTIME_API void        CmdDrawIndexedIndirect(FCmdListH CL, FGPURange Indices, GPUPtr Args, FGPURange Arguments, uint32 DrawCount, uint32 Stride, EIndexType IndexType = EIndexType::Uint32);
     
     RUNTIME_API void        CmdDrawIndirect(FCmdListH CL, GPUPtr Args, FGPURange Arguments, uint32 DrawCount, uint32 Stride);
+    RUNTIME_API void        CmdDrawIndirectCount(FCmdListH CL, GPUPtr Args, FGPURange Arguments, FGPURange CountRange, uint32 MaxDrawCount, uint32 Stride);
     RUNTIME_API void        CmdDispatchIndirect(FCmdListH CL, GPUPtr Args, FGPURange Arguments);
 
     RUNTIME_API void        CmdDrawMeshTasks(FCmdListH CL, GPUPtr DrawArgs, uint32 GroupCountX, uint32 GroupCountY, uint32 GroupCountZ);

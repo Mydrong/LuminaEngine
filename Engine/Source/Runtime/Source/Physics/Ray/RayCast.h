@@ -69,7 +69,7 @@ namespace Lumina
         PROPERTY()
         int32 BoneIndex = Constants::kIndexNone;
 
-        /** Carries the optionality a by-value result cannot, so a miss is a zeroed struct rather than nothing. */
+        // A miss keeps the requested Start and End but has no hit data.
         PROPERTY()
         bool bHit = false;
     };

@@ -399,7 +399,7 @@ internal static class Serializer
         }
         if (Type.Kind == EPropertyType.Entity)
         {
-            return Value is Entity Ent ? Ent.Id : 0L;
+            return Value is FEntity Current ? Current.Id : 0L;
         }
         // Bit-preserving for unsigned values: Convert.ToInt64 throws OverflowException on a ulong (or a
         // ulong-backed enum) whose high bit is set, which would abort the whole schema/value blob and
@@ -781,7 +781,7 @@ internal static class Serializer
     {
         if (Type.Kind == EPropertyType.Entity)
         {
-            return new Entity(unchecked((uint)Value));
+            return new FEntity(unchecked((uint)Value));
         }
         Type Target = Type.Clr;
         if (Target.IsEnum)

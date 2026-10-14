@@ -25,7 +25,7 @@ namespace Lumina
 
         //~ Ray and shape queries.
 
-        /** Closest hit along the segment. A miss comes back zeroed, so read bHit before the rest. */
+        // A miss keeps Start and End, while bHit marks whether the remaining hit fields are valid.
         FUNCTION()
         static SRayResult Raycast(CWorld* World, FVector3 Start, FVector3 End,
             ECS::FEntity IgnoreEntity, ECollisionProfiles LayerMask = ECollisionProfiles::All);

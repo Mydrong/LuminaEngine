@@ -41,6 +41,12 @@ public sealed class ReflectionProjectEntry
 
 public sealed class ReflectionInputDocument
 {
+    public int CodeGenerationVersion { get; set; }
+
+    public string ReflectorFingerprint { get; set; } = string.Empty;
+
+    public string CoreReflectionFingerprint { get; set; } = string.Empty;
+
     public string WorkspaceName { get; set; } = string.Empty;
 
     /// <summary>Root the Reflector writes Intermediates/Reflection and CSharpBindings under.</summary>
@@ -58,6 +64,8 @@ public sealed class EngineReflectionManifest
 /// <summary>Wires the reflection code generator into the action graph.</summary>
 public static class ReflectionStep
 {
+    private const int CodeGenerationVersion = 3;
+
     /// <summary>Must match kUnityShardCount in Reflector/CodeGeneration/CodeGenerator.cpp.</summary>
     public const int UnityShardCount = 8;
 
@@ -96,6 +104,9 @@ public static class ReflectionStep
 
         ReflectionInputDocument Document = new()
         {
+            CodeGenerationVersion = CodeGenerationVersion,
+            ReflectorFingerprint = ContentHash.OfFileContents(ReflectorPath),
+            CoreReflectionFingerprint = ComputeCoreReflectionFingerprint(Target),
             WorkspaceName = Target.Name,
             WorkspacePath = Target.Directories.OutputRoot,
         };
@@ -187,6 +198,14 @@ public static class ReflectionStep
             }
         }
 
+        foreach (ReflectionProjectEntry Project in Document.Projects.Where(Project => Project.ReferenceOnly))
+        {
+            foreach (string Header in Project.Files)
+            {
+                Action.PrerequisiteItems.Add(FileItem.Get(Header));
+            }
+        }
+
         return new ReflectionActions { Generate = Action, Inputs = InputActions };
     }
 
@@ -206,6 +225,19 @@ public static class ReflectionStep
             WriteIndented = true,
             DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingDefault,
         });
+    }
+
+    private static string ComputeCoreReflectionFingerprint(BuildTarget Target)
+    {
+        string Root = Path.Combine(Target.Directories.EngineRuntimeDirectory, "Source", "Core", "Reflection");
+        if (!Directory.Exists(Root))
+        {
+            return string.Empty;
+        }
+
+        return ContentHash.OfStrings(Directory.EnumerateFiles(Root, "*", SearchOption.AllDirectories)
+            .OrderBy(FilePath => FilePath, StringComparer.OrdinalIgnoreCase)
+            .Select(FilePath => Path.GetRelativePath(Root, FilePath) + ContentHash.OfFileContents(FilePath)));
     }
 
     private static string ResolveReflectorPath(BuildTarget Target)

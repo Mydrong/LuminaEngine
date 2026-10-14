@@ -149,54 +149,82 @@ namespace Lumina
         }
     }
 
-    //~ World.Debug forwards to this world's draw interface; the draws are no-ops in Shipping.
-    void FWorldDebugInterface::DrawText(FStringView Text, TOptional<FVector4> Color)
+    void FWorldDebugInterface::DrawBillboard(int32 ResourceID, const FVector3& Location, float Scale)
     {
         if (World)
         {
-            World->DrawDebugText(FString(Text), Color.value_or(FVector4(1.0f)));
+            World->DrawBillboard(ResourceID, Location, Scale);
         }
+    }
+
+    void FWorldDebugInterface::DrawLine(const FVector3& Start, const FVector3& End, const FVector4& Color, float Thickness, bool bDepthTest, float Duration)
+    {
+        if (World != nullptr && !World->IsSuspended())
+        {
+            World->LineBatcherComponent->EnqueueLine(Start, End, Color, Thickness, bDepthTest, Duration);
+        }
+    }
+
+    void FWorldDebugInterface::DrawText(FStringView Text, TOptional<FVector4> Color)
+    {
+        #if !defined(LE_SHIPPING)
+        if (World != nullptr && !World->IsSuspended())
+        {
+            FDebugTextLine& Line = World->DebugTextLines.emplace_back();
+            Line.Text = FString(Text);
+            Line.Color = Color.value_or(FVector4(1.0f));
+        }
+        #endif
     }
     void FWorldDebugInterface::DrawLine(FVector3 Start, FVector3 End, FVector4 Color, TOptional<float> Thickness, TOptional<bool> bDepthTest, TOptional<float> Duration)
     {
         if (World)
         {
-            World->DrawLine(Start, End, Color, Thickness.value_or(1.0f), bDepthTest.value_or(true), Duration.value_or(0.0f));
+            DrawLine(static_cast<const FVector3&>(Start), static_cast<const FVector3&>(End),
+                static_cast<const FVector4&>(Color), Thickness.value_or(1.0f), bDepthTest.value_or(true), Duration.value_or(0.0f));
         }
     }
     void FWorldDebugInterface::DrawBox(FVector3 Center, FVector3 HalfExtents, FQuat Rotation, FVector4 Color, TOptional<float> Thickness, TOptional<bool> bDepthTest, TOptional<float> Duration)
     {
         if (World)
         {
-            World->DrawBox(Center, HalfExtents, Rotation, Color, Thickness.value_or(1.0f), bDepthTest.value_or(true), Duration.value_or(0.0f));
+            IPrimitiveDrawInterface::DrawBox(Center, HalfExtents, Rotation, Color, Thickness.value_or(1.0f), bDepthTest.value_or(true), Duration.value_or(0.0f));
         }
     }
     void FWorldDebugInterface::DrawSphere(FVector3 Center, float Radius, FVector4 Color, TOptional<float> Thickness, TOptional<bool> bDepthTest, TOptional<float> Duration)
     {
         if (World)
         {
-            World->DrawSphere(Center, Radius, Color, 16, Thickness.value_or(1.0f), bDepthTest.value_or(true), Duration.value_or(0.0f));
+            IPrimitiveDrawInterface::DrawSphere(Center, Radius, Color, 16, Thickness.value_or(1.0f), bDepthTest.value_or(true), Duration.value_or(0.0f));
         }
     }
     void FWorldDebugInterface::DrawCapsule(FVector3 Start, FVector3 End, float Radius, FVector4 Color, TOptional<float> Thickness, TOptional<bool> bDepthTest, TOptional<float> Duration)
     {
         if (World)
         {
-            World->DrawCapsule(Start, End, Radius, Color, 16, Thickness.value_or(1.0f), bDepthTest.value_or(true), Duration.value_or(0.0f));
+            IPrimitiveDrawInterface::DrawCapsule(Start, End, Radius, Color, 16, Thickness.value_or(1.0f), bDepthTest.value_or(true), Duration.value_or(0.0f));
         }
     }
     void FWorldDebugInterface::DrawCone(FVector3 Apex, FVector3 Direction, float AngleRadians, float Length, FVector4 Color, TOptional<float> Thickness, TOptional<bool> bDepthTest, TOptional<float> Duration)
     {
         if (World)
         {
-            World->DrawCone(Apex, Direction, AngleRadians, Length, Color, 16, 4, Thickness.value_or(1.0f), bDepthTest.value_or(true), Duration.value_or(0.0f));
+            IPrimitiveDrawInterface::DrawCone(Apex, Direction, AngleRadians, Length, Color, 16, 4, Thickness.value_or(1.0f), bDepthTest.value_or(true), Duration.value_or(0.0f));
         }
     }
     void FWorldDebugInterface::DrawArrow(FVector3 Start, FVector3 Direction, float Length, FVector4 Color, TOptional<float> Thickness, TOptional<bool> bDepthTest, TOptional<float> Duration)
     {
         if (World)
         {
-            World->DrawArrow(Start, Direction, Length, Color, Thickness.value_or(1.0f), bDepthTest.value_or(true), Duration.value_or(0.0f));
+            IPrimitiveDrawInterface::DrawArrow(Start, Direction, Length, Color, Thickness.value_or(1.0f), bDepthTest.value_or(true), Duration.value_or(0.0f));
+        }
+    }
+
+    void FWorldDebugInterface::DrawSolidTriangles(TVector<FSimpleElementVertex>&& Vertices, ESolidDrawMode Mode, float Duration)
+    {
+        if (World != nullptr && !World->IsSuspended())
+        {
+            World->TriangleBatcherComponent->EnqueueTriangles(std::move(Vertices), Mode, Duration);
         }
     }
 
@@ -1702,16 +1730,6 @@ namespace Lumina
         RenderScene->DrawBillboard(ResourceID, Location, Scale);
     }
 
-    void CWorld::DrawLine(const FVector3& Start, const FVector3& End, const FVector4& Color, float Thickness, bool bDepthTest, float Duration)
-    {
-        if (IsSuspended())
-        {
-            return;
-        }
-        
-        LineBatcherComponent->EnqueueLine(Start, End, Color, Thickness, bDepthTest, Duration);
-    }
-
     FImmediateLineRenderer* CWorld::GetImmediateLines() const
     {
         if (IsSuspended() || RenderScene == nullptr)
@@ -1720,30 +1738,6 @@ namespace Lumina
         }
 
         return RenderScene->GetImmediateLines();
-    }
-
-    void CWorld::DrawSolidTriangles(TVector<FSimpleElementVertex>&& Vertices, ESolidDrawMode Mode, float Duration)
-    {
-        if (IsSuspended())
-        {
-            return;
-        }
-
-        TriangleBatcherComponent->EnqueueTriangles(std::move(Vertices), Mode, Duration);
-    }
-
-    void CWorld::DrawDebugText(const FString& Text, const FVector4& Color)
-    {
-#if !defined(LE_SHIPPING)
-        if (IsSuspended())
-        {
-            return;
-        }
-
-        FDebugTextLine& Line = DebugTextLines.emplace_back();
-        Line.Text  = Text;
-        Line.Color = Color;
-#endif
     }
 
     void CWorld::DrainDebugTextLines(TVector<FDebugTextLine>& Out)
@@ -1768,18 +1762,18 @@ namespace Lumina
             if (Result.has_value())
             {
                 SRayResult RayResult = Result.value();
-                DrawLine(Settings.Start, RayResult.Location, FColor(Settings.DebugMissColor), 3.0f, true, Settings.DebugDuration);
+                DebugInterface.DrawLine(Settings.Start, RayResult.Location, FColor(Settings.DebugMissColor), 3.0f, true, Settings.DebugDuration);
                 
                 FVector3 NormalEnd = RayResult.Location + RayResult.Normal * 0.5f;
-                DrawLine(RayResult.Location, NormalEnd, FColor::Blue, 3.0f,true, Settings.DebugDuration);
+                DebugInterface.DrawLine(RayResult.Location, NormalEnd, FColor::Blue, 3.0f,true, Settings.DebugDuration);
                 
-                DrawBox(RayResult.Location, FVector3(0.05f), FQuat(1.0f, 0.0f, 0.0f, 0.0f), FColor::Yellow, 3.0, true, Settings.DebugDuration);
+                DebugInterface.DrawBox(RayResult.Location, FVector3(0.05f), FQuat(1.0f, 0.0f, 0.0f, 0.0f), FColor::Yellow, 3.0f, true, Settings.DebugDuration);
                 
-                DrawLine(RayResult.Location, Settings.End, FColor(Settings.DebugHitColor), 3.0f, true, Settings.DebugDuration);
+                DebugInterface.DrawLine(RayResult.Location, Settings.End, FColor(Settings.DebugHitColor), 3.0f, true, Settings.DebugDuration);
             }
             else
             {
-                DrawLine(Settings.Start, Settings.End, FColor(Settings.DebugMissColor), 3.0f, true, Settings.DebugDuration);
+                DebugInterface.DrawLine(Settings.Start, Settings.End, FColor(Settings.DebugMissColor), 3.0f, true, Settings.DebugDuration);
             }
         }
         

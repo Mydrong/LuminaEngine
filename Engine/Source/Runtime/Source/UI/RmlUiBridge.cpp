@@ -458,7 +458,6 @@ namespace Lumina::RmlUi
             // Small N per screen, so a linear scan on add and remove is fine.
             TVector<FManagedUIListener*>        UIListeners;
 
-            // Script-registered data models (World.UI.AddModel). Owned here; reaped per-world like UIListeners.
             TVector<FManagedDataModel*>         DataModels;
 
             // Recursive because Update may fire callbacks that re-enter the bridge on the same thread.
@@ -2106,8 +2105,6 @@ namespace Lumina::RmlUi
         }
     }
 
-    // Scripting surface for World.UI; takes the bridge lock, game thread only.
-
     namespace
     {
         Rml::Element*         AsElement (void* P) { return static_cast<Rml::Element*>(P); }
@@ -2129,14 +2126,14 @@ namespace Lumina::RmlUi
             // A headless process never starts the UI, so a document it asks for is expected to come back empty.
             if (!GIsHeadless)
             {
-                LOG_WARN("[RmlUi] World.UI.LoadDocument('{}') called before RmlUi initialized.", FString(VirtualPath.data(), VirtualPath.size()).c_str());
+                LOG_WARN("[RmlUi] CUILibrary.LoadDocument('{}') called before RmlUi initialized.", FString(VirtualPath.data(), VirtualPath.size()).c_str());
             }
             return nullptr;
         }
         FWorldUIContext* UI = WorldUI(World);
         if (UI == nullptr || UI->Context == nullptr)
         {
-            LOG_WARN("[RmlUi] World.UI.LoadDocument('{}') found no UI context on world '{}'.",
+            LOG_WARN("[RmlUi] CUILibrary.LoadDocument('{}') found no UI context on world '{}'.",
                 FString(VirtualPath.data(), VirtualPath.size()).c_str(), World->GetName().c_str());
             return nullptr;
         }
@@ -2144,7 +2141,7 @@ namespace Lumina::RmlUi
         Rml::ElementDocument* Doc = UI->Context->LoadDocument(ToRml(VirtualPath));
         if (Doc == nullptr)
         {
-            LOG_WARN("[RmlUi] World.UI.LoadDocument failed for '{}'.", FString(VirtualPath.data(), VirtualPath.size()).c_str());
+            LOG_WARN("[RmlUi] CUILibrary.LoadDocument failed for '{}'.", FString(VirtualPath.data(), VirtualPath.size()).c_str());
         }
         return Doc;
     }
@@ -2530,8 +2527,6 @@ namespace Lumina::RmlUi
             return;
         }
     }
-
-    // Data binding for LuminaSharp ViewModel and World.UI.AddModel.
 
     void* CreateDataModel(CWorld* World, FStringView Name, void* Context, FManagedDataSetThunk SetThunk, FManagedDataEventThunk EventThunk)
     {

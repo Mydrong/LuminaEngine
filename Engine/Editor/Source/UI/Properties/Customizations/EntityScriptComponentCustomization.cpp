@@ -161,7 +161,7 @@ namespace Lumina
                 }
                 if (View.ValueTable)
                 {
-                    View.ValueTable->DrawTree();
+                    View.ValueTable->DrawTree(Args);
                 }
 
                 // The instance is created on demand, so a script that has never been dispatched to still has

@@ -10,11 +10,11 @@ public partial class CEntityScript
     internal TypeDescription Description = null!;
 
     // The native object owns both values and sets them once at attach, so the first real read is kept.
-    private Entity CachedEntity = Entity.Null;
+    private FEntity CachedEntity = FEntity.Null;
     private CWorld? CachedWorld;
     private STransformComponent? CachedTransform;
 
-    public Entity Entity
+    public FEntity Entity
     {
         get
         {
@@ -27,8 +27,6 @@ public partial class CEntityScript
     }
 
     public CWorld World => CachedWorld ??= GetWorld();
-
-    public EntityRegistry Registry => World.Registry;
 
     private System.Threading.CancellationTokenSource? DestroyCts;
 
@@ -57,7 +55,7 @@ public partial class CEntityScript
             {
                 return Kept;
             }
-            CachedTransform = Registry.Get<STransformComponent>(Entity);
+            CachedTransform = World.GetComponent<STransformComponent>(Entity);
             return CachedTransform;
         }
     }
@@ -65,29 +63,29 @@ public partial class CEntityScript
     // The world subsystem of type T, which is where shared gameplay state belongs.
     protected T? GetSubsystem<T>() where T : NativeObject => World.GetSubsystem<T>();
 
-    protected T? GetScript<T>(Entity Target) where T : CEntityScript
+    protected T? GetScript<T>(FEntity Target) where T : CEntityScript
     {
-        return Registry.GetScript<T>(Target);
+        return World.GetScript<T>(Target);
     }
 
     protected T? GetScript<T>() where T : CEntityScript
     {
-        return Registry.GetScript<T>(Entity);
+        return World.GetScript<T>(Entity);
     }
 
     protected System.Collections.Generic.List<T> GetScripts<T>() where T : CEntityScript
     {
-        return Registry.GetScripts<T>(Entity);
+        return World.GetScripts<T>(Entity);
     }
 
     protected T? AddScript<T>() where T : CEntityScript
     {
-        return Registry.AddScript<T>(Entity);
+        return World.AddScript<T>(Entity);
     }
 
     protected bool RemoveScript<T>() where T : CEntityScript
     {
-        return Registry.RemoveScript<T>(Entity);
+        return World.RemoveScript<T>(Entity);
     }
 
     // Feeds the script's SInputAction and SInputAxis bindings before its own OnAction runs.
@@ -114,12 +112,12 @@ public partial class CEntityScript
     // Add (idempotently) and return this entity's SInputComponent so it can receive input. Call in OnReady.
     protected SInputComponent EnableInput()
     {
-        return Registry.Emplace<SInputComponent>(Entity) ?? Registry.Get<SInputComponent>(Entity);
+        return World.GetOrEmplaceComponent<SInputComponent>(Entity) ?? World.GetComponent<SInputComponent>(Entity);
     }
 
     // Remove this entity's SInputComponent, stopping OnInput and the input queries.
     protected void DisableInput()
     {
-        Registry.Remove<SInputComponent>(Entity);
+        World.RemoveComponent<SInputComponent>(Entity);
     }
 }

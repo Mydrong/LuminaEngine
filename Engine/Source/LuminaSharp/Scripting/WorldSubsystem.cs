@@ -7,6 +7,4 @@ public partial class CWorldSubsystem
 {
     // Valid from OnInitialize onwards, read from the native object that owns the value for both languages.
     public CWorld World => GetWorld();
-
-    public EntityRegistry Registry => World.Registry;
 }

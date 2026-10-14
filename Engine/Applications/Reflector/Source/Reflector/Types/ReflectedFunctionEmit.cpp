@@ -1,5 +1,7 @@
 #include "ReflectedType.h"
 
+#include <algorithm>
+
 #include "Reflector/CodeGeneration/CodeWriter.h"
 #include "Reflector/CodeGeneration/ReflectionNames.h"
 
@@ -141,18 +143,23 @@ namespace Lumina::Reflection
                 continue;
             }
 
-            Writer.Linef("static constexpr Lumina::FPropertyDesc %s[] =", Names::FunctionParamsTable(Function->Name).c_str());
-            Writer.BeginBlock();
-            for (const FReflectedProperty* Param : Function->TopLevelParams)
-            {
-                Param->EmitDescriptor(Writer);
-            }
-            Writer.PopIndent();
-            Writer.Line("};");
+            Writer.Linef("static const Lumina::FPropertyDesc %s[%zu];", Names::FunctionParamsTable(Function->Name).c_str(), Function->TopLevelParams.size());
             Writer.Line();
         }
 
-        Writer.Line("static constexpr Lumina::FFunctionDesc Functions[] =");
+        const size_t Count = std::count_if(Functions.begin(), Functions.end(), [](const auto& Function) { return Function->bReflectNatively; });
+        Writer.Linef("static const Lumina::FFunctionDesc Functions[%zu];", Count);
+        Writer.Line();
+    }
+
+    void FReflectedStruct::DefineFunctionTable(FCodeWriter& Writer) const
+    {
+        if (!HasNativeFunctions())
+        {
+            return;
+        }
+
+        Writer.Linef("constexpr Lumina::FFunctionDesc %s::Functions[] =", TypeInfoName().c_str());
         Writer.BeginBlock();
         for (const auto& Function : Functions)
         {
@@ -197,5 +204,26 @@ namespace Lumina::Reflection
         Writer.PopIndent();
         Writer.Line("};");
         Writer.Line();
+    }
+
+    void FReflectedStruct::DefineFunctionParameterTables(FCodeWriter& Writer) const
+    {
+        for (const auto& Function : Functions)
+        {
+            if (!Function->bReflectNatively || Function->TopLevelParams.empty())
+            {
+                continue;
+            }
+
+            Writer.Linef("constexpr Lumina::FPropertyDesc %s::%s[] =", TypeInfoName().c_str(), Names::FunctionParamsTable(Function->Name).c_str());
+            Writer.BeginBlock();
+            for (const FReflectedProperty* Param : Function->TopLevelParams)
+            {
+                Param->EmitDescriptor(Writer);
+            }
+            Writer.PopIndent();
+            Writer.Line("};");
+            Writer.Line();
+        }
     }
 }

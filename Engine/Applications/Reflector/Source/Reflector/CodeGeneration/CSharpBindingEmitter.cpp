@@ -108,7 +108,7 @@ namespace Lumina::Reflection
                 { "Int16",  "short",  2, 2 }, { "UInt16", "ushort", 2, 2 },
                 { "Int32",  "int",    4, 4 }, { "UInt32", "uint",   4, 4 }, { "Float",  "float", 4, 4 },
                 { "Int64",  "long",   8, 8 }, { "UInt64", "ulong",  8, 8 }, { "Double", "double",8, 8 },
-                { "Entity", "global::LuminaSharp.Entity", 4, 4 },
+                { "Entity", "global::LuminaSharp.FEntity", 4, 4 },
             };
             for (const FEntry& E : Table)
             {
@@ -224,7 +224,7 @@ namespace Lumina::Reflection
                 || Bare == "ECS::FEntity" || Bare == "Lumina::ECS::FEntity";
         }
 
-        // An ECS::FEntity field is its own Entity kind, blittable as its packed id, and surfaces as the C# Entity.
+        // An ECS::FEntity field is its own Entity kind, blittable as its packed id, and surfaces as the C# FEntity.
         bool IsEntityField(const FReflectedProperty& Prop)
         {
             return IsEntitySpelling(Prop.RawTypeName) || IsEntitySpelling(Prop.TypeName);
@@ -235,7 +235,7 @@ namespace Lumina::Reflection
         {
             if (IsEntityField(Prop))
             {
-                return "global::LuminaSharp.Entity";
+                return "global::LuminaSharp.FEntity";
             }
             const std::string Kind = Prop.GetTypeName();
             std::string CSharp;
@@ -548,7 +548,7 @@ namespace Lumina::Reflection
                     // An entity is a plain id in both languages, so it reads straight out of the argument pack.
                     if (ArgType == "ECS::FEntity" || ArgType == "Lumina::ECS::FEntity")
                     {
-                        Arg->CSharp = "global::LuminaSharp.Entity";
+                        Arg->CSharp = "global::LuminaSharp.FEntity";
                     }
                     else if (!ClassifyElement(ArgType, OwnerNs, Db, *Arg))
                     {
@@ -607,7 +607,7 @@ namespace Lumina::Reflection
             if (IsEntityField(Prop))
             {
                 B.Kind = EBind::Number;
-                B.CSharp = "global::LuminaSharp.Entity";
+                B.CSharp = "global::LuminaSharp.FEntity";
                 B.Cpp = "uint32";
                 return true;
             }
@@ -1247,7 +1247,7 @@ namespace Lumina::Reflection
             std::string CSharp;
             std::string Cpp;
             std::string TargetCpp;
-            bool          bEntity = false; // An entity handle, ABI-marshalled as uint32 and surfaced as the C# Entity.
+            bool          bEntity = false; // An entity handle, ABI-marshalled as uint32 and surfaced as the C# FEntity.
             // Only a CObject has a managed-instance slot, so only a CObject may be rebuilt through ForObject.
             bool          bCObject = false;
             bool          bIsName = false; // EBind::Str arg, FName (true) vs FString (false), for the native ctor.
@@ -1429,7 +1429,7 @@ namespace Lumina::Reflection
             }
             if (IsEntitySpelling(Elem))
             {
-                OutCSharp = "global::LuminaSharp.Entity";
+                OutCSharp = "global::LuminaSharp.FEntity";
                 OutCpp = "Lumina::ECS::FEntity";
                 return true;
             }
@@ -1531,11 +1531,11 @@ namespace Lumina::Reflection
 
             const std::string Bare = StripQualifiers(F.RawFieldType);
 
-            // An ECS::FEntity crosses as its packed id and surfaces as the C# Entity.
+            // An ECS::FEntity crosses as its packed id and surfaces as the C# FEntity.
             if (IsEntitySpelling(F.RawFieldType) || IsEntitySpelling(F.TypeName))
             {
                 B.Kind = EBind::Number;
-                B.CSharp = "global::LuminaSharp.Entity";
+                B.CSharp = "global::LuminaSharp.FEntity";
                 B.Cpp = "uint32";
                 B.bEntity = true;
                 return true;
@@ -2132,7 +2132,7 @@ namespace Lumina::Reflection
         }
         std::string SeArgFromAbiCS(const FArg& A, const std::string& N)
         {
-            if (A.bEntity) { return "new global::LuminaSharp.Entity(" + N + ")"; }
+            if (A.bEntity) { return "new global::LuminaSharp.FEntity(" + N + ")"; }
             switch (A.Kind)
             {
             case EBind::Bool:   return "(" + N + " != 0)";

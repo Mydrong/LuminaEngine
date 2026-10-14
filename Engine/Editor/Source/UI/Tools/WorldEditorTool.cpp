@@ -209,8 +209,7 @@ namespace Lumina
     }
 
     // Slab ray-vs-AABB; OutT is along (possibly unnormalized) Dir. Returns true on hit in front of origin.
-    static bool RayVsAABB(const FVector3& Origin, const FVector3& Dir,
-                          const FAABB& Box, float& OutT)
+    static bool RayVsAABB(const FVector3& Origin, const FVector3& Dir, const FAABB& Box, float& OutT)
     {
         float TMin = 0.0f;
         float TMax = FLT_MAX;
@@ -889,6 +888,11 @@ namespace Lumina
 
         DrawWorldGrid();
 
+        if (World != nullptr && !bGameViewMode)
+        {
+            EntityScripts::DebugDraw(ECS::GetWorldRegistry(*World));
+        }
+
         ProcessComponentEditRequests();
 
         if (!EntityDestroyRequests.empty())
@@ -1459,8 +1463,8 @@ namespace Lumina
 
         Scene->AddForceAtTarget(GrabbedTarget, Acceleration * BodyMass, AttachPoint);
 
-        World->DrawLine(AttachPoint, Target, FVector4(1.0f, 0.85f, 0.2f, 1.0f), 2.5f, false);
-        World->DrawSphere(Target, 0.035f, FVector4(1.0f, 0.85f, 0.2f, 1.0f), 10, 2.0f, false);
+        World->GetDebugInterface()->DrawLine(AttachPoint, Target, FVector4(1.0f, 0.85f, 0.2f, 1.0f), 2.5f, false);
+        World->GetDebugInterface()->DrawSphere(Target, 0.035f, FVector4(1.0f, 0.85f, 0.2f, 1.0f), 10, 2.0f, false);
     }
 
     IWorldEditorMode* FWorldEditorTool::GetActiveMode() const

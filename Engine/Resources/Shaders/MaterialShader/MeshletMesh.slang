@@ -33,6 +33,70 @@ FMaterialVertexInputs EvalMaterialVertex(FGPUInstance* Inst, float4x4 ModelMatri
     return Material;
 }
 
+// What every vertex of one meshlet reads alike, loaded once per mesh workgroup and once per vertex on the vertex path.
+struct FMeshVertexContext
+{
+    float4x4 ModelMatrix;
+    float3x3 NormalMatrix;
+#if defined(MESHLET_MESH_BASE) || defined(MESHLET_MESH_MASKED_SHADOW)
+    float4x4 CameraView;
+    float4x4 CameraProj;
+#endif
+#ifdef MESHLET_MESH_MASKED_SHADOW
+    uint     MaterialIndex;
+#endif
+#ifndef MESHLET_MESH_BASE
+    float4x4 ShadowViewProj;
+#endif
+};
+
+FMeshVertexContext LoadMeshVertexContext(FMeshletRef Ref, uint DrawIndex)
+{
+    FMeshVertexContext Ctx;
+    Ctx.ModelMatrix  = Ref.ModelMatrix;
+    Ctx.NormalMatrix = CalculateNormalMatrix(Ctx.ModelMatrix);
+#if defined(MESHLET_MESH_BASE) || defined(MESHLET_MESH_MASKED_SHADOW)
+    Ctx.CameraView   = GetCameraView();
+    Ctx.CameraProj   = GetCameraProjection();
+#endif
+#ifdef MESHLET_MESH_MASKED_SHADOW
+    Ctx.MaterialIndex = Ref.Inst.MaterialIndex;
+#endif
+#ifndef MESHLET_MESH_BASE
+    const FShadowRasterView ShadowView = ShadowRasterViewForDraw(DrawIndex);
+    Ctx.ShadowViewProj = GetShadowViewProjection(ShadowView.ShadowDataIndex, (uint)ShadowView.ViewIndex);
+#endif
+    return Ctx;
+}
+
+// Both entry points emit their vertices through this, so the mesh and vertex paths place geometry identically.
+FMeshVertexOutput MeshPassVertex(FMeshletRef Ref, uint LocalVertex, FMeshVertexContext Ctx)
+{
+    FVertexData VertexData = LoadMeshletVertexData(Ref, LocalVertex);
+    FMeshletWorldVertex W  = TransformMeshletVertex(VertexData, Ctx.ModelMatrix, Ctx.NormalMatrix);
+
+    float4 WorldPos = float4(W.WorldPos, 1.0);
+    const FMaterialVertexInputs Material =
+        EvalMaterialVertex(Ref.Inst, Ctx.ModelMatrix, VertexData, WorldPos,
+                           W.NormalWS, W.TangentWS.xyz, W.TangentWS.w);
+    WorldPos.xyz += Material.WorldPositionOffset;
+
+    const float3 FinalWorldPos = WorldPos.xyz;
+
+#ifdef MESHLET_MESH_BASE
+    return MakeBaseVertexOutput(Ref, W, FinalWorldPos, Ctx.CameraView, Ctx.CameraProj);
+#elif defined(MESHLET_MESH_MASKED_SHADOW)
+    // Interpolants use the camera basis for the opacity graph, and only the clip position is the light's.
+    FMeshVertexOutput VOut = MakeMaskedVertexOutput(Ref, W, FinalWorldPos, Ctx.CameraView, Ctx.CameraProj, Ctx.MaterialIndex);
+    VOut.Position = mul(Ctx.ShadowViewProj, float4(FinalWorldPos, 1.0));
+    return VOut;
+#else
+    FMeshVertexOutput VOut = (FMeshVertexOutput)0;
+    VOut.Position = mul(Ctx.ShadowViewProj, float4(FinalWorldPos, 1.0));
+    return VOut;
+#endif
+}
+
 [shader("mesh")]
 [outputtopology("triangle")]
 [numthreads(MESHLET_MESH_GROUP_SIZE, 1, 1)]
@@ -54,7 +118,6 @@ void MeshMain(
     SetMeshOutputCounts(VertCount, TriCount);
 
 #ifndef MESHLET_MESH_BASE
-    const FShadowRasterView ShadowView = ShadowRasterViewForDraw(DrawIndex);
     const uint ShadowViewport = IsMultiViewShadowDraw() ? DrawIndex : 0u;
 #endif
 
@@ -71,18 +134,7 @@ void MeshMain(
     if (VertCount > 0u)
     {
         // Issued before the vertex fetch so the loads overlap rather than serialize.
-        const float4x4 ModelMatrix  = Ref.ModelMatrix;
-        const float3x3 NormalMatrix = CalculateNormalMatrix(ModelMatrix);
-#if defined(MESHLET_MESH_BASE) || defined(MESHLET_MESH_MASKED_SHADOW)
-        const float4x4 CameraView   = GetCameraView();
-        const float4x4 CameraProj   = GetCameraProjection();
-#endif
-#ifdef MESHLET_MESH_MASKED_SHADOW
-        const uint     MaterialIndex  = Ref.Inst.MaterialIndex;
-#endif
-#ifndef MESHLET_MESH_BASE
-        const float4x4 ShadowViewProj = GetShadowViewProjection(ShadowView.ShadowDataIndex, (uint)ShadowView.ViewIndex);
-#endif
+        const FMeshVertexContext Ctx = LoadMeshVertexContext(Ref, DrawIndex);
 
         [ForceUnroll]
         for (uint v = 0; v < MESHLET_VERT_ITERS; ++v)
@@ -91,30 +143,8 @@ void MeshMain(
             const uint StoreSlot = ThreadID + v * MESHLET_MESH_GROUP_SIZE;
             const uint LoadSlot  = min(StoreSlot, VertCount - 1u);
 
-            FVertexData VertexData = LoadMeshletVertexData(Ref, LoadSlot);
-            FMeshletWorldVertex W  = TransformMeshletVertex(VertexData, ModelMatrix, NormalMatrix);
-
-            float4 WorldPos = float4(W.WorldPos, 1.0);
-            const FMaterialVertexInputs Material =
-                EvalMaterialVertex(Ref.Inst, ModelMatrix, VertexData, WorldPos,
-                                   W.NormalWS, W.TangentWS.xyz, W.TangentWS.w);
-            WorldPos.xyz += Material.WorldPositionOffset;
-
-            const float3 FinalWorldPos = WorldPos.xyz;
-
-#ifdef MESHLET_MESH_BASE
-            FMeshVertexOutput VOut = MakeBaseVertexOutput(Ref, W, FinalWorldPos, CameraView, CameraProj);
-            Clip[v] = VOut.Position;   // taken from the output so the two cannot drift
-#elif defined(MESHLET_MESH_MASKED_SHADOW)
-            // Interpolants use the camera basis for the opacity graph, and only the clip position is the light's.
-            FMeshVertexOutput VOut = MakeMaskedVertexOutput(Ref, W, FinalWorldPos, CameraView, CameraProj, MaterialIndex);
-            Clip[v] = mul(ShadowViewProj, float4(FinalWorldPos, 1.0));
-            VOut.Position = Clip[v];
-#else
-            FMeshVertexOutput VOut = (FMeshVertexOutput)0;
-            Clip[v] = mul(ShadowViewProj, float4(FinalWorldPos, 1.0));
-            VOut.Position = Clip[v];
-#endif
+            const FMeshVertexOutput VOut = MeshPassVertex(Ref, LoadSlot, Ctx);
+            Clip[v] = VOut.Position;
 
             if (StoreSlot < VertCount)
             {
@@ -127,7 +157,7 @@ void MeshMain(
 #ifdef MESHLET_MESH_BASE
     const float2 ViewportSize = float2(MeshletPass().ViewportW, MeshletPass().ViewportH);
 #else
-    const float2 ViewportSize = ShadowView.TileSize;
+    const float2 ViewportSize = ShadowRasterViewForDraw(DrawIndex).TileSize;
 #endif
 
     // Dead triangles carry SV_CullPrimitive, so there is no compaction. The clamp below needs a non-zero TriCount.
@@ -156,4 +186,19 @@ void MeshMain(
             }
         }
     }
+}
+
+// The fallback without mesh shading, one instance per meshlet and one view per draw, so it writes no viewport index.
+[shader("vertex")]
+FMeshVertexOutput VertexMain(uint VertexIndex   : SV_VulkanVertexID,
+                             uint InstanceIndex : SV_VulkanInstanceID,
+                             uint DrawIndex     : SV_DrawIndex)
+{
+    // An invalid corner stays at the origin, so its triangle has no area.
+    const FMeshletCorner Corner = ResolveMeshletCorner(DrawIndex, InstanceIndex, VertexIndex);
+    if (!Corner.bValid)
+    {
+        return (FMeshVertexOutput)0;
+    }
+    return MeshPassVertex(Corner.Ref, Corner.LocalVertex, LoadMeshVertexContext(Corner.Ref, DrawIndex));
 }

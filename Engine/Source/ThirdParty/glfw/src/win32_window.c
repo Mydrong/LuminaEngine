@@ -385,6 +385,23 @@ static GLFWbool cursorInContentArea(_GLFWwindow* window)
     return PtInRect(&area, pos);
 }
 
+static GLFWbool cursorInClientHitArea(_GLFWwindow* window)
+{
+    POINT pos;
+
+    if (!cursorInContentArea(window))
+        return GLFW_FALSE;
+
+    if (window->titlebar || !window->decorated)
+        return GLFW_TRUE;
+
+    if (!GetCursorPos(&pos))
+        return GLFW_FALSE;
+
+    return SendMessageW(window->win32.handle, WM_NCHITTEST, 0,
+                        MAKELPARAM(pos.x, pos.y)) == HTCLIENT;
+}
+
 // Update native window styles to match attributes
 //
 static void updateWindowStyles(const _GLFWwindow* window)
@@ -2245,7 +2262,7 @@ void _glfwSetCursorModeWin32(_GLFWwindow* window, int mode)
     }
     else if (_glfw.win32.disabledCursorWindow == window)
         enableCursor(window);
-    else if (cursorInContentArea(window))
+    else if (cursorInClientHitArea(window))
         updateCursorImage(window);
 }
 
@@ -2339,7 +2356,7 @@ void _glfwDestroyCursorWin32(_GLFWcursor* cursor)
 
 void _glfwSetCursorWin32(_GLFWwindow* window, _GLFWcursor* cursor)
 {
-    if (cursorInContentArea(window))
+    if (cursorInClientHitArea(window))
         updateCursorImage(window);
 }
 

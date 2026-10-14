@@ -6,6 +6,7 @@
 #include "GameplayTags/GameplayMessageBus.h"
 
 #include "Containers/BoundedQueue.h"
+#include "Containers/Span.h"
 #include "Core/Object/Object.h"
 #include "Core/UpdateContext.h"
 #include "Core/Delegates/Delegate.h"
@@ -21,6 +22,7 @@
 #include "Subsystems/TweenManager.h"
 #include "Physics/Ray/RayCast.h"
 #include "Renderer/PrimitiveDrawInterface.h"
+#include "DebugDrawTypes.h"
 #include "WorldTypes.h"
 #include "World/WorldContext.h"
 #include "Containers/FunctionRef.h"
@@ -55,7 +57,7 @@ namespace Lumina
 
 namespace Lumina
 {
-    // One queued screen-space debug-text line (DrawDebugText). Drained by the render scene each frame.
+    // One queued screen-space debug-text line drained by the render scene each frame.
     struct FDebugTextLine
     {
         FString  Text;
@@ -78,10 +80,18 @@ namespace Lumina
         bool            bManaged   = false;
     };
 
-    struct FWorldDebugInterface
+    struct RUNTIME_API FWorldDebugInterface : IPrimitiveDrawInterface
     {
         CWorld* World = nullptr;
 
+        using IPrimitiveDrawInterface::DrawBox;
+        using IPrimitiveDrawInterface::DrawSphere;
+        using IPrimitiveDrawInterface::DrawCapsule;
+        using IPrimitiveDrawInterface::DrawCone;
+        using IPrimitiveDrawInterface::DrawArrow;
+
+        void DrawBillboard(int32 ResourceID, const FVector3& Location, float Scale) override;
+        void DrawLine(const FVector3& Start, const FVector3& End, const FVector4& Color, float Thickness = 1.0f, bool bDepthTest = true, float Duration = 0.0f) override;
         void DrawText(FStringView Text, TOptional<FVector4> Color);
         void DrawLine(FVector3 Start, FVector3 End, FVector4 Color, TOptional<float> Thickness, TOptional<bool> bDepthTest, TOptional<float> Duration);
         void DrawBox(FVector3 Center, FVector3 HalfExtents, FQuat Rotation, FVector4 Color, TOptional<float> Thickness, TOptional<bool> bDepthTest, TOptional<float> Duration);
@@ -89,15 +99,28 @@ namespace Lumina
         void DrawCapsule(FVector3 Start, FVector3 End, float Radius, FVector4 Color, TOptional<float> Thickness, TOptional<bool> bDepthTest, TOptional<float> Duration);
         void DrawCone(FVector3 Apex, FVector3 Direction, float AngleRadians, float Length, FVector4 Color, TOptional<float> Thickness, TOptional<bool> bDepthTest, TOptional<float> Duration);
         void DrawArrow(FVector3 Start, FVector3 Direction, float Length, FVector4 Color, TOptional<float> Thickness, TOptional<bool> bDepthTest, TOptional<float> Duration);
+        void DrawSolidTriangles(TVector<FSimpleElementVertex>&& Vertices, ESolidDrawMode Mode = ESolidDrawMode::Translucent, float Duration = -1.0f);
+        void DrawSolidTriangles(TSpan<const SDebugDrawVertex> Vertices, EDebugFillMode Mode = EDebugFillMode::Translucent, float Duration = -1.0f);
+        void DrawSolidTriangle(FVector3 A, FVector3 B, FVector3 C, FVector4 Color, EDebugFillMode Mode = EDebugFillMode::Translucent, float Duration = -1.0f);
+        void DrawSolidQuad(FVector3 A, FVector3 B, FVector3 C, FVector3 D, FVector4 Color, EDebugFillMode Mode = EDebugFillMode::Translucent, float Duration = -1.0f);
+        void DrawSolidBox(FVector3 Center, FVector3 HalfExtents, FQuat Rotation, FVector4 Color, EDebugFillMode Mode = EDebugFillMode::Translucent, float Duration = -1.0f);
+        void DrawSolidSphere(FVector3 Center, float Radius, FVector4 Color, EDebugFillMode Mode = EDebugFillMode::Translucent, float Duration = -1.0f);
+        void DrawSolidCylinder(FVector3 Start, FVector3 End, float Radius, FVector4 Color, EDebugFillMode Mode = EDebugFillMode::Translucent, float Duration = -1.0f);
+        void DrawSolidCone(FVector3 Apex, FVector3 Direction, float AngleRadians, float Length, FVector4 Color, EDebugFillMode Mode = EDebugFillMode::Translucent, float Duration = -1.0f);
+        void DrawSolidCapsule(FVector3 Start, FVector3 End, float Radius, FVector4 Color, EDebugFillMode Mode = EDebugFillMode::Translucent, float Duration = -1.0f);
+        void DrawSolidCircle(FVector3 Center, FVector3 Normal, float Radius, FVector4 Color, EDebugFillMode Mode = EDebugFillMode::Translucent, float Duration = -1.0f);
+        void DrawSolidArc(FVector3 Center, FVector3 Normal, float Radius, float StartAngle, float SweepAngle, FVector4 Color, EDebugFillMode Mode = EDebugFillMode::Translucent, float Duration = -1.0f);
+        void DrawSolidArrow(FVector3 Start, FVector3 Direction, float Length, FVector4 Color, float HeadSize = 0.2f, EDebugFillMode Mode = EDebugFillMode::Translucent, float Duration = -1.0f);
     };
 
     REFLECT()
-    class RUNTIME_API CWorld : public CObject, public IPrimitiveDrawInterface
+    class RUNTIME_API CWorld : public CObject
     {
         GENERATED_BODY()
         
         friend class FWorldManager;
         friend struct FSystemContext;
+        friend struct FWorldDebugInterface;
         friend struct SRenderComponent;
         friend ECS::FRegistry& ECS::GetWorldRegistry(CWorld&);
 
@@ -654,22 +677,10 @@ namespace Lumina
 
         //~ Debug drawing.
 
-        void DrawBillboard(int32 ResourceID, const FVector3& Location, float Scale) override;
+        void DrawBillboard(int32 ResourceID, const FVector3& Location, float Scale);
 
-        void DrawLine(const FVector3& Start, const FVector3& End, const FVector4& Color, float Thickness = 1.0f, bool bDepthTest = true, float Duration = -1.0f) override;
-
-        /** Immediate-mode line sink, or null when this world has no renderer (dedicated server) or is
-         *  suspended. Single frame, thickness 1, no CPU cull -- the path for the hundred-thousand-line
-         *  cases. DrawLine above is still the one to use for timed or thick lines. */
+        // Immediate line sink for large single-frame batches when the world has an active renderer.
         FImmediateLineRenderer* GetImmediateLines() const;
-
-        /** Submit a solid triangle batch (3 pre-colored verts per tri). Duration <= 0 draws one frame.
-         *  Mode picks the depth/blend state: Opaque for meshes that must occlude themselves, Translucent
-         *  for blended overlays, XRay to ignore scene depth entirely. */
-        void DrawSolidTriangles(TVector<FSimpleElementVertex>&& Vertices, ESolidDrawMode Mode = ESolidDrawMode::Translucent, float Duration = -1.0f);
-
-        /** Queue a line of screen-space debug text for this frame, stacked top-left on the world viewport */
-        void DrawDebugText(const FString& Text, const FVector4& Color = FVector4(1.0f));
 
         /** Render scene drains the queued debug-text lines each frame (moves them out + clears). */
         void DrainDebugTextLines(TVector<FDebugTextLine>& Out);
@@ -788,7 +799,7 @@ namespace Lumina
         FLineBatcherComponent*                              LineBatcherComponent;
         FTriangleBatcherComponent*                          TriangleBatcherComponent;
 
-        // Screen-space debug-text lines queued this frame (DrawDebugText); drained by the render scene.
+        // Screen-space debug-text lines drained by the render scene.
         TVector<FDebugTextLine>                             DebugTextLines;
 
         // Render-target paint/clear requests; drained each Extract into the frame snapshot.

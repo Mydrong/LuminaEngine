@@ -1,5 +1,6 @@
 #include "RuntimePCH.h"
 #include "World/ECS/Registry.h"
+#include <algorithm>
 #include "EntityUtils.h"
 #include "Components/CharacterComponent.h"
 #include "Components/DirtyComponent.h"

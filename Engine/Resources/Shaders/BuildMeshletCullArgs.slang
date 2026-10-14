@@ -3,11 +3,10 @@
 
 // Runs before the cull to lay out the flat block dispatch, and after it to publish the phase's draw slices.
 
-struct FDrawMeshTasksIndirectArguments
+// One meshlet sub-draw, read as mesh-task group counts or as an unindexed instanced draw, and mirrored by FMeshletDrawArgs.
+struct FMeshletDrawArgs
 {
-    uint GroupCountX;
-    uint GroupCountY;
-    uint GroupCountZ;
+    uint Words[4];
 };
 
 struct FDispatchIndirectArguments
@@ -33,12 +32,17 @@ struct FBuildMeshletCullArgsArgs
     uint  bSplitPhases;
     // 1 keeps near cascades out of this phase, 2 lays out only them for the dispatch that culls against the receiver mask.
     uint  bDeferCascades;
+    // Corners per meshlet on the vertex path, or 0 for mesh shading.
+    uint  VertexPathCorners;
+    uint  _Pad0;
+    uint  _Pad1;
+    uint  _Pad2;
 
     GPUSpan<FRenderBucket>                   Buckets;
     // One workgroup per written block, Y-folded exactly as BuildDrawPrefix folds the block dispatch.
     GPUSpan<FDispatchIndirectArguments>      OutCullDispatchArgs;
     // [(bucket * MESHLET_SLICE_COUNT + slice) * SubDrawsPerSlice + subdraw]
-    GPUSpan<FDrawMeshTasksIndirectArguments> OutMeshDrawArgs;
+    GPUSpan<FMeshletDrawArgs>                OutMeshDrawArgs;
 };
 FBuildMeshletCullArgsArgs* Pass() { return GetPassArgs<FBuildMeshletCullArgsArgs>(); }
 
@@ -146,10 +150,15 @@ void ComputeMain(uint3 ThreadID : SV_DispatchThreadID)
             {
                 const uint First = sd * Pass().MaxMeshGroups;
 
-                FDrawMeshTasksIndirectArguments DrawArgs;
-                DrawArgs.GroupCountX = (First < Count) ? min(Count - First, Pass().MaxMeshGroups) : 0u;
-                DrawArgs.GroupCountY = 1u;
-                DrawArgs.GroupCountZ = 1u;
+                const uint Meshlets = (First < Count) ? min(Count - First, Pass().MaxMeshGroups) : 0u;
+
+                // The vertex path draws one instance per meshlet where the mesh path launches one workgroup.
+                const bool bVertexPath = Pass().VertexPathCorners != 0u;
+                FMeshletDrawArgs DrawArgs;
+                DrawArgs.Words[0] = bVertexPath ? Pass().VertexPathCorners : Meshlets;
+                DrawArgs.Words[1] = bVertexPath ? Meshlets : 1u;
+                DrawArgs.Words[2] = bVertexPath ? 0u : 1u;
+                DrawArgs.Words[3] = 0u;
 
                 const uint Index = (i * (uint)MESHLET_SLICE_COUNT + s) * Pass().SubDrawsPerSlice + sd;
                 Pass().OutMeshDrawArgs.Set(Index, DrawArgs);

@@ -234,8 +234,7 @@ namespace Lumina
         Options.JointDistance  = CVarSkeletonJointDist.GetValue();
         Options.ShapeDistance  = CVarSkeletonShapeDist.GetValue();
 
-        // CWorld implements IPrimitiveDrawInterface, so it is the draw target.
-        SkeletonDebugDraw::DrawWorldSkeletons(World.Get(), World.Get(), Options);
+        SkeletonDebugDraw::DrawWorldSkeletons(World.Get(), World->GetDebugInterface(), Options);
     }
 
     void FEditorTool::DrawSkeletonNameLabels(const ImVec2& ViewportOrigin, const ImVec2& ViewportSize)
@@ -2063,9 +2062,9 @@ namespace Lumina
 
             if (bIsAxis)
             {
-                World->DrawLine(FVector3(Coord, 0, -Reach), FVector3(Coord, 0, Reach),
+                World->GetDebugInterface()->DrawLine(FVector3(Coord, 0, -Reach), FVector3(Coord, 0, Reach),
                                 FVector4(0.0f, 0.0f, 1.0f, 1.0f), Settings->AxisThickness);
-                World->DrawLine(FVector3(-Reach, 0, Coord), FVector3(Reach, 0, Coord),
+                World->GetDebugInterface()->DrawLine(FVector3(-Reach, 0, Coord), FVector3(Reach, 0, Coord),
                                 FVector4(1.0f, 0.0f, 0.0f, 1.0f), Settings->AxisThickness);
                 continue;
             }
@@ -2090,7 +2089,7 @@ namespace Lumina
         if (Settings->bShowVerticalAxis)
         {
             // It used to use the line count, so it only matched the grid while spacing happened to be 1.
-            World->DrawLine(
+            World->GetDebugInterface()->DrawLine(
                 FVector3(0, -Reach, 0),
                 FVector3(0,  Reach, 0),
                 FVector4(0.0f, 1.0f, 0.0f, 1.0f),

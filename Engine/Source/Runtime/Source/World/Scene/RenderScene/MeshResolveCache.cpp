@@ -314,7 +314,7 @@ namespace Lumina
         const uint64 SwitchKey = Material->GetStaticSwitchKey();
         auto Stage = [ConcreteMaterial, SwitchKey](EMaterialShaderStage InStage)
         {
-            return ConcreteMaterial ? ConcreteMaterial->GetStageForKey(InStage, SwitchKey) : FShaderH{};
+            return ConcreteMaterial ? ConcreteMaterial->GetStageForKey(ActiveMeshletStage(InStage), SwitchKey) : FShaderH{};
         };
 
         R.PixelShader                = Stage(EMaterialShaderStage::Pixel);

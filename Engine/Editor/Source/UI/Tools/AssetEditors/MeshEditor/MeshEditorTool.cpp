@@ -461,7 +461,7 @@ namespace Lumina
         if (bShowAABB)
         {
             FAABB AABB = StaticMeshComponent.StaticMesh->GetAABB().ToWorld(Transform.GetWorldMatrix());
-            World->DrawBox(AABB.GetCenter(), AABB.GetSize() * 0.5f, FQuat(1, 0, 0, 0), FColor::Green);
+            World->GetDebugInterface()->DrawBox(AABB.GetCenter(), AABB.GetSize() * 0.5f, FQuat(1, 0, 0, 0), FColor::Green);
         }
 
         // Derive overlay AABB from the currently rendered LOD's meshlet range; LOD 0 bounds look stale after a forced LOD change.
@@ -499,7 +499,7 @@ namespace Lumina
                     SurfaceAABB.Min = Lo;
                     SurfaceAABB.Max = Hi;
                     SurfaceAABB     = SurfaceAABB.ToWorld(Transform.GetWorldMatrix());
-                    World->DrawBox(SurfaceAABB.GetCenter(), SurfaceAABB.GetSize() * 0.5f, FQuat(1, 0, 0, 0), FColor::Yellow, 2.0f);
+                    World->GetDebugInterface()->DrawBox(SurfaceAABB.GetCenter(), SurfaceAABB.GetSize() * 0.5f, FQuat(1, 0, 0, 0), FColor::Yellow, 2.0f);
                 }
             }
         }
@@ -514,10 +514,10 @@ namespace Lumina
                 const FMatrix4 SocketMatrix = EntityMatrix * Socket.RelativeTransform.GetMatrix();
                 const FVector3 Position = FVector3(SocketMatrix[3]);
 
-                World->DrawSphere(Position, 0.045f, FVector4(1.0f, 0.82f, 0.4f, 1.0f), 12, 2.5f, false);
-                World->DrawLine(Position, Position + Math::Normalize(FVector3(SocketMatrix[0])) * AxisLength, FVector4(1.0f, 0.2f, 0.2f, 1.0f), 3.0f, false);
-                World->DrawLine(Position, Position + Math::Normalize(FVector3(SocketMatrix[1])) * AxisLength, FVector4(0.2f, 1.0f, 0.2f, 1.0f), 3.0f, false);
-                World->DrawLine(Position, Position + Math::Normalize(FVector3(SocketMatrix[2])) * AxisLength, FVector4(0.2f, 0.4f, 1.0f, 1.0f), 3.0f, false);
+                World->GetDebugInterface()->DrawSphere(Position, 0.045f, FVector4(1.0f, 0.82f, 0.4f, 1.0f), 12, 2.5f, false);
+                World->GetDebugInterface()->DrawLine(Position, Position + Math::Normalize(FVector3(SocketMatrix[0])) * AxisLength, FVector4(1.0f, 0.2f, 0.2f, 1.0f), 3.0f, false);
+                World->GetDebugInterface()->DrawLine(Position, Position + Math::Normalize(FVector3(SocketMatrix[1])) * AxisLength, FVector4(0.2f, 1.0f, 0.2f, 1.0f), 3.0f, false);
+                World->GetDebugInterface()->DrawLine(Position, Position + Math::Normalize(FVector3(SocketMatrix[2])) * AxisLength, FVector4(0.2f, 0.4f, 1.0f, 1.0f), 3.0f, false);
             }
         }
     }

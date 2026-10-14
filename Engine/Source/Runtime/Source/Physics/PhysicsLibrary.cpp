@@ -39,10 +39,14 @@ namespace Lumina
     SRayResult CPhysicsLibrary::Raycast(CWorld* World, FVector3 Start, FVector3 End,
         ECS::FEntity IgnoreEntity, ECollisionProfiles LayerMask)
     {
+        SRayResult Miss;
+        Miss.Start = Start;
+        Miss.End = End;
+
         Physics::IPhysicsScene* Scene = SceneOf(World);
         if (Scene == nullptr)
         {
-            return SRayResult();
+            return Miss;
         }
 
         SRayCastSettings Settings;
@@ -52,7 +56,7 @@ namespace Lumina
         StageIgnore(IgnoreEntity, Settings.IgnoreEntities);
 
         TOptional<SRayResult> Result = Scene->CastRay(Settings);
-        return Result.has_value() ? Result.value() : SRayResult();
+        return Result.has_value() ? Result.value() : Miss;
     }
 
     void CPhysicsLibrary::RaycastAll(CWorld* World, FVector3 Start, FVector3 End, ECS::FEntity IgnoreEntity,

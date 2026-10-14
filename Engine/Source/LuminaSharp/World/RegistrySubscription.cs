@@ -2,12 +2,6 @@ using System;
 
 namespace LuminaSharp;
 
-/// <summary>
-/// A live subscription to a registry signal, returned by <see cref="EntityRegistry.OnConstruct{T}"/> /
-/// <see cref="EntityRegistry.OnDestroy{T}"/> / <see cref="EntityRegistry.OnUpdate{T}"/>. Dispose it to
-/// unsubscribe. Undisposed is safe: the native listener owns the binding, so tearing the world down or
-/// reloading scripts releases the callback on its own.
-/// </summary>
 public sealed class RegistrySubscription : IDisposable
 {
     /// <summary>An inert subscription (returned when the component type is unknown or the connect failed).</summary>

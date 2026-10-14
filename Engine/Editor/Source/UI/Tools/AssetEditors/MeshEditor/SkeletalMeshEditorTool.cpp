@@ -884,7 +884,7 @@ namespace Lumina
         if (bShowAABB)
         {
             FAABB AABB = MeshComponent.GetAABB().ToWorld(EntityMatrix);
-            World->DrawBox(AABB.GetCenter(), AABB.GetSize() * 0.5f, FQuat(1, 0, 0, 0), FColor::Green);
+            World->GetDebugInterface()->DrawBox(AABB.GetCenter(), AABB.GetSize() * 0.5f, FQuat(1, 0, 0, 0), FColor::Green);
         }
 
         CSkeletalMesh* SkeletalMesh = Cast<CSkeletalMesh>(Asset.Get());
@@ -923,7 +923,7 @@ namespace Lumina
                     SurfaceAABB.Min = Lo;
                     SurfaceAABB.Max = Hi;
                     SurfaceAABB     = SurfaceAABB.ToWorld(EntityMatrix);
-                    World->DrawBox(SurfaceAABB.GetCenter(), SurfaceAABB.GetSize() * 0.5f, FQuat(1, 0, 0, 0), FColor::Yellow, 2.0f);
+                    World->GetDebugInterface()->DrawBox(SurfaceAABB.GetCenter(), SurfaceAABB.GetSize() * 0.5f, FQuat(1, 0, 0, 0), FColor::Yellow, 2.0f);
                 }
             }
         }
@@ -947,11 +947,11 @@ namespace Lumina
                 const FSkeletonResource::FBoneInfo& Bone = SkeletonResource->GetBone(i);
                 const FVector3 BonePosition = FVector3(BoneWorld[i][3]);
 
-                World->DrawSphere(BonePosition, BoneRadius, FColor::Red, 8);
+                World->GetDebugInterface()->DrawSphere(BonePosition, BoneRadius, FColor::Red, 8);
 
                 if (Bone.ParentIndex != Constants::kIndexNone)
                 {
-                    World->DrawLine(FVector3(BoneWorld[Bone.ParentIndex][3]), BonePosition, FColor::Green);
+                    World->GetDebugInterface()->DrawLine(FVector3(BoneWorld[Bone.ParentIndex][3]), BonePosition, FColor::Green);
                 }
             }
         }
@@ -962,10 +962,10 @@ namespace Lumina
             const FVector3  Position = FVector3(Selected[3]);
             const float     AxisLength = BoneRadius * 6.0f;
 
-            World->DrawSphere(Position, BoneRadius * 1.8f, FVector4(1.0f, 0.85f, 0.2f, 1.0f), 12, 2.5f, false);
-            World->DrawLine(Position, Position + Math::Normalize(FVector3(Selected[0])) * AxisLength, FVector4(1.0f, 0.2f, 0.2f, 1.0f), 3.0f, false);
-            World->DrawLine(Position, Position + Math::Normalize(FVector3(Selected[1])) * AxisLength, FVector4(0.2f, 1.0f, 0.2f, 1.0f), 3.0f, false);
-            World->DrawLine(Position, Position + Math::Normalize(FVector3(Selected[2])) * AxisLength, FVector4(0.2f, 0.4f, 1.0f, 1.0f), 3.0f, false);
+            World->GetDebugInterface()->DrawSphere(Position, BoneRadius * 1.8f, FVector4(1.0f, 0.85f, 0.2f, 1.0f), 12, 2.5f, false);
+            World->GetDebugInterface()->DrawLine(Position, Position + Math::Normalize(FVector3(Selected[0])) * AxisLength, FVector4(1.0f, 0.2f, 0.2f, 1.0f), 3.0f, false);
+            World->GetDebugInterface()->DrawLine(Position, Position + Math::Normalize(FVector3(Selected[1])) * AxisLength, FVector4(0.2f, 1.0f, 0.2f, 1.0f), 3.0f, false);
+            World->GetDebugInterface()->DrawLine(Position, Position + Math::Normalize(FVector3(Selected[2])) * AxisLength, FVector4(0.2f, 0.4f, 1.0f, 1.0f), 3.0f, false);
 
             RebuildSelectedBonePoints();
 
@@ -998,10 +998,10 @@ namespace Lumina
                 const FVector3 Position = FVector3(SocketMatrix[3]);
                 const float AxisLength = BoneRadius * 5.0f;
 
-                World->DrawSphere(Position, BoneRadius * 0.9f, FVector4(1.0f, 0.82f, 0.4f, 1.0f), 12, 2.5f, false);
-                World->DrawLine(Position, Position + Math::Normalize(FVector3(SocketMatrix[0])) * AxisLength, FVector4(1.0f, 0.2f, 0.2f, 1.0f), 3.0f, false);
-                World->DrawLine(Position, Position + Math::Normalize(FVector3(SocketMatrix[1])) * AxisLength, FVector4(0.2f, 1.0f, 0.2f, 1.0f), 3.0f, false);
-                World->DrawLine(Position, Position + Math::Normalize(FVector3(SocketMatrix[2])) * AxisLength, FVector4(0.2f, 0.4f, 1.0f, 1.0f), 3.0f, false);
+                World->GetDebugInterface()->DrawSphere(Position, BoneRadius * 0.9f, FVector4(1.0f, 0.82f, 0.4f, 1.0f), 12, 2.5f, false);
+                World->GetDebugInterface()->DrawLine(Position, Position + Math::Normalize(FVector3(SocketMatrix[0])) * AxisLength, FVector4(1.0f, 0.2f, 0.2f, 1.0f), 3.0f, false);
+                World->GetDebugInterface()->DrawLine(Position, Position + Math::Normalize(FVector3(SocketMatrix[1])) * AxisLength, FVector4(0.2f, 1.0f, 0.2f, 1.0f), 3.0f, false);
+                World->GetDebugInterface()->DrawLine(Position, Position + Math::Normalize(FVector3(SocketMatrix[2])) * AxisLength, FVector4(0.2f, 0.4f, 1.0f, 1.0f), 3.0f, false);
             }
         }
     }

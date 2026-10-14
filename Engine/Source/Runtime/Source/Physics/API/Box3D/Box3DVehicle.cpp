@@ -178,7 +178,7 @@ namespace Lumina::Physics
                 {
                     const FVector3 From = FromB3(Mount);
                     const FVector3 To = Ray.bHit ? FromB3(Ray.Point) : From - Up * Reach;
-                    World->DrawLine(From, To, Ray.bHit ? FVector4(0.2f, 1.0f, 0.3f, 1.0f) : FVector4(1.0f, 0.3f, 0.2f, 1.0f), 1.0f, false, 0.0f);
+                    World->GetDebugInterface()->DrawLine(From, To, Ray.bHit ? FVector4(0.2f, 1.0f, 0.3f, 1.0f) : FVector4(1.0f, 0.3f, 0.2f, 1.0f), 1.0f, false, 0.0f);
                 }
             }
 

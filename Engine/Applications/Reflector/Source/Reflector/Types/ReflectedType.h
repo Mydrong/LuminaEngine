@@ -159,6 +159,7 @@ namespace Lumina::Reflection
         // Shared with FReflectedClass, whose descriptor differs only in what registers it.
         void EmitMetadataArrays(FCodeWriter& Writer) const;
         void EmitPropertyTable(FCodeWriter& Writer) const;
+        void DefinePropertyTable(FCodeWriter& Writer) const;
 
         // The descriptor fields naming the tables above, empty for a table that was not emitted.
         std::string MemberTableFields() const;
@@ -168,6 +169,8 @@ namespace Lumina::Reflection
         // The frame struct and thunk for each function, at file scope since offsetof is taken against them.
         void EmitFunctionFrames(FCodeWriter& Writer) const;
         void EmitFunctionTable(FCodeWriter& Writer) const;
+        void DefineFunctionParameterTables(FCodeWriter& Writer) const;
+        void DefineFunctionTable(FCodeWriter& Writer) const;
 
         std::string Parent;
     };

@@ -190,6 +190,22 @@ uint3 UnpackMeshletTriangle(FMeshletRef Ref, uint TriIdx)
     return unpack_u8u32(Packed).xyz;
 }
 
+// Written as ((MeshletSlot << 7) | TriIndex) + 1 so a cleared visibility buffer reads as no geometry, decoded in VisBufferSurface.slang.
+#define VISBUFFER_TRI_BITS 7u
+#define VISBUFFER_TRI_MASK 0x7Fu
+
+uint PackVisID(uint MeshletSlot, uint TriIdx)
+{
+    return ((MeshletSlot << VISBUFFER_TRI_BITS) | (TriIdx & VISBUFFER_TRI_MASK)) + 1u;
+}
+
+// The mesh path hands VisID to the pixel shader as the primitive ID, and the vertex path, which cannot write one, as a flat varying.
+#ifdef MESHLET_VERTEX_PATH
+#define VIS_ID_INPUT nointerpolation uint VisID : VISID
+#else
+#define VIS_ID_INPUT uint VisID : SV_PrimitiveID
+#endif
+
 // Collapsing to (0,0,0) skips a primitive whose unbounded local index the workgroup may never have written.
 uint3 UnpackMeshletTriangleSafe(FMeshletRef Ref, uint TriIdx)
 {
@@ -302,6 +318,36 @@ bool IsMeshletTriangleCulled(float4 C0, float4 C1, float4 C2, float2 ViewportSiz
 bool IsDegenerateTriangleIndices(uint3 Idx)
 {
     return Idx.x == Idx.y || Idx.y == Idx.z || Idx.z == Idx.x;
+}
+
+// The vertex path draws this many unindexed corners per meshlet, one instance per meshlet standing in for the mesh workgroup.
+#define MESHLET_VERTEX_PATH_CORNERS (MESHLET_MAX_TRIANGLES * 3u)
+
+struct FMeshletCorner
+{
+    FMeshletRef Ref;
+    uint        MeshletSlot;
+    uint        TriIdx;
+    uint        LocalVertex;
+    bool        bValid;
+};
+
+// Resolves through the same slot the mesh path's workgroup would, and a corner past the meshlet's triangles is invalid.
+FMeshletCorner ResolveMeshletCorner(uint DrawIndex, uint InstanceIndex, uint VertexIndex)
+{
+    FMeshletCorner Corner;
+    Corner.Ref         = ResolveMeshletForWorkgroup(DrawIndex, InstanceIndex, Corner.MeshletSlot);
+    Corner.TriIdx      = VertexIndex / 3u;
+    Corner.LocalVertex = 0u;
+    Corner.bValid      = Corner.TriIdx < Corner.Ref.M.TriangleCount;
+
+    if (Corner.bValid)
+    {
+        const uint3 Idx = UnpackMeshletTriangleSafe(Corner.Ref, Corner.TriIdx);
+        Corner.LocalVertex = Idx[VertexIndex % 3u];
+        Corner.bValid      = !IsDegenerateTriangleIndices(Idx);
+    }
+    return Corner;
 }
 
 struct FMeshletWorldVertex

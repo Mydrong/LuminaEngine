@@ -145,6 +145,7 @@ namespace Lumina::ImGuiX
 
     // Shows the mixed state while only some are checked, and returns true with the value to apply to all when clicked.
     RUNTIME_API bool SelectAllCheckbox(const char* Label, uint32 NumChecked, uint32 NumTotal, bool& bOutCheckAll);
+    RUNTIME_API bool ToggleSwitch(const char* Label, bool* Value);
 
     RUNTIME_API inline bool FlatButton( char const* pLabel, ImVec2 const& size = ImVec2( 0, 0 ), const ImColor& foregroundColor = ImGui::ColorConvertFloat4ToU32( ImGui::GetStyle().Colors[ImGuiCol_Text] ) )
     {
@@ -218,18 +219,7 @@ namespace Lumina::ImGuiX
     RUNTIME_API FString FormatSize(size_t Bytes);
 
     /**
-     * Switches subsequent images in this draw list into HDR-preview mode: the sampled texel is treated
-     * as LINEAR radiance and run through exposure -> ACES -> display encode, the same transform the
-     * scene viewport applies (both share Includes/Tonemap.slang).
-     *
-     * Use it for float-format sources -- environment maps, scene captures, anything cooked as RGBA16F.
-     * Do NOT use it for ordinary color textures: those are already display-encoded, and running the
-     * transform again would wash them out. Without it the reverse happens, which is why a linear HDR
-     * panorama blitted directly reads far darker in a preview than the same data does in-world.
-     *
-     * ExposureStops is a photographic EV bias; 0 = the texture's authored values.
-     *
-     * Always pair with EndHDRPreview -- the mode persists for the rest of the draw list otherwise.
+     * Switches subsequent images in this draw list into HDR-preview mode.
      */
     RUNTIME_API void BeginHDRPreview(ImDrawList* DrawList, float ExposureStops);
     RUNTIME_API void EndHDRPreview(ImDrawList* DrawList);
@@ -243,19 +233,6 @@ namespace Lumina::ImGuiX
 
     /**
      * Draws the following images as one slice of a Texture2DArray.
-     *
-     * Required, not cosmetic: an array texture's heap slot holds a VIEW_TYPE_2D_ARRAY view, and the
-     * ImGui pixel shader's default path reads it as an FTexture2D. Sampling a 2D_ARRAY view through a
-     * Texture2D descriptor is a type mismatch, so an array drawn without this resolves to the null
-     * slot (the purple placeholder) rather than merely looking wrong.
-     *
-     * The ResourceID handed to AddImage is the same either way -- the bindless arrays are aliased
-     * views of one descriptor array; only the descriptor type the shader reads it through changes.
-     *
-     * Does NOT compose with BeginHDRPreview: each writes the whole display state, so the later call
-     * wins. Not currently a limitation, because array layers cook through Basis and are always LDR.
-     *
-     * Always pair with EndArrayPreview -- the mode persists for the rest of the draw list otherwise.
      */
     RUNTIME_API void BeginArrayPreview(ImDrawList* DrawList, uint32 Slice, bool bEncodeLinear = false);
     RUNTIME_API void EndArrayPreview(ImDrawList* DrawList);

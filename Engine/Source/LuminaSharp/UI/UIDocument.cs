@@ -2,10 +2,6 @@ using System;
 
 namespace LuminaSharp;
 
-/// <summary>
-/// A loaded RmlUi document in a world's screen context (returned by <see cref="UI.LoadDocument"/>). A
-/// lightweight handle: copy it freely; it stays valid until <see cref="Close"/> (or the world tears down).
-/// </summary>
 public readonly struct UIDocument
 {
     internal readonly ulong World;
@@ -15,6 +11,11 @@ public readonly struct UIDocument
     {
         this.World = World;
         this.Handle = Handle;
+    }
+
+    public UIDocument(Lumina.CWorld World, Lumina.FUIDocument Handle)
+        : this(World.WorldHandle, Handle)
+    {
     }
 
     /// <summary>False if the load failed or the document has been closed.</summary>
@@ -45,7 +46,7 @@ public readonly struct UIDocument
     {
         if (IsValid)
         {
-            Lumina.CUILibrary.UnloadDocument(UI.WorldOf(World), Handle);
+            Lumina.CUILibrary.UnloadDocument(UIWorld.FromHandle(World), Handle);
         }
     }
 

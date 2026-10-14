@@ -3251,7 +3251,7 @@ namespace Lumina
         FComponentVisualizerContext Context(VisualizerInteraction, this);
         Context.World = GetObservedWorld();
         Context.Registry = &Registry;
-        Context.PDI = GetObservedWorld();
+        Context.PDI = GetObservedWorld() != nullptr ? GetObservedWorld()->GetDebugInterface() : nullptr;
         Context.DrawList = ImGui::GetWindowDrawList();
         Context.View.SetFromCamera(Camera, ViewportOrigin, ViewportSize);
         Context.bViewportHovered = bViewportHovered;
@@ -3346,7 +3346,7 @@ namespace Lumina
             {
                 if (Binding.Storage->Contains(Entity))
                 {
-                    Binding.Visualizer->Draw(World.Get(), Registry, Entity);
+                    Binding.Visualizer->Draw(World->GetDebugInterface(), Registry, Entity);
                 }
             }
         };

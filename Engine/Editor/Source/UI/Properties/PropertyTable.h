@@ -342,6 +342,7 @@ namespace Lumina
 
     private:
 
+        FString GetHeaderLabel() const;
         FStructProperty*            StructProperty = nullptr;
     };
 

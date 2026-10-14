@@ -35,6 +35,11 @@ internal static class ScriptPropertyClassifier
         {
             return FScriptPropertyClassification.Of(EScriptAccess.String);
         }
+        if (Type is INamedTypeSymbol { Name: "FEntity" } EntityType
+            && EntityType.ContainingNamespace?.ToDisplayString() == "LuminaSharp")
+        {
+            return FScriptPropertyClassification.Of(EScriptAccess.Blittable);
+        }
 
         // Asset references (FSoftObjectPath, TSoftObjectPtr<T>; TStrongObjectPtr<T> is NOT one) are recognised by the
         // interface they share, so a new asset-reference type needs nothing here. Checked before the unmanaged
@@ -136,11 +141,6 @@ internal static class ScriptPropertyClassifier
         {
             return true;
         }
-        if (Type.ToDisplayString() == ScriptPropertyTypeNames.Entity)
-        {
-            return true;
-        }
-
         foreach (AttributeData Attribute in Type.GetAttributes())
         {
             string? Name = Attribute.AttributeClass?.ToDisplayString();
@@ -457,7 +457,6 @@ internal static class ScriptPropertyTypeNames
     public const string NativeObject = "LuminaSharp.NativeObject";
     public const string SoftObjectReference = "LuminaSharp.ISoftObjectReference";
     public const string InputBinding = "LuminaSharp.SInputBinding";
-    public const string Entity = "LuminaSharp.Entity";
 
     // What marks a struct as an engine mirror of a native type, so reading it as raw bytes is sound.
     public const string NativeTypeAttribute = "LuminaSharp.NativeTypeAttribute";

@@ -12,6 +12,7 @@
 #include "Input/Key.h"
 #include "Tools/UI/ImGui/Widgets/TreeListView.h"
 #include "UI/Properties/NamePicker.h"
+#include "Tools/UI/ImGui/ImGuiXNumeric.h"
 
 namespace Lumina
 {
@@ -148,7 +149,7 @@ namespace Lumina
                 // Type-only entry; +/- buttons step by Delta, no click-drag scrubbing. The UNSCALED base:
                 // a button press must step by the same amount every time.
                 ValueType Step = static_cast<ValueType>(ResolveBaseStep(Prop, IsFloatType(DT) ? 0.01f : 1.0f));
-                ImGui::InputScalar("##Value", DT, &DisplayValue, &Step, nullptr, Format);
+                ImGuiX::InputScalar("##Value", DT, &DisplayValue, &Step, nullptr, Format);
                 if (Min && DisplayValue < *Min)
                 {
                     DisplayValue = *Min;
@@ -160,7 +161,7 @@ namespace Lumina
             }
             else
             {
-                ImGui::DragScalar("##Value", DT, &DisplayValue, Speed, Min, Max, Format);
+                ImGuiX::DragScalar("##Value", DT, &DisplayValue, Speed, Min, Max, Format);
             }
             ImGui::PopItemWidth();
 
@@ -225,9 +226,7 @@ namespace Lumina
         
         EPropertyChangeOp DrawProperty(const TSharedPtr<FPropertyHandle>& Property, const FPropertyDrawArgs& Args) override
         {
-            ImGui::PushItemWidth(ImGui::GetContentRegionAvail().x);
-            ImGui::Checkbox("##", &bValue);
-            ImGui::PopItemWidth();
+            ImGuiX::ToggleSwitch("##Value", &bValue);
 
             EPropertyChangeOp Result = EPropertyChangeOp::None;
             if (ImGui::IsItemEdited())

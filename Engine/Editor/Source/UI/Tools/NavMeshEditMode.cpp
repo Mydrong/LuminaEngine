@@ -48,7 +48,7 @@ namespace Lumina
             const bool bBaking = Nav.Runtime.State == ENavBakeState::Building || Nav.Runtime.State == ENavBakeState::Initializing;
             const FVector4 Color = bBaking ? kBakingColor : (Nav.HasBakedData() ? kBakedColor : kVolumeColor);
             // Duration -1 = single frame; the overlay re-emits each tick so the wireframe is always present.
-            World->DrawBox(Nav.Center, Nav.GetWorldExtents(), FQuat(1.0f, 0.0f, 0.0f, 0.0f), Color, 1.5f, true, -1.0f);
+            World->GetDebugInterface()->DrawBox(Nav.Center, Nav.GetWorldExtents(), FQuat(1.0f, 0.0f, 0.0f, 0.0f), Color, 1.5f, true, -1.0f);
         }
 
         // Authoring aids, so a volume or link is visible while it is being placed rather than only after a bake.
@@ -65,7 +65,7 @@ namespace Lumina
             const FVector3 Scale = WT.GetScale();
             const FVector3 Center = WT.GetLocation() + Math::Rotate(WT.GetRotation(), Modifier.Offset * Scale);
             const FVector3 Half(Modifier.Extents.x * Math::Abs(Scale.x), Modifier.Extents.y * Math::Abs(Scale.y), Modifier.Extents.z * Math::Abs(Scale.z));
-            World->DrawBox(Center, Half, WT.GetRotation(), ModifierColor(Modifier.Area), 1.5f, true, -1.0f);
+            World->GetDebugInterface()->DrawBox(Center, Half, WT.GetRotation(), ModifierColor(Modifier.Area), 1.5f, true, -1.0f);
         }
 
         auto LinkView = World->View<SNavLinkComponent, STransformComponent>();
@@ -80,19 +80,19 @@ namespace Lumina
             const FMatrix4 World4 = LinkView.Get<STransformComponent>(Entity).GetWorldMatrix();
             const FVector3 Start = FVector3(World4 * FVector4(Link.Start, 1.0f));
             const FVector3 End   = FVector3(World4 * FVector4(Link.End,   1.0f));
-            World->DrawSphere(Start, Link.Radius, kLinkColor, 12, 1.5f, true, -1.0f);
-            World->DrawSphere(End,   Link.Radius, kLinkColor, 12, 1.5f, true, -1.0f);
+            World->GetDebugInterface()->DrawSphere(Start, Link.Radius, kLinkColor, 12, 1.5f, true, -1.0f);
+            World->GetDebugInterface()->DrawSphere(End,   Link.Radius, kLinkColor, 12, 1.5f, true, -1.0f);
 
             const FVector3 Delta = End - Start;
             const float Length = Math::Length(Delta);
             if (Length > Math::kSmallNumber)
             {
-                World->DrawArrow(Start, Delta / Length, Length, kLinkColor, 2.0f, true, -1.0f, 0.25f);
+                World->GetDebugInterface()->DrawArrow(Start, Delta / Length, Length, kLinkColor, 2.0f, true, -1.0f, 0.25f);
                 if (!Link.bBidirectional)
                 {
                     continue;
                 }
-                World->DrawArrow(End, -Delta / Length, Length, kLinkColor, 2.0f, true, -1.0f, 0.25f);
+                World->GetDebugInterface()->DrawArrow(End, -Delta / Length, Length, kLinkColor, 2.0f, true, -1.0f, 0.25f);
             }
         }
     }

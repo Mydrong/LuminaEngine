@@ -36,6 +36,11 @@ namespace Lumina
         void DrawFrustum(const FMatrix4& Matrix, float zNear, float zFar, const FVector4& Color, float Thickness = 1.0f, bool bDepthTest = true, float Duration = 0.0f);
         void DrawArrow(const FVector3& Start, const FVector3& Direction, float Length, const FVector4& Color, float Thickness = 1.0f, bool bDepthTest = true, float Duration = 0.0f, float HeadSize = 0.2f);
         void DrawViewVolume(const FViewVolume& ViewVolume, const FVector4& Color, float Thickness = 1.0f, bool bDepthTest = true, float Duration = 0.0f);
+        void DrawCircle(const FVector3& Center, const FVector3& Normal, float Radius, const FVector4& Color, uint8 Segments = 32, float Thickness = 1.0f, bool bDepthTest = true, float Duration = 0.0f);
+        void DrawArc(const FVector3& Center, const FVector3& Normal, float Radius, float StartAngle, float SweepAngle, const FVector4& Color, uint8 Segments = 16, float Thickness = 1.0f, bool bDepthTest = true, float Duration = 0.0f);
+        void DrawCylinder(const FVector3& Start, const FVector3& End, float Radius, const FVector4& Color, uint8 Segments = 16, float Thickness = 1.0f, bool bDepthTest = true, float Duration = 0.0f);
+        void DrawAxes(const FVector3& Origin, const FQuat& Rotation, float Length, float Thickness = 1.0f, bool bDepthTest = true, float Duration = 0.0f);
+        void DrawPoint(const FVector3& Position, float Size, const FVector4& Color, float Thickness = 1.0f, bool bDepthTest = true, float Duration = 0.0f);
         
     };
 }

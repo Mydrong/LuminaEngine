@@ -278,10 +278,10 @@ namespace Lumina
             const FVector3 Position = FVector3(SocketMatrix[3]);
             constexpr float AxisLength = 0.18f;
 
-            World->DrawSphere(Position, 0.045f, FVector4(1.0f, 0.82f, 0.4f, 1.0f), 12, 2.5f, false);
-            World->DrawLine(Position, Position + Math::Normalize(FVector3(SocketMatrix[0])) * AxisLength, FVector4(1.0f, 0.2f, 0.2f, 1.0f), 3.0f, false);
-            World->DrawLine(Position, Position + Math::Normalize(FVector3(SocketMatrix[1])) * AxisLength, FVector4(0.2f, 1.0f, 0.2f, 1.0f), 3.0f, false);
-            World->DrawLine(Position, Position + Math::Normalize(FVector3(SocketMatrix[2])) * AxisLength, FVector4(0.2f, 0.4f, 1.0f, 1.0f), 3.0f, false);
+            World->GetDebugInterface()->DrawSphere(Position, 0.045f, FVector4(1.0f, 0.82f, 0.4f, 1.0f), 12, 2.5f, false);
+            World->GetDebugInterface()->DrawLine(Position, Position + Math::Normalize(FVector3(SocketMatrix[0])) * AxisLength, FVector4(1.0f, 0.2f, 0.2f, 1.0f), 3.0f, false);
+            World->GetDebugInterface()->DrawLine(Position, Position + Math::Normalize(FVector3(SocketMatrix[1])) * AxisLength, FVector4(0.2f, 1.0f, 0.2f, 1.0f), 3.0f, false);
+            World->GetDebugInterface()->DrawLine(Position, Position + Math::Normalize(FVector3(SocketMatrix[2])) * AxisLength, FVector4(0.2f, 0.4f, 1.0f, 1.0f), 3.0f, false);
         }
     }
 
@@ -362,12 +362,12 @@ namespace Lumina
         const FSkeletonResource::FBoneInfo& Bone = SkeletonResource->GetBone(BoneIndex);
         FVector3 BonePosition = FVector3(WorldTransforms[BoneIndex][3]);
     
-        DrawWorld->DrawSphere(BonePosition, 0.025f, FColor::Red, 8, 1.0f, false);
+        DrawWorld->GetDebugInterface()->DrawSphere(BonePosition, 0.025f, FColor::Red, 8, 1.0f, false);
     
         if (Bone.ParentIndex != Constants::kIndexNone)
         {
             FVector3 ParentPosition = FVector3(WorldTransforms[Bone.ParentIndex][3]);
-            DrawWorld->DrawLine(ParentPosition, BonePosition, FColor::Green, 10.0f, false);
+            DrawWorld->GetDebugInterface()->DrawLine(ParentPosition, BonePosition, FColor::Green, 10.0f, false);
         }
     
         TVector<int32> Children = SkeletonResource->GetChildBones(BoneIndex);

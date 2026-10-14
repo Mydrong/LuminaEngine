@@ -4,10 +4,6 @@
 
 // Every VisID decode lives here, since the five shaders that read it must agree bit for bit.
 
-// MeshletVisBuffer writes ((MeshletSlot << 7) | TriIndex) + 1, so a cleared 0 means no geometry.
-#define VISBUFFER_TRI_BITS 7u
-#define VISBUFFER_TRI_MASK 0x7Fu
-
 struct FVisTriangle
 {
     FMeshletRef Ref;

@@ -13,7 +13,7 @@ namespace Lumina::ThumbnailCache
     {
         // Identifies a valid sidecar file; a header mismatch means "regenerate".
         constexpr uint32 kCacheMagic   = 0x434D4854; // 'THMC'
-        constexpr uint8  kCacheVersion = 1;
+        constexpr uint8  kCacheVersion = 2;
 
         FString CacheDirectory()
         {
@@ -75,7 +75,7 @@ namespace Lumina::ThumbnailCache
         Ar.Serialize(&StoredHash, sizeof(StoredHash));
 
         // Content changed since this thumbnail was baked -> ignore, caller regenerates.
-        if (StoredHash != ExpectedContentHash)
+        if (Version != kCacheVersion || StoredHash != ExpectedContentHash)
         {
             return false;
         }

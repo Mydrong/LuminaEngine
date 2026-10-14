@@ -91,7 +91,6 @@ namespace Lumina
             Scene.SetCameraTransform(CamPos, Center, kThumbnailFOV);
         };
 
-        // The render path falls back to identity bones when no animation drives the mesh.
         auto RenderSkeletalMesh = [SetupStudioLighting, FrameBounds](FThumbnailScene& Scene, CSkeletalMesh* Mesh)
         {
             if (Mesh == nullptr)
@@ -104,9 +103,26 @@ namespace Lumina
             SetupStudioLighting(Scene);
 
             ECS::FEntity MeshEntity = Scene.SpawnEntity("SkeletalMesh");
-            World->EmplaceComponent<SSkeletalMeshComponent>(MeshEntity).SetSkeletalMesh(Mesh);
+            SSkeletalMeshComponent& MeshComponent = World->EmplaceComponent<SSkeletalMeshComponent>(MeshEntity);
+            MeshComponent.SetSkeletalMesh(Mesh);
 
-            FrameBounds(Scene, Mesh->GetAABB());
+            FAABB Bounds = Mesh->GetAABB();
+            if (Mesh->Skeleton.IsValid())
+            {
+                Mesh->Skeleton->ComputeBindPoseSkinningMatrices(MeshComponent.BoneTransforms);
+                MeshComponent.bRenderBonesDirty = true;
+
+                if (const FMeshResource* Resource = Mesh->TryGetMeshResource())
+                {
+                    const TVector<uint32>& BoneIndices = Resource->MeshletData.MeshletBoneIndices;
+                    if (!BoneIndices.empty() && BoneIndices[0] < MeshComponent.BoneTransforms.size())
+                    {
+                        Bounds = Bounds.ToWorld(MeshComponent.BoneTransforms[BoneIndices[0]]);
+                    }
+                }
+            }
+
+            FrameBounds(Scene, Bounds);
         };
 
         RegisterThumbnailRenderer(CStaticMesh::StaticClass(), [SetupStudioLighting, FrameBounds](FThumbnailScene& Scene, CObject* Asset)
@@ -302,23 +318,30 @@ namespace Lumina
                 }
             }
 
-            // 2. Legacy thumbnail embedded in the .lasset. Migrate it into the sidecar for next launch.
-            CPackage* Pkg = CPackage::LoadPackage(PackagePath);
-            if (Pkg != nullptr)
+            CClass* Klass = FindObject<CClass>(ClassName);
+            const bool bRegenerateSkeletalPreview = Klass != nullptr
+                && (Klass->IsChildOf(CSkeletalMesh::StaticClass())
+                    || Klass->IsChildOf(CSkeleton::StaticClass())
+                    || Klass->IsChildOf(CAnimation::StaticClass()));
+
+            if (!bRegenerateSkeletalPreview)
             {
-                if (FPackageThumbnail* Embedded = Pkg->GetPackageThumbnail())
+                CPackage* Pkg = CPackage::LoadPackage(PackagePath);
+                if (Pkg != nullptr)
                 {
-                    if (!Embedded->ImageData.empty())
+                    if (FPackageThumbnail* Embedded = Pkg->GetPackageThumbnail())
                     {
-                        ThumbnailCache::Save(GUID, ContentHash, *Embedded);
-                        UploadAndStore(Package, *Embedded);
-                        return;
+                        if (!Embedded->ImageData.empty())
+                        {
+                            ThumbnailCache::Save(GUID, ContentHash, *Embedded);
+                            UploadAndStore(Package, *Embedded);
+                            return;
+                        }
                     }
                 }
             }
 
             // Never load the object here, since that would race the editor's own loader on the same object.
-            CClass* Klass = FindObject<CClass>(ClassName);
             if (Klass == nullptr || !CanGenerateFor(Klass))
             {
                 SetRecordState(Package, FPackageThumbnail::EState::Failed);

@@ -29,6 +29,9 @@
 #include "Core/Serialization/MemoryArchiver.h"
 #include "Core/Serialization/ObjectArchiver.h"
 #include "World/Entity/Components/EntityTags.h"
+#if USING(WITH_EDITOR)
+#include "World/Entity/Components/EditorComponent.h"
+#endif
 #include "Log/Log.h"
 #include "TaskSystem/TaskSystem.h"
 
@@ -93,7 +96,7 @@ namespace Lumina
         return *this;
     }
 
-    SEntityScriptComponent& SEntityScriptComponent::operator=(SEntityScriptComponent&& Other)
+    SEntityScriptComponent& SEntityScriptComponent::operator=(SEntityScriptComponent&& Other) noexcept
     {
         if (this != &Other)
         {
@@ -1246,6 +1249,49 @@ namespace Lumina
 
     namespace EntityScripts
     {
+        #if USING(WITH_EDITOR)
+        void DebugDraw(ECS::FRegistry& Registry)
+        {
+            CWorld** WorldPtr = Registry.Ctx().Find<CWorld*>();
+            if (WorldPtr == nullptr || *WorldPtr == nullptr)
+            {
+                return;
+            }
+
+            CWorld* World = *WorldPtr;
+            TVector<ECS::FEntity> Entities;
+            FScriptSnapshot Scripts;
+            SnapshotScriptedEntities(Registry, Entities);
+
+            for (ECS::FEntity Entity : Entities)
+            {
+                SnapshotScripts(Registry, Entity, Scripts);
+                for (const TStrongObjectPtr<CEntityScript>& Held : Scripts)
+                {
+                    CEntityScript* Script = Held.Get();
+                    if (Script == nullptr || Script->IsFaulted() || !IsStillAttached(Registry, Entity, Script)
+                        || IsOutsideRealm(Script, World))
+                    {
+                        continue;
+                    }
+
+                    const bool bNeedsOwner = Script->GetOwningEntity() == ECS::NullEntity;
+                    if (bNeedsOwner)
+                    {
+                        Script->SetOwner(Entity, World);
+                    }
+
+                    Script->OnDebugDraw(Registry.HasAll<FSelectedInEditorComponent>(Entity));
+
+                    if (bNeedsOwner)
+                    {
+                        Script->SetOwner(ECS::NullEntity, nullptr);
+                    }
+                }
+            }
+        }
+        #endif
+
         CEntityScript* Clone(CEntityScript* Source)
         {
             return CloneScript(Source);
