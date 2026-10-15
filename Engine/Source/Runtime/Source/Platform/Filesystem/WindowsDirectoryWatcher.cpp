@@ -22,16 +22,8 @@ namespace Lumina
 
     bool FDirectoryWatcher::Stop()
     {
-        if (bRunning.load(Atomic::MemoryOrderRelaxed))
-        {
-            bRunning.store(false, Atomic::MemoryOrderRelaxed);
-            if (WatchThread.joinable())
-            {
-                WatchThread.join();
-                return true;
-            }
-        }
-
+        WatchThread.RequestStop();
+        WatchThread.Join();
         return true;
     }
 
@@ -52,12 +44,12 @@ namespace Lumina
         }
 
         bRunning.store(true, Atomic::MemoryOrderRelaxed);
-        WatchThread = FThread([this]() { WatchThreadFunc(); });
+        WatchThread = FThread(FThreadOptions{ "DirectoryWatcher" }, [this](const FThreadStop& Stop) { WatchThreadFunc(Stop); });
         
         return true;
     }
 
-    void FDirectoryWatcher::WatchThreadFunc()
+    void FDirectoryWatcher::WatchThreadFunc(const FThreadStop& Stop)
     {
         HANDLE hDir = CreateFileA(
             Path.c_str(),
@@ -83,7 +75,7 @@ namespace Lumina
         Overlapped.hEvent = CreateEvent(nullptr, TRUE, FALSE, nullptr);
 
         bool bReadPending = false;
-        while (bRunning.load(Atomic::MemoryOrderRelaxed))
+        while (!Stop.ShouldStop())
         {
             DWORD BytesReturned = 0;
 

@@ -64,6 +64,10 @@ namespace Lumina
         PROPERTY(Editable, Category = "Query", ClampMin = 0.0f)
         float HierarchicalPathDistance = 64.0f;
 
+        // Path followers that may repath in one tick, the rest walking their old corners until their turn comes round. Zero lifts the cap.
+        PROPERTY(Editable, Category = "Query", ClampMin = 0)
+        int32 MaxRepathsPerTick = 64;
+
         /** Pooled dtNavMeshQuery objects beyond one per worker. Each costs its node pool, and running
          *  out makes a query fail rather than wait, so a little slack is cheaper than the alternative. */
         PROPERTY(Editable, Category = "Query", ClampMin = 0)
@@ -72,5 +76,9 @@ namespace Lumina
         // Nav sources rechecked each tick in case gameplay code wrote a collider without raising its update signal.
         PROPERTY(Editable, Category = "Bake", ClampMin = 0)
         int32 SourceVerifyBudget = 256;
+
+        // Heightfields of recently rebaked tiles kept per volume, so moving a nav modifier restamps a tile instead of voxelizing it again. Zero turns it off.
+        PROPERTY(Editable, Category = "Bake", ClampMin = 0)
+        int32 TileCacheBudgetMB = 128;
     };
 }

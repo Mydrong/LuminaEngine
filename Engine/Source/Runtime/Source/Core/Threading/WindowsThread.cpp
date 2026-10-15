@@ -166,6 +166,16 @@ namespace Lumina::Threading
         ::SetThreadIdealProcessorEx(::GetCurrentThread(), &Ideal, nullptr);
     }
 
+    bool SetCurrentThreadPriority(EThreadPriority Priority)
+    {
+        // The wake boost would lift a background thread level with the frame's workers for a whole quantum.
+        ::SetThreadPriorityBoost(::GetCurrentThread(), Priority == EThreadPriority::Background ? TRUE : FALSE);
+        const int Level = Priority == EThreadPriority::Background   ? THREAD_PRIORITY_LOWEST
+                        : Priority == EThreadPriority::TimeCritical ? THREAD_PRIORITY_TIME_CRITICAL
+                                                                    : THREAD_PRIORITY_NORMAL;
+        return ::SetThreadPriority(::GetCurrentThread(), Level) != 0;
+    }
+
     bool SetThreadPerformanceHint()
     {
         // A zero state mask opts out of EcoQoS so the Thread Director picks performance cores.
@@ -183,24 +193,61 @@ namespace Lumina
 {
     namespace
     {
+        // Copied so the name outlives a caller that built it on the stack.
+        struct FThreadStart
+        {
+            char                        Name[64] = {};
+            int32                       Group = Threading::ThreadGroup_Other;
+            EThreadPriority             Priority = EThreadPriority::Normal;
+            TMoveOnlyFunction<void()>*  Body = nullptr;
+
+            FThreadStart(const FThreadOptions& Options, TMoveOnlyFunction<void()>* InBody)
+                : Group(Options.Group), Priority(Options.Priority), Body(InBody)
+            {
+                if (Options.Name != nullptr)
+                {
+                    for (size_t i = 0; i + 1 < sizeof(Name) && Options.Name[i] != 0; ++i)
+                    {
+                        Name[i] = Options.Name[i];
+                    }
+                }
+            }
+
+            void Run()
+            {
+                if (Name[0] != 0)
+                {
+                    Threading::SetThreadName(Name, Group);
+                }
+                if (Priority != EThreadPriority::Normal)
+                {
+                    Threading::SetCurrentThreadPriority(Priority);
+                }
+                (*Body)();
+                delete Body;
+            }
+        };
+
         DWORD WINAPI ThreadEntry(LPVOID Parameter)
         {
-            TMoveOnlyFunction<void()>* Body = static_cast<TMoveOnlyFunction<void()>*>(Parameter);
-            (*Body)();
-            delete Body;
+            FThreadStart* Start = static_cast<FThreadStart*>(Parameter);
+            Start->Run();
+            delete Start;
             return 0;
         }
     }
 
-    void FThread::Start(TMoveOnlyFunction<void()>* Body)
+    void FThread::Start(const FThreadOptions& Options, TMoveOnlyFunction<void()>* Body)
     {
+        FThreadStart* Begin = new FThreadStart(Options, Body);
         DWORD ThreadId = 0;
-        Handle = ::CreateThread(nullptr, 0, &ThreadEntry, Body, 0, &ThreadId);
+        Handle = ::CreateThread(nullptr, Options.StackSize, &ThreadEntry, Begin, 0, &ThreadId);
         Id = static_cast<uint64>(ThreadId);
 
         if (Handle == nullptr)
         {
             delete Body;
+            delete Begin;
             Id = 0;
         }
     }
@@ -237,6 +284,7 @@ namespace Lumina
             Detach();
             Handle = Other.Handle;
             Id = Other.Id;
+            Stop = std::move(Other.Stop);
             Other.Handle = nullptr;
             Other.Id = 0;
         }

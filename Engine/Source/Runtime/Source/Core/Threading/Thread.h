@@ -2,9 +2,11 @@
 #include <type_traits>
 #include <utility>
 
+#include <atomic>
 #include "Containers/Function.h"
 #include "Core/Threading/Sync.h"
 #include "Lumina.h"
+#include "Memory/SmartPtr.h"
 #include "Platform/GenericPlatform.h"
 
 
@@ -14,7 +16,58 @@ namespace Lumina
     using FWriteScopeLock       = TScopeLock<FSharedMutex>;
     using FRecursiveScopeLock   = TScopeLock<FRecursiveMutex>;
 
-    /** An OS thread that owns its callable; join or detach it before the handle goes away. */
+    namespace Threading
+    {
+        // Tracy sorts lower hints higher with Main pinned on top, and groups the threads that share a hint.
+        enum EThreadGroup : int32
+        {
+            ThreadGroup_Main    = 0,
+            ThreadGroup_Physics = 10,
+            ThreadGroup_Audio   = 20,
+            ThreadGroup_Worker  = 100,
+            ThreadGroup_Fiber   = 200,
+            ThreadGroup_Other   = 1000,
+        };
+    }
+
+    enum class EThreadPriority : uint8
+    {
+        Normal,
+
+        // Runs in the time the frame's threads leave, for throughput work nothing waits on.
+        Background,
+
+        // Ahead of everything, for a device callback with a hard deadline.
+        TimeCritical,
+    };
+
+    // How a thread starts, applied on the thread itself before its body runs.
+    struct FThreadOptions
+    {
+        const char*     Name = nullptr;
+        int32           Group = Threading::ThreadGroup_Other;
+        EThreadPriority Priority = EThreadPriority::Normal;
+        uint32          StackSize = 0;
+    };
+
+    // Raised by the owner and read by the body, so a thread winds down at a point of its own choosing.
+    class RUNTIME_API FThreadStop
+    {
+    public:
+
+        NODISCARD bool ShouldStop() const noexcept { return Word.load(std::memory_order_acquire) != 0; }
+
+        // Sleeps until a stop is requested or TimeoutMs passes, true when it was the stop.
+        bool WaitForStop(uint32 TimeoutMs) const noexcept;
+
+        void Request() noexcept;
+
+    private:
+
+        std::atomic<uint32> Word{ 0 };
+    };
+
+    // An OS thread that owns its callable, joined or detached before the handle goes, whose body may take the FThreadStop its owner raises.
     class RUNTIME_API FThread
     {
     public:
@@ -22,18 +75,33 @@ namespace Lumina
         FThread() noexcept = default;
 
         template <typename TCallable, typename... TArgs>
-        requires (!std::is_same_v<std::decay_t<TCallable>, FThread>)
+        requires (!std::is_same_v<std::decay_t<TCallable>, FThread> && !std::is_same_v<std::decay_t<TCallable>, FThreadOptions>)
         explicit FThread(TCallable&& Body, TArgs&&... Args)
+            : FThread(FThreadOptions{}, std::forward<TCallable>(Body), std::forward<TArgs>(Args)...)
         {
-            Start(new TMoveOnlyFunction<void()>(
+        }
+
+        template <typename TCallable, typename... TArgs>
+        FThread(const FThreadOptions& Options, TCallable&& Body, TArgs&&... Args)
+            : Stop(MakeShared<FThreadStop>())
+        {
+            Start(Options, new TMoveOnlyFunction<void()>(
                 [Callable = std::decay_t<TCallable>(std::forward<TCallable>(Body)),
-                 ...Arguments = std::decay_t<TArgs>(std::forward<TArgs>(Args))]() mutable
+                 ...Arguments = std::decay_t<TArgs>(std::forward<TArgs>(Args)),
+                 State = Stop]() mutable
                 {
-                    Invoke(Callable, Arguments...);
+                    if constexpr (std::is_invocable_v<std::decay_t<TCallable>&, const FThreadStop&, std::decay_t<TArgs>&...>)
+                    {
+                        Invoke(Callable, *State, Arguments...);
+                    }
+                    else
+                    {
+                        Invoke(Callable, Arguments...);
+                    }
                 }));
         }
 
-        FThread(FThread&& Other) noexcept : Handle(Other.Handle), Id(Other.Id)
+        FThread(FThread&& Other) noexcept : Handle(Other.Handle), Id(Other.Id), Stop(std::move(Other.Stop))
         {
             Other.Handle = nullptr;
             Other.Id = 0;
@@ -49,6 +117,9 @@ namespace Lumina
         NODISCARD bool Joinable() const noexcept { return Handle != nullptr; }
         NODISCARD uint64 GetId() const noexcept { return Id; }
 
+        // Raises the stop the body reads. A body asleep on its own event or socket still needs its owner to wake it.
+        void RequestStop() noexcept;
+
         void Join() noexcept;
         void Detach() noexcept;
 
@@ -58,10 +129,11 @@ namespace Lumina
 
     private:
 
-        void Start(TMoveOnlyFunction<void()>* Body);
+        void Start(const FThreadOptions& Options, TMoveOnlyFunction<void()>* Body);
 
-        void*  Handle = nullptr;
-        uint64 Id = 0;
+        void*                   Handle = nullptr;
+        uint64                  Id = 0;
+        TSharedPtr<FThreadStop> Stop;
     };
 
     namespace Threading
@@ -69,18 +141,6 @@ namespace Lumina
         #define CACHE_ALIGN alignas(::Lumina::Constants::kCacheLineSize)
 
         using ThreadID = uint64;
-
-        // Tracy timeline ordering: lower hint sorts higher (Main pinned to the top), and threads sharing a
-        // hint are grouped together. Passed through to tracy::SetThreadNameWithHint / TracyFiberEnterHint.
-        enum EThreadGroup : int32
-        {
-            ThreadGroup_Main    = 0,
-            ThreadGroup_Physics = 10,
-            ThreadGroup_Audio   = 20,
-            ThreadGroup_Worker  = 100,
-            ThreadGroup_Fiber   = 200,
-            ThreadGroup_Other   = 1000,
-        };
 
         RUNTIME_API void ThreadYield();
         RUNTIME_API uint64 GetThreadID();
@@ -102,6 +162,8 @@ namespace Lumina
 
         // Opts the current thread out of EcoQoS power throttling.
         RUNTIME_API bool SetThreadPerformanceHint();
+
+        RUNTIME_API bool SetCurrentThreadPriority(EThreadPriority Priority);
 
         // One entry per logical processor. SMT siblings share PhysicalCore; last-level-cache peers share
         // CacheGroup. Both are dense ids with no meaning beyond equality.

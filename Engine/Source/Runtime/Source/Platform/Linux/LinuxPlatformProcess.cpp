@@ -306,18 +306,13 @@ namespace Lumina::Platform
             }
 
             // Killing a stuck child closes its end of the pipe, which is what lets the blocking read below return.
-            std::atomic<bool> bReaped = false;
             std::atomic<bool> bTimedOut = false;
             FThread Watchdog;
             if (TimeoutMilliseconds > 0)
             {
-                Watchdog = FThread([Child, TimeoutMilliseconds, &bReaped, &bTimedOut]()
+                Watchdog = FThread([Child, TimeoutMilliseconds, &bTimedOut](const FThreadStop& Reaped)
                 {
-                    for (uint32 Waited = 0; Waited < TimeoutMilliseconds && !bReaped.load(); Waited += 20)
-                    {
-                        ::usleep(20 * 1000);
-                    }
-                    if (!bReaped.load())
+                    if (!Reaped.WaitForStop(TimeoutMilliseconds))
                     {
                         bTimedOut = true;
                         ::kill(Child, SIGKILL);
@@ -381,7 +376,7 @@ namespace Lumina::Platform
             {
                 if (errno != EINTR)
                 {
-                    bReaped = true;
+                    Watchdog.RequestStop();
                     if (Watchdog.Joinable())
                     {
                         Watchdog.Join();
@@ -390,7 +385,7 @@ namespace Lumina::Platform
                 }
             }
 
-            bReaped = true;
+            Watchdog.RequestStop();
             if (Watchdog.Joinable())
             {
                 Watchdog.Join();

@@ -5,6 +5,7 @@
 #include "AI/Navigation/NavOctree.h"
 #include "Config/NavigationSettings.h"
 #include "NavWorldTestUtil.h"
+#include "World/Entity/Components/NavModifierComponent.h"
 
 using namespace Lumina;
 
@@ -228,3 +229,103 @@ TEST(NavSourceTracking, MovesAndSignalsAloneFindEveryChange)
     EXPECT_TRUE(World.IsGroundWalkable(0.0f, 15.0f)) << "the destroy signal reopened the ground";
     World.Stop();
 }
+
+namespace
+{
+    // Holds one navigation setting for a test and puts it back after.
+    template <typename T>
+    struct TSettingScope
+    {
+        T& Setting;
+        T  Saved;
+        TSettingScope(T& InSetting, T Value) : Setting(InSetting), Saved(InSetting) { Setting = Value; }
+        ~TSettingScope() { Setting = Saved; }
+    };
+
+    ECS::FEntity SpawnModifier(ECS::FRegistry& Registry, const FVector3& Location, const FVector3& Extents)
+    {
+        const ECS::FEntity Entity = Registry.Create();
+        FTransform Transform;
+        Transform.SetLocation(Location);
+        Registry.Emplace<STransformComponent>(Entity, Transform);
+        SNavModifierComponent& Modifier = Registry.Emplace<SNavModifierComponent>(Entity);
+        Modifier.Area = ENavArea::Null;
+        Modifier.Extents = Extents;
+        return Entity;
+    }
+}
+
+TEST(NavSourceTracking, AModifierMovingBackOverATileRestampsItFromTheCache)
+{
+    NavTest::FNavWorld World;
+    World.Create(64.0f);
+    const ECS::FEntity Modifier = SpawnModifier(World.Registry(), FVector3(-15.0f, 0.0f, 0.0f), FVector3(2.0f, 2.0f, 2.0f));
+    World.Start();
+    ASSERT_TRUE(World.WaitReady());
+    EXPECT_FALSE(World.IsGroundWalkable(-15.0f, 0.0f));
+
+    World.Registry().Get<STransformComponent>(Modifier).SetLocation(FVector3(15.0f, 0.0f, 0.0f));
+    ASSERT_TRUE(World.WaitSettled());
+    EXPECT_TRUE(World.IsGroundWalkable(-15.0f, 0.0f));
+    EXPECT_FALSE(World.IsGroundWalkable(15.0f, 0.0f));
+
+    World.Registry().Get<STransformComponent>(Modifier).SetLocation(FVector3(-15.0f, 0.0f, 0.0f));
+    ASSERT_TRUE(World.WaitSettled());
+    EXPECT_FALSE(World.IsGroundWalkable(-15.0f, 0.0f)) << "the cached heightfield still takes the stamp";
+    EXPECT_TRUE(World.IsGroundWalkable(15.0f, 0.0f));
+    ASSERT_TRUE(World.Nav().Runtime.TileCache);
+    EXPECT_GT(World.Nav().Runtime.TileCache->GetHits(), 0) << "the second move only restamped tiles the first one cached";
+    World.Stop();
+}
+
+TEST(NavSourceTracking, AColliderMovedOnTerrainCarvesTheSlopeItLandsOn)
+{
+    NavTest::FNavWorld World;
+    World.Create(64.0f, 256.0f, true);
+    auto Ground = [](float X, float Z) { return NavTest::GroundHeight(X, Z); };
+    const ECS::FEntity Crate = NavTest::SpawnBox(World.Registry(), FVector3(-15.0f, Ground(-15.0f, 0.0f) + 0.7f, 0.0f), FVector3(2.0f, 0.7f, 2.0f));
+    World.Start();
+    ASSERT_TRUE(World.WaitReady());
+    EXPECT_FALSE(World.IsGroundWalkable(-15.0f, 0.0f, Ground(-15.0f, 0.0f)));
+    EXPECT_TRUE(World.IsGroundWalkable(15.0f, 0.0f, Ground(15.0f, 0.0f)));
+
+    World.Registry().Get<STransformComponent>(Crate).SetLocation(FVector3(15.0f, Ground(15.0f, 0.0f) + 0.7f, 0.0f));
+    ASSERT_TRUE(World.WaitSettled());
+    EXPECT_TRUE(World.IsGroundWalkable(-15.0f, 0.0f, Ground(-15.0f, 0.0f))) << "the rebake tessellated the terrain it left";
+    EXPECT_FALSE(World.IsGroundWalkable(15.0f, 0.0f, Ground(15.0f, 0.0f)));
+    World.Stop();
+}
+
+TEST(PathFollow, ACrowdOwingPathsIsServedAFewPerTick)
+{
+    TSettingScope<int32> Budget(GetMutableDefault<CNavigationSettings>()->MaxRepathsPerTick, 4);
+    NavTest::FNavWorld World;
+    World.Create(64.0f);
+    World.Start(true);
+    ASSERT_TRUE(World.WaitReady());
+
+    TVector<ECS::FEntity> Agents;
+    for (int32 i = 0; i < 20; ++i)
+    {
+        const ECS::FEntity Agent = World.Registry().Create();
+        FTransform Transform;
+        Transform.SetLocation(FVector3(-25.0f + (float)i * 2.5f, 0.1f, -20.0f));
+        World.Registry().Emplace<STransformComponent>(Agent, Transform);
+        World.Registry().Emplace<SPathFollowComponent>(Agent).SetTargetLocation(FVector3(-25.0f + (float)i * 2.5f, 0.0f, 20.0f));
+        Agents.push_back(Agent);
+    }
+    auto WithPaths = [&]
+    {
+        return (int32)Algo::CountIf(Agents.begin(), Agents.end(), [&](ECS::FEntity Agent) { return World.Registry().Get<SPathFollowComponent>(Agent).CornerCount > 0; });
+    };
+
+    World.TickFollow();
+    EXPECT_EQ(WithPaths(), 4);
+    for (int32 Tick = 0; Tick < 4; ++Tick)
+    {
+        World.TickFollow();
+    }
+    EXPECT_EQ(WithPaths(), 20) << "every agent is served once the round comes back to it";
+    World.Stop();
+}
+

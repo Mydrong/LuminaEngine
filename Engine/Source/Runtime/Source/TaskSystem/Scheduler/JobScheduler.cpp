@@ -1378,9 +1378,6 @@ namespace Lumina::Jobs
             TLS.WorkerIndex = WorkerIndex;
             TLS.bIsWorker   = true;
 
-            char Name[32];
-            (void)snprintf(Name, sizeof(Name), "Lumina Worker %u", WorkerIndex);
-            Threading::SetThreadName(Name, Threading::ThreadGroup_Worker);
             Threading::SetThreadPerformanceHint();
             Threading::SetThreadIdealProcessor(G->WorkerCpu[WorkerIndex]);
             Memory::InitializeThreadHeap();
@@ -1588,7 +1585,9 @@ namespace Lumina::Jobs
         G->WorkerThreads.reserve(G->NumWorkers);
         for (uint32 i = 0; i < G->NumWorkers; ++i)
         {
-            G->WorkerThreads.emplace_back(WorkerThreadMain, i);
+            char Name[32];
+            (void)snprintf(Name, sizeof(Name), "Lumina Worker %u", i);
+            G->WorkerThreads.emplace_back(FThreadOptions{ Name, Threading::ThreadGroup_Worker }, WorkerThreadMain, i);
         }
 
         LOG_DISPLAY("Job system online: {} workers, {} thread slots, {} fibers ({} max, {}KB stacks).",

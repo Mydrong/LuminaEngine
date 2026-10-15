@@ -145,6 +145,9 @@ namespace Lumina
     {
         int32 X = 0;
         int32 Y = 0;
+
+        // The FNavTileCache generation the tile's geometry was gathered at, which a cached heightfield has to match.
+        uint32 CacheGeneration = 0;
     };
 
     namespace NavTile

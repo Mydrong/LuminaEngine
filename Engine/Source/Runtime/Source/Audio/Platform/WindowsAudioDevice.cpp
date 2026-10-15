@@ -63,10 +63,10 @@ namespace Lumina
 
 		private:
 
-			void ThreadMain();
+			void ThreadMain(const FThreadStop& Stop);
 			bool OpenEndpoint();
 			void CloseEndpoint();
-			void RenderLoop();
+			void RenderLoop(const FThreadStop& Stop);
 
 			FAudioDeviceConfig    Config;
 			IAudioRenderCallback* Callback = nullptr;
@@ -82,7 +82,6 @@ namespace Lumina
 			FThread Thread;
 
 			TAtomic<bool> bRunning{false};
-			TAtomic<bool> bStopRequested{false};
 			TAtomic<bool> bNeedsRestart{false};
 
 			bool bOpened = false;
@@ -107,8 +106,7 @@ namespace Lumina
 				return false;
 			}
 
-			bStopRequested.store(false, Atomic::MemoryOrderRelease);
-			Thread = FThread([this]() { ThreadMain(); });
+			Thread = FThread(FThreadOptions{ "Audio", Threading::ThreadGroup_Audio }, [this](const FThreadStop& Stop) { ThreadMain(Stop); });
 
 			// The endpoint is opened on the render thread so every COM call shares one apartment.
 			WaitForSingleObject(ReadyEvent, INFINITE);
@@ -131,7 +129,7 @@ namespace Lumina
 				return;
 			}
 
-			bStopRequested.store(true, Atomic::MemoryOrderRelease);
+			Thread.RequestStop();
 
 			if (BufferEvent != nullptr)
 			{
@@ -142,7 +140,7 @@ namespace Lumina
 			bRunning.store(false, Atomic::MemoryOrderRelease);
 		}
 
-		void FWindowsAudioDevice::ThreadMain()
+		void FWindowsAudioDevice::ThreadMain(const FThreadStop& Stop)
 		{
 			const HRESULT ComResult = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
 			const bool bOwnsCom = SUCCEEDED(ComResult);
@@ -156,11 +154,11 @@ namespace Lumina
 
 			if (bRunning.load(Atomic::MemoryOrderAcquire))
 			{
-				SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL);
-				RenderLoop();
+				Threading::SetCurrentThreadPriority(EThreadPriority::TimeCritical);
+				RenderLoop(Stop);
 
 				// A loop that ended on its own left nothing rendering, and voices queued behind it would never start.
-				if (!bStopRequested.load(Atomic::MemoryOrderAcquire))
+				if (!Stop.ShouldStop())
 				{
 					bNeedsRestart.store(true, Atomic::MemoryOrderRelease);
 					bRunning.store(false, Atomic::MemoryOrderRelease);
@@ -306,13 +304,13 @@ namespace Lumina
 			}
 		}
 
-		void FWindowsAudioDevice::RenderLoop()
+		void FWindowsAudioDevice::RenderLoop(const FThreadStop& Stop)
 		{
 			constexpr DWORD  kWakeTimeoutMs   = 2000;
 			constexpr uint32 kStalledWakeLimit = 2;
 
 			uint32 MissedWakes = 0;
-			while (!bStopRequested.load(Atomic::MemoryOrderAcquire))
+			while (!Stop.ShouldStop())
 			{
 				if (WaitForSingleObject(BufferEvent, kWakeTimeoutMs) != WAIT_OBJECT_0)
 				{
@@ -326,7 +324,7 @@ namespace Lumina
 				}
 				MissedWakes = 0;
 
-				if (bStopRequested.load(Atomic::MemoryOrderAcquire))
+				if (Stop.ShouldStop())
 				{
 					break;
 				}

@@ -46,10 +46,9 @@ namespace Lumina::Http
         Limits    = Params.Limits;
         BoundPort = Listener->GetBoundPort();
 
-        bStopRequested.store(false, std::memory_order_release);
         bRunning.store(true, std::memory_order_release);
 
-        Worker = FThread([this]() { ServeLoop(); });
+        Worker = FThread(FThreadOptions{ "Http" }, [this](const FThreadStop& Stop) { ServeLoop(Stop); });
 
         LOG_INFO("[Http] Listening on port {}.", BoundPort);
         return true;
@@ -62,12 +61,8 @@ namespace Lumina::Http
             return;
         }
 
-        bStopRequested.store(true, std::memory_order_release);
-
-        if (Worker.Joinable())
-        {
-            Worker.Join();
-        }
+        Worker.RequestStop();
+        Worker.Join();
 
         Listener.reset();
         Clients.clear();
@@ -185,9 +180,9 @@ namespace Lumina::Http
         }
     }
 
-    void FServer::ServeLoop()
+    void FServer::ServeLoop(const FThreadStop& Stop)
     {
-        while (!bStopRequested.load(std::memory_order_acquire))
+        while (!Stop.ShouldStop())
         {
             if (Platform::FSocketConnectionPtr Accepted = Listener->Accept(GAcceptTimeoutMs))
             {
@@ -216,7 +211,7 @@ namespace Lumina::Http
             // Accept already blocked for its timeout, so only an idle spin with clients attached needs a rest.
             if (!Clients.empty() && !bServicedAnything)
             {
-                Threading::Sleep(GIdleSleepMs);
+                Stop.WaitForStop(GIdleSleepMs);
             }
         }
 

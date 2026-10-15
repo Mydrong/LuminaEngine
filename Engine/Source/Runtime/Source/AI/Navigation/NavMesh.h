@@ -63,6 +63,17 @@ namespace Lumina
         /** NewBlob is consumed; empty removes the tile. Serializes against in-flight queries itself. */
         bool RebuildTile(int32 TileX, int32 TileY, TVector<uint8>&& NewBlob);
 
+        // One tile in a batched swap, where an empty blob removes the tile.
+        struct FTileSwap
+        {
+            int32                 X = 0;
+            int32                 Y = 0;
+            const TVector<uint8>* Blob = nullptr;
+        };
+
+        // Every swap lands under one exclusive hold, so a batch waits on in-flight queries once. Returns how many landed.
+        int32 RebuildTiles(const TVector<FTileSwap>& Swaps);
+
         /** Pages a baked tile in. Fails if the resident pool is full or the blob does not match this layout. */
         bool AddTile(int32 TileX, int32 TileY, const TVector<uint8>& Blob);
 
@@ -101,6 +112,11 @@ namespace Lumina
         void ForEachLoadedTile(const FTileBoundsVisitor& Visitor) const;
 
         FNavDebugStats GetDebugStats() const;
+
+        // Exact island labels for the long path planner, computed off the game thread after swaps and adopted in a brief exclusive hold.
+        bool TryBeginClusterRelabel();
+        void RelabelClusters();
+        void AdoptClusterLabels();
 
         /** Marks the debug draw caches stale. Rebuilding them walks every poly, so it waits for a reader. */
         void InvalidateDebugCache();
@@ -141,8 +157,28 @@ namespace Lumina
 
         FAcquiredQuery AcquireQuery() const;
 
-        /** All three assume TopologyLock is already held exclusively. */
-        bool AddTileLocked(int32 TileX, int32 TileY, const TVector<uint8>& Blob);
+        // A swap waiting on the topology turns new queries away until it lands, so a stream of them cannot hold it off.
+        struct FQueryScope
+        {
+            const FNavMesh& Mesh;
+            explicit FQueryScope(const FNavMesh& InMesh);
+            ~FQueryScope();
+
+            // True when a swap ran while the query stood aside, so every ref it held is suspect.
+            bool YieldToSwap(uint64 Epoch) const;
+        };
+
+        struct FSwapScope
+        {
+            FNavMesh& Mesh;
+            explicit FSwapScope(FNavMesh& InMesh);
+            ~FSwapScope();
+        };
+
+        void WaitForSwaps() const;
+
+        /** All three assume TopologyLock is already held exclusively. Owned is a Detour allocation the mesh takes over. */
+        bool AddTileLocked(uint8* Owned, int32 Size);
         bool RemoveTileLocked(int32 TileX, int32 TileY);
         void RecordTileChangeLocked(int32 TileX, int32 TileY);
 
@@ -159,6 +195,8 @@ namespace Lumina
         // Shared by every query, exclusive for tile mutation. addTile rewrites the link arrays of up to
         // eight neighbours, so a tile swap is never local and the whole mesh is the only safe granularity.
         mutable FSharedMutex                TopologyLock;
+        std::atomic<uint32>                 PendingSwaps{ 0 };
+        std::atomic<uint32>                 RelabelsInFlight{ 0 };
 
         std::atomic<uint64>                 TopologyEpoch{ 1 };
 

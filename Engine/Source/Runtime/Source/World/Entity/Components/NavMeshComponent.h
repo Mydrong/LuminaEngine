@@ -11,12 +11,14 @@
 namespace Lumina
 {
 
-    /** Cached collider AABB for change detection; key = (entity << 8 | colliderType). */
     // The footprint of a nav source that moved, appeared, vanished or changed shape.
     struct FNavSourceBounds
     {
         FVector3 Min = FVector3( FLT_MAX);
         FVector3 Max = FVector3(-FLT_MAX);
+
+        // False for area volumes and links, which leave the voxelized geometry and so a cached heightfield untouched.
+        bool     bGeometry = true;
     };
 
     /** Per-tile rebake task in flight. */
@@ -24,6 +26,8 @@ namespace Lumina
     {
         int32                       TileX = 0;
         int32                       TileY = 0;
+        uint32                      CacheGeneration = 0;
+        bool                        bCachePinned = false;
         TVector<uint8>              ResultBlob;
         std::atomic<bool>           bDone{ false };
         std::atomic<bool>           bConsumed{ false };
@@ -65,6 +69,9 @@ namespace Lumina
         /** Layout fed to BakeSingleTile so coords align with live mesh. */
         FNavBuildOutput                         LiveLayout;
 
+        // Shared with rebakes in flight, and dropped with every full bake since its heightfields assume the old layout.
+        TSharedPtr<FNavTileCache>               TileCache;
+
         /** Decides which baked tiles are resident in Mesh. Inert while StreamLoadRadius is 0. */
         FNavTileStreamer                        Streamer;
 
@@ -86,6 +93,9 @@ namespace Lumina
 
         // Throttles the geometry change scan to DynamicRebuildInterval.
         float                                   DynamicScanTimer = 0.0f;
+
+        // Ticks since the exact island labels were last asked for, so a mesh that keeps changing relabels at a measured pace.
+        uint32                                  TicksSinceRelabel = 0;
 
         /** The debug surface is hundreds of thousands of vertices, so it is rebuilt only when the mesh
          *  topology or its coloring changes rather than once per frame. */

@@ -140,7 +140,7 @@ namespace Lumina
 
 			bool OpenEndpoint();
 			void CloseEndpoint();
-			void RenderLoop();
+			void RenderLoop(const FThreadStop& Stop);
 
 			FAudioDeviceConfig    Config;
 			IAudioRenderCallback* Callback = nullptr;
@@ -152,7 +152,6 @@ namespace Lumina
 			FThread Thread;
 
 			TAtomic<bool> bRunning{false};
-			TAtomic<bool> bStopRequested{false};
 			TAtomic<bool> bNeedsRestart{false};
 
 			uint32 SampleRate   = 0;
@@ -251,10 +250,9 @@ namespace Lumina
 				return false;
 			}
 
-			bStopRequested.store(false, Atomic::MemoryOrderRelease);
 			bRunning.store(true, Atomic::MemoryOrderRelease);
 
-			Thread = FThread([this]() { RenderLoop(); });
+			Thread = FThread(FThreadOptions{ "Audio", Threading::ThreadGroup_Audio }, [this](const FThreadStop& Stop) { RenderLoop(Stop); });
 			return true;
 		}
 
@@ -265,21 +263,21 @@ namespace Lumina
 				return;
 			}
 
-			bStopRequested.store(true, Atomic::MemoryOrderRelease);
+			Thread.RequestStop();
 			Thread.Join();
 			bRunning.store(false, Atomic::MemoryOrderRelease);
 		}
 
-		void FLinuxAudioDevice::RenderLoop()
+		void FLinuxAudioDevice::RenderLoop(const FThreadStop& Stop)
 		{
-			while (!bStopRequested.load(Atomic::MemoryOrderAcquire))
+			while (!Stop.ShouldStop())
 			{
 				Callback->RenderAudio(Scratch.data(), PeriodFrames);
 
 				const float* At = Scratch.data();
 				unsigned long Remaining = PeriodFrames;
 
-				while (Remaining > 0 && !bStopRequested.load(Atomic::MemoryOrderAcquire))
+				while (Remaining > 0 && !Stop.ShouldStop())
 				{
 					const long Written = Alsa.WriteInterleaved(Pcm, At, Remaining);
 					if (Written < 0)

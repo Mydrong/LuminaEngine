@@ -38,5 +38,8 @@ namespace Lumina
 
         TVector<FRepathBucket>  RepathBuckets;
         TVector<FRepathRequest> RepathQueue;
+
+        // Index of the last follower served when the repath budget ran out, so the next tick starts after it.
+        uint32                  RepathCursor = 0;
     };
 }

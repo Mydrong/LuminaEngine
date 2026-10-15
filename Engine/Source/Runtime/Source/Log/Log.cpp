@@ -56,7 +56,6 @@ namespace Lumina::Logging
 		alignas(Constants::kCacheLineSize) std::atomic<uint64> GDequeuePos{ 0 };
 
 		std::atomic<bool>   GBackendRunning{ false };
-		std::atomic<bool>   GStopRequested{ false };
 		std::atomic<bool>   GBackendSleeping{ false };
 		std::atomic<uint64> GDroppedMessages{ 0 };
 
@@ -339,9 +338,8 @@ namespace Lumina::Logging
 		}
 
 
-		void BackendMain()
+		void BackendMain(const FThreadStop& Stop)
 		{
-			Threading::SetThreadName("Log");
 			Threading::InitializeThreadHeap();
 
 			FTimestampCache Timestamps;
@@ -356,7 +354,7 @@ namespace Lumina::Logging
 					continue;
 				}
 
-				if (GStopRequested.load(std::memory_order_acquire) && IsQueueEmpty())
+				if (Stop.ShouldStop() && IsQueueEmpty())
 				{
 					break;
 				}
@@ -366,7 +364,7 @@ namespace Lumina::Logging
 				GBackendSleeping.store(true, std::memory_order_release);
 
 				if (IsQueueEmpty()
-					&& !GStopRequested.load(std::memory_order_acquire)
+					&& !Stop.ShouldStop()
 					&& GFlushTarget.load(std::memory_order_acquire) == 0)
 				{
 					(void)GWakeCv.WaitFor(Lock, 0.05);
@@ -457,9 +455,8 @@ namespace Lumina::Logging
 		SetLevel(ELogLevel::Info);
 		#endif
 
-		GStopRequested.store(false, std::memory_order_relaxed);
 		GBackendRunning.store(true, std::memory_order_release);
-		GBackendThread = FThread(&BackendMain);
+		GBackendThread = FThread(FThreadOptions{ "Log" }, &BackendMain);
 
 		LOG_TRACE("------- Log Initialized -------");
 	}
@@ -474,16 +471,12 @@ namespace Lumina::Logging
 
 		LOG_TRACE("------- Log Shutdown -------");
 
-		GStopRequested.store(true, std::memory_order_release);
+		GBackendThread.RequestStop();
 		{
 			FScopeLock Lock(GWakeMutex);
 			GWakeCv.NotifyAll();
 		}
-
-		if (GBackendThread.joinable())
-		{
-			GBackendThread.join();
-		}
+		GBackendThread.Join();
 
 		GBackendRunning.store(false, std::memory_order_release);
 

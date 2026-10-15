@@ -1128,11 +1128,73 @@ TEST(NavHierarchy, RebakedTilesThatCloseAndReopenAGapChangeTheRoute)
     ASSERT_EQ(FindMazePath(Mesh, 32.0f).Result, ENavPathResult::Success);
 
     RebakeWall(Mesh, Layout, Closed, kMazeWalls / 2);
-    const FNavPath Blocked = FindMazePath(Mesh, 32.0f);
-    EXPECT_EQ(Blocked.Result, ENavPathResult::Partial) << ToString(Blocked.Result);
-    ASSERT_FALSE(Blocked.Corners.empty());
-    EXPECT_LT(Blocked.Corners.back().x, MazeWallX(kMazeWalls / 2)) << "the closed wall stops the path on its near side";
+    for (bool bExactLabels : { false, true })
+    {
+        // The swap only merged island labels, so the first pass searches its way to the answer and the second reads it from exact labels.
+        if (bExactLabels)
+        {
+            ASSERT_TRUE(Mesh.TryBeginClusterRelabel());
+            Mesh.RelabelClusters();
+            Mesh.AdoptClusterLabels();
+        }
+        const FNavPath Blocked = FindMazePath(Mesh, 32.0f);
+        EXPECT_EQ(Blocked.Result, ENavPathResult::Partial) << ToString(Blocked.Result);
+        ASSERT_FALSE(Blocked.Corners.empty());
+        EXPECT_LT(Blocked.Corners.back().x, MazeWallX(kMazeWalls / 2)) << "the closed wall stops the path on its near side";
+    }
 
     RebakeWall(Mesh, Layout, Open, kMazeWalls / 2);
+    EXPECT_EQ(FindMazePath(Mesh, 32.0f).Result, ENavPathResult::Success) << "a reopened gap merges the islands without waiting for a relabel";
+}
+
+TEST(NavHierarchy, ATileSwapIsNotHeldOffByAStreamOfLongQueries)
+{
+    FQuerySettingsScope Scope(2048);
+    const FNavBuildInput Open = MakeSerpentine();
+    FNavBuildOutput Out;
+    ASSERT_TRUE(NavMeshBuilder::BakeSync(FNavBuildInput(Open), Out));
+    FNavBuildOutput Layout = Out;
+    Layout.Tiles.clear();
+    FNavMesh Mesh;
+    ASSERT_TRUE(Mesh.Initialize(Out.Origin, Out.TileWorldSize, Out.MaxTiles, Out.MaxPolysPerTile, std::move(Out.Tiles)));
+
+    TVector<FNavTileCoord> Coords;
+    for (int32 Row = 0; Row < Layout.TilesY; ++Row)
+    {
+        Coords.push_back(FNavTileCoord{ Layout.TilesX / 2, Row });
+    }
+    TVector<SNavTileData> Baked;
+    NavMeshBuilder::BakeTiles(Open, Layout, Coords, Baked);
+
+    GetMutableDefault<CNavigationSettings>()->HierarchicalPathDistance = 32.0f;
+    std::atomic<bool> bStop{ false };
+    TVector<FThread> Queriers;
+    for (int32 i = 0; i < 4; ++i)
+    {
+        Queriers.emplace_back([&Mesh, &bStop]
+        {
+            FNavQueryFilter Filter;
+            while (!bStop.load(std::memory_order_relaxed))
+            {
+                FNavPath Path;
+                Mesh.FindPath(kMazeStart, kMazeEnd, Filter, Path);
+            }
+        });
+    }
+    Threading::Sleep(20);
+
+    double Worst = 0.0;
+    for (SNavTileData& Tile : Baked)
+    {
+        PlatformTime::FStopwatch Watch;
+        Mesh.RebuildTile(Tile.X, Tile.Y, Move(Tile.Blob));
+        Worst = Math::Max(Worst, Watch.ElapsedMilliseconds());
+    }
+    bStop.store(true);
+    for (FThread& Querier : Queriers)
+    {
+        Querier.Join();
+    }
+    EXPECT_LT(Worst, 50.0) << "a swap waits for one search segment, not for the queries to dry up";
     EXPECT_EQ(FindMazePath(Mesh, 32.0f).Result, ENavPathResult::Success);
 }

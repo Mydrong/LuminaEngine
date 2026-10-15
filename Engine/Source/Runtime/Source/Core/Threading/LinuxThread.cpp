@@ -1,4 +1,4 @@
-#include "RuntimePCH.h"
+﻿#include "RuntimePCH.h"
 #ifdef LE_PLATFORM_LINUX
 
 #include "Thread.h"
@@ -6,6 +6,7 @@
 #include <cstring>
 #include <pthread.h>
 #include <linux/futex.h>
+#include <sys/resource.h>
 #include <sys/syscall.h>
 #include <unistd.h>
 
@@ -68,6 +69,12 @@ namespace Lumina::Threading
         return false;
     }
 
+    bool SetCurrentThreadPriority(EThreadPriority Priority)
+    {
+        const int Nice = Priority == EThreadPriority::Background ? 10 : Priority == EThreadPriority::TimeCritical ? -10 : 0;
+        return ::setpriority(PRIO_PROCESS, (id_t)GetThreadID(), Nice) == 0;
+    }
+
     bool WaitOnAddress32(const volatile uint32* Address, uint32 Compare, uint32 TimeoutMs)
     {
         timespec Timeout;
@@ -98,21 +105,67 @@ namespace Lumina
 {
     namespace
     {
+        // Copied so the name outlives a caller that built it on the stack.
+        struct FThreadStart
+        {
+            char                        Name[64] = {};
+            int32                       Group = Threading::ThreadGroup_Other;
+            EThreadPriority             Priority = EThreadPriority::Normal;
+            TMoveOnlyFunction<void()>*  Body = nullptr;
+
+            FThreadStart(const FThreadOptions& Options, TMoveOnlyFunction<void()>* InBody)
+                : Group(Options.Group), Priority(Options.Priority), Body(InBody)
+            {
+                if (Options.Name != nullptr)
+                {
+                    for (size_t i = 0; i + 1 < sizeof(Name) && Options.Name[i] != 0; ++i)
+                    {
+                        Name[i] = Options.Name[i];
+                    }
+                }
+            }
+
+            void Run()
+            {
+                if (Name[0] != 0)
+                {
+                    Threading::SetThreadName(Name, Group);
+                }
+                if (Priority != EThreadPriority::Normal)
+                {
+                    Threading::SetCurrentThreadPriority(Priority);
+                }
+                (*Body)();
+                delete Body;
+            }
+        };
+
         void* ThreadEntry(void* Parameter)
         {
-            TMoveOnlyFunction<void()>* Body = static_cast<TMoveOnlyFunction<void()>*>(Parameter);
-            (*Body)();
-            delete Body;
+            FThreadStart* Start = static_cast<FThreadStart*>(Parameter);
+            Start->Run();
+            delete Start;
             return nullptr;
         }
     }
 
-    void FThread::Start(TMoveOnlyFunction<void()>* Body)
+    void FThread::Start(const FThreadOptions& Options, TMoveOnlyFunction<void()>* Body)
     {
+        FThreadStart* Begin = new FThreadStart(Options, Body);
+        pthread_attr_t Attributes;
+        pthread_attr_init(&Attributes);
+        if (Options.StackSize > 0)
+        {
+            pthread_attr_setstacksize(&Attributes, Options.StackSize);
+        }
+
         pthread_t Thread{};
-        if (pthread_create(&Thread, nullptr, &ThreadEntry, Body) != 0)
+        const int Created = pthread_create(&Thread, &Attributes, &ThreadEntry, Begin);
+        pthread_attr_destroy(&Attributes);
+        if (Created != 0)
         {
             delete Body;
+            delete Begin;
             return;
         }
 
@@ -151,6 +204,7 @@ namespace Lumina
             Detach();
             Handle = Other.Handle;
             Id = Other.Id;
+            Stop = std::move(Other.Stop);
             Other.Handle = nullptr;
             Other.Id = 0;
         }

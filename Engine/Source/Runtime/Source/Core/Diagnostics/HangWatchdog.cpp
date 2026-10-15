@@ -27,7 +27,6 @@ namespace Lumina::HangWatchdog
         constexpr uint32 kMaxFrames = 48;
 
         std::atomic<uint64> GHeartbeat{0};
-        std::atomic<bool>   GRunning{false};
         FThread             GThread;
         float               GTimeoutSeconds   = 8.0f;
 
@@ -254,18 +253,16 @@ namespace Lumina::HangWatchdog
             Logging::Flush();
         }
 
-        void WatchdogMain()
+        void WatchdogMain(const FThreadStop& Stop)
         {
-            Threading::SetThreadName("HangWatchdog", Threading::ThreadGroup_Other);
             GWatchdogThreadId = GetCurrentThreadId();
 
             uint64 LastBeat   = GHeartbeat.load(std::memory_order_relaxed);
             double LastChange = PlatformTime::Seconds();
             bool   bDumped    = false;
 
-            while (GRunning.load(std::memory_order_relaxed))
+            while (!Stop.WaitForStop(250))
             {
-                PlatformTime::SleepMilliseconds(250);
 
                 const uint64 Beat = GHeartbeat.load(std::memory_order_relaxed);
                 const double Now  = PlatformTime::Seconds();
@@ -303,27 +300,20 @@ namespace Lumina::HangWatchdog
 
     void Start(float TimeoutSeconds)
     {
-        bool Expected = false;
-        if (!GRunning.compare_exchange_strong(Expected, true))
+        if (GThread.Joinable())
         {
             return;
         }
 
         GTimeoutSeconds = TimeoutSeconds;
         GMainThreadId   = GetCurrentThreadId();
-        GThread         = FThread(&WatchdogMain);
+        GThread         = FThread(FThreadOptions{ "HangWatchdog" }, &WatchdogMain);
     }
 
     void Stop()
     {
-        if (!GRunning.exchange(false))
-        {
-            return;
-        }
-        if (GThread.joinable())
-        {
-            GThread.join();
-        }
+        GThread.RequestStop();
+        GThread.Join();
     }
 
     void Heartbeat()

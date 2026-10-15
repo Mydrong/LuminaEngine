@@ -79,6 +79,13 @@ namespace Lumina
     {
         Tiles.clear();
         Tiles.resize((size_t)Math::Max(0, MaxTiles));
+        Labels = FLabels{};
+        Labels.FirstId.assign(Tiles.size(), 0);
+        {
+            FScopeLock Lock(PendingLock);
+            PendingLabels = FLabels{};
+            PendingVersion = 0;
+        }
         ++Version;
     }
 
@@ -99,23 +106,116 @@ namespace Lumina
                 BuildEdges(Mesh, *Tile);
             }
         }
+        LabelsExactAt = Version;
     }
 
     void FNavClusterGraph::AddTile(const dtNavMesh& Mesh, const dtMeshTile& Tile)
     {
+        AdoptPendingLabels();
         BuildClusters(Mesh, Tile);
         BuildNeighborEdges(Mesh, Tile.header->x, Tile.header->y);
+
+        // A tile arriving only adds connections, which the merges already record exactly.
+        const bool bWasExact = LabelsExactAt == Version;
         ++Version;
+        LabelsExactAt = bWasExact ? Version : LabelsExactAt;
     }
 
     void FNavClusterGraph::RemoveTile(const dtNavMesh& Mesh, uint32 TileIndex, int32 TileX, int32 TileY)
     {
+        AdoptPendingLabels();
         if (TileIndex < (uint32)Tiles.size())
         {
             Tiles[TileIndex] = FTileClusters{};
         }
         BuildNeighborEdges(Mesh, TileX, TileY);
         ++Version;
+    }
+
+    void FNavClusterGraph::Union(uint32 A, uint32 B)
+    {
+        A = FindRoot<uint32>(Labels.Parent, A);
+        B = FindRoot<uint32>(Labels.Parent, B);
+        if (A == B)
+        {
+            return;
+        }
+        if (Labels.Size[A] < Labels.Size[B])
+        {
+            std::swap(A, B);
+        }
+        Labels.Parent[B] = A;
+        Labels.Size[A] += Labels.Size[B];
+    }
+
+    uint32 FNavClusterGraph::ComponentOf(uint64 Key) const
+    {
+        uint32 Id = Labels.FirstId[TileOfKey(Key)] + ClusterOfKey(Key);
+        while (Labels.Parent[Id] != Id)
+        {
+            Id = Labels.Parent[Id];
+        }
+        return Id;
+    }
+
+    void FNavClusterGraph::PrepareExactLabels(const std::atomic<uint32>& Abandon) const
+    {
+        constexpr size_t kAbandonCheckTiles = 64;
+        FLabels Fresh;
+        Fresh.FirstId.assign(Tiles.size(), 0);
+        uint32 Count = 0;
+        for (size_t t = 0; t < Tiles.size(); ++t)
+        {
+            Fresh.FirstId[t] = Count;
+            Count += (uint32)Tiles[t].Centers.size();
+        }
+        Fresh.Parent.resize(Count);
+        Algo::Iota(Fresh.Parent.begin(), Fresh.Parent.end(), 0u);
+        for (size_t t = 0; t < Tiles.size(); ++t)
+        {
+            // A swap waiting would change the graph and throw this result away, so it gets the lock back now.
+            if (t % kAbandonCheckTiles == 0 && Abandon.load(std::memory_order_relaxed) != 0)
+            {
+                return;
+            }
+            const FTileClusters& Tile = Tiles[t];
+            for (size_t c = 0; c < Tile.Centers.size(); ++c)
+            {
+                for (uint32 e = Tile.EdgeStart[c]; e < Tile.EdgeStart[c + 1]; ++e)
+                {
+                    const uint64 Key = Tile.Edges[e].Key;
+                    Fresh.Parent[FindRoot<uint32>(Fresh.Parent, Fresh.FirstId[t] + (uint32)c)] = FindRoot<uint32>(Fresh.Parent, Fresh.FirstId[TileOfKey(Key)] + ClusterOfKey(Key));
+                }
+            }
+        }
+        Fresh.Size.assign(Count, 0);
+        for (uint32 i = 0; i < Count; ++i)
+        {
+            Fresh.Parent[i] = FindRoot<uint32>(Fresh.Parent, i);
+            ++Fresh.Size[Fresh.Parent[i]];
+        }
+
+        FScopeLock Lock(PendingLock);
+        PendingLabels = std::move(Fresh);
+        PendingVersion = Version;
+    }
+
+    bool FNavClusterGraph::HasPendingLabels() const
+    {
+        FScopeLock Lock(PendingLock);
+        return PendingVersion != 0;
+    }
+
+    void FNavClusterGraph::AdoptPendingLabels()
+    {
+        FScopeLock Lock(PendingLock);
+        if (PendingVersion != 0 && PendingVersion == Version)
+        {
+            Labels = std::move(PendingLabels);
+            LabelsExactAt = Version;
+        }
+        PendingLabels = FLabels{};
+        PendingVersion = 0;
     }
 
     void FNavClusterGraph::BuildClusters(const dtNavMesh& Mesh, const dtMeshTile& Tile)
@@ -166,6 +266,13 @@ namespace Lumina
             Out.Centers[c] /= (float)PolysInCluster[c];
         }
         Out.EdgeStart.assign(Out.Centers.size() + 1, 0);
+
+        Labels.FirstId[TileIndex] = (uint32)Labels.Parent.size();
+        for (size_t c = 0; c < Out.Centers.size(); ++c)
+        {
+            Labels.Parent.push_back((uint32)Labels.Parent.size());
+            Labels.Size.push_back(1);
+        }
     }
 
     void FNavClusterGraph::BuildEdges(const dtNavMesh& Mesh, const dtMeshTile& Tile)
@@ -226,6 +333,7 @@ namespace Lumina
             }
             Out.Edges.push_back(Found[i].Edge);
             ++Out.EdgeStart[Found[i].Cluster + 1];
+            Union(Labels.FirstId[TileIndex] + Found[i].Cluster, Labels.FirstId[TileOfKey(Found[i].Edge.Key)] + ClusterOfKey(Found[i].Edge.Key));
         }
         for (size_t c = 1; c < Out.EdgeStart.size(); ++c)
         {
@@ -247,51 +355,6 @@ namespace Lumina
                 }
             }
         }
-    }
-
-    void FNavClusterGraph::EnsureComponents() const
-    {
-        if (ComponentVersion.load(std::memory_order_acquire) == Version)
-        {
-            return;
-        }
-        TScopeLock<FMutex> Lock(ComponentLock);
-        if (ComponentVersion.load(std::memory_order_relaxed) == Version)
-        {
-            return;
-        }
-
-        TVector<uint32>& Offset = ClusterOffset;
-        Offset.assign(Tiles.size() + 1, 0);
-        for (size_t t = 0; t < Tiles.size(); ++t)
-        {
-            Offset[t + 1] = Offset[t] + (uint32)Tiles[t].Centers.size();
-        }
-        TVector<uint32>& Parent = Components;
-        Parent.resize(Offset.back());
-        Algo::Iota(Parent.begin(), Parent.end(), 0u);
-        for (size_t t = 0; t < Tiles.size(); ++t)
-        {
-            const FTileClusters& Tile = Tiles[t];
-            for (size_t c = 0; c < Tile.Centers.size(); ++c)
-            {
-                for (uint32 e = Tile.EdgeStart[c]; e < Tile.EdgeStart[c + 1]; ++e)
-                {
-                    const uint64 Key = Tile.Edges[e].Key;
-                    Parent[FindRoot<uint32>(Parent, Offset[t] + (uint32)c)] = FindRoot<uint32>(Parent, Offset[TileOfKey(Key)] + ClusterOfKey(Key));
-                }
-            }
-        }
-        for (uint32 i = 0; i < (uint32)Parent.size(); ++i)
-        {
-            Parent[i] = FindRoot<uint32>(Parent, i);
-        }
-        ComponentVersion.store(Version, std::memory_order_release);
-    }
-
-    uint32 FNavClusterGraph::ComponentOf(uint64 Key) const
-    {
-        return Components[ClusterOffset[TileOfKey(Key)] + ClusterOfKey(Key)];
     }
 
     const FNavClusterGraph::FTileClusters* FNavClusterGraph::FindTile(const dtNavMesh& Mesh, uint64 PolyRef) const
@@ -331,7 +394,7 @@ namespace Lumina
     }
 
     FNavClusterGraph::ERoute FNavClusterGraph::FindRoute(const dtNavMesh& Mesh, const dtQueryFilter& Filter, uint64 StartRef, uint64 EndRef,
-                                                         const FVector3& StartPos, const FVector3& EndPos, TVector<FStep>& Out) const
+                                                         const FVector3& StartPos, const FVector3& EndPos, const std::atomic<uint32>& Abandon, TVector<FStep>& Out) const
     {
         Out.clear();
         const uint64 StartKey = KeyOf(Mesh, StartRef);
@@ -341,11 +404,10 @@ namespace Lumina
             return ERoute::Failed;
         }
 
-        EnsureComponents();
         const uint32 StartComponent = ComponentOf(StartKey);
         if (StartComponent == ComponentOf(EndKey))
         {
-            return Search(Mesh, Filter, StartKey, StartRef, EndKey, StartPos, EndPos, Out);
+            return Search(Mesh, Filter, StartKey, StartRef, EndKey, StartPos, EndPos, Abandon, Out);
         }
 
         // A different island, so the route heads for the part of the start's island nearest the goal instead.
@@ -353,9 +415,13 @@ namespace Lumina
         float NearestDistance = FLT_MAX;
         for (size_t t = 0; t < Tiles.size(); ++t)
         {
+            if (t % 1024 == 0 && Abandon.load(std::memory_order_relaxed) != 0)
+            {
+                return ERoute::Abandoned;
+            }
             for (size_t c = 0; c < Tiles[t].Centers.size(); ++c)
             {
-                const float Distance = Components[ClusterOffset[t] + c] == StartComponent ? Math::LengthSquared(Tiles[t].Centers[c] - EndPos) : FLT_MAX;
+                const float Distance = ComponentOf(PackKey((uint32)t, (uint16)c)) == StartComponent ? Math::LengthSquared(Tiles[t].Centers[c] - EndPos) : FLT_MAX;
                 if (Distance < NearestDistance)
                 {
                     NearestDistance = Distance;
@@ -364,11 +430,12 @@ namespace Lumina
             }
         }
         const FVector3& NearestCenter = Tiles[TileOfKey(NearestKey)].Centers[ClusterOfKey(NearestKey)];
-        return Search(Mesh, Filter, StartKey, StartRef, NearestKey, StartPos, NearestCenter, Out) == ERoute::Failed ? ERoute::Failed : ERoute::Unreachable;
+        const ERoute Toward = Search(Mesh, Filter, StartKey, StartRef, NearestKey, StartPos, NearestCenter, Abandon, Out);
+        return Toward == ERoute::Failed || Toward == ERoute::Abandoned ? Toward : ERoute::Unreachable;
     }
 
     FNavClusterGraph::ERoute FNavClusterGraph::Search(const dtNavMesh& Mesh, const dtQueryFilter& Filter, uint64 StartKey, uint64 StartRef, uint64 GoalKey,
-                                                      const FVector3& StartPos, const FVector3& GoalPos, TVector<FStep>& Out) const
+                                                      const FVector3& StartPos, const FVector3& GoalPos, const std::atomic<uint32>& Abandon, TVector<FStep>& Out) const
     {
         struct FNode
         {
@@ -407,6 +474,10 @@ namespace Lumina
                 continue;
             }
             Nodes[Current].bClosed = true;
+            if ((Expansions & 255) == 0 && Abandon.load(std::memory_order_relaxed) != 0)
+            {
+                return ERoute::Abandoned;
+            }
             if (Nodes[Current].Key == GoalKey)
             {
                 Goal = Current;
@@ -475,7 +546,10 @@ namespace Lumina
     void FNavClusterGraph::Rebuild(const dtNavMesh&) {}
     void FNavClusterGraph::AddTile(const dtNavMesh&, const dtMeshTile&) {}
     void FNavClusterGraph::RemoveTile(const dtNavMesh&, uint32, int32, int32) {}
+    void FNavClusterGraph::PrepareExactLabels(const std::atomic<uint32>&) const {}
+    bool FNavClusterGraph::HasPendingLabels() const { return false; }
+    void FNavClusterGraph::AdoptPendingLabels() {}
     uint64 FNavClusterGraph::NearestPoly(const dtNavMesh&, uint64, const FVector3&) const { return 0; }
-    FNavClusterGraph::ERoute FNavClusterGraph::FindRoute(const dtNavMesh&, const dtQueryFilter&, uint64, uint64, const FVector3&, const FVector3&, TVector<FStep>&) const { return ERoute::Failed; }
+    FNavClusterGraph::ERoute FNavClusterGraph::FindRoute(const dtNavMesh&, const dtQueryFilter&, uint64, uint64, const FVector3&, const FVector3&, const std::atomic<uint32>&, TVector<FStep>&) const { return ERoute::Failed; }
 #endif
 }

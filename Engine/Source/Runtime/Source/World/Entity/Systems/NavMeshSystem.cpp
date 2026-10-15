@@ -8,6 +8,7 @@
 
 #include "AI/Navigation/NavMesh.h"
 #include "AI/Navigation/NavMeshBuilder.h"
+#include "AI/Navigation/NavBuildPool.h"
 #include "AI/Navigation/NavOctree.h"
 #include "AI/Navigation/NavTileStreamer.h"
 #include "Config/NavigationSettings.h"
@@ -457,42 +458,41 @@ namespace Lumina
             }
         }
 
-        // Gift wrapping over the XZ projection, which an oriented box reduces to a hexagon at worst.
+        // Monotone chain over the XZ projection, which survives the top and bottom of a box landing on the same points.
         void BuildXZHull(const FVector3* Pts, int32 N, TVector<FVector3>& Out)
         {
             Out.clear();
-            if (N < 3)
+            TVector<FVector3> Sorted;
+            Sorted.reserve(N);
+            for (int32 i = 0; i < N; ++i)
             {
-                return;
+                Sorted.push_back(FVector3(Pts[i].x, 0.0f, Pts[i].z));
             }
+            Algo::Sort(Sorted, [](const FVector3& A, const FVector3& B) { return A.x < B.x || (A.x == B.x && A.z < B.z); });
 
-            int32 Leftmost = 0;
-            for (int32 i = 1; i < N; ++i)
+            auto Turn = [](const FVector3& O, const FVector3& A, const FVector3& B)
             {
-                if (Pts[i].x < Pts[Leftmost].x || (Pts[i].x == Pts[Leftmost].x && Pts[i].z < Pts[Leftmost].z))
-                {
-                    Leftmost = i;
-                }
-            }
-
-            int32 Current = Leftmost;
-            do
+                return (A.x - O.x) * (B.z - O.z) - (A.z - O.z) * (B.x - O.x);
+            };
+            for (int32 Pass = 0; Pass < 2; ++Pass)
             {
-                Out.push_back(FVector3(Pts[Current].x, 0.0f, Pts[Current].z));
-
-                int32 Next = (Current + 1) % N;
-                for (int32 i = 0; i < N; ++i)
+                const size_t ChainStart = Out.size();
+                for (int32 k = 0; k < (int32)Sorted.size(); ++k)
                 {
-                    const float Cross = (Pts[Next].x - Pts[Current].x) * (Pts[i].z - Pts[Current].z)
-                                      - (Pts[Next].z - Pts[Current].z) * (Pts[i].x - Pts[Current].x);
-                    if (Cross < 0.0f)
+                    const FVector3& P = Sorted[Pass == 0 ? k : (int32)Sorted.size() - 1 - k];
+                    while (Out.size() >= ChainStart + 2 && Turn(Out[Out.size() - 2], Out.back(), P) <= 0.0f)
                     {
-                        Next = i;
+                        Out.pop_back();
                     }
+                    Out.push_back(P);
                 }
-                Current = Next;
+                // Each chain ends on the point the other starts from.
+                Out.pop_back();
             }
-            while (Current != Leftmost && (int32)Out.size() <= N);
+            if (Out.size() < 3)
+            {
+                Out.clear();
+            }
         }
 
         // Explicit Mesh wins; falls back to StaticMeshComponent. Mirrors the collider resolution.
@@ -546,89 +546,119 @@ namespace Lumina
             }
         }
 
-        // Subsampled so a quad is about one cell, keeping only tris overlapping the bake bounds.
-        void TessellateTerrain(const STerrainComponent& T, const FMatrix4& W, const FVector3& BakeMin, const FVector3& BakeMax, float CellSize, TVector<FVector3>& Out)
+        // A window of a heightfield copied on the game thread, so a bake worker tessellates it without touching the live component.
+        struct FNavTerrainPatch
+        {
+            TVector<float> Heights;
+            FMatrix4       World = FMatrix4(1.0f);
+            FVector3       BakeMin = FVector3(0.0f);
+            FVector3       BakeMax = FVector3(0.0f);
+            float          Stride = 1.0f;
+            float          Half = 0.0f;
+            int32          ColBegin = 0;
+            int32          ColEnd = 0;
+            int32          RowBegin = 0;
+            int32          RowEnd = 0;
+            int32          Step = 1;
+        };
+
+        // Clipped to the bake box first, or a volume covering a slice of a huge terrain still pays for the whole thing and gets coarsened by it.
+        TSharedPtr<FNavTerrainPatch> CaptureTerrainPatch(const STerrainComponent& T, const FMatrix4& W, const FVector3& BakeMin, const FVector3& BakeMax, float CellSize)
         {
             const int32 Res = T.Resolution;
             if (Res < 2 || (int64)T.Heightmap.size() < (int64)Res * (int64)Res)
             {
-                return;
+                return nullptr;
             }
 
-            const float Stride = T.TileWorldSize / float(Res - 1);
-            const float Half   = T.TileWorldSize * 0.5f;
+            auto Patch = MakeShared<FNavTerrainPatch>();
+            Patch->World = W;
+            Patch->BakeMin = BakeMin;
+            Patch->BakeMax = BakeMax;
+            Patch->Stride = T.TileWorldSize / float(Res - 1);
+            Patch->Half = T.TileWorldSize * 0.5f;
 
-            auto Height = [&](int32 Col, int32 Row) -> float
-            {
-                return T.Heightmap[(size_t)Row * (size_t)Res + (size_t)Col] * T.MaxHeight;
+            const FMatrix4 ToLocal = Math::Inverse(W);
+            FVector3 LocalMin( FLT_MAX);
+            FVector3 LocalMax(-FLT_MAX);
+            const FVector3 Corners[8] = {
+                {BakeMin.x, BakeMin.y, BakeMin.z}, {BakeMax.x, BakeMin.y, BakeMin.z},
+                {BakeMin.x, BakeMax.y, BakeMin.z}, {BakeMax.x, BakeMax.y, BakeMin.z},
+                {BakeMin.x, BakeMin.y, BakeMax.z}, {BakeMax.x, BakeMin.y, BakeMax.z},
+                {BakeMin.x, BakeMax.y, BakeMax.z}, {BakeMax.x, BakeMax.y, BakeMax.z},
             };
+            for (const FVector3& Corner : Corners)
+            {
+                const FVector3 L = FVector3(ToLocal * FVector4(Corner, 1.0f));
+                LocalMin = Math::Min(LocalMin, L);
+                LocalMax = Math::Max(LocalMax, L);
+            }
+
+            // One quad of slack each way, so the clipped edge still shares vertices with its neighbor.
+            Patch->ColBegin = Math::Clamp((int32)std::floor((LocalMin.x + Patch->Half) / Patch->Stride) - 1, 0, Res - 2);
+            Patch->ColEnd   = Math::Clamp((int32)std::ceil ((LocalMax.x + Patch->Half) / Patch->Stride) + 1, Patch->ColBegin + 1, Res - 1);
+            Patch->RowBegin = Math::Clamp((int32)std::floor((LocalMin.z + Patch->Half) / Patch->Stride) - 1, 0, Res - 2);
+            Patch->RowEnd   = Math::Clamp((int32)std::ceil ((LocalMax.z + Patch->Half) / Patch->Stride) + 1, Patch->RowBegin + 1, Res - 1);
+
+            // One cell per quad is the finest worth emitting, and only the emitted span is capped, since coarser quads turn relief into unwalkable facets.
+            Patch->Step = Math::Max(1, (int32)std::floor(Math::Max(CellSize, 0.01f) / Math::Max(Patch->Stride, 1e-4f)));
+            const int32 SpanQuads = Math::Max(Patch->ColEnd - Patch->ColBegin, Patch->RowEnd - Patch->RowBegin);
+            Patch->Step = Math::Max(Patch->Step, (int32)std::ceil((float)SpanQuads / 1024.0f));
+
+            const int32 Cols = Patch->ColEnd - Patch->ColBegin + 1;
+            const int32 Rows = Patch->RowEnd - Patch->RowBegin + 1;
+            Patch->Heights.resize((size_t)Cols * (size_t)Rows);
+            for (int32 Row = 0; Row < Rows; ++Row)
+            {
+                const float* Source = &T.Heightmap[(size_t)(Patch->RowBegin + Row) * (size_t)Res + (size_t)Patch->ColBegin];
+                float* Dest = &Patch->Heights[(size_t)Row * (size_t)Cols];
+                for (int32 Col = 0; Col < Cols; ++Col)
+                {
+                    Dest[Col] = Source[Col] * T.MaxHeight;
+                }
+            }
+            return Patch;
+        }
+
+        // Subsampled so a quad is about one cell, keeping only tris overlapping the bake bounds.
+        void TessellateTerrainPatch(const FNavTerrainPatch& Patch, TVector<FVector3>& Out, FNavBuildPool* Pool)
+        {
+            const int32 Cols = Patch.ColEnd - Patch.ColBegin + 1;
             auto Pos = [&](int32 Col, int32 Row) -> FVector3
             {
-                const FVector3 Local(-Half + (float)Col * Stride, Height(Col, Row), -Half + (float)Row * Stride);
-                return FVector3(W * FVector4(Local, 1.0f));
+                const float Height = Patch.Heights[(size_t)(Row - Patch.RowBegin) * (size_t)Cols + (size_t)(Col - Patch.ColBegin)];
+                const FVector3 Local(-Patch.Half + (float)Col * Patch.Stride, Height, -Patch.Half + (float)Row * Patch.Stride);
+                return FVector3(Patch.World * FVector4(Local, 1.0f));
             };
 
-            // Clipped to the bake box first, or a volume covering a slice of a huge terrain still pays for
-            // the whole thing and gets coarsened by it.
-            int32 ColBegin = 0, ColEnd = Res - 1, RowBegin = 0, RowEnd = Res - 1;
-            {
-                const FMatrix4 ToLocal = Math::Inverse(W);
-                FVector3 LocalMin( FLT_MAX);
-                FVector3 LocalMax(-FLT_MAX);
-                const FVector3 Corners[8] = {
-                    {BakeMin.x, BakeMin.y, BakeMin.z}, {BakeMax.x, BakeMin.y, BakeMin.z},
-                    {BakeMin.x, BakeMax.y, BakeMin.z}, {BakeMax.x, BakeMax.y, BakeMin.z},
-                    {BakeMin.x, BakeMin.y, BakeMax.z}, {BakeMax.x, BakeMin.y, BakeMax.z},
-                    {BakeMin.x, BakeMax.y, BakeMax.z}, {BakeMax.x, BakeMax.y, BakeMax.z},
-                };
-                for (const FVector3& Corner : Corners)
-                {
-                    const FVector3 L = FVector3(ToLocal * FVector4(Corner, 1.0f));
-                    LocalMin = Math::Min(LocalMin, L);
-                    LocalMax = Math::Max(LocalMax, L);
-                }
-
-                // One quad of slack each way, so the clipped edge still shares vertices with its neighbor.
-                ColBegin = Math::Clamp((int32)std::floor((LocalMin.x + Half) / Stride) - 1, 0, Res - 2);
-                ColEnd   = Math::Clamp((int32)std::ceil ((LocalMax.x + Half) / Stride) + 1, ColBegin + 1, Res - 1);
-                RowBegin = Math::Clamp((int32)std::floor((LocalMin.z + Half) / Stride) - 1, 0, Res - 2);
-                RowEnd   = Math::Clamp((int32)std::ceil ((LocalMax.z + Half) / Stride) + 1, RowBegin + 1, Res - 1);
-            }
-
-            // One nav cell per quad is the finest worth emitting. The ceiling is on the quads this bake
-            // actually emits, since coarsening past the cell size turns real relief into a steep facet and
-            // Recast then marks the whole quad unwalkable.
-            int32 Step = Math::Max(1, (int32)std::floor(Math::Max(CellSize, 0.01f) / Math::Max(Stride, 1e-4f)));
-            const int32 SpanQuads = Math::Max(ColEnd - ColBegin, RowEnd - RowBegin);
-            Step = Math::Max(Step, (int32)std::ceil((float)SpanQuads / 1024.0f));
-
-            // Rows are independent, and on a world-sized bake this is the one source worth fanning out.
-            const int32 RowStrips = (RowEnd - RowBegin + Step - 1) / Step;
+            const int32 Step = Patch.Step;
+            const int32 RowStrips = (Patch.RowEnd - Patch.RowBegin + Step - 1) / Step;
             if (RowStrips <= 0)
             {
                 return;
             }
 
+            // Rows are independent, and on a world-sized bake this is the one source worth fanning out.
             TVector<TVector<FVector3>> Strips((size_t)RowStrips);
-            Task::ParallelFor((uint32)RowStrips, [&](uint32 StripIndex)
+            NavParallelFor(Pool, (uint32)RowStrips, [&](uint32 StripIndex)
             {
-                const int32 Row  = RowBegin + (int32)StripIndex * Step;
-                const int32 RowN = Math::Min(Row + Step, RowEnd);
+                const int32 Row  = Patch.RowBegin + (int32)StripIndex * Step;
+                const int32 RowN = Math::Min(Row + Step, Patch.RowEnd);
                 TVector<FVector3>& Strip = Strips[StripIndex];
 
-                for (int32 Col = ColBegin; Col < ColEnd; Col += Step)
+                for (int32 Col = Patch.ColBegin; Col < Patch.ColEnd; Col += Step)
                 {
-                    const int32 ColN = Math::Min(Col + Step, ColEnd);
+                    const int32 ColN = Math::Min(Col + Step, Patch.ColEnd);
                     const FVector3 A = Pos(Col,  Row);
                     const FVector3 B = Pos(ColN, Row);
                     const FVector3 C = Pos(ColN, RowN);
                     const FVector3 D = Pos(Col,  RowN);
                     // Wound so the surface normal points +Y (Recast's slope test marks it walkable).
-                    if (TriIntersectsAABB(A, C, B, BakeMin, BakeMax))
+                    if (TriIntersectsAABB(A, C, B, Patch.BakeMin, Patch.BakeMax))
                     {
                         Strip.push_back(A); Strip.push_back(C); Strip.push_back(B);
                     }
-                    if (TriIntersectsAABB(A, D, C, BakeMin, BakeMax))
+                    if (TriIntersectsAABB(A, D, C, Patch.BakeMin, Patch.BakeMax))
                     {
                         Strip.push_back(A); Strip.push_back(D); Strip.push_back(C);
                     }
@@ -656,6 +686,7 @@ namespace Lumina
             CStaticMesh*                    Mesh  = nullptr;
             TSharedPtr<FDynamicMeshRenderData> DynamicMesh;          // held so a re-commit on the game thread cannot free it under the bake
             TSharedPtr<TVector<FVector3>>   TriangleSoup;             // world-space tri soup (groups of 3); Terrain and TriangleSoup types
+            TSharedPtr<FNavTerrainPatch>    TerrainPatch;
             TSharedPtr<FNavAreaVolume>      AreaVolume;               // AreaVolume type
             TSharedPtr<FNavOffMeshLink>     Link;                     // OffMeshLink type
             // Foliage type, shared by every instance of a species in its local space and placed by World.
@@ -663,6 +694,11 @@ namespace Lumina
             // Reads the mesh's coarsest LOD, enough for a footprint at a fraction of the triangles.
             bool                            bCoarsestLOD = false;
         };
+
+        bool IsAnnotation(ENavColliderType Type)
+        {
+            return Type == ENavColliderType::AreaVolume || Type == ENavColliderType::OffMeshLink;
+        }
 
         struct FNavSourceEntry
         {
@@ -724,10 +760,24 @@ namespace Lumina
             }
         }
 
+        // Runs on the bake worker, turning each copied heightfield window into the triangles emission reads.
+        void TessellateTerrainPatches(TVector<FNavSourcePrim>& Prims, FNavBuildPool* Pool = nullptr)
+        {
+            for (FNavSourcePrim& Prim : Prims)
+            {
+                if (Prim.TerrainPatch && !Prim.TriangleSoup)
+                {
+                    Prim.TriangleSoup = MakeShared<TVector<FVector3>>();
+                    TessellateTerrainPatch(*Prim.TerrainPatch, *Prim.TriangleSoup, Pool);
+                    Prim.TerrainPatch.reset();
+                }
+            }
+        }
+
         // Emission is pure per prim, so it fans out into per-chunk buffers and concatenates with the
         // indices rebased. Serial emission was the whole front half of a world-sized bake.
         void EmitNavSourcePrims(const FNavSourcePrim* Prims, size_t Count, const FVector3& EmitMin,
-            const FVector3& EmitMax, TVector<FVector3>& OutVertices, TVector<uint32>& OutIndices)
+            const FVector3& EmitMax, TVector<FVector3>& OutVertices, TVector<uint32>& OutIndices, FNavBuildPool* Pool = nullptr)
         {
             if (Count == 0)
             {
@@ -739,7 +789,7 @@ namespace Lumina
             const size_t PerChunk  = (Count + NumChunks - 1) / NumChunks;
 
             TVector<FGatherAccumulator> Chunks((size_t)NumChunks);
-            Task::ParallelFor(NumChunks, [&](uint32 ChunkIndex)
+            NavParallelFor(Pool, NumChunks, [&](uint32 ChunkIndex)
             {
                 const size_t Begin = (size_t)ChunkIndex * PerChunk;
                 const size_t End   = Math::Min(Begin + PerChunk, Count);
@@ -1095,7 +1145,7 @@ namespace Lumina
             }
         }
 
-        void CollectNavSources(const FSystemContext& Context, const FVector3& BakeMin, const FVector3& BakeMax, bool bTessellateTerrain, float CellSize, TVector<FNavSourceEntry>& Out, FNavFoliageCache* FoliageCache, const ECS::FEntity* Only = nullptr)
+        void CollectNavSources(const FSystemContext& Context, const FVector3& BakeMin, const FVector3& BakeMax, TVector<FNavSourceEntry>& Out, FNavFoliageCache* FoliageCache, const ECS::FEntity* Only = nullptr)
         {
 
             // A simulated body is loose debris rather than level geometry, and baking it would rebuild tiles every time it settles.
@@ -1451,11 +1501,6 @@ namespace Lumina
                     {-Half, Terrain->MaxHeight, -Half}, { Half, Terrain->MaxHeight, -Half}, { Half, Terrain->MaxHeight,  Half}, {-Half, Terrain->MaxHeight,  Half},
                 };
                 CornersAABB(Entry.Prim.World, Corners, 8, Entry.AABBMin, Entry.AABBMax);
-                if (bTessellateTerrain)
-                {
-                    Entry.Prim.TriangleSoup = MakeShared<TVector<FVector3>>();
-                    TessellateTerrain(*Terrain, Entry.Prim.World, BakeMin, BakeMax, CellSize, *Entry.Prim.TriangleSoup);
-                }
                 Out.push_back(std::move(Entry));
             });
 
@@ -1504,6 +1549,9 @@ namespace Lumina
         TVector<FNavSourceBounds>               Changes;
         int32                                   Counts[4] = {};
         int32                                   Refreshed = 0;
+
+        // Last, so it joins its threads before anything a queued rebake might still read goes away.
+        TUniquePtr<FNavBuildPool>               BuildPool;
     };
 
     namespace
@@ -1580,7 +1628,7 @@ namespace Lumina
         void SeedSources(const FSystemContext& Context, FNavSourceTracker& Sources)
         {
             TVector<FNavSourceEntry> All;
-            CollectNavSources(Context, FVector3(-kUnbounded), FVector3(kUnbounded), false, 0.0f, All, &Sources.Foliage);
+            CollectNavSources(Context, FVector3(-kUnbounded), FVector3(kUnbounded), All, &Sources.Foliage);
             Sources.Records.reserve(All.size());
             Sources.RecordElement.reserve(All.size());
             for (FNavSourceEntry& Entry : All)
@@ -1600,7 +1648,7 @@ namespace Lumina
             Current.clear();
             if (Context.GetRegistry().IsValid(Entity))
             {
-                CollectNavSources(Context, FVector3(-kUnbounded), FVector3(kUnbounded), false, 0.0f, Current, &Sources.Foliage, &Entity);
+                CollectNavSources(Context, FVector3(-kUnbounded), FVector3(kUnbounded), Current, &Sources.Foliage, &Entity);
             }
             if (!Context.GetRegistry().IsValid(Entity) || !Context.GetRegistry().HasAll<SFoliageComponent>(Entity))
             {
@@ -1619,7 +1667,7 @@ namespace Lumina
                 if (Found == Sources.RecordOfKey.end())
                 {
                     ++Sources.Counts[0];
-                    Sources.Changes.push_back(FNavSourceBounds{ Entry.AABBMin, Entry.AABBMax });
+                    Sources.Changes.push_back(FNavSourceBounds{ Entry.AABBMin, Entry.AABBMax, !IsAnnotation(Entry.Prim.Type) });
                     AddSourceRecord(Sources, std::move(Entry));
                     continue;
                 }
@@ -1632,8 +1680,8 @@ namespace Lumina
                 if (bMoved || bReshaped)
                 {
                     ++Sources.Counts[bMoved ? 1 : 2];
-                    Sources.Changes.push_back(FNavSourceBounds{ Record.AABBMin, Record.AABBMax });
-                    Sources.Changes.push_back(FNavSourceBounds{ Entry.AABBMin, Entry.AABBMax });
+                    Sources.Changes.push_back(FNavSourceBounds{ Record.AABBMin, Record.AABBMax, !IsAnnotation(Record.Prim.Type) });
+                    Sources.Changes.push_back(FNavSourceBounds{ Entry.AABBMin, Entry.AABBMax, !IsAnnotation(Entry.Prim.Type) });
                     Sources.Octree.Update(Sources.RecordElement[Found->second], Entry.AABBMin, Entry.AABBMax);
                 }
                 Record = std::move(Entry);
@@ -1654,7 +1702,7 @@ namespace Lumina
                 {
                     ++Sources.Counts[3];
                     const FNavSourceEntry& Record = Sources.Records[Found->second];
-                    Sources.Changes.push_back(FNavSourceBounds{ Record.AABBMin, Record.AABBMax });
+                    Sources.Changes.push_back(FNavSourceBounds{ Record.AABBMin, Record.AABBMax, !IsAnnotation(Record.Prim.Type) });
                     RemoveSourceRecord(Sources, Found->second);
                 }
             }
@@ -1767,11 +1815,16 @@ namespace Lumina
         }
 
         // What lies under a box, read from the index, with terrain tessellated only inside it.
-        void GatherSourcePrims(const FSystemContext& Context, const FNavSourceTracker& Sources, const FVector3& Min, const FVector3& Max, float CellSize, TVector<FNavSourcePrim>& Out)
+        void GatherSourcePrims(const FSystemContext& Context, const FNavSourceTracker& Sources, const FVector3& Min, const FVector3& Max, float CellSize, TVector<FNavSourcePrim>& Out,
+                               bool bAnnotationsOnly = false)
         {
             Sources.Octree.Query(Min, Max, [&](uint32 Index, const FVector3&, const FVector3&)
             {
                 const FNavSourceEntry& Record = Sources.Records[Index];
+                if (bAnnotationsOnly && !IsAnnotation(Record.Prim.Type))
+                {
+                    return;
+                }
                 if (Record.Prim.Type != ENavColliderType::Terrain)
                 {
                     Out.push_back(Record.Prim);
@@ -1784,8 +1837,7 @@ namespace Lumina
                     return;
                 }
                 FNavSourcePrim& Prim = Out.emplace_back(Record.Prim);
-                Prim.TriangleSoup = MakeShared<TVector<FVector3>>();
-                TessellateTerrain(*Terrain, Prim.World, Min, Max, CellSize, *Prim.TriangleSoup);
+                Prim.TerrainPatch = CaptureTerrainPatch(*Terrain, Prim.World, Min, Max, CellSize);
             });
         }
 
@@ -2084,6 +2136,8 @@ namespace Lumina
             }
 
             // Hot-swap completed per-tile rebakes.
+            PlatformTime::FStopwatch SwapWatch;
+            TVector<FNavMesh::FTileSwap> Swaps;
             for (auto& Job : Comp.Runtime.PendingRebakes)
             {
                 if (!Job || Job->bConsumed.load(std::memory_order_acquire))
@@ -2095,7 +2149,7 @@ namespace Lumina
                     continue;
                 }
 
-                // Persist into Comp.Tiles BEFORE the runtime mesh hand-off, or PIE clones/saves init from empty.
+                // Persist into Comp.Tiles before the runtime mesh hand-off, or PIE clones/saves init from empty.
                 bool bUpdatedExisting = false;
                 for (SNavTileData& T : Comp.Tiles)
                 {
@@ -2119,9 +2173,23 @@ namespace Lumina
                 const bool bStreamerOwnsResidency = Comp.Runtime.bStreamedInit;
                 if (!bStreamerOwnsResidency || Comp.Runtime.Streamer.IsResident(Job->TileX, Job->TileY))
                 {
-                    Comp.Runtime.Mesh->RebuildTile(Job->TileX, Job->TileY, std::move(Job->ResultBlob));
+                    Swaps.push_back(FNavMesh::FTileSwap{ Job->TileX, Job->TileY, &Job->ResultBlob });
                 }
                 Job->bConsumed.store(true, std::memory_order_release);
+            }
+            Comp.Runtime.Mesh->RebuildTiles(Swaps);
+            if (!Swaps.empty() && CVarNavTimings.GetValue())
+            {
+                LOG_INFO("NavTiming swap: {} tiles in {:.2f} ms.", (int32)Swaps.size(), SwapWatch.ElapsedMilliseconds());
+            }
+
+            // Swaps only merge the planner's island labels, so an exact pass runs on the build pool now and then and lands between swaps.
+            constexpr uint32 kRelabelTicks = 15;
+            Comp.Runtime.Mesh->AdoptClusterLabels();
+            if (++Comp.Runtime.TicksSinceRelabel >= kRelabelTicks && Comp.Runtime.Mesh->TryBeginClusterRelabel())
+            {
+                Comp.Runtime.TicksSinceRelabel = 0;
+                Sources.BuildPool->Enqueue([Mesh = Comp.Runtime.Mesh.get()] { Mesh->RelabelClusters(); });
             }
             
             Comp.Runtime.PendingRebakes.erase(
@@ -2147,6 +2215,11 @@ namespace Lumina
                 Comp.Runtime.SettlingTiles.clear();
 
                 const int32 DirtyBefore = (int32)(Comp.Runtime.DirtyTiles.size() + Comp.Runtime.SettlingTiles.size());
+                const int32 CacheBudgetMB = NavSettings().TileCacheBudgetMB;
+                if (!Comp.Runtime.TileCache && CacheBudgetMB > 0)
+                {
+                    Comp.Runtime.TileCache = MakeShared<FNavTileCache>((size_t)CacheBudgetMB << 20);
+                }
                 for (const FNavSourceBounds& Change : Comp.Runtime.PendingSourceChanges)
                 {
                     int32 TX0, TY0, TX1, TY1;
@@ -2155,6 +2228,10 @@ namespace Lumina
                     {
                         for (int32 TX = TX0; TX <= TX1; ++TX)
                         {
+                            if (Change.bGeometry && Comp.Runtime.TileCache)
+                            {
+                                Comp.Runtime.TileCache->Invalidate(TX, TY);
+                            }
                             // A tile already waiting rebakes from the geometry as it stands when it is kicked, so it needs no second pass.
                             const uint64 TileKey = PackTileKey(TX, TY);
                             if (!Comp.Runtime.DirtyTiles.contains(TileKey))
@@ -2184,141 +2261,167 @@ namespace Lumina
                 Comp.Runtime.SettlingTiles.clear();
             }
 
-            // Cap concurrent rebake jobs; remaining dirty tiles wait for next tick.
+            // Batches keep starting until the cap is reached, since tiles scattered over a big world each make a small batch of their own.
             const uint32 MaxConcurrent = (uint32)Math::Max(1, NavSettings().MaxConcurrentTileRebakes);
-            if (Comp.Runtime.DirtyTiles.empty() || Comp.Runtime.PendingRebakes.size() >= MaxConcurrent)
+            while (!Comp.Runtime.DirtyTiles.empty() && Comp.Runtime.PendingRebakes.size() < MaxConcurrent)
             {
-                return;
-            }
+                // Main thread only snapshots params + world matrices; tessellation runs on a worker.
+                const uint32 Capacity = MaxConcurrent - (uint32)Comp.Runtime.PendingRebakes.size();
 
-            // Main thread only snapshots params + world matrices; tessellation runs on a worker.
-            const uint32 Capacity = MaxConcurrent - (uint32)Comp.Runtime.PendingRebakes.size();
+                // A batch gathers the union of its tiles, so scattered tiles re-tessellate everything between.
+                TVector<uint64> Candidates(Comp.Runtime.DirtyTiles.begin(), Comp.Runtime.DirtyTiles.end());
+                int32 SeedX, SeedY;
+                NavTile::UnpackKey(Candidates[0], SeedX, SeedY);
 
-            // A batch gathers the union of its tiles, so scattered tiles re-tessellate everything between.
-            TVector<uint64> Candidates(Comp.Runtime.DirtyTiles.begin(), Comp.Runtime.DirtyTiles.end());
-            int32 SeedX, SeedY;
-            NavTile::UnpackKey(Candidates[0], SeedX, SeedY);
-            auto SeedDistance = [SeedX, SeedY](uint64 Key)
-            {
-                int32 X, Y;
-                NavTile::UnpackKey(Key, X, Y);
-                return Math::Max(Math::Abs(X - SeedX), Math::Abs(Y - SeedY));
-            };
-            size_t Take = Math::Min((size_t)Capacity, Candidates.size());
-            std::partial_sort(Candidates.begin(), Candidates.begin() + Take, Candidates.end(),
-                [&SeedDistance](uint64 A, uint64 B) { return SeedDistance(A) < SeedDistance(B); });
-
-            // Tiles past this radius wait for a batch seeded near them, since one far tile widens the gather to everything in between.
-            constexpr int32 kMaxBatchRadiusTiles = 4;
-            while (Take > 1 && SeedDistance(Candidates[Take - 1]) > kMaxBatchRadiusTiles)
-            {
-                --Take;
-            }
-
-            TVector<TSharedPtr<FNavTileRebake>> BatchJobs;
-            BatchJobs.reserve(Take);
-            for (size_t i = 0; i < Take; ++i)
-            {
-                Comp.Runtime.DirtyTiles.erase(Candidates[i]);
-
-                auto Job = MakeShared<FNavTileRebake>();
-                NavTile::UnpackKey(Candidates[i], Job->TileX, Job->TileY);
-                BatchJobs.push_back(Job);
-                Comp.Runtime.PendingRebakes.push_back(std::move(Job));
-            }
-
-            // Terrain is pre-tessellated on this thread; the worker re-emits and bakes the dirty tiles.
-            struct FInputSnapshot
-            {
-                TVector<FNavSourcePrim> Prims;
-                FVector3                BakeMin;
-                FVector3                BakeMax;
-                FVector3                GatherMin;
-                FVector3                GatherMax;
-                SNavBuildSettings       Settings;
-                FNavBuildOutput         Layout;
-            };
-            auto Snap = MakeShared<FInputSnapshot>();
-            Snap->BakeMin  = Comp.Center - Comp.GetWorldExtents();
-            Snap->BakeMax  = Comp.Center + Comp.GetWorldExtents();
-            Snap->Settings = Comp.Settings;
-            Snap->Layout   = Comp.Runtime.LiveLayout;
-
-            // Gathering the whole volume for a few dirty tiles costs a full bake, so narrow it to their footprint.
-            {
-                const int32 BorderVoxels = (int32)std::ceil(Comp.Settings.AgentRadius / Comp.Settings.CellSize) + 3;
-                const float Border = (float)BorderVoxels * Comp.Settings.CellSize;
-                FVector3 Mn( FLT_MAX, Snap->BakeMin.y,  FLT_MAX);
-                FVector3 Mx(-FLT_MAX, Snap->BakeMax.y, -FLT_MAX);
-                for (const TSharedPtr<FNavTileRebake>& Job : BatchJobs)
+                // Seeded at the dirty tile nearest the view, so what the player can see rebakes first.
+                if (const FSignificanceState* Significance = Significance::GetState(Context); Significance != nullptr && Significance->bHasView)
                 {
-                    const float TileMinX = Comp.Origin.x + (float)Job->TileX * Comp.TileWorldSize;
-                    const float TileMinZ = Comp.Origin.z + (float)Job->TileY * Comp.TileWorldSize;
-                    Mn.x = Math::Min(Mn.x, TileMinX - Border);
-                    Mn.z = Math::Min(Mn.z, TileMinZ - Border);
-                    Mx.x = Math::Max(Mx.x, TileMinX + Comp.TileWorldSize + Border);
-                    Mx.z = Math::Max(Mx.z, TileMinZ + Comp.TileWorldSize + Border);
+                    const int32 ViewX = (int32)std::floor((Significance->ViewOrigin.x - Comp.Origin.x) / Comp.TileWorldSize);
+                    const int32 ViewY = (int32)std::floor((Significance->ViewOrigin.z - Comp.Origin.z) / Comp.TileWorldSize);
+                    auto ViewDistance = [ViewX, ViewY](uint64 Key)
+                    {
+                        int32 X, Y;
+                        NavTile::UnpackKey(Key, X, Y);
+                        return Math::Max(Math::Abs(X - ViewX), Math::Abs(Y - ViewY));
+                    };
+                    const uint64 Nearest = *Algo::MinElement(Candidates, [&ViewDistance](uint64 A, uint64 B) { return ViewDistance(A) < ViewDistance(B); });
+                    NavTile::UnpackKey(Nearest, SeedX, SeedY);
                 }
-                Snap->GatherMin = Math::Max(Mn, Snap->BakeMin);
-                Snap->GatherMax = Math::Min(Mx, Snap->BakeMax);
-            }
-
-            PlatformTime::FStopwatch GatherWatch;
-            GatherSourcePrims(Context, Sources, Snap->GatherMin, Snap->GatherMax, Comp.Settings.CellSize, Snap->Prims);
-            const bool bLogRebakeTimings = CVarNavTimings.GetValue();
-            if (bLogRebakeTimings)
-            {
-                const FVector3 GatherSpan = Snap->GatherMax - Snap->GatherMin;
-                LOG_INFO("NavTiming rebake gather: {} tiles, box {:.0f}x{:.0f}, {} prims in {:.2f} ms, {} still dirty.",
-                    (int32)BatchJobs.size(), GatherSpan.x, GatherSpan.z, (int32)Snap->Prims.size(),
-                    GatherWatch.ElapsedMilliseconds(), (int32)Comp.Runtime.DirtyTiles.size());
-            }
-
-            // Coordinator emits geometry once on a worker, then ParallelFors the per-tile bakes.
-            Task::AsyncTask(1, 1, [Snap, Jobs = std::move(BatchJobs), bLogRebakeTimings](uint32, uint32, uint32) mutable
-            {
-                PlatformTime::FStopwatch EmitWatch;
-                FNavBuildInput Input;
-                Input.BoundsMin = Snap->BakeMin;
-                Input.BoundsMax = Snap->BakeMax;
-                Input.Settings  = Snap->Settings;
-
-                for (const FNavSourcePrim& Prim : Snap->Prims)
+                auto SeedDistance = [SeedX, SeedY](uint64 Key)
                 {
-                    AppendAnnotation(Prim, Input.AreaVolumes, Input.Links);
-                }
-                EmitNavSourcePrims(Snap->Prims.data(), Snap->Prims.size(), Snap->GatherMin, Snap->GatherMax,
-                    Input.Vertices, Input.Indices);
+                    int32 X, Y;
+                    NavTile::UnpackKey(Key, X, Y);
+                    return Math::Max(Math::Abs(X - SeedX), Math::Abs(Y - SeedY));
+                };
+                size_t Take = Math::Min((size_t)Capacity, Candidates.size());
+                std::partial_sort(Candidates.begin(), Candidates.begin() + Take, Candidates.end(),
+                    [&SeedDistance](uint64 A, uint64 B) { return SeedDistance(A) < SeedDistance(B); });
 
-                // One binning pass feeds every dirty tile, rather than each tile rescanning the soup.
-                TVector<FNavTileCoord> Coords;
-                Coords.reserve(Jobs.size());
-                for (const TSharedPtr<FNavTileRebake>& Job : Jobs)
+                // Tiles past this radius wait for a batch seeded near them, since one far tile widens the gather to everything in between.
+                constexpr int32 kMaxBatchRadiusTiles = 4;
+                while (Take > 1 && SeedDistance(Candidates[Take - 1]) > kMaxBatchRadiusTiles)
                 {
-                    Coords.push_back(FNavTileCoord{ Job->TileX, Job->TileY });
+                    --Take;
                 }
 
-                const double EmitMs = EmitWatch.ElapsedMilliseconds();
-                const int32 EmittedTris = (int32)(Input.Indices.size() / 3);
+                TVector<TSharedPtr<FNavTileRebake>> BatchJobs;
+                BatchJobs.reserve(Take);
+                for (size_t i = 0; i < Take; ++i)
+                {
+                    Comp.Runtime.DirtyTiles.erase(Candidates[i]);
 
-                PlatformTime::FStopwatch BakeWatch;
-                TVector<SNavTileData> Baked;
-                NavMeshBuilder::BakeTiles(Input, Snap->Layout, Coords, Baked);
+                    auto Job = MakeShared<FNavTileRebake>();
+                    NavTile::UnpackKey(Candidates[i], Job->TileX, Job->TileY);
+                    if (Comp.Runtime.TileCache)
+                    {
+                        Job->CacheGeneration = Comp.Runtime.TileCache->GetGeneration(Job->TileX, Job->TileY);
+                        Job->bCachePinned = Comp.Runtime.TileCache->Pin(Job->TileX, Job->TileY, Job->CacheGeneration);
+                    }
+                    BatchJobs.push_back(Job);
+                    Comp.Runtime.PendingRebakes.push_back(std::move(Job));
+                }
+
+                // Terrain is pre-tessellated on this thread; the worker re-emits and bakes the dirty tiles.
+                struct FInputSnapshot
+                {
+                    TVector<FNavSourcePrim> Prims;
+                    FVector3                BakeMin;
+                    FVector3                BakeMax;
+                    FVector3                GatherMin;
+                    FVector3                GatherMax;
+                    SNavBuildSettings       Settings;
+                    FNavBuildOutput         Layout;
+                };
+                auto Snap = MakeShared<FInputSnapshot>();
+                Snap->BakeMin  = Comp.Center - Comp.GetWorldExtents();
+                Snap->BakeMax  = Comp.Center + Comp.GetWorldExtents();
+                Snap->Settings = Comp.Settings;
+                Snap->Layout   = Comp.Runtime.LiveLayout;
+
+                // Gathering the whole volume for a few dirty tiles costs a full bake, so narrow it to their footprint.
+                {
+                    const int32 BorderVoxels = (int32)std::ceil(Comp.Settings.AgentRadius / Comp.Settings.CellSize) + 3;
+                    const float Border = (float)BorderVoxels * Comp.Settings.CellSize;
+                    FVector3 Mn( FLT_MAX, Snap->BakeMin.y,  FLT_MAX);
+                    FVector3 Mx(-FLT_MAX, Snap->BakeMax.y, -FLT_MAX);
+                    for (const TSharedPtr<FNavTileRebake>& Job : BatchJobs)
+                    {
+                        const float TileMinX = Comp.Origin.x + (float)Job->TileX * Comp.TileWorldSize;
+                        const float TileMinZ = Comp.Origin.z + (float)Job->TileY * Comp.TileWorldSize;
+                        Mn.x = Math::Min(Mn.x, TileMinX - Border);
+                        Mn.z = Math::Min(Mn.z, TileMinZ - Border);
+                        Mx.x = Math::Max(Mx.x, TileMinX + Comp.TileWorldSize + Border);
+                        Mx.z = Math::Max(Mx.z, TileMinZ + Comp.TileWorldSize + Border);
+                    }
+                    Snap->GatherMin = Math::Max(Mn, Snap->BakeMin);
+                    Snap->GatherMax = Math::Min(Mx, Snap->BakeMax);
+                }
+
+                // Every tile already holding its heightfield means only the areas and links move, so no geometry is gathered at all.
+                const bool bAnnotationsOnly = Algo::AllOf(BatchJobs, [](const TSharedPtr<FNavTileRebake>& Job) { return Job->bCachePinned; });
+                PlatformTime::FStopwatch GatherWatch;
+                GatherSourcePrims(Context, Sources, Snap->GatherMin, Snap->GatherMax, Comp.Settings.CellSize, Snap->Prims, bAnnotationsOnly);
+                const bool bLogRebakeTimings = CVarNavTimings.GetValue();
                 if (bLogRebakeTimings)
                 {
-                    LOG_INFO("NavTiming rebake work: {} tiles, emit {} tris in {:.2f} ms, bake {:.2f} ms.",
-                        (int32)Coords.size(), EmittedTris, EmitMs, BakeWatch.ElapsedMilliseconds());
+                    const FVector3 GatherSpan = Snap->GatherMax - Snap->GatherMin;
+                    LOG_INFO("NavTiming rebake gather: {} tiles, box {:.0f}x{:.0f}, {} prims in {:.2f} ms, {} still dirty.",
+                        (int32)BatchJobs.size(), GatherSpan.x, GatherSpan.z, (int32)Snap->Prims.size(),
+                        GatherWatch.ElapsedMilliseconds(), (int32)Comp.Runtime.DirtyTiles.size());
                 }
 
-                for (size_t i = 0; i < Jobs.size(); ++i)
+                // The whole batch runs on the build pool, so a tile that takes milliseconds never holds a worker the frame waits on.
+                FNavBuildPool* Pool = Sources.BuildPool.get();
+                Pool->Enqueue([Snap, Jobs = std::move(BatchJobs), bLogRebakeTimings, Pool, Cache = Comp.Runtime.TileCache]() mutable
                 {
-                    if (i < Baked.size())
+                    PlatformTime::FStopwatch EmitWatch;
+                    FNavBuildInput Input;
+                    Input.BoundsMin = Snap->BakeMin;
+                    Input.BoundsMax = Snap->BakeMax;
+                    Input.Settings  = Snap->Settings;
+
+                    for (const FNavSourcePrim& Prim : Snap->Prims)
                     {
-                        Jobs[i]->ResultBlob = std::move(Baked[i].Blob);
+                        AppendAnnotation(Prim, Input.AreaVolumes, Input.Links);
                     }
-                    Jobs[i]->bDone.store(true, std::memory_order_release);
-                }
-            }, ETaskPriority::Background);
+                    TessellateTerrainPatches(Snap->Prims, Pool);
+                    EmitNavSourcePrims(Snap->Prims.data(), Snap->Prims.size(), Snap->GatherMin, Snap->GatherMax,
+                        Input.Vertices, Input.Indices, Pool);
+
+                    // One binning pass feeds every dirty tile, rather than each tile rescanning the soup.
+                    TVector<FNavTileCoord> Coords;
+                    Coords.reserve(Jobs.size());
+                    for (const TSharedPtr<FNavTileRebake>& Job : Jobs)
+                    {
+                        Coords.push_back(FNavTileCoord{ Job->TileX, Job->TileY, Job->CacheGeneration });
+                    }
+
+                    const double EmitMs = EmitWatch.ElapsedMilliseconds();
+                    const int32 EmittedTris = (int32)(Input.Indices.size() / 3);
+
+                    PlatformTime::FStopwatch BakeWatch;
+                    TVector<SNavTileData> Baked;
+                    NavMeshBuilder::BakeTiles(Input, Snap->Layout, Coords, Baked, Pool, Cache.get());
+                    if (bLogRebakeTimings)
+                    {
+                        LOG_INFO("NavTiming rebake work: {} tiles, emit {} tris in {:.2f} ms, bake {:.2f} ms.",
+                            (int32)Coords.size(), EmittedTris, EmitMs, BakeWatch.ElapsedMilliseconds());
+                    }
+
+                    for (size_t i = 0; i < Jobs.size(); ++i)
+                    {
+                        if (Jobs[i]->bCachePinned)
+                        {
+                            Cache->Unpin(Jobs[i]->TileX, Jobs[i]->TileY);
+                        }
+                        if (i < Baked.size())
+                        {
+                            Jobs[i]->ResultBlob = std::move(Baked[i].Blob);
+                        }
+                        Jobs[i]->bDone.store(true, std::memory_order_release);
+                    }
+                });
+            }
 
             (void)Entity;
         }
@@ -2376,6 +2479,8 @@ namespace Lumina
         if (FindSourceTracker(Context) == nullptr)
         {
             TUniquePtr<FNavSourceTracker>& Sources = Registry.Ctx().Emplace<TUniquePtr<FNavSourceTracker>>(MakeUnique<FNavSourceTracker>());
+            // A few threads keep up with a world full of moving obstacles, and every extra one is a thread the frame's workers share cores with.
+            Sources->BuildPool = MakeUnique<FNavBuildPool>(Math::Clamp(Jobs::GetNumWorkers() / 8, 1u, 4u));
             Sources->MovedConsumer = ECS::Utils::AddMovedTransformConsumer(Registry);
         }
         WatchSourceComponents<SBoxColliderComponent, SSphereColliderComponent, SMeshColliderComponent, SCapsuleColliderComponent, SCylinderColliderComponent,
@@ -2437,6 +2542,7 @@ namespace Lumina
             // Worker holds its own shared_ptr; clearing here just prevents consumption.
             Comp.Runtime.PendingInit.reset();
             Comp.Runtime.PendingRebakes.clear();
+            Comp.Runtime.TileCache.reset();
             Comp.Runtime.DirtyTiles.clear();
             Comp.Runtime.SettlingTiles.clear();
             Comp.Runtime.PendingSourceChanges.clear();
@@ -2490,8 +2596,10 @@ namespace Lumina
         Comp.Runtime.DirtyTiles.clear();
         Comp.Runtime.SettlingTiles.clear();
         Comp.Runtime.PendingRebakes.clear();
-        Comp.Runtime.ActiveBake = NavMeshBuilder::Bake(std::move(Input), [Prims = std::move(Prims)](FNavBuildInput& In)
+        Comp.Runtime.TileCache.reset();
+        Comp.Runtime.ActiveBake = NavMeshBuilder::Bake(std::move(Input), [Prims = std::move(Prims)](FNavBuildInput& In) mutable
         {
+            TessellateTerrainPatches(Prims);
             EmitNavSourcePrims(Prims.data(), Prims.size(), In.BoundsMin, In.BoundsMax, In.Vertices, In.Indices);
             if (In.Vertices.empty() || In.Indices.empty())
             {

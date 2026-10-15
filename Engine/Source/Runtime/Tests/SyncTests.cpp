@@ -419,4 +419,38 @@ namespace LuminaSyncTests
         EXPECT_EQ(Observed.load(std::memory_order_acquire), Reported);
         EXPECT_NE(Reported, Lumina::Threading::GetThreadID());
     }
+
+    TEST(Thread, ABodyAskedToStopWakesFromItsWaitAndReturns)
+    {
+        std::atomic<int32> Laps{ 0 };
+        Lumina::FThread Thread(Lumina::FThreadOptions{ "StopTest" }, [&Laps](const Lumina::FThreadStop& Stop)
+        {
+            while (!Stop.WaitForStop(10000))
+            {
+                Laps.fetch_add(1);
+            }
+        });
+
+        Lumina::PlatformTime::FStopwatch Watch;
+        Thread.RequestStop();
+        Thread.Join();
+        EXPECT_LT(Watch.ElapsedMilliseconds(), 1000.0) << "the stop wakes the wait instead of letting it run out";
+        EXPECT_EQ(Laps.load(), 0);
+    }
+
+    TEST(Thread, AStopRaisedBeforeTheBodyRunsIsStillSeen)
+    {
+        std::atomic<bool> bStarted{ false };
+        std::atomic<bool> bSawStop{ false };
+        Lumina::FThread Thread([&](const Lumina::FThreadStop& Stop, int32 Delay)
+        {
+            Lumina::Threading::Sleep((uint64)Delay);
+            bStarted.store(true);
+            bSawStop.store(Stop.ShouldStop());
+        }, 20);
+        Thread.RequestStop();
+        Thread.Join();
+        EXPECT_TRUE(bStarted.load());
+        EXPECT_TRUE(bSawStop.load());
+    }
 }

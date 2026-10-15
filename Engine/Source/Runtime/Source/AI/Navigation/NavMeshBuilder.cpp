@@ -6,6 +6,7 @@
 #include "Memory/Memory.h"
 #include "Memory/MemoryTracking.h"
 #include "TaskSystem/TaskSystem.h"
+#include "AI/Navigation/NavBuildPool.h"
 #include "tracy/TracyC.h"
 #include "Core/Console/ConsoleVariable.h"
 #include <array>
@@ -146,7 +147,7 @@ namespace Lumina::NavMeshBuilder
         }
 
         // A counting sort split into chunks of triangles, each with its own tally row, so both passes run in parallel and keep the serial order.
-        void BuildTileBins(const FNavBuildInput& In, const FTileGrid& Grid, const FBinTarget& Target, FTileBins& Out)
+        void BuildTileBins(const FNavBuildInput& In, const FTileGrid& Grid, const FBinTarget& Target, FTileBins& Out, FNavBuildPool* Pool = nullptr)
         {
             constexpr uint32 kMinChunkTris = 16384;
             const uint32 NumTris = (uint32)(In.Indices.size() / 3);
@@ -164,7 +165,7 @@ namespace Lumina::NavMeshBuilder
             const uint32 ChunkTris = (NumTris + Chunks - 1) / Chunks;
             TVector<uint32> Cursors((size_t)Chunks * NumSlots, 0u);
 
-            Task::ParallelFor(Chunks, [&](uint32 Chunk)
+            NavParallelFor(Pool, Chunks, [&](uint32 Chunk)
             {
                 uint32* Tally = &Cursors[(size_t)Chunk * NumSlots];
                 const uint32 End = Math::Min(NumTris, (Chunk + 1) * ChunkTris);
@@ -189,7 +190,7 @@ namespace Lumina::NavMeshBuilder
             Out.Offsets[NumSlots] = Running;
             Out.TriIndices.resize(Running);
 
-            Task::ParallelFor(Chunks, [&](uint32 Chunk)
+            NavParallelFor(Pool, Chunks, [&](uint32 Chunk)
             {
                 uint32* Cursor = &Cursors[(size_t)Chunk * NumSlots];
                 const uint32 End = Math::Min(NumTris, (Chunk + 1) * ChunkTris);
@@ -261,47 +262,10 @@ namespace Lumina::NavMeshBuilder
         };
         #endif
 
-        bool BakeTile(const FNavBuildInput& In, const FTileGrid& Grid, int32 TX, int32 TY, const int32* TileTriIndices, int32 NumTileTris, SNavTileData& Out)
+        // Rasterize, filter, compact and erode, everything a cached tile gets to skip.
+        bool VoxelizeTile(rcContext& Ctx, const rcConfig& Cfg, const FNavBuildInput& In, const int32* TileTriIndices, int32 NumTileTris, rcCompactHeightfield*& OutCompact)
         {
-            const SNavBuildSettings& S = In.Settings;
-            Out.X = TX;
-            Out.Y = TY;
-            Out.Blob.clear();
-
-            const float TileMinX = Grid.Origin.x + (float)TX * Grid.TileWorldSize;
-            const float TileMinZ = Grid.Origin.z + (float)TY * Grid.TileWorldSize;
-            const float TileMaxX = TileMinX + Grid.TileWorldSize;
-            const float TileMaxZ = TileMinZ + Grid.TileWorldSize;
-
-            rcConfig Cfg{};
-            Cfg.cs = S.CellSize;
-            Cfg.ch = S.CellHeight;
-            Cfg.walkableSlopeAngle = S.AgentMaxSlopeDeg;
-            Cfg.walkableHeight     = (int)std::ceil(S.AgentHeight / S.CellHeight);
-            Cfg.walkableClimb      = (int)std::floor(S.AgentMaxClimb / S.CellHeight);
-            Cfg.walkableRadius     = (int)std::ceil(S.AgentRadius / S.CellSize);
-            Cfg.maxEdgeLen         = (int)(S.EdgeMaxLength / S.CellSize);
-            Cfg.maxSimplificationError = S.EdgeMaxError;
-            Cfg.minRegionArea      = S.RegionMinSize * S.RegionMinSize;
-            Cfg.mergeRegionArea    = S.RegionMergeSize * S.RegionMergeSize;
-            Cfg.maxVertsPerPoly    = S.VertsPerPoly;
-            Cfg.detailSampleDist   = S.DetailSampleDist < 0.9f ? 0.0f : S.CellSize * S.DetailSampleDist;
-            Cfg.detailSampleMaxError = S.CellHeight * S.DetailSampleMaxError;
-            Cfg.tileSize           = S.TileSizeVoxels;
-            Cfg.borderSize         = Cfg.walkableRadius + 3;
-            Cfg.width              = Cfg.tileSize + Cfg.borderSize * 2;
-            Cfg.height             = Cfg.tileSize + Cfg.borderSize * 2;
-
-            // bmin/bmax include border so seam tris rasterize; rcBuildPolyMesh strips border polys.
-            Cfg.bmin[0] = TileMinX - Grid.BorderSize;
-            Cfg.bmin[1] = In.BoundsMin.y;
-            Cfg.bmin[2] = TileMinZ - Grid.BorderSize;
-            Cfg.bmax[0] = TileMaxX + Grid.BorderSize;
-            Cfg.bmax[1] = In.BoundsMax.y;
-            Cfg.bmax[2] = TileMaxZ + Grid.BorderSize;
-
-            FProfiledRecastContext Ctx;
-
+            OutCompact = nullptr;
             rcHeightfield* Solid = rcAllocHeightfield();
             if (!Solid) return false;
             if (!rcCreateHeightfield(&Ctx, *Solid, Cfg.width, Cfg.height, Cfg.bmin, Cfg.bmax, Cfg.cs, Cfg.ch))
@@ -310,7 +274,7 @@ namespace Lumina::NavMeshBuilder
                 return false;
             }
 
-            // Empty tile is valid (no overlapping geometry); skip straight to a clear blob.
+            // An empty tile is valid and comes back without a heightfield.
             if (NumTileTris == 0)
             {
                 rcFreeHeightField(Solid);
@@ -374,6 +338,70 @@ namespace Lumina::NavMeshBuilder
             {
                 rcFreeCompactHeightfield(Compact);
                 return false;
+            }
+
+            OutCompact = Compact;
+            return true;
+        }
+
+        bool BakeTile(const FNavBuildInput& In, const FTileGrid& Grid, int32 TX, int32 TY, const int32* TileTriIndices, int32 NumTileTris, SNavTileData& Out,
+                      FNavTileCache* Cache = nullptr, uint32 Generation = 0)
+        {
+            const SNavBuildSettings& S = In.Settings;
+            Out.X = TX;
+            Out.Y = TY;
+            Out.Blob.clear();
+
+            const float TileMinX = Grid.Origin.x + (float)TX * Grid.TileWorldSize;
+            const float TileMinZ = Grid.Origin.z + (float)TY * Grid.TileWorldSize;
+            const float TileMaxX = TileMinX + Grid.TileWorldSize;
+            const float TileMaxZ = TileMinZ + Grid.TileWorldSize;
+
+            rcConfig Cfg{};
+            Cfg.cs = S.CellSize;
+            Cfg.ch = S.CellHeight;
+            Cfg.walkableSlopeAngle = S.AgentMaxSlopeDeg;
+            Cfg.walkableHeight     = (int)std::ceil(S.AgentHeight / S.CellHeight);
+            Cfg.walkableClimb      = (int)std::floor(S.AgentMaxClimb / S.CellHeight);
+            Cfg.walkableRadius     = (int)std::ceil(S.AgentRadius / S.CellSize);
+            Cfg.maxEdgeLen         = (int)(S.EdgeMaxLength / S.CellSize);
+            Cfg.maxSimplificationError = S.EdgeMaxError;
+            Cfg.minRegionArea      = S.RegionMinSize * S.RegionMinSize;
+            Cfg.mergeRegionArea    = S.RegionMergeSize * S.RegionMergeSize;
+            Cfg.maxVertsPerPoly    = S.VertsPerPoly;
+            Cfg.detailSampleDist   = S.DetailSampleDist < 0.9f ? 0.0f : S.CellSize * S.DetailSampleDist;
+            Cfg.detailSampleMaxError = S.CellHeight * S.DetailSampleMaxError;
+            Cfg.tileSize           = S.TileSizeVoxels;
+            Cfg.borderSize         = Cfg.walkableRadius + 3;
+            Cfg.width              = Cfg.tileSize + Cfg.borderSize * 2;
+            Cfg.height             = Cfg.tileSize + Cfg.borderSize * 2;
+
+            // bmin/bmax include border so seam tris rasterize; rcBuildPolyMesh strips border polys.
+            Cfg.bmin[0] = TileMinX - Grid.BorderSize;
+            Cfg.bmin[1] = In.BoundsMin.y;
+            Cfg.bmin[2] = TileMinZ - Grid.BorderSize;
+            Cfg.bmax[0] = TileMaxX + Grid.BorderSize;
+            Cfg.bmax[1] = In.BoundsMax.y;
+            Cfg.bmax[2] = TileMaxZ + Grid.BorderSize;
+
+            FProfiledRecastContext Ctx;
+
+            // A tile whose geometry has not changed since its last bake starts from the heightfield that bake left, skipping voxelization.
+            rcCompactHeightfield* Compact = nullptr;
+            if (Cache == nullptr || !Cache->Load(TX, TY, Generation, Compact))
+            {
+                if (!VoxelizeTile(Ctx, Cfg, In, TileTriIndices, NumTileTris, Compact))
+                {
+                    return false;
+                }
+                if (Compact == nullptr)
+                {
+                    return true;
+                }
+                if (Cache != nullptr)
+                {
+                    Cache->Store(TX, TY, Generation, *Compact);
+                }
             }
 
             // Stamped after erosion so a Null volume carves a hole the agent radius cannot reopen.
@@ -700,8 +728,8 @@ namespace Lumina::NavMeshBuilder
     // One worker in this many may rebake tiles while a game runs.
     constexpr uint32 kRebakeWorkerShare = 4;
 
-    void BakeTiles(const FNavBuildInput& Input, const FNavBuildOutput& BaseLayout,
-                   const TVector<FNavTileCoord>& Coords, TVector<SNavTileData>& Out)
+    void BakeTiles(const FNavBuildInput& Input, const FNavBuildOutput& BaseLayout, const TVector<FNavTileCoord>& Coords,
+                   TVector<SNavTileData>& Out, FNavBuildPool* Pool, FNavTileCache* Cache)
     {
         LUMINA_PROFILE_SCOPE();
 
@@ -744,7 +772,19 @@ namespace Lumina::NavMeshBuilder
         }
 
         FTileBins Bins;
-        BuildTileBins(Input, Grid, Target, Bins);
+        BuildTileBins(Input, Grid, Target, Bins, Pool);
+
+        auto BakeSlot = [&](uint32 i)
+        {
+            const uint32 Begin = Bins.Offsets[i];
+            const uint32 End = Bins.Offsets[i + 1];
+            BakeTile(Input, Grid, Coords[i].X, Coords[i].Y, End > Begin ? &Bins.TriIndices[Begin] : nullptr, (int32)(End - Begin), Out[i], Cache, Coords[i].CacheGeneration);
+        };
+        if (Pool != nullptr)
+        {
+            Pool->ParallelFor((uint32)Coords.size(), BakeSlot);
+            return;
+        }
 
         // A tile is several milliseconds no one can preempt, so a runtime rebake takes a few lanes rather than every worker the frame needs.
         const uint32 Lanes = Math::Clamp(Jobs::GetNumWorkers() / kRebakeWorkerShare, 1u, (uint32)Coords.size());
@@ -754,9 +794,7 @@ namespace Lumina::NavMeshBuilder
             for (uint32 i = NextTile.fetch_add(1, std::memory_order_relaxed); i < (uint32)Coords.size();
                  i = NextTile.fetch_add(1, std::memory_order_relaxed))
             {
-                const uint32 Begin = Bins.Offsets[i];
-                const uint32 End = Bins.Offsets[i + 1];
-                BakeTile(Input, Grid, Coords[i].X, Coords[i].Y, End > Begin ? &Bins.TriIndices[Begin] : nullptr, (int32)(End - Begin), Out[i]);
+                BakeSlot(i);
             }
         }, 1, ETaskPriority::Background);
     }
@@ -781,10 +819,212 @@ namespace Lumina::NavMeshBuilder
         return false;
     }
 
-    void BakeTiles(const FNavBuildInput&, const FNavBuildOutput&, const TVector<FNavTileCoord>& Coords, TVector<SNavTileData>& Out)
+    void BakeTiles(const FNavBuildInput&, const FNavBuildOutput&, const TVector<FNavTileCoord>& Coords, TVector<SNavTileData>& Out, FNavBuildPool*, FNavTileCache*)
     {
         Out.clear();
         Out.resize(Coords.size());
     }
+#endif
+}
+
+namespace Lumina
+{
+#if defined(LUMINA_HAS_RECAST)
+    struct FNavTileCache::FEntry
+    {
+        uint32                  Generation = 0;
+        uint32                  Pins = 0;
+        uint64                  LastUse = 0;
+        int32                   Width = 0;
+        int32                   Height = 0;
+        int32                   WalkableHeight = 0;
+        int32                   WalkableClimb = 0;
+        int32                   BorderSize = 0;
+        uint16                  MaxDistance = 0;
+        uint16                  MaxRegions = 0;
+        float                   BMin[3] = {};
+        float                   BMax[3] = {};
+        float                   CellSize = 0.0f;
+        float                   CellHeight = 0.0f;
+        TVector<rcCompactCell>  Cells;
+        TVector<rcCompactSpan>  Spans;
+        TVector<uint8>          Areas;
+
+        size_t GetBytes() const { return Cells.size() * sizeof(rcCompactCell) + Spans.size() * sizeof(rcCompactSpan) + Areas.size(); }
+    };
+#else
+    struct FNavTileCache::FEntry
+    {
+        uint32 Generation = 0;
+        uint32 Pins = 0;
+        uint64 LastUse = 0;
+        size_t GetBytes() const { return 0; }
+    };
+#endif
+
+    FNavTileCache::FNavTileCache(size_t InBudgetBytes)
+        : BudgetBytes(InBudgetBytes)
+    {
+    }
+
+    FNavTileCache::~FNavTileCache() = default;
+
+    void FNavTileCache::Invalidate(int32 X, int32 Y)
+    {
+        const uint64 Key = NavTile::PackKey(X, Y);
+        FScopeLock Guard(Lock);
+        ++Generations[Key];
+        auto It = Entries.find(Key);
+        if (It != Entries.end() && It->second->Pins == 0)
+        {
+            Bytes -= It->second->GetBytes();
+            Entries.erase(It);
+        }
+    }
+
+    uint32 FNavTileCache::GetGeneration(int32 X, int32 Y) const
+    {
+        FScopeLock Guard(Lock);
+        auto It = Generations.find(NavTile::PackKey(X, Y));
+        return It != Generations.end() ? It->second : 0;
+    }
+
+    bool FNavTileCache::Pin(int32 X, int32 Y, uint32 Generation)
+    {
+        FScopeLock Guard(Lock);
+        auto It = Entries.find(NavTile::PackKey(X, Y));
+        if (It == Entries.end() || It->second->Generation != Generation)
+        {
+            return false;
+        }
+        ++It->second->Pins;
+        return true;
+    }
+
+    void FNavTileCache::Unpin(int32 X, int32 Y)
+    {
+        FScopeLock Guard(Lock);
+        auto It = Entries.find(NavTile::PackKey(X, Y));
+        if (It != Entries.end() && It->second->Pins > 0)
+        {
+            --It->second->Pins;
+        }
+    }
+
+#if defined(LUMINA_HAS_RECAST)
+    bool FNavTileCache::Load(int32 X, int32 Y, uint32 Generation, rcCompactHeightfield*& Out)
+    {
+        FScopeLock Guard(Lock);
+        auto It = Entries.find(NavTile::PackKey(X, Y));
+        if (It == Entries.end() || It->second->Generation != Generation)
+        {
+            Misses.fetch_add(1, std::memory_order_relaxed);
+            return false;
+        }
+
+        const FEntry& Entry = *It->second;
+        rcCompactHeightfield* Compact = rcAllocCompactHeightfield();
+        if (Compact == nullptr)
+        {
+            return false;
+        }
+        Compact->width = Entry.Width;
+        Compact->height = Entry.Height;
+        Compact->spanCount = (int)Entry.Spans.size();
+        Compact->walkableHeight = Entry.WalkableHeight;
+        Compact->walkableClimb = Entry.WalkableClimb;
+        Compact->borderSize = Entry.BorderSize;
+        Compact->maxDistance = Entry.MaxDistance;
+        Compact->maxRegions = Entry.MaxRegions;
+        rcVcopy(Compact->bmin, Entry.BMin);
+        rcVcopy(Compact->bmax, Entry.BMax);
+        Compact->cs = Entry.CellSize;
+        Compact->ch = Entry.CellHeight;
+        Compact->cells = (rcCompactCell*)rcAlloc(sizeof(rcCompactCell) * Entry.Cells.size(), RC_ALLOC_PERM);
+        Compact->spans = (rcCompactSpan*)rcAlloc(sizeof(rcCompactSpan) * Entry.Spans.size(), RC_ALLOC_PERM);
+        Compact->areas = (unsigned char*)rcAlloc(Entry.Areas.size(), RC_ALLOC_PERM);
+        if (Compact->cells == nullptr || Compact->spans == nullptr || Compact->areas == nullptr)
+        {
+            rcFreeCompactHeightfield(Compact);
+            return false;
+        }
+        memcpy(Compact->cells, Entry.Cells.data(), sizeof(rcCompactCell) * Entry.Cells.size());
+        memcpy(Compact->spans, Entry.Spans.data(), sizeof(rcCompactSpan) * Entry.Spans.size());
+        memcpy(Compact->areas, Entry.Areas.data(), Entry.Areas.size());
+        It->second->LastUse = ++Clock;
+        Hits.fetch_add(1, std::memory_order_relaxed);
+        Out = Compact;
+        return true;
+    }
+
+    void FNavTileCache::Store(int32 X, int32 Y, uint32 Generation, const rcCompactHeightfield& Compact)
+    {
+        if (BudgetBytes == 0)
+        {
+            return;
+        }
+
+        auto Entry = MakeUnique<FEntry>();
+        Entry->Generation = Generation;
+        Entry->Width = Compact.width;
+        Entry->Height = Compact.height;
+        Entry->WalkableHeight = Compact.walkableHeight;
+        Entry->WalkableClimb = Compact.walkableClimb;
+        Entry->BorderSize = Compact.borderSize;
+        Entry->MaxDistance = Compact.maxDistance;
+        Entry->MaxRegions = Compact.maxRegions;
+        rcVcopy(Entry->BMin, Compact.bmin);
+        rcVcopy(Entry->BMax, Compact.bmax);
+        Entry->CellSize = Compact.cs;
+        Entry->CellHeight = Compact.ch;
+        Entry->Cells.assign(Compact.cells, Compact.cells + (size_t)Compact.width * (size_t)Compact.height);
+        Entry->Spans.assign(Compact.spans, Compact.spans + Compact.spanCount);
+        Entry->Areas.assign(Compact.areas, Compact.areas + Compact.spanCount);
+
+        const uint64 Key = NavTile::PackKey(X, Y);
+        FScopeLock Guard(Lock);
+        auto Current = Generations.find(Key);
+        if ((Current != Generations.end() ? Current->second : 0) != Generation)
+        {
+            return;
+        }
+
+        Entry->LastUse = ++Clock;
+        Bytes += Entry->GetBytes();
+        auto [It, bAdded] = Entries.try_emplace(Key);
+        if (!bAdded)
+        {
+            // A pinned entry is what a bake in flight was promised, so it stays as it is until released.
+            if (It->second->Pins > 0)
+            {
+                Bytes -= Entry->GetBytes();
+                return;
+            }
+            Bytes -= It->second->GetBytes();
+        }
+        It->second = std::move(Entry);
+
+        // Least recently used first, never one a bake has pinned.
+        while (Bytes > BudgetBytes)
+        {
+            auto Oldest = Entries.end();
+            for (auto Candidate = Entries.begin(); Candidate != Entries.end(); ++Candidate)
+            {
+                if (Candidate->second->Pins == 0 && Candidate->first != Key && (Oldest == Entries.end() || Candidate->second->LastUse < Oldest->second->LastUse))
+                {
+                    Oldest = Candidate;
+                }
+            }
+            if (Oldest == Entries.end())
+            {
+                break;
+            }
+            Bytes -= Oldest->second->GetBytes();
+            Entries.erase(Oldest);
+        }
+    }
+#else
+    bool FNavTileCache::Load(int32, int32, uint32, rcCompactHeightfield*&) { return false; }
+    void FNavTileCache::Store(int32, int32, uint32, const rcCompactHeightfield&) {}
 #endif
 }

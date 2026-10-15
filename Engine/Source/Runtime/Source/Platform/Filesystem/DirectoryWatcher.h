@@ -37,7 +37,7 @@ namespace Lumina
         bool IsRunning() const { return bRunning.load(Atomic::MemoryOrderRelaxed); }
     
     private:
-        void WatchThreadFunc();
+        void WatchThreadFunc(const FThreadStop& Stop);
         FString WideToUtf8(const FWString& Wide);
         
         FFixedString Path;

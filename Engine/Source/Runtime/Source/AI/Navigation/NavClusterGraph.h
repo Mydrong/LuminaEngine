@@ -30,6 +30,7 @@ namespace Lumina
             Failed,
             Reached,
             Unreachable,
+            Abandoned,
         };
 
         void Reset(int32 MaxTiles);
@@ -41,12 +42,22 @@ namespace Lumina
         void AddTile(const dtNavMesh& Mesh, const dtMeshTile& Tile);
         void RemoveTile(const dtNavMesh& Mesh, uint32 TileIndex, int32 TileX, int32 TileY);
 
-        // Unreachable routes to the cluster nearest the goal that the start can reach.
+        // Unreachable routes to the cluster nearest the goal that the start can reach. Abandoned once Abandon reads nonzero.
         ERoute FindRoute(const dtNavMesh& Mesh, const dtQueryFilter& Filter, uint64 StartRef, uint64 EndRef,
-                         const FVector3& StartPos, const FVector3& EndPos, TVector<FStep>& Out) const;
+                         const FVector3& StartPos, const FVector3& EndPos, const std::atomic<uint32>& Abandon, TVector<FStep>& Out) const;
 
         // The poly of a route's cluster whose center lies nearest Pos.
         uint64 NearestPoly(const dtNavMesh& Mesh, uint64 Key, const FVector3& Pos) const;
+
+        // Swaps only ever merge the island labels, so a tile change that cut a route leaves them saying connected until an exact pass lands.
+        bool NeedsExactLabels() const { return LabelsExactAt != Version; }
+
+        // Reads the graph under a shared hold and parks the result for the next writer to adopt, giving up once Abandon reads nonzero.
+        void PrepareExactLabels(const std::atomic<uint32>& Abandon) const;
+        bool HasPendingLabels() const;
+
+        // Writer only. Takes the parked labels when nothing changed since they were computed.
+        void AdoptPendingLabels();
 
     private:
 
@@ -56,6 +67,14 @@ namespace Lumina
             uint64 EntryRef = 0;
             uint16 Flags = 0;
             uint8  Area = 0;
+        };
+
+        // Union find over every cluster ever built, so a swap merges in place and a reader walks it without writing.
+        struct FLabels
+        {
+            TVector<uint32> FirstId;
+            TVector<uint32> Parent;
+            TVector<uint32> Size;
         };
 
         struct FTileClusters
@@ -72,20 +91,18 @@ namespace Lumina
         void BuildClusters(const dtNavMesh& Mesh, const dtMeshTile& Tile);
         void BuildEdges(const dtNavMesh& Mesh, const dtMeshTile& Tile);
         void BuildNeighborEdges(const dtNavMesh& Mesh, int32 TileX, int32 TileY);
-        void EnsureComponents() const;
         uint32 ComponentOf(uint64 Key) const;
+        void Union(uint32 A, uint32 B);
         ERoute Search(const dtNavMesh& Mesh, const dtQueryFilter& Filter, uint64 StartKey, uint64 StartRef, uint64 GoalKey,
-                      const FVector3& StartPos, const FVector3& GoalPos, TVector<FStep>& Out) const;
+                      const FVector3& StartPos, const FVector3& GoalPos, const std::atomic<uint32>& Abandon, TVector<FStep>& Out) const;
 
         TVector<FTileClusters> Tiles;
-        uint64 Version = 1;
+        uint64                 Version = 1;
+        FLabels                Labels;
+        uint64                 LabelsExactAt = 0;
 
-        // Labeled on the first long query after a change, which already holds the topology lock shared.
-        mutable FMutex                 ComponentLock;
-        mutable std::atomic<uint64>    ComponentVersion{ 0 };
-
-        // Undirected labels by cluster, so different labels prove no route while equal ones still need a search.
-        mutable TVector<uint32>        ClusterOffset;
-        mutable TVector<uint32>        Components;
+        mutable FMutex         PendingLock;
+        mutable FLabels        PendingLabels;
+        mutable uint64         PendingVersion = 0;
     };
 }

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cmath>
 #include <thread>
 
 #include "AI/Navigation/NavMesh.h"
@@ -10,9 +11,12 @@
 #include "Platform/Time/PlatformTime.h"
 #include "World/World.h"
 #include "World/Entity/Components/NavMeshComponent.h"
+#include "World/Entity/Components/PathFollowComponent.h"
 #include "World/Entity/Components/PhysicsComponent.h"
+#include "World/Entity/Components/TerrainComponent.h"
 #include "World/Entity/Components/TransformComponent.h"
 #include "World/Entity/Systems/NavMeshSystem.h"
+#include "World/Entity/Systems/PathFollowSystem.h"
 
 namespace Lumina::NavTest
 {
@@ -33,18 +37,55 @@ namespace Lumina::NavTest
         return Entity;
     }
 
+    // Gentle hills, low enough that every slope stays walkable.
+    inline float GroundHeight(float X, float Z)
+    {
+        return 3.0f * std::sin(X * 0.011f) * std::cos(Z * 0.013f) + 1.0f * std::sin(X * 0.05f + Z * 0.04f);
+    }
+
+    constexpr float kTerrainBase = -5.0f;
+    constexpr float kTerrainRange = 10.0f;
+
+    // One heightfield spanning Size at a meter per sample, sitting where GroundHeight says.
+    inline ECS::FEntity SpawnTerrain(ECS::FRegistry& Registry, float Size)
+    {
+        const ECS::FEntity Entity = Registry.Create();
+        FTransform Transform;
+        Transform.SetLocation(FVector3(0.0f, kTerrainBase, 0.0f));
+        Registry.Emplace<STransformComponent>(Entity, Transform);
+
+        STerrainComponent Terrain;
+        Terrain.Resolution = (int32)Size + 1;
+        Terrain.TileWorldSize = Size;
+        Terrain.MaxHeight = kTerrainRange;
+        Terrain.Heightmap.resize((size_t)Terrain.Resolution * Terrain.Resolution);
+        const float Stride = Size / (float)(Terrain.Resolution - 1);
+        for (int32 Row = 0; Row < Terrain.Resolution; ++Row)
+        {
+            for (int32 Col = 0; Col < Terrain.Resolution; ++Col)
+            {
+                const float Height = GroundHeight(-Size * 0.5f + Col * Stride, -Size * 0.5f + Row * Stride);
+                Terrain.Heightmap[(size_t)Row * Terrain.Resolution + Col] = (Height - kTerrainBase) / kTerrainRange;
+            }
+        }
+        Registry.Emplace<STerrainComponent>(Entity, std::move(Terrain));
+        Registry.Emplace<STerrainColliderComponent>(Entity);
+        return Entity;
+    }
+
     // A level as the engine sees it, colliders in a registry and a nav volume ticked by the real system.
     struct FNavWorld
     {
-        CWorld*         World = nullptr;
-        SNavMeshSystem* System = nullptr;
-        ECS::FEntity    Volume;
+        CWorld*            World = nullptr;
+        SNavMeshSystem*    System = nullptr;
+        SPathFollowSystem* Follow = nullptr;
+        ECS::FEntity       Volume;
 
         ECS::FRegistry& Registry() const { return ECS::GetWorldRegistry(*World); }
         SNavMeshComponent& Nav() const { return Registry().Get<SNavMeshComponent>(Volume); }
 
-        // A world with only ground under the volume, square and Size across.
-        void Create(float Size, float GroundSlab = 256.0f)
+        // A world with only ground under the volume, square and Size across, flat slabs or one terrain.
+        void Create(float Size, float GroundSlab = 256.0f, bool bTerrain = false)
         {
             RegisterPendingTypes();
             World = NewObject<CWorld>(nullptr, FName("NavTestWorld"), FGuid::New(), OF_Transient);
@@ -52,13 +93,17 @@ namespace Lumina::NavTest
             R.GetSignals<STransformComponent>().OnConstruct.Connect<&BindTransform>();
 
             const float Slab = Math::Min(GroundSlab, Size);
-            const int32 Slabs = Math::Max(1, (int32)(Size / Slab));
+            const int32 Slabs = bTerrain ? 0 : Math::Max(1, (int32)(Size / Slab));
             for (int32 Z = 0; Z < Slabs; ++Z)
             {
                 for (int32 X = 0; X < Slabs; ++X)
                 {
                     SpawnBox(R, FVector3(-Size * 0.5f + (X + 0.5f) * Slab, -0.5f, -Size * 0.5f + (Z + 0.5f) * Slab), FVector3(Slab * 0.5f, 0.5f, Slab * 0.5f));
                 }
+            }
+            if (bTerrain)
+            {
+                SpawnTerrain(R, Size);
             }
 
             Volume = R.Create();
@@ -71,22 +116,41 @@ namespace Lumina::NavTest
             Mesh.DynamicRebuildInterval = 0.0f;
         }
 
-        void Start()
+        void Start(bool bWithPathFollow = false)
         {
             Nav().bBakeRequested = true;
             System = NewObject<SNavMeshSystem>(nullptr, NAME_None, FGuid::New(), OF_Transient);
             System->SetOwningWorld(World);
             World->Systems.push_back(System);
             System->OnStartup();
+            if (bWithPathFollow)
+            {
+                Follow = NewObject<SPathFollowSystem>(nullptr, NAME_None, FGuid::New(), OF_Transient);
+                Follow->SetOwningWorld(World);
+                World->Systems.push_back(Follow);
+                Follow->OnStartup();
+            }
         }
 
         void Stop()
         {
+            if (Follow != nullptr)
+            {
+                Follow->OnTeardown();
+                Follow = nullptr;
+            }
             if (System != nullptr)
             {
                 System->OnTeardown();
                 System = nullptr;
             }
+        }
+
+        double TickFollow()
+        {
+            PlatformTime::FStopwatch Watch;
+            Follow->OnUpdate();
+            return Watch.ElapsedMilliseconds();
         }
 
         double Tick()
@@ -129,13 +193,13 @@ namespace Lumina::NavTest
         }
 
         // True where an agent could stand on the ground itself, rather than on something set down there.
-        bool IsGroundWalkable(float X, float Z) const
+        bool IsGroundWalkable(float X, float Z, float GroundY = 0.0f) const
         {
             FVector3 Out;
             FNavQueryFilter Filter;
             // The nearest polygon can be the ground beside an obstacle, so the answer has to stay where it was asked.
-            return Nav().Runtime.Mesh && Nav().Runtime.Mesh->ProjectPoint(FVector3(X, 0.0f, Z), FVector3(0.1f, 0.3f, 0.1f), Filter, Out)
-                && std::fabs(Out.y) < 0.3f && std::fabs(Out.x - X) < 0.05f && std::fabs(Out.z - Z) < 0.05f;
+            return Nav().Runtime.Mesh && Nav().Runtime.Mesh->ProjectPoint(FVector3(X, GroundY, Z), FVector3(0.1f, 0.3f, 0.1f), Filter, Out)
+                && std::fabs(Out.y - GroundY) < 0.45f && std::fabs(Out.x - X) < 0.05f && std::fabs(Out.z - Z) < 0.05f;
         }
     };
 }

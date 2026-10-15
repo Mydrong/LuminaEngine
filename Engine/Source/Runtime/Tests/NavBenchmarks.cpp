@@ -8,9 +8,12 @@
 #include "AI/Navigation/NavMeshBuilder.h"
 #include "AI/Navigation/NavTypes.h"
 #include "Config/NavigationSettings.h"
+#include "Core/Console/ConsoleVariable.h"
 #include "Core/Math/Math.h"
+#include "Core/Threading/Thread.h"
 #include "Platform/Time/PlatformTime.h"
 #include "TaskSystem/TaskSystem.h"
+#include "World/Entity/Components/NavModifierComponent.h"
 #include "NavWorldTestUtil.h"
 
 // Run with --gtest_also_run_disabled_tests --gtest_filter=NavBenchmark.* and LUMINA_NAV_BENCH_SIZE as the world edge in meters.
@@ -509,5 +512,197 @@ TEST(NavBenchmark, DISABLED_WorldSources)
     const bool bDrained = World.WaitSettled(120000.0);
     std::printf("[NavBench] dirty tiles drained %s in %.0f ms\n", bDrained ? "ok" : "TIMED OUT", DrainWatch.ElapsedMilliseconds());
 
+    World.Stop();
+}
+
+namespace
+{
+    int32 EnvInt(const char* Name, int32 Default)
+    {
+        const char* Value = std::getenv(Name);
+        return Value ? std::atoi(Value) : Default;
+    }
+
+    struct FFrameSeries
+    {
+        TVector<double> Samples;
+
+        void Print(const char* Name) const
+        {
+            TVector<double> Sorted = Samples;
+            Algo::Sort(Sorted);
+            double Sum = 0.0;
+            for (double Sample : Sorted)
+            {
+                Sum += Sample;
+            }
+            const size_t N = Sorted.size();
+            std::printf("[NavHitch] %-24s avg %6.2f ms, p99 %6.2f ms, worst %6.2f ms\n", Name, N ? Sum / N : 0.0,
+                N ? Sorted[(size_t)(0.99 * (double)(N - 1))] : 0.0, N ? Sorted.back() : 0.0);
+        }
+    };
+
+    // Fixed work spread over every worker, so its wall time grows when something else holds them.
+    double ProbeWorkers()
+    {
+        const uint32 Chunks = Math::Max(1u, Jobs::GetNumWorkers()) * 4;
+        PlatformTime::FStopwatch Watch;
+        Task::ParallelFor(Chunks, [](uint32)
+        {
+            PlatformTime::FStopwatch Spin;
+            while (Spin.ElapsedMilliseconds() < 0.1)
+            {
+            }
+        }, 1);
+        return Watch.ElapsedMilliseconds();
+    }
+
+    struct FMover
+    {
+        ECS::FEntity Entity;
+        FVector3     Center;
+        float        Radius;
+        float        Angle;
+    };
+}
+
+// A crowd standing on its paths while obstacles drift through them and another thread keeps asking for paths, timed the way a frame feels it.
+TEST(NavBenchmark, DISABLED_Hitch)
+{
+    const float Size = (float)EnvInt("LUMINA_NAV_BENCH_SIZE", 1024);
+    const int32 AgentCount = EnvInt("LUMINA_NAV_BENCH_AGENTS", 2000);
+    const int32 MoverCount = EnvInt("LUMINA_NAV_BENCH_MOVERS", 40);
+    const bool bModifierMovers = EnvInt("LUMINA_NAV_BENCH_MODIFIERS", 0) != 0;
+    const int32 Frames = EnvInt("LUMINA_NAV_BENCH_FRAMES", 600);
+    const bool bGameplayQueries = EnvInt("LUMINA_NAV_BENCH_QUERY_THREAD", 1) != 0;
+    constexpr double kFrameMs = 1000.0 / 60.0;
+    if (EnvInt("LUMINA_NAV_BENCH_TIMINGS", 0) != 0)
+    {
+        FConsoleRegistry::Get().SetValueFromString("Nav.Debug.Timings", "1");
+    }
+
+    NavTest::FNavWorld World;
+    World.Create(Size, 256.0f, true);
+    ECS::FRegistry& Registry = World.Registry();
+    FRandom Random(5);
+    const float Half = Size * 0.5f - 8.0f;
+    auto Ground = [](float X, float Z) { return FVector3(X, NavTest::GroundHeight(X, Z), Z); };
+
+    const int32 Rocks = (int32)(Size * Size / 400.0f);
+    for (int32 i = 0; i < Rocks; ++i)
+    {
+        const FVector3 Extent(Random.Range(0.4f, 2.0f), Random.Range(0.4f, 1.5f), Random.Range(0.4f, 2.0f));
+        NavTest::SpawnBox(Registry, Ground(Random.Range(-Half, Half), Random.Range(-Half, Half)) + FVector3(0.0f, Extent.y - 0.3f, 0.0f), Extent);
+    }
+    World.Nav().Settings.TileSizeVoxels = 128;
+    std::printf("[NavHitch] %.0f m terrain, %d rocks, %d agents, %d moving %s\n", Size, Rocks, AgentCount, MoverCount, bModifierMovers ? "modifiers" : "box colliders");
+
+    World.Start(true);
+    ASSERT_TRUE(World.WaitReady(600000.0));
+    std::printf("[NavHitch] baked %d tiles\n", (int32)World.Nav().Tiles.size());
+
+    for (int32 i = 0; i < AgentCount; ++i)
+    {
+        const FVector3 From = Ground(Random.Range(-Half, Half), Random.Range(-Half, Half));
+        const float Heading = Random.Range(0.0f, 6.283f);
+        const float Distance = Random.Range(50.0f, 400.0f);
+        const FVector3 To = Ground(Math::Clamp(From.x + std::cos(Heading) * Distance, -Half, Half), Math::Clamp(From.z + std::sin(Heading) * Distance, -Half, Half));
+
+        const ECS::FEntity Agent = Registry.Create();
+        FTransform Transform;
+        Transform.SetLocation(From + FVector3(0.0f, 0.2f, 0.0f));
+        Registry.Emplace<STransformComponent>(Agent, Transform);
+        Registry.Emplace<SPathFollowComponent>(Agent).SetTargetLocation(To);
+    }
+
+    // The first wave of paths, which every agent owes at once.
+    {
+        FFrameSeries Wave;
+        int32 Settled = 0;
+        for (int32 Frame = 0; Frame < 600 && Settled < 10; ++Frame)
+        {
+            const double Ms = World.TickFollow();
+            Wave.Samples.push_back(Ms);
+            Settled = Ms < 0.5 ? Settled + 1 : 0;
+        }
+        std::printf("[NavHitch] first paths for the crowd took %d frames\n", (int32)Wave.Samples.size());
+        Wave.Print("first paths frame");
+    }
+
+    TVector<FMover> Movers;
+    for (int32 i = 0; i < MoverCount; ++i)
+    {
+        FMover Mover{ ECS::NullEntity, Ground(Random.Range(-Half + 30.0f, Half - 30.0f), Random.Range(-Half + 30.0f, Half - 30.0f)), Random.Range(8.0f, 25.0f), Random.Range(0.0f, 6.283f) };
+        const FVector3 Start = Mover.Center + FVector3(std::cos(Mover.Angle) * Mover.Radius, 0.0f, std::sin(Mover.Angle) * Mover.Radius);
+        if (bModifierMovers)
+        {
+            Mover.Entity = Registry.Create();
+            FTransform Transform;
+            Transform.SetLocation(Start);
+            Registry.Emplace<STransformComponent>(Mover.Entity, Transform);
+            SNavModifierComponent& Modifier = Registry.Emplace<SNavModifierComponent>(Mover.Entity);
+            Modifier.Area = ENavArea::Null;
+            Modifier.Extents = FVector3(2.0f, 3.0f, 2.0f);
+        }
+        else
+        {
+            Mover.Entity = NavTest::SpawnBox(Registry, Start + FVector3(0.0f, 0.7f, 0.0f), FVector3(2.0f, 0.7f, 2.0f));
+        }
+        Movers.push_back(Mover);
+    }
+
+    // Other gameplay asking for long paths from its own thread, the way a script or a spawner would.
+    std::atomic<bool> bStopQueries{ false };
+    std::atomic<int32> GameplayQueries{ 0 };
+    FNavMesh* Mesh = World.Nav().Runtime.Mesh.get();
+    FThread QueryThread([&]
+    {
+        FRandom QueryRandom(77);
+        FNavQueryFilter Filter;
+        while (bGameplayQueries && !bStopQueries.load(std::memory_order_relaxed))
+        {
+            FNavPath Path;
+            Mesh->FindPath(Ground(QueryRandom.Range(-Half, Half), QueryRandom.Range(-Half, Half)),
+                           Ground(QueryRandom.Range(-Half, Half), QueryRandom.Range(-Half, Half)), Filter, Path);
+            GameplayQueries.fetch_add(1, std::memory_order_relaxed);
+        }
+    });
+
+    FFrameSeries NavTick, FollowTick, Probe, Frame;
+    const uint64 EpochBefore = Mesh->GetTopologyEpoch();
+    PlatformTime::FStopwatch RunWatch;
+    for (int32 FrameIndex = 0; FrameIndex < Frames; ++FrameIndex)
+    {
+        PlatformTime::FStopwatch FrameWatch;
+        for (FMover& Mover : Movers)
+        {
+            Mover.Angle += 3.0f / 60.0f / Mover.Radius;
+            const FVector3 At = Mover.Center + FVector3(std::cos(Mover.Angle) * Mover.Radius, 0.0f, std::sin(Mover.Angle) * Mover.Radius);
+            Registry.Get<STransformComponent>(Mover.Entity).SetLocation(Ground(At.x, At.z) + FVector3(0.0f, bModifierMovers ? 0.0f : 0.7f, 0.0f));
+        }
+        NavTick.Samples.push_back(World.Tick());
+        FollowTick.Samples.push_back(World.TickFollow());
+        Probe.Samples.push_back(ProbeWorkers());
+        const double Used = FrameWatch.ElapsedMilliseconds();
+        Frame.Samples.push_back(Used);
+        if (Used < kFrameMs)
+        {
+            std::this_thread::sleep_for(std::chrono::microseconds((int64)((kFrameMs - Used) * 1000.0)));
+        }
+    }
+    const double RunSeconds = RunWatch.ElapsedMilliseconds() / 1000.0;
+    bStopQueries.store(true);
+    QueryThread.Join();
+
+    NavTick.Print("nav system tick");
+    FollowTick.Print("path follow tick");
+    Probe.Print("worker probe, 0.4 ideal");
+    Frame.Print("frame work");
+    std::printf("[NavHitch] %.1f tile changes/s, %.0f gameplay paths/s over %.1f s\n",
+        (double)(Mesh->GetTopologyEpoch() - EpochBefore) / RunSeconds, GameplayQueries.load() / RunSeconds, RunSeconds);
+    if (const TSharedPtr<FNavTileCache>& Cache = World.Nav().Runtime.TileCache)
+    {
+        std::printf("[NavHitch] tile cache %d hits, %d misses\n", Cache->GetHits(), Cache->GetMisses());
+    }
     World.Stop();
 }

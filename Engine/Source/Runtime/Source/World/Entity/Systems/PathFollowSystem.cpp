@@ -3,6 +3,7 @@
 #include "World/ECS/Registry.h"
 
 #include "AI/Navigation/NavMesh.h"
+#include "Config/NavigationSettings.h"
 #include "TaskSystem/TaskSystem.h"
 #include "World/Entity/EntityUtils.h"
 #include "World/Entity/Components/CharacterComponent.h"
@@ -474,13 +475,29 @@ namespace Lumina
             RepathQueue.insert(RepathQueue.end(), Bucket.Requests.begin(), Bucket.Requests.end());
         }
 
+        // A burst of repaths, a crowd spawning or a tile under it rebaking, is served round robin over several ticks.
+        const uint32 Budget = (uint32)Math::Max(0, GetDefault<CNavigationSettings>()->MaxRepathsPerTick);
+        const uint32 Served = Budget == 0 ? (uint32)RepathQueue.size() : Math::Min(Budget, (uint32)RepathQueue.size());
+        if (Served < (uint32)RepathQueue.size())
+        {
+            Algo::Sort(RepathQueue, [](const FRepathRequest& A, const FRepathRequest& B) { return A.Entity.GetIndex() < B.Entity.GetIndex(); });
+            const auto Resume = Algo::FindIf(RepathQueue, [this](const FRepathRequest& Request) { return Request.Entity.GetIndex() > RepathCursor; });
+            Algo::Rotate(RepathQueue.begin(), Resume, RepathQueue.end());
+            RepathCursor = RepathQueue[Served - 1].Entity.GetIndex();
+        }
+
         // One query per grab, so a burst of retargets spreads across every worker instead of piling onto a few chunks.
         Task::ParallelFor((uint32)RepathQueue.size(), [&](const Task::FParallelRange& Range)
         {
             for (uint32 i = Range.Start; i < Range.End; ++i)
             {
                 const FRepathRequest& Request = RepathQueue[i];
-                Follow(Request.Entity, PathStorage.Get(Request.Entity), Request.Goal, Request.AgentPos, true);
+                SPathFollowComponent& Comp = PathStorage.Get(Request.Entity);
+                // Still owed a path, it walks the corners it has, and one without any waits where it stands.
+                if (i < Served || Comp.CornerCount > 0)
+                {
+                    Follow(Request.Entity, Comp, Request.Goal, Request.AgentPos, i < Served);
+                }
             }
         }, 1);
     }

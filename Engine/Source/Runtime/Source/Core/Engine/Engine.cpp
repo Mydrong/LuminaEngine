@@ -357,13 +357,13 @@ namespace Lumina
         BootMark("Phase Core");
 
         // Threads rather than jobs, since a CLR and a COM apartment both outlive the fiber a job runs on.
-        FThread BasisuThread([]
+        FThread BasisuThread(FThreadOptions{ "Basisu Init" }, []
         {
             basisu::basisu_encoder_init();
         });
 
         // Started past this stretch's last module load, whose static initializers race the layout registry.
-        FThread DotNetThread([]
+        FThread DotNetThread(FThreadOptions{ "DotNet Init" }, []
         {
             DotNet::Initialize();
         });
@@ -371,7 +371,7 @@ namespace Lumina
         FThread AudioThread;
         if (!GIsHeadless)
         {
-            AudioThread = FThread([]
+            AudioThread = FThread(FThreadOptions{ "Audio Init" }, []
             {
                 Audio::Initialize();
             });
