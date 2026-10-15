@@ -790,6 +790,12 @@ namespace Lumina
                 if (Task.Clip != nullptr)
                 {
                     Task.Clip->SampleLocalPose(Task.Time, Skeleton, Out, ActiveBones);
+
+                    // Pinned per sample, not only at the output, so IK and mesh-space nodes never see a moving root.
+                    if (List.bLockRoot && List.RootBoneIndex != Constants::kIndexNone && !Task.Clip->IsAdditive())
+                    {
+                        RootMotion::PinRootToBindPose(Out, Skeleton, PoseBone(List.RootBoneIndex));
+                    }
                 }
                 else
                 {
