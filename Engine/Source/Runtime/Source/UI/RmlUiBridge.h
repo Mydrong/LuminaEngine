@@ -87,6 +87,8 @@ namespace Lumina::RmlUi
 
         FLockedWorldContext(const FLockedWorldContext&)            = delete;
         FLockedWorldContext& operator=(const FLockedWorldContext&) = delete;
+        FLockedWorldContext(FLockedWorldContext&&) = delete;
+        FLockedWorldContext& operator=(FLockedWorldContext&&) = delete;
 
         Rml::Context* Get() const { return Context; }
         Rml::Context* operator->() const { return Context; }

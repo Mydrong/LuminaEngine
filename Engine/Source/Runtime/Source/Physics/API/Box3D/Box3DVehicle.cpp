@@ -84,7 +84,7 @@ namespace Lumina::Physics
         LUMINA_PROFILE_SCOPE();
 
         ECS::FRegistry& Registry = ECS::GetWorldRegistry(*World);
-        const bool bDebugDraw = FBox3DPhysicsContext::IsDebugDrawEnabled();
+        const bool bDrawWheels = IsDebugDrawEnabled() || FBox3DPhysicsContext::IsDebugDrawForced();
         const bool bPermissive = Box3DUtils::UsesPermissiveCollisionFilter();
 
         Registry.View<SVehicleComponent, SRigidBodyComponent>().ForEach([&](ECS::FEntity Entity, SVehicleComponent& Vehicle, const SRigidBodyComponent& RigidBody)
@@ -174,7 +174,7 @@ namespace Lumina::Physics
                 const float WheelSteer = Wheel.bSteer ? TargetSteer * (Wheel.Position.z < 0.0f ? -1.0f : 1.0f) : 0.0f;
                 Wheel.SteerAngle += Math::Clamp(WheelSteer - Wheel.SteerAngle, -SteerStep, SteerStep);
 
-                if (bDebugDraw)
+                if (bDrawWheels)
                 {
                     const FVector3 From = FromB3(Mount);
                     const FVector3 To = Ray.bHit ? FromB3(Ray.Point) : From - Up * Reach;

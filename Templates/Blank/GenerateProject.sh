@@ -1,27 +1,28 @@
 #!/usr/bin/env bash
-#
-# Regenerates this project's IDE files, and the Unix counterpart to GenerateProject.bat. The engine
-# is built from source alongside the project, so its own output stays in the engine tree and is
-# shared across projects.
+# Any engine on this machine starts this, and the build tool hands it to the engine the .lproject names.
 
 set -uo pipefail
 
 ProjectDir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+Store="${XDG_DATA_HOME:-$HOME/.local/share}/Lumina/Engines.json"
 
-if [ -z "${LUMINA_DIR:-}" ]; then
-    echo "LUMINA_DIR is not set. Run the engine's Setup.sh first, or export it yourself:" >&2
-    echo "  export LUMINA_DIR=\"/path/to/LuminaEngine\"" >&2
-    exit 1
+EngineDir=""
+if [ -f "$Store" ]; then
+    while IFS= read -r Candidate; do
+        if [ -x "$Candidate/LuminaBuild.sh" ]; then
+            EngineDir="$Candidate"
+            break
+        fi
+    done < <(sed -n 's/^ *"[^"]*": *"\(.*\)",\{0,1\} *$/\1/p' "$Store")
 fi
 
-if [ ! -f "$LUMINA_DIR/LuminaBuild.sh" ]; then
-    echo "LuminaBuild.sh not found under \"$LUMINA_DIR\"." >&2
-    echo "LUMINA_DIR does not point at a Lumina engine root." >&2
+if [ -z "$EngineDir" ]; then
+    echo "No Lumina engine is known on this machine. Run Setup.sh in an engine checkout once, then try again." >&2
     exit 1
 fi
 
 # Extra arguments pass straight through.
-if ! "$LUMINA_DIR/LuminaBuild.sh" GenerateProjectFiles -Project="$ProjectDir" "$@"; then
+if ! "$EngineDir/LuminaBuild.sh" GenerateProjectFiles -Project="$ProjectDir" "$@"; then
     echo
     echo "Project generation failed." >&2
     exit 1

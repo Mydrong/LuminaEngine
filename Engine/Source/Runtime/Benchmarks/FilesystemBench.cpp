@@ -8,6 +8,7 @@
 #include "Platform/Time/PlatformTime.h"
 #include "Containers/Vector.h"
 #include "Containers/String.h"
+#include "Paths/Paths.h"
 #include "Platform/Filesystem/PlatformFilesystem.h"
 
 using namespace Lumina;
@@ -73,11 +74,10 @@ namespace
 
     std::string FindWalkRoot()
     {
-        const char* EngineDir = std::getenv("LUMINA_DIR");
-        if (EngineDir != nullptr)
+        Lumina::Paths::InitializePaths();
+        if (const Lumina::FString& EngineDir = Lumina::Paths::GetEngineInstallDirectory(); !EngineDir.empty())
         {
-            std::string Candidate = std::string(EngineDir) + "/Engine/Source";
-            std::replace(Candidate.begin(), Candidate.end(), '\\', '/');
+            std::string Candidate = std::string(EngineDir.c_str()) + "/Engine/Source";
             if (std::filesystem::is_directory(Candidate))
             {
                 return Candidate;

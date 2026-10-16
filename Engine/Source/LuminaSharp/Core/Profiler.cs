@@ -17,17 +17,12 @@ public static class Profiler
     /// <summary>Open a named scope. Pair with <see cref="End"/>; prefer <see cref="Sample"/> for exception safety.</summary>
     public static void Begin(string Name) => Lumina.CGameplayProfilerLibrary.BeginRegisteredScope(ScopeId(Name));
 
-    // Names are registered natively once, after which a sample sends only an id.
-    private static readonly System.Collections.Generic.Dictionary<string, int> ScopeIds = new();
+    // Names are registered natively once, after which a sample sends only an id. Concurrent, since parallel OnUpdate samples too.
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, int> ScopeIds = new();
 
     private static int ScopeId(string Name)
     {
-        if (!ScopeIds.TryGetValue(Name, out int Id))
-        {
-            Id = Lumina.CGameplayProfilerLibrary.RegisterScope(Name);
-            ScopeIds[Name] = Id;
-        }
-        return Id;
+        return ScopeIds.GetOrAdd(Name, static Key => Lumina.CGameplayProfilerLibrary.RegisterScope(Key));
     }
 
     /// <summary>Close the most recently opened scope.</summary>
@@ -42,7 +37,24 @@ public static class Profiler
     /// <summary>The disposable returned by <see cref="Sample"/>. Stack-only (a ref struct); do not store it.</summary>
     public readonly ref struct Scope
     {
-        public Scope(string Name) => Lumina.CGameplayProfilerLibrary.BeginRegisteredScope(ScopeId(Name));
-        public void Dispose() => Lumina.CGameplayProfilerLibrary.EndScope();
+        // Decided once at the open, so the close always matches whatever the open did.
+        private readonly bool bOpen;
+
+        public Scope(string Name)
+        {
+            bOpen = Native.IsProfilingScopes;
+            if (bOpen)
+            {
+                Lumina.CGameplayProfilerLibrary.BeginRegisteredScope(ScopeId(Name));
+            }
+        }
+
+        public void Dispose()
+        {
+            if (bOpen)
+            {
+                Lumina.CGameplayProfilerLibrary.EndScope();
+            }
+        }
     }
 }

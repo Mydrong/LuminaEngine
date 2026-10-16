@@ -316,8 +316,11 @@ namespace Lumina::RHI
     // Metered, since a destroy can reach the driver free and a streaming burst retires hundreds.
     static constexpr uint32 kMaxDestroysPerDrain = 64;
 
-    // Past this the backlog is itself VRAM the frame is trying to allocate, so the cap is dropped.
+    // Past this the backlog is itself VRAM the frame is trying to allocate, so the cap widens to a share of it.
     static constexpr size_t kRetireBacklogHighWater = 512;
+
+    // A quarter a drain clears a streaming burst in a few frames instead of stalling one on thousands of frees.
+    static constexpr size_t kRetireBacklogShareDivisor = 4;
 
     static void DrainRetireQueue(uint32 Slot)
     {
@@ -369,13 +372,15 @@ namespace Lumina::RHI
             TVector<FRetireItem>& Queue = GCore.RetireQueues[Slot];
 
             // A callback is paired with the resource beside it, so metering some kinds fires it a drain early.
-            const bool bUncapped = Queue.size() > kRetireBacklogHighWater;
+            const size_t Cap = Queue.size() > kRetireBacklogHighWater
+                ? Math::Max(kRetireBacklogHighWater / 2, Queue.size() / kRetireBacklogShareDivisor)
+                : kMaxDestroysPerDrain;
 
             // Compacted in place rather than swap-popped, so retire order is destroy order.
             size_t Write = 0;
             for (size_t Read = 0; Read < Queue.size(); ++Read)
             {
-                const bool bUnderCap = bUncapped || Ready.size() < kMaxDestroysPerDrain;
+                const bool bUnderCap = Ready.size() < Cap;
                 if (bUnderCap && HasRetired(Queue[Read]))
                 {
                     Ready.push_back(std::move(Queue[Read]));

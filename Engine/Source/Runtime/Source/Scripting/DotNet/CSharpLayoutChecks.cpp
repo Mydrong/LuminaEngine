@@ -61,6 +61,10 @@ namespace Lumina
     static_assert(offsetof(FVectorOps, PushBack) == 16, "VectorOps.PushBack offset drift (update TVector.cs).");
     static_assert(offsetof(FVectorOps, RemoveAt) == 24, "VectorOps.RemoveAt offset drift (update TVector.cs).");
     static_assert(offsetof(FVectorOps, Clear)    == 32, "VectorOps.Clear offset drift (update TVector.cs).");
+    static_assert(offsetof(FVectorOps, DataOffset)   == 100, "VectorOps.DataOffset offset drift (update ContainerOps.cs).");
+    static_assert(offsetof(FVectorOps, CountDivisor) == 108, "VectorOps.CountDivisor offset drift (update ContainerOps.cs).");
+    static_assert(offsetof(FMapOps, At)   == 72,  "MapOps.At offset drift (update ContainerOps.cs).");
+    static_assert(offsetof(FMapOps, Next) == 120, "MapOps.Next offset drift (update ContainerOps.cs).");
 
 #if defined(LE_DEBUG) || defined(LE_DEVELOPMENT)
     namespace

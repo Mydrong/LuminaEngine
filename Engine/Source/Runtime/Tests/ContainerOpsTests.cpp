@@ -124,6 +124,18 @@ namespace
         EXPECT_EQ(Ops->Size(Storage), Count - 1);
         EXPECT_EQ(Ops->Find(Storage, &Probe), nullptr);
 
+        // Next resumes from its cursor, so a walk reaches every remaining pair once, skipping the erased slot.
+        SIZE_T Cursor = 0;
+        SIZE_T Visited = 0;
+        const void* Key = nullptr;
+        void* Value = nullptr;
+        while (Ops->Next(Storage, &Cursor, &Key, &Value))
+        {
+            EXPECT_EQ(*static_cast<const int32*>(Value), *static_cast<const int32*>(Key) * 10);
+            ++Visited;
+        }
+        EXPECT_EQ(Visited, Count - 1);
+
         Ops->Clear(Storage);
         EXPECT_EQ(Ops->Size(Storage), 0u);
 

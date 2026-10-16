@@ -1,6 +1,6 @@
 #include "Includes/SceneGlobals.slang"
 
-// One workgroup per (skinned slot, meshlet), keyed on retained slots that all hold this frame's data.
+// One workgroup per (skinned entry, meshlet), keyed on skinned indices that all hold this frame's data.
 
 struct FDispatchIndirectArguments
 {
@@ -12,7 +12,7 @@ struct FDispatchIndirectArguments
 struct FBuildSkinWorkArgs
 {
     GPUSpan<uint>              SlotList;
-    GPUSpan<FSkinnedFrameData> SkinnedData;   // indexed by retained slot, not by SlotList position
+    GPUSpan<FSkinnedFrameData> SkinnedData;   // indexed by the skinned index SlotList holds, not by list position
 
     // One running base per slot, written for empty slots too, so Skinning.slang's search never reads a stale one.
     GPUSpan<uint> OutWorkBase;

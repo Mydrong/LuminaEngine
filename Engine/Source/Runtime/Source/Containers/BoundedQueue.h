@@ -84,6 +84,8 @@ namespace Lumina
 
         TBoundedQueue(const TBoundedQueue&) = delete;
         TBoundedQueue& operator=(const TBoundedQueue&) = delete;
+        TBoundedQueue(TBoundedQueue&&) = delete;
+        TBoundedQueue& operator=(TBoundedQueue&&) = delete;
 
         static constexpr bool IsFixedCapacity() { return bFixed; }
 

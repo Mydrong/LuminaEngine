@@ -16,8 +16,6 @@ namespace Lumina
     class RUNTIME_API IDevelopmentToolUI : public IEventHandler
     {
     public:
-        IDevelopmentToolUI() = default;
-        IDevelopmentToolUI(const IDevelopmentToolUI&) = default;
         virtual ~IDevelopmentToolUI() = default;
 
         virtual void Initialize(const FUpdateContext& UpdateContext) = 0;

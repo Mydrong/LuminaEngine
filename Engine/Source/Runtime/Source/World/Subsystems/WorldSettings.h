@@ -16,7 +16,7 @@ namespace Lumina
         /** Engine systems disabled for this world, by reflected type name. Unknown names are ignored,
             so deleting a system never breaks load; new systems default to enabled. Driven by the
             World Editor's Systems panel, not the property grid. */
-        PROPERTY()
+        PROPERTY(Hidden)
         TVector<FName> DisabledSystems;
 
         /** Entities below this Y position are automatically destroyed. */

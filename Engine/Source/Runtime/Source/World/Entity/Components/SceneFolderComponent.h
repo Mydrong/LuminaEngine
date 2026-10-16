@@ -4,6 +4,7 @@
 
 
 
+#include "Containers/Algorithm.h"
 #include "Containers/Vector.h"
 #include "Containers/Name.h"
 #include "Core/Object/ObjectMacros.h"
@@ -17,18 +18,18 @@ namespace Lumina
     {
         GENERATED_BODY()
 
-        PROPERTY()
+        PROPERTY(Hidden)
         uint32 ID = 0;
 
         /** Owning folder, or 0 for a folder that sits at the root of the outliner. */
-        PROPERTY()
+        PROPERTY(Hidden)
         uint32 ParentID = 0;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         FName Name;
 
         /** Members, as entity integral ids. Only entities without an entity parent are filed here. */
-        PROPERTY()
+        PROPERTY(Hidden)
         TVector<ECS::FEntity> Entities;
     };
 
@@ -40,11 +41,11 @@ namespace Lumina
 
         static constexpr uint32 NoFolder = 0;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         TVector<SSceneFolder> Folders;
 
         /** Monotonic id source; ids are never reused so a stale reference can't alias a new folder. */
-        PROPERTY()
+        PROPERTY(Hidden)
         uint32 NextFolderID = 1;
 
         NODISCARD SSceneFolder* Find(uint32 FolderID)
@@ -211,6 +212,16 @@ namespace Lumina
             if (SSceneFolder* Folder = Find(FolderID))
             {
                 Folder->Entities.push_back(Entity);
+            }
+        }
+
+        // One pass over every folder for a whole batch, where RemoveEntity searches them per entity.
+        template <typename TPredicate>
+        void RemoveEntitiesIf(TPredicate&& ShouldRemove)
+        {
+            for (SSceneFolder& Folder : Folders)
+            {
+                Folder.Entities.erase(Algo::RemoveIf(Folder.Entities, ShouldRemove), Folder.Entities.end());
             }
         }
 

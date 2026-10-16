@@ -9,22 +9,43 @@ namespace LuminaSharp;
 // Every way native calls back into managed code is one of these behind a GCHandle, carried as an SScriptCallback.
 public abstract class ScriptClosure
 {
+    // One rule for every kind of callback, it runs in the script context it was bound in.
+    private readonly Engine.Scope BoundIn = Engine.Snapshot();
+
     // The payload's meaning is the binding's own; the answer goes back to native, which most callers ignore.
     public abstract ulong Invoke(ulong Payload);
+
+    internal ulong Run(ulong Payload)
+    {
+        using Engine.Scope Prior = Engine.Resume(BoundIn);
+        return Invoke(Payload);
+    }
 }
 
+// Holds the caller's own delegate, so binding one allocates no adapter around it.
 internal sealed class ActionClosure : ScriptClosure
 {
-    private readonly Action<ulong> Handler;
+    private readonly Delegate Handler;
 
-    public ActionClosure(Action<ulong> Handler)
+    public ActionClosure(Delegate Handler)
     {
         this.Handler = Handler;
     }
 
     public override ulong Invoke(ulong Payload)
     {
-        Handler(Payload);
+        switch (Handler)
+        {
+            case Action Plain:
+                Plain();
+                break;
+            case Action<FEntity> OnEntity:
+                OnEntity(new FEntity((uint)Payload));
+                break;
+            case Action<float> OnFloat:
+                OnFloat(BitConverter.Int32BitsToSingle(unchecked((int)(uint)Payload)));
+                break;
+        }
         return 0;
     }
 }
@@ -37,19 +58,19 @@ public static class ScriptCallback
 
     public static SScriptCallback Of(Action Handler)
     {
-        return Bind(new ActionClosure(_ => Handler()));
+        return Bind(new ActionClosure(Handler));
     }
 
     // The payload is the entity the operation produced, or the null entity when it produced none.
     public static SScriptCallback Of(Action<FEntity> Handler)
     {
-        return Bind(new ActionClosure(Payload => Handler(new FEntity((uint)Payload))));
+        return Bind(new ActionClosure(Handler));
     }
 
     // The payload is a float packed by Scripting::PackFloatPayload, such as a tween's value.
     public static SScriptCallback OfFloat(Action<float> Handler)
     {
-        return Bind(new ActionClosure(Payload => Handler(BitConverter.Int32BitsToSingle(unchecked((int)(uint)Payload)))));
+        return Bind(new ActionClosure(Handler));
     }
 
     public static SScriptCallback Bind(ScriptClosure Closure)
@@ -69,7 +90,7 @@ public static class ScriptCallback
     {
         try
         {
-            return Token != IntPtr.Zero && GCHandle.FromIntPtr(Token).Target is ScriptClosure Closure ? Closure.Invoke(Payload) : 0;
+            return Token != IntPtr.Zero && GCHandle.FromIntPtr(Token).Target is ScriptClosure Closure ? Closure.Run(Payload) : 0;
         }
         catch (Exception Exception)
         {

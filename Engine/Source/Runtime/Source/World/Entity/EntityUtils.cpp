@@ -615,6 +615,41 @@ namespace Lumina::ECS::Utils
         return Registry.NamedStorage<STagComponent>(Tag).Contains(Entity);
     }
 
+    namespace
+    {
+        template<typename TFunc>
+        void ForEachTagStorage(const ECS::FRegistry& Registry, ECS::FEntity Entity, TFunc&& Func)
+        {
+            const ECS::FComponentTypeID TagType = ECS::GetComponentTypeID<STagComponent>();
+            const ECS::FSparseSet* Unnamed = Registry.FindStorage(TagType);
+            for (ECS::FSparseSet* Storage : Registry.GetActiveStorages())
+            {
+                if (Storage != Unnamed && Storage->GetTypeInfo().TypeID == TagType && Storage->Contains(Entity))
+                {
+                    Func(*Storage);
+                }
+            }
+        }
+    }
+
+    void ForEachEntityTag(const ECS::FRegistry& Registry, ECS::FEntity Entity, TFunctionRef<void(const FName&)> Func)
+    {
+        ForEachTagStorage(Registry, Entity, [&](ECS::FSparseSet& Storage)
+        {
+            Func(static_cast<const STagComponent*>(Storage.GetRaw(Entity))->Tag);
+        });
+    }
+
+    FName GetEntityTag(const ECS::FRegistry& Registry, ECS::FEntity Entity)
+    {
+        FName First;
+        ForEachEntityTag(Registry, Entity, [&](const FName& Tag)
+        {
+            First = First.IsNone() ? Tag : First;
+        });
+        return First;
+    }
+
     void SetEntityTag(ECS::FRegistry& Registry, ECS::FEntity Entity, const FName& Tag)
     {
         if (!Registry.IsValid(Entity))
@@ -622,20 +657,11 @@ namespace Lumina::ECS::Utils
             return;
         }
 
-        // Out of the old storage first, or the entity answers to both names.
         ClearEntityTag(Registry, Entity);
-
-        if (Tag.IsNone())
+        if (!Tag.IsNone())
         {
-            return;
+            Registry.NamedStorage<STagComponent>(Tag).Emplace(Entity).Tag = Tag;
         }
-
-        STagComponent Component;
-        Component.Tag = Tag;
-        Registry.NamedStorage<STagComponent>(Tag).EmplaceOrReplace(Entity, Component);
-
-        // A lookup by type alone cannot see into a named storage, so the unnamed copy records which one.
-        Registry.GetOrEmplace<STagComponent>(Entity).Tag = Tag;
     }
 
     void ClearEntityTag(ECS::FRegistry& Registry, ECS::FEntity Entity)
@@ -645,13 +671,13 @@ namespace Lumina::ECS::Utils
             return;
         }
 
-        const STagComponent* Existing = Registry.TryGet<STagComponent>(Entity);
-        if (Existing == nullptr)
+        // Gathered first, since removing reshapes the storages being walked.
+        TVector<ECS::FSparseSet*> Tagged;
+        ForEachTagStorage(Registry, Entity, [&](ECS::FSparseSet& Storage) { Tagged.push_back(&Storage); });
+        for (ECS::FSparseSet* Storage : Tagged)
         {
-            return;
+            Storage->RemoveEntity(Entity);
         }
-
-        Registry.NamedStorage<STagComponent>(Existing->Tag).RemoveEntity(Entity);
         Registry.Remove<STagComponent>(Entity);
     }
 
@@ -664,6 +690,9 @@ namespace Lumina::ECS::Utils
                 Registry.NamedStorage<STagComponent>(Component.Tag).EmplaceOrReplace(Entity, Component);
             }
         });
+
+        // Left behind, the unnamed copy would read as one more tag beside the per-tag one.
+        Registry.ClearComponent<STagComponent>();
     }
     
     // --- Hierarchy ---
@@ -1570,32 +1599,33 @@ namespace Lumina::ECS::Utils
         }
 
         template<typename Visitor>
-        void ForEachEntityRefOnEntity(ECS::FRegistry& Registry, ECS::FEntity Entity, Visitor& Visit)
+        void ForEachEntityRefInComponent(const CStruct* Struct, void* Value, Visitor& Visit)
         {
-            for (Lumina::ECS::FSparseSet* StoragePtr : Registry.GetActiveStorages())
-            {
-                const Lumina::ECS::FComponentTypeID ID = StoragePtr->GetTypeInfo().TypeID;
-                Lumina::ECS::FSparseSet& Storage = *StoragePtr;
-                if (!Storage.Contains(Entity))
-                {
-                    continue;
-                }
+            ForEachEntityRefInStruct(const_cast<CStruct*>(Struct), Value, Visit);
 
-                if (CStruct* Struct = FindComponentStructByTypeId(ID))
-                {
-                    ForEachEntityRefInStruct(Struct, Storage.GetRaw(Entity), Visit);
-                }
-            }
-
-            // A script is held BY a component, so its reflected properties are invisible to the storage walk.
-            if (SEntityScriptComponent* Scripts = Registry.TryGet<SEntityScriptComponent>(Entity))
+            // A script is an object the component holds, so its reflected properties are invisible to the component's own walk.
+            if (Struct == SEntityScriptComponent::StaticStruct())
             {
-                for (const TStrongObjectPtr<CEntityScript>& Held : Scripts->Scripts)
+                for (const TStrongObjectPtr<CEntityScript>& Held : static_cast<SEntityScriptComponent*>(Value)->Scripts)
                 {
-                    CEntityScript* Script = Held.Get();
-                    if (Script != nullptr && Script->GetClass() != nullptr)
+                    if (CEntityScript* Script = Held.Get(); Script != nullptr && Script->GetClass() != nullptr)
                     {
                         ForEachEntityRefInStruct(Script->GetClass(), Script, Visit);
+                    }
+                }
+            }
+        }
+
+        template<typename Visitor>
+        void ForEachEntityRefOnEntity(ECS::FRegistry& Registry, ECS::FEntity Entity, Visitor& Visit)
+        {
+            for (Lumina::ECS::FSparseSet* Storage : Registry.GetActiveStorages())
+            {
+                if (Storage->Contains(Entity))
+                {
+                    if (CStruct* Struct = FindComponentStructByTypeId(Storage->GetTypeInfo().TypeID))
+                    {
+                        ForEachEntityRefInComponent(Struct, Storage->GetRaw(Entity), Visit);
                     }
                 }
             }
@@ -1606,24 +1636,50 @@ namespace Lumina::ECS::Utils
 
     void RemapEntityReferences(ECS::FRegistry& Registry, ECS::FEntity Entity, const THashMap<ECS::FEntity, ECS::FEntity>& Map, bool bClearUnmapped)
     {
-        auto Visit = [&](uint32& Value)
+        for (Lumina::ECS::FSparseSet* Storage : Registry.GetActiveStorages())
         {
-            RemapEntityHandle(Value, Map, bClearUnmapped);
+            if (Storage->Contains(Entity))
+            {
+                RemapEntityReferences(FindComponentStructByTypeId(Storage->GetTypeInfo().TypeID), Storage->GetRaw(Entity), Map, bClearUnmapped);
+            }
+        }
+    }
+
+    void RemapEntityReferences(const CStruct* Struct, void* Value, const THashMap<ECS::FEntity, ECS::FEntity>& Map, bool bClearUnmapped)
+    {
+        if (Struct == nullptr || Value == nullptr)
+        {
+            return;
+        }
+        auto Visit = [&](uint32& Handle)
+        {
+            RemapEntityHandle(Handle, Map, bClearUnmapped);
         };
-        ForEachEntityRefOnEntity(Registry, Entity, Visit);
+        ForEachEntityRefInComponent(Struct, Value, Visit);
+
+        // A held value cannot be read until its type returns, so it records the remap instead.
+        if (Struct == SEntityScriptComponent::StaticStruct())
+        {
+            for (SHeldValue& Held : static_cast<SEntityScriptComponent*>(Value)->Pending)
+            {
+                Held.RemapEntities(Map, bClearUnmapped);
+            }
+        }
+        else if (Struct == SMissingComponents::StaticStruct())
+        {
+            for (SHeldValue& Held : static_cast<SMissingComponents*>(Value)->Entries)
+            {
+                Held.RemapEntities(Map, bClearUnmapped);
+            }
+        }
     }
 
     void RemapEntityReferences(CObject* Object, const THashMap<ECS::FEntity, ECS::FEntity>& Map, bool bClearUnmapped)
     {
-        if (Object == nullptr || Object->GetClass() == nullptr)
+        if (Object != nullptr)
         {
-            return;
+            RemapEntityReferences(Object->GetClass(), Object, Map, bClearUnmapped);
         }
-        auto Visit = [&](uint32& Value)
-        {
-            RemapEntityHandle(Value, Map, bClearUnmapped);
-        };
-        ForEachEntityRefInStruct(Object->GetClass(), Object, Visit);
     }
 
     void CollectEntityReferences(ECS::FRegistry& Registry, ECS::FEntity Entity, TVector<ECS::FEntity>& Out)

@@ -72,19 +72,20 @@ namespace Lumina::Reflection
     X(ReflectAs,            Value,  Reflector, "Reflects the field as the named type instead of its declared type.") \
     X(NoSerialize,          Flag,   Runtime,   "Excludes the property from serialization.") \
     X(EditorOnly,           Flag,   Runtime,   "The property exists for editor tooling only and is stripped from cooked packages.") \
-    X(Sync,                 Either, Runtime,   "Replicates the field from the host, the C++ spelling of C# [Sync]. Sync = FromOwner lets the owning client write it too.") \
+    X(Sync,                 Either, Runtime,   "Replicates the field from the host, the C++ spelling of C# [Property(Sync)]. Sync = FromOwner lets the owning client write it too.") \
     X(Replicated,           Flag,   Runtime,   "Alias of Sync.") \
     X(Change,               Value,  Runtime,   "A FUNCTION() run whenever the Sync field changes, or a Bind field is changed by its UI, taking nothing or (Old, New).") \
     X(Bind,                 Either, Runtime,   "Exposes the value to a UI document as {{ Name }} and the data-* views, under this name or its own. A struct binds its members and a TVector binds for data-for.") \
-    X(Element,              Either, Runtime,   "Fills an SUIElement with the element of this id, or of the property's name, each time the script's UI document loads.") \
+    X(Element,              Either, Runtime,   "Fills an SUIElement with the element of this id, or of the property's name, each time the script's UI document loads.")     X(Component,            Either, Runtime,   "Binds a TComponentRef to the owner entity's component before OnAttach, adding it first. Component = Get only finds it, leaving the reference unbound when the entity has none.") \
     X(Rate,                 Number,  Runtime,   "The most times a second the host sends the Sync field. A change sooner than that waits for the next slot.") \
     X(Quantize,             Number,  Runtime,   "Snaps a numeric Sync field to multiples of this step, so a smaller wobble never reaches the wire.") \
     X(Validate,             Value,  Runtime,   "For a Sync = FromOwner field, a FUNCTION() taking the proposed value and returning whether the host accepts it.") \
     X(DuplicateTransient,   Flag,   Runtime,   "Resets the property to its default when the owning object is duplicated.") \
     X(SaveGame,             Flag,   Runtime,   "Writes the property into save games, its whole value included. A SaveGame field marked NoSerialize is saved in games but kept out of levels and assets.") \
     X(StructBase,           Value,  Runtime,   "Constrains a bare FInstancedStruct to structs deriving from the named base.")     X(Bundle,               Value,  Runtime,   "Soft references inside the property load with their owner when this bundle is asked for. Several bundles separate with a comma.") \
-    X(Editable,             Flag,   Editor,    "Shows the property in the details panel and allows editing.") \
+    X(Editable,             Flag,   Editor,    "Shows the property in the details panel and allows editing, which every property does unless it is ReadOnly or Hidden.") \
     X(ReadOnly,             Flag,   Editor,    "Shows the property in the details panel with editing disabled. Do not combine with Editable.") \
+    X(Hidden,               Flag,   Reflector, "Keeps the property out of the details panel while it is still serialized. Do not combine with Editable or ReadOnly.") \
     X(Category,             Value,  Editor,    "Groups the property under a named heading. Nested headings separate with a pipe.") \
     X(DisplayName,          Value,  Editor,    "Overrides the label shown for the property.") \
     X(TitleProperty,        Value,  Editor,    "Uses a struct member as the label for elements of an array property.") \

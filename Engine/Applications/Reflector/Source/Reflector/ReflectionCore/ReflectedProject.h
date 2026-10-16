@@ -15,7 +15,10 @@ namespace Lumina::Reflection
     public:
         
         FReflectedProject& operator =(const FReflectedProject&) = delete;
+        ~FReflectedProject() = default;
         FReflectedProject(const FReflectedProject&) = delete;
+        FReflectedProject(FReflectedProject&&) = delete;
+        FReflectedProject& operator=(FReflectedProject&&) = delete;
 
         FReflectedProject(FReflectedWorkspace* InWorkspace);
         

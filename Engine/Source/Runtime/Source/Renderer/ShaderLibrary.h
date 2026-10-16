@@ -63,6 +63,10 @@ namespace Lumina
 
         FShaderLibrary();
         ~FShaderLibrary();
+        FShaderLibrary(const FShaderLibrary&) = delete;
+        FShaderLibrary& operator=(const FShaderLibrary&) = delete;
+        FShaderLibrary(FShaderLibrary&&) = delete;
+        FShaderLibrary& operator=(FShaderLibrary&&) = delete;
 
         /** Fetches (compiling on demand) a shader by name -- "TexturePaint.slang" -- or by full virtual
          *  path -- "/Game/Shaders/GameOfLife.slang". A name is resolved against the ordered shader roots

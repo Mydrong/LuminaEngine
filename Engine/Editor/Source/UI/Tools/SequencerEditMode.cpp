@@ -686,7 +686,16 @@ namespace Lumina
         DrawList->AddText(ImVec2(Origin.x + 10.0f, RowY + 5.0f), IM_COL32(255, 205, 130, 235), LE_ICON_MOVIE_OPEN "  Camera Cuts");
 
         DrawList->PushClipRect(ImVec2(TrackLeft, RowY), RowMax, true);
-        struct FCutClipScope { ImDrawList* DL; ~FCutClipScope() { DL->PopClipRect(); } } ClipScope{ DrawList };
+        struct FCutClipScope
+        {
+            ImDrawList* DL;
+            explicit FCutClipScope(ImDrawList* InDL) : DL(InDL) {}
+            ~FCutClipScope() { DL->PopClipRect(); }
+            FCutClipScope(const FCutClipScope&) = delete;
+            FCutClipScope& operator=(const FCutClipScope&) = delete;
+            FCutClipScope(FCutClipScope&&) = delete;
+            FCutClipScope& operator=(FCutClipScope&&) = delete;
+        } ClipScope{ DrawList };
 
         if (Track == nullptr)
         {

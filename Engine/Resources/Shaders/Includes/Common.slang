@@ -482,6 +482,9 @@ struct FInstanceCullEntry
     // Past this camera distance a foliage instance thins out, 0 never.
     property float ThinningStartDistance { get { return f16tof32(LODAndThinning >> 16u); } }
 
+    // Clear for the Default layer, which is nearly everything, so only the rest load their mask from FInstanceStatic.
+    property bool bCustomLayers { get { return (LODAndThinning & INSTANCE_CUSTOM_LAYERS_BIT) != 0u; } }
+
     bool HasFlag(EInstanceFlags Flag)
     {
         uint Mask = (uint)Flag << 16;
@@ -501,11 +504,13 @@ struct FInstanceStatic
     FCustomPrimitiveData CustomData;
     uint            MaterialIndex;
     uint            EntityID;
-    uint            BoneOffset;
+    // Into the skinned frame data for a skinned slot, kNoSkinnedIndex otherwise.
+    uint            SkinnedIndex;
     uint            SkinnedVertexBase;
     // One visibility word per block of its camera LOD, kNoMeshletVisibility for none.
     uint            MeshletVisibilityBase;
-    uint            _Pad0;
+    // Only meaningful when the cull entry has bCustomLayers.
+    uint            RenderLayers;
 }
 
 // Word 0 is never handed out, so a zeroed payload reads as an instance with no meshlet visibility.
@@ -516,8 +521,9 @@ static const uint kNoPreSkinBase = 0xFFFFFFFFu;
 static const uint kNoBoneSlice   = 0xFFFFFFFFu;
 // No per-frame skinned meshlet bounds, so the cull falls back to bind-pose spheres and stops trusting them.
 static const uint kNoSkinnedBounds = 0xFFFFFFFFu;
+static const uint kNoSkinnedIndex  = 0xFFFFFFFFu;
 
-// Mirror of Lumina::FSkinnedFrameData, indexed by retained slot, with LOD ranges pinned to the pick the pre-skin slice used.
+// Mirror of Lumina::FSkinnedFrameData, indexed by FInstanceStatic::SkinnedIndex, with LOD ranges pinned to the pick the pre-skin slice used.
 struct FSkinnedFrameData
 {
     // The array is never cleared, so a mismatched tag means the slot was not gathered this frame.
@@ -530,6 +536,8 @@ struct FSkinnedFrameData
     uint BoneOffset;
     // Folds in the range start, so SkinnedMeshletBounds() is indexed by a mesh-global meshlet index.
     uint SkinnedBoundsBase;
+    // The instance this entry belongs to, since the array is indexed by skinned index rather than by slot.
+    uint RetainedSlot;
 
     bool IsFromFrame(uint ExpectedTag) { return FrameTag == ExpectedTag && ExpectedTag != 0u; }
 };
@@ -652,7 +660,10 @@ struct FGPUInstance
     uint                    MeshletTotalCount;
     // Into InstanceVisibility, keyed by the retained slot since the compacted slot changes every frame.
     uint                    RetainedSlot;
-    uint                    _Pad0[3];
+    uint                    RenderLayers;
+    // Copied from the skinned frame data, so the meshlet cull reads it without that array.
+    uint                    SkinnedBoundsBase;
+    uint                    _Pad0;
 
     property float4x4 ModelMatrix { get { return Transform.ToMatrix(); } }
 
@@ -878,7 +889,7 @@ struct FCullView
     float  MinBoundsDiameter;  // world units, 0 is off
     // Pixels a unit of world error covers at unit distance, over the pixel error the view tolerates; 0 pins LOD 0.
     float  LODErrorScale;
-    uint   _Pad0;
+    uint   LayerMask;
 
     property float3 ViewOrigin { get { return ViewOriginAndFlags.xyz; } }
     property uint   Flags      { get { return asuint(ViewOriginAndFlags.w); } }
@@ -928,8 +939,9 @@ struct FCullData
     // The cull camera's clip range, which under a frozen cull is not the live view's.
     float    CullNearPlane;
     float    CullFarPlane;
+    // Render layers the primary camera draws, for passes that cull without a cull view.
+    uint     CameraLayerMask;
     // Holds the struct at a 16-byte multiple, which the members after it in FSceneGlobalData rely on.
-    uint     _CullPad0;
     uint     _CullPad1;
     uint     _CullPad2;
 };

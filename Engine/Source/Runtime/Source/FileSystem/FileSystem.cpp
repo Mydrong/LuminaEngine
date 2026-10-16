@@ -509,15 +509,15 @@ namespace Lumina::VFS
 
     bool HasExtension(FStringView Path, FStringView Ext)
     {
-        Path = Paths::Normalize(Path);
-        Ext = Paths::Normalize(Ext);
-        size_t Dot = Path.find_last_of('.');
+        // Held by value, since a view of the normalized temporary would dangle.
+        const FFixedString NormalPath = Paths::Normalize(Path);
+        const FFixedString NormalExt  = Paths::Normalize(Ext);
+        const size_t Dot = NormalPath.find_last_of('.');
         if (Dot == FString::npos)
         {
             return false;
         }
 
-        FStringView ActualExt = Path.substr(Dot);
-        return ActualExt == Ext;
+        return FStringView(NormalPath.c_str() + Dot, NormalPath.size() - Dot) == FStringView(NormalExt.c_str(), NormalExt.size());
     }
 }

@@ -62,6 +62,29 @@ namespace Lumina
     };
 
     REFLECT()
+    struct MCPEDITOR_API SPrefabNodeInfo
+    {
+        GENERATED_BODY()
+
+        PROPERTY()
+        FString Name;
+
+        PROPERTY()
+        FString StableID;
+
+        /** Empty for a root. */
+        PROPERTY()
+        FString ParentStableID;
+
+        PROPERTY()
+        TVector<FString> Components;
+
+        /** Class names of the entity scripts, then of any held while their class is not loaded. */
+        PROPERTY()
+        TVector<FString> Scripts;
+    };
+
+    REFLECT()
     struct MCPEDITOR_API SDescribePrefabResult
     {
         GENERATED_BODY()
@@ -85,6 +108,10 @@ namespace Lumina
         /** GUID of the prefab this one is a variant of, or empty. */
         PROPERTY()
         FString ParentPrefab;
+
+        /** Every entity, in no particular order. */
+        PROPERTY()
+        TVector<SPrefabNodeInfo> Nodes;
     };
 
     REFLECT()
@@ -192,6 +219,41 @@ namespace Lumina
 
         PROPERTY()
         FString Guid;
+    };
+
+    REFLECT()
+    struct MCPEDITOR_API SPrefabInstanceParams
+    {
+        GENERATED_BODY()
+
+        /** Root of a placed instance. */
+        PROPERTY()
+        FString Entity;
+    };
+
+    REFLECT()
+    struct MCPEDITOR_API SPrefabInstanceResult
+    {
+        GENERATED_BODY()
+
+        PROPERTY()
+        bool bDone = false;
+    };
+
+    REFLECT()
+    struct MCPEDITOR_API SCreatePrefabFromEntitiesParams
+    {
+        GENERATED_BODY()
+
+        /** World entities to capture; nested picks fold into their selected ancestor. */
+        PROPERTY()
+        TVector<FString> Entities;
+
+        PROPERTY()
+        FString Folder;
+
+        PROPERTY()
+        FString Name;
     };
 
     namespace MCP

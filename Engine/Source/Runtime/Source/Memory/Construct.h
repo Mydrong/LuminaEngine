@@ -20,11 +20,11 @@ namespace Lumina::Memory
     requires requires (void* Storage, TArgs&&... Args) { ::new (Storage) T(static_cast<TArgs&&>(Args)...); }
     FORCEINLINE constexpr T* ConstructAt(T* Ptr, TArgs&&... Args)
     {
-#if LUMINA_HAS_CONSTEXPR_PLACEMENT_NEW
+        #if LUMINA_HAS_CONSTEXPR_PLACEMENT_NEW
         return ::new (static_cast<void*>(Ptr)) T(static_cast<TArgs&&>(Args)...);
-#else
+        #else
         return std::construct_at(Ptr, static_cast<TArgs&&>(Args)...);
-#endif
+        #endif
     }
 
     template <typename T>

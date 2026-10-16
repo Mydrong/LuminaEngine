@@ -20,6 +20,9 @@ namespace Lumina
 
         /** Originals still strongly referenced after the swap, so they retire on their own refcount. */
         int32 OriginalsOutlivingTheSwap = 0;
+
+        // Every original and its replacement, classes included, for whoever has to rebind something the walk could not reach.
+        THashMap<CObject*, CObject*> Replaced;
     };
 
     /**

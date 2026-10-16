@@ -10,16 +10,16 @@ using LuminaSharp.ScriptProperties;
 
 namespace LuminaSharp.Generators;
 
-// A typed entry point per [ScriptFunction], so dispatch neither reflects nor boxes an argument per call.
+// A typed entry point per [Function], so dispatch neither reflects nor boxes an argument per call.
 [Generator]
 public sealed class ScriptFunctionInvokerGenerator : IIncrementalGenerator
 {
-    private const string ScriptFunctionAttribute = "LuminaSharp.ScriptFunctionAttribute";
+    private const string FunctionAttribute = "LuminaSharp.FunctionAttribute";
 
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
         IncrementalValuesProvider<Model?> Models = context.SyntaxProvider.ForAttributeWithMetadataName(
-            ScriptFunctionAttribute,
+            FunctionAttribute,
             predicate: static (Node, _) => Node is MethodDeclarationSyntax,
             transform: static (Context, Token) => BuildModel(Context, Token));
 
@@ -36,7 +36,12 @@ public sealed class ScriptFunctionInvokerGenerator : IIncrementalGenerator
             return null;
         }
 
+        // Only a minted class is called through a reflected frame, and a view model's commands go through UI reflection instead.
         INamedTypeSymbol Owner = Method.ContainingType;
+        if (!IsNativeObject(Owner) || !IsReachable(Method))
+        {
+            return null;
+        }
         SymbolDisplayFormat Qualified = SymbolDisplayFormat.FullyQualifiedFormat;
         string OwnerName = Owner.ToDisplayString(Qualified);
 
@@ -108,8 +113,10 @@ public sealed class ScriptFunctionInvokerGenerator : IIncrementalGenerator
 
         var Builder = new StringBuilder();
         Builder.Append("        private static void Invoke_").Append(Method.Name)
-               .Append("(nint __instance, nint __frame, int* __offsets)\n        {\n            try\n            {\n");
-        Builder.Append("                var __target = (").Append(OwnerName).Append(")global::System.Runtime.InteropServices.GCHandle.FromIntPtr(__instance).Target!;\n");
+               .Append("(nint __instance, nint __frame, int* __offsets)\n        {\n");
+        Builder.Append("            var __target = (").Append(OwnerName).Append(")global::System.Runtime.InteropServices.GCHandle.FromIntPtr(__instance).Target!;\n");
+        Builder.Append("            using var __scope = global::LuminaSharp.ScriptFunctionDispatch.EnterFunction(__target);\n");
+        Builder.Append("            try\n            {\n");
         foreach (string Read in Reads)
         {
             Builder.Append("                ").Append(Read).Append('\n');
@@ -124,11 +131,36 @@ public sealed class ScriptFunctionInvokerGenerator : IIncrementalGenerator
             Builder.Append("                ").Append(ReturnWrite).Append('\n');
         }
         Builder.Append("            }\n            catch (global::System.Exception __e)\n            {\n");
-        Builder.Append("                global::LuminaSharp.NativeBindings.LogException(__e);\n");
+        Builder.Append("                global::LuminaSharp.ScriptFunctionDispatch.ReportFunctionException(__target, \"").Append(Method.Name).Append("\", __e);\n");
         Builder.Append("            }\n        }\n");
 
         string Hint = Owner.ToDisplayString().Replace('.', '_').Replace('<', '_').Replace('>', '_');
         return new Model(OwnerName, Hint, Method.Name, Builder.ToString());
+    }
+
+    private static bool IsNativeObject(INamedTypeSymbol? Type)
+    {
+        for (INamedTypeSymbol? Current = Type; Current != null; Current = Current.BaseType)
+        {
+            if (Current.ToDisplayString() == ScriptPropertyTypeNames.NativeObject)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // The invoker is a separate class, so a private or protected method or owner keeps the reflection path.
+    private static bool IsReachable(ISymbol Symbol)
+    {
+        for (ISymbol? Current = Symbol; Current != null && Current is not INamespaceSymbol; Current = Current.ContainingSymbol)
+        {
+            if (Current.DeclaredAccessibility is Accessibility.Private or Accessibility.Protected or Accessibility.ProtectedAndInternal)
+            {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static string RefPrefix(RefKind Kind)

@@ -118,7 +118,7 @@ namespace Lumina
 
 
         /** Nearest declaration of Name walking up the chain, or null. */
-        RUNTIME_API NODISCARD FFunction* FindFunction(const FName& Name) const;
+        NODISCARD RUNTIME_API FFunction* FindFunction(const FName& Name) const;
 
         RUNTIME_API void AddFunction(FFunction* Function);
 

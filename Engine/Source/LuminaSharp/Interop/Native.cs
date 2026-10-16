@@ -12,10 +12,19 @@ public static unsafe partial class Native
         Exports = Table;
     }
 
+    // The engine's own threshold read in place, so a filtered message is never encoded or sent.
+    public static bool IsLogEnabled(ELogLevel Level)
+    {
+        return Exports.Log != null && (byte)Level >= System.Threading.Volatile.Read(ref *Exports.LogThreshold);
+    }
+
+    // The profiler's own flag read in place, so a script sample nothing records costs no crossing.
+    public static bool IsProfilingScopes => Exports.ScriptScopesActive != null && System.Threading.Volatile.Read(ref *Exports.ScriptScopesActive) != 0;
+
     // Through the bootstrap exporter table, captured in the default context so it outlives every script reload.
     public static void Log(ELogLevel Level, string Message)
     {
-        if (Exports.Log == null)
+        if (!IsLogEnabled(Level))
         {
             return;
         }
@@ -29,6 +38,19 @@ public static unsafe partial class Native
         finally
         {
             Encoded.Free();
+        }
+    }
+
+    public static void Log(ELogLevel Level, ReadOnlySpan<byte> Utf8)
+    {
+        if (!IsLogEnabled(Level))
+        {
+            return;
+        }
+
+        fixed (byte* Text = Utf8)
+        {
+            Exports.Log((int)Level, Text, Utf8.Length);
         }
     }
 

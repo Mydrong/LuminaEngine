@@ -13,8 +13,11 @@ namespace Lumina
         FPropertyEditContext() = default;
         explicit FPropertyEditContext(const FPropertyEditContext* InParent) : Parent(InParent) {}
 
+        ~FPropertyEditContext() = default;
         FPropertyEditContext(const FPropertyEditContext&) = delete;
         FPropertyEditContext& operator=(const FPropertyEditContext&) = delete;
+        FPropertyEditContext(FPropertyEditContext&&) = delete;
+        FPropertyEditContext& operator=(FPropertyEditContext&&) = delete;
 
         // Borrowed for the draw only; the provider owns the storage.
         template<typename T>

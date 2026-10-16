@@ -1,6 +1,7 @@
 #include "Core/Threading/Thread.h"
 #include "EditorPCH.h"
 #include "Importer.h"
+#include "Assets/Factories/Factory.h"
 
 #include "Core/Object/Class.h"
 #include "Core/Object/ObjectCore.h"
@@ -8,6 +9,26 @@
 
 namespace Lumina
 {
+    void FImportResult::Finish(const FImportRequest& Request)
+    {
+        if (Succeeded() && CreatedObjects.empty() && !Request.bReplaceExisting)
+        {
+            Error = "The importer produced no assets.";
+        }
+
+        // Reverse order, since a generated graph must die before the material it back-references.
+        while (!CreatedObjects.empty())
+        {
+            CreatedObjects.pop_back();
+        }
+
+        for (CPackage* Package : UnsavedPackages)
+        {
+            CFactory::DiscardNewPackage(Package);
+        }
+        UnsavedPackages.clear();
+    }
+
     namespace
     {
         CImporterRegistry* GImporterRegistry = nullptr;

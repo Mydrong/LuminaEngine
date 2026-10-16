@@ -5,38 +5,6 @@ using System.Runtime.CompilerServices;
 
 namespace LuminaSharp;
 
-// Exposes a value, a collection of [Bind] items or a data-event-* command to RML, and a writable value is two-way.
-[MeansImplicitUse(ImplicitUseKindFlags.Access | ImplicitUseKindFlags.Assign)]
-[AttributeUsage(AttributeTargets.Property | AttributeTargets.Field | AttributeTargets.Method, Inherited = true)]
-public sealed class BindAttribute : Attribute
-{
-    /// <summary>Override the name RML binds to (defaults to the property name).</summary>
-    public string? Name { get; }
-
-    public BindAttribute(string? Name = null)
-    {
-        this.Name = Name;
-    }
-}
-
-/// <summary>
-/// Marks a parameterless method on a <see cref="ViewModel"/> as a command callable from RML with
-/// <c>data-event-click="MethodName()"</c> (or any other <c>data-event-*</c>). The method runs on the game
-/// thread when the event fires.
-/// </summary>
-[MeansImplicitUse]
-[AttributeUsage(AttributeTargets.Method, Inherited = true)]
-public sealed class BindCommandAttribute : Attribute
-{
-    /// <summary>Override the name RML binds to (defaults to the method name).</summary>
-    public string? Name { get; }
-
-    public BindCommandAttribute(string? Name = null)
-    {
-        this.Name = Name;
-    }
-}
-
 public abstract class ViewModel
 {
     /// <summary>The live binding, or null while the model is not registered. Set by <see cref="UIDataModel"/>.</summary>

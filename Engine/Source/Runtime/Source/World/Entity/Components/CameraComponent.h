@@ -5,6 +5,7 @@
 #include "Containers/Vector.h"
 #include "Core/Engine/Engine.h"
 #include "Core/Object/ObjectHandleTyped.h"
+#include "Renderer/RenderLayers.h"
 #include "Renderer/ViewVolume.h"
 #include "PostProcessSettings.h"
 #include "CameraComponent.generated.h"
@@ -37,15 +38,15 @@ namespace Lumina
         GENERATED_BODY()
 
         /** Pixel coordinates, origin top-left, +Y down. Meaningless unless bOnScreen. */
-        PROPERTY()
+        PROPERTY(Hidden)
         FVector2 Position;
 
         /** View-space forward distance in world units, positive in front. Valid even when off screen. */
-        PROPERTY()
+        PROPERTY(Hidden)
         float Depth = 0.0f;
 
         /** False when the point is at or behind the near plane, where a projected point mirrors. */
-        PROPERTY()
+        PROPERTY(Hidden)
         bool bOnScreen = false;
     };
 
@@ -56,15 +57,15 @@ namespace Lumina
         GENERATED_BODY()
 
         /** On the near plane, not at the camera position. */
-        PROPERTY()
+        PROPERTY(Hidden)
         FVector3 Origin;
 
         /** Normalized. */
-        PROPERTY()
+        PROPERTY(Hidden)
         FVector3 Direction;
 
         /** False when the world has no rendered view to deproject through. */
-        PROPERTY()
+        PROPERTY(Hidden)
         bool bValid = false;
     };
 
@@ -150,6 +151,23 @@ namespace Lumina
         PROPERTY(Editable, Category = "Camera", ClampMin = 1.0f)
         float FarPlane = FViewVolume::DefaultFarPlane;
         
+        // Render layers this camera draws.
+        PROPERTY(Editable, Category = "Camera|Render Layers")
+        SRenderLayerMask CullMask = SRenderLayerMask(RenderLayers::kAllMask);
+
+        // Draws the Foreground layer over the world at this vertical field of view, for first-person hands and weapons. Zero draws it in place.
+        PROPERTY(Editable, Category = "Camera|Render Layers", Units = "deg", ClampMin = 0.0f, ClampMax = 170.0f)
+        float ForegroundFOV = 0.0f;
+
+        // How far toward the camera Foreground geometry is pulled so walls never cut into it, small enough to clear the world yet leave it past NearPlane.
+        PROPERTY(Editable, Category = "Camera|Render Layers", ClampMin = 0.01f, ClampMax = 1.0f)
+        float ForegroundDepthScale = 0.1f;
+
+        FViewLayerSettings GetViewLayers() const
+        {
+            return FViewLayerSettings{ CullMask.Bits, ForegroundFOV, ForegroundDepthScale };
+        }
+
         void ApplyCameraProperties()
         {
             ViewVolume.SetFOV(FOV).SetNear(NearPlane).SetFar(FarPlane);

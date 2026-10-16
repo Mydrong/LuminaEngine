@@ -881,7 +881,7 @@ namespace Lumina::Physics
         LUMINA_PROFILE_VALUE("Physics/AwakeBodies", (int64)b3World_GetAwakeBodyCount(WorldId));
         LUMINA_PROFILE_VALUE("Physics/AwakeContacts", (int64)b3World_GetCounters(WorldId).awakeContactCount);
 
-        if (FBox3DPhysicsContext::IsDebugDrawEnabled())
+        if (IsDebugDrawEnabled() || FBox3DPhysicsContext::IsDebugDrawForced())
         {
             FBox3DPhysicsContext::GetDebugRenderer()->DrawWorld(WorldId, World);
         }

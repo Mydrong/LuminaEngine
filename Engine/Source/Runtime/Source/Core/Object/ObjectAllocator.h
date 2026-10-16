@@ -14,6 +14,10 @@ namespace Lumina
 
         FCObjectAllocator();
         ~FCObjectAllocator();
+        FCObjectAllocator(const FCObjectAllocator&) = delete;
+        FCObjectAllocator& operator=(const FCObjectAllocator&) = delete;
+        FCObjectAllocator(FCObjectAllocator&&) = delete;
+        FCObjectAllocator& operator=(FCObjectAllocator&&) = delete;
 
         /** Raw allocation; does not construct. */
         RUNTIME_API void* AllocateCObject(uint32 Size, uint32 Alignment);

@@ -44,6 +44,9 @@ namespace Lumina
     {
         TUniquePtr<FNavMesh>            Mesh;
 
+        // The highest topology epoch any mesh this runtime dropped reached, which its next mesh continues from.
+        uint64                          RetiredEpoch = 0;
+
         /** Shared with the bake worker, so dropping this mid-bake leaves the worker a live handle. */
         TSharedPtr<FNavBakeHandle>      ActiveBake;
 
@@ -114,6 +117,7 @@ namespace Lumina
 
         SNavMeshComponent() = default;
 
+        ~SNavMeshComponent() = default;
         SNavMeshComponent(const SNavMeshComponent& Other)
             : Settings(Other.Settings)
             , bAutoBake(Other.bAutoBake)
@@ -186,27 +190,27 @@ namespace Lumina
         bool bBakeRequested = false;
 
         /** Baked tile blobs (empty = non-walkable tile). Serialized. */
-        PROPERTY(Category = "NavMesh|Baked")
+        PROPERTY(Hidden, Category = "NavMesh|Baked")
         TVector<SNavTileData> Tiles;
 
         /** Bake origin (= bounds min). */
-        PROPERTY(Category = "NavMesh|Baked")
+        PROPERTY(Hidden, Category = "NavMesh|Baked")
         FVector3 Origin = FVector3(0.0f);
 
         /** Tile size in world units. */
-        PROPERTY(Category = "NavMesh|Baked")
+        PROPERTY(Hidden, Category = "NavMesh|Baked")
         float TileWorldSize = 0.0f;
 
         /** Grid the baked tile coords index into. Serialized so a hot rebake still lines up after the
          *  volume is moved or rescaled without a full re-bake. */
-        PROPERTY(Category = "NavMesh|Baked")
+        PROPERTY(Hidden, Category = "NavMesh|Baked")
         int32 TilesX = 0;
 
-        PROPERTY(Category = "NavMesh|Baked")
+        PROPERTY(Hidden, Category = "NavMesh|Baked")
         int32 TilesY = 0;
 
         /** Cap fed to dtNavMeshParams. */
-        PROPERTY(Category = "NavMesh|Baked")
+        PROPERTY(Hidden, Category = "NavMesh|Baked")
         int32 MaxPolysPerTile = 0;
 
         /** Transient; not serialized. */

@@ -226,6 +226,7 @@ namespace Lumina
         TScriptDelegate() = default;
 
         // Same identity rules as the base, spelled out because a defaulted copy would not be inert.
+        ~TScriptDelegate() = default;
         TScriptDelegate(const TScriptDelegate&) {}
         TScriptDelegate(TScriptDelegate&& Other) noexcept : FScriptDelegateBase(std::move(Other)) {}
         TScriptDelegate& operator=(const TScriptDelegate&) { return *this; }

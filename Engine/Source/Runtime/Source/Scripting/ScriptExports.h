@@ -39,7 +39,7 @@ namespace Lumina::Scripting
     struct FScriptExportField
     {
         FName                         Name;
-        /** Author-declared Lumina::EPropertyFlags from [Property(Flags = ...)], OR'd onto the minted property. */
+        /** Author-declared Lumina::EPropertyFlags from [Property] specifiers, OR'd onto the minted property. */
         uint32                        Flags = 0;
         TSharedPtr<FScriptExportType> Type;
         FScriptExportMeta             Meta;      ///< Editor display data, rebuilt per load.
@@ -68,7 +68,7 @@ namespace Lumina::Scripting
         FName                         BaseName;
     };
 
-    /** One [ScriptFunction] method: its name, and its parameters as the fields of its call frame. */
+    /** One [Function] method: its name, and its parameters as the fields of its call frame. */
     struct FScriptExportFunction
     {
         FName                        Name;
@@ -82,7 +82,7 @@ namespace Lumina::Scripting
         // EFunctionFlags the declaration adds, such as where a C# [Rpc] method runs.
         uint32                       Flags = 0;
 
-        // What the function carries as metadata, such as the label of a [Button].
+        // What the function carries as metadata, such as the label of a C# [Function(Button)].
         FScriptExportMeta            Meta;
     };
 
@@ -90,7 +90,7 @@ namespace Lumina::Scripting
     {
         TVector<FScriptExportField> Fields;
 
-        // The type's [ScriptFunction] methods, each describing its own call frame.
+        // The type's [Function] methods, each describing its own call frame.
         TVector<FScriptExportFunction> Functions;
 
         // A behavior-only type still mints, for its functions, so a schema with either counts.

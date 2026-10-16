@@ -40,11 +40,11 @@ namespace Lumina
         }
 
         /** Modules run once when a particle is born. */
-        PROPERTY()
+        PROPERTY(Hidden)
         TVector<TStrongObjectPtr<CParticleModule>> SpawnModules;
 
         /** Modules run every frame on live particles. */
-        PROPERTY()
+        PROPERTY(Hidden)
         TVector<TStrongObjectPtr<CParticleModule>> UpdateModules;
     };
 }

@@ -19,9 +19,20 @@ public static class ScriptInvokerRegistry
         return Invokers.TryGetValue((Owner, Function), out nint Found) ? Found : 0;
     }
 
-    // Holds user types and delegates over user methods, so a generation unload has to drop the whole table.
+    // Only script types go, since the engine assembly registered its own once at load and never will again.
     internal static void Clear()
     {
-        Invokers.Clear();
+        var Unloading = new List<(Type, string)>();
+        foreach ((Type Owner, string Function) Key in Invokers.Keys)
+        {
+            if (Key.Owner.Assembly.IsCollectible)
+            {
+                Unloading.Add(Key);
+            }
+        }
+        foreach ((Type, string) Key in Unloading)
+        {
+            Invokers.Remove(Key);
+        }
     }
 }

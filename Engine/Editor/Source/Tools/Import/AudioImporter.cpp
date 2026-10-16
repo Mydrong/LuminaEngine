@@ -127,7 +127,7 @@ namespace Lumina
 
         if (!LoadStreamFromFile(Stream, Request.SourcePath, OutResult.Error))
         {
-            Stream->ConditionalBeginDestroy();
+            CFactory::DiscardNew(Stream);
             return;
         }
 
@@ -137,15 +137,14 @@ namespace Lumina
         }
 
         CPackage* Package = Stream->GetPackage();
-        if (CPackage::SavePackage(Package, Package->GetPackagePath()))
+        if (!CPackage::SavePackage(Package, Package->GetPackagePath()))
         {
-            FAssetRegistry::Get().AssetCreated(Stream);
-        }
-        else
-        {
-            LOG_ERROR("[AudioImport] failed to save '{0}'; asset will not be registered", Package->GetPackagePath());
+            OutResult.Error = FString("Could not save ") + FString(Package->GetPackagePath().c_str());
+            CFactory::DiscardNew(Stream);
+            return;
         }
 
+        FAssetRegistry::Get().AssetCreated(Stream);
         OutResult.CreatedObjects.push_back(Stream);
     }
 

@@ -38,6 +38,11 @@ namespace Lumina
                 Destroy(Callable);
             }
         }
+        FNode() = default;
+        FNode(const FNode&) = delete;
+        FNode& operator=(const FNode&) = delete;
+        FNode(FNode&&) = delete;
+        FNode& operator=(FNode&&) = delete;
     };
 
     struct FTaskGraph::FNodeCoro

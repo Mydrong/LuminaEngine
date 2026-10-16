@@ -33,23 +33,23 @@ namespace Lumina
             : Device(EKeyDevice::Keyboard), Key(InKey), bShift(bInShift), bCtrl(bInCtrl), bAlt(bInAlt) {}
 
         // The device this binding targets. None == unbound.
-        PROPERTY()
+        PROPERTY(Hidden)
         EKeyDevice Device = EKeyDevice::None;
 
         // The keyboard key, valid when Device == Keyboard.
-        PROPERTY()
+        PROPERTY(Hidden)
         EKey Key = EKey::Num;
 
         // The mouse button, valid when Device == Mouse.
-        PROPERTY()
+        PROPERTY(Hidden)
         EMouseKey MouseButton = EMouseKey::Num;
 
         // Modifier chord. A standalone modifier binding (e.g. Key == LeftControl) leaves these false.
-        PROPERTY()
+        PROPERTY(Hidden)
         bool bShift = false;
-        PROPERTY()
+        PROPERTY(Hidden)
         bool bCtrl = false;
-        PROPERTY()
+        PROPERTY(Hidden)
         bool bAlt = false;
 
         bool IsKeyboard() const { return Device == EKeyDevice::Keyboard; }

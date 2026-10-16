@@ -74,7 +74,7 @@ internal static unsafe partial class InteropBenchHooks
         long Start = Stopwatch.GetTimestamp();
         for (int i = 0; i < Iterations; ++i)
         {
-            Total += CInteropTestLibrary.BenchMeasureName("InteropBenchmarkName");
+            Total += CInteropTestLibrary.BenchMeasureString("InteropBenchmarkName");
         }
         long Elapsed = Stopwatch.GetTimestamp() - Start;
         Sink = Total;
@@ -90,7 +90,7 @@ internal static unsafe partial class InteropBenchHooks
         long Start = Stopwatch.GetTimestamp();
         for (int i = 0; i < Iterations; ++i)
         {
-            Total += CInteropTestLibrary.BenchGetName().Length;
+            Total += CInteropTestLibrary.BenchGetString().Length;
         }
         long Elapsed = Stopwatch.GetTimestamp() - Start;
         Sink = Total;
@@ -145,7 +145,7 @@ internal static unsafe partial class InteropBenchHooks
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
     public static double Bench_PropertyOffsetRead(IntPtr Component, int Iterations)
     {
-        var View = new Lumina.STransformComponent(Component);
+        ref Lumina.STransformComponent View = ref Unsafe.AsRef<Lumina.STransformComponent>((void*)Component);
         float Total = 0.0f;
         long Start = Stopwatch.GetTimestamp();
         for (int i = 0; i < Iterations; ++i)
@@ -182,7 +182,7 @@ internal static unsafe partial class InteropBenchHooks
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
     public static double Bench_PropertyAccessorRead(IntPtr Component, int Iterations)
     {
-        var View = new Lumina.STransformComponent(Component);
+        ref Lumina.STransformComponent View = ref Unsafe.AsRef<Lumina.STransformComponent>((void*)Component);
         float Total = 0.0f;
         long Start = Stopwatch.GetTimestamp();
         for (int i = 0; i < Iterations; ++i)
@@ -224,9 +224,9 @@ internal static unsafe partial class InteropBenchHooks
         for (int Tick = 0; Tick < Ticks; ++Tick)
         {
             Seen = 0;
-            foreach ((FEntity _, Lumina.STransformComponent Transform) in Registry.View<Lumina.STransformComponent>())
+            foreach (var Row in Registry.View<Lumina.STransformComponent>().Each())
             {
-                Total += Transform.LocalTransform.Location.X;
+                Total += Row.First.LocalTransform.Location.X;
                 ++Seen;
             }
         }
@@ -248,11 +248,9 @@ internal static unsafe partial class InteropBenchHooks
         for (int Tick = 0; Tick < Ticks; ++Tick)
         {
             Seen = 0;
-            foreach ((FEntity _, Lumina.STransformComponent Transform) in Registry.View<Lumina.STransformComponent>())
+            foreach (var Row in Registry.View<Lumina.STransformComponent>().Each())
             {
-                FTransform Local = Transform.LocalTransform;
-                Local.Location.X += 1.0f;
-                Transform.LocalTransform = Local;
+                Row.First.LocalTransform.Location.X += 1.0f;
                 ++Seen;
             }
         }
@@ -300,7 +298,7 @@ internal static unsafe partial class InteropBenchHooks
             {
                 if (Registry.TryGetComponent<Lumina.STransformComponent>(new FEntity(Entities[Index])) is { } Transform)
                 {
-                    Total += Transform.LocalTransform.Location.X;
+                    Total += Transform.Get().LocalTransform.Location.X;
                 }
             }
         }
@@ -312,4 +310,81 @@ internal static unsafe partial class InteropBenchHooks
     [NativeCall(Module = "Runtime",
         EntryPoint = "LuminaSharp_Call_Lumina_CInteropTestLibrary_BenchNoOp", SuppressGCTransition = true)]
     private static partial int BenchNoOpFast();
+
+    // NativeCall against P/Invoke on the same exports, so each pair of rows differs only in the managed calling mechanism.
+    private const string BenchLibrary = "Runtime";
+    private const string ShortText = "InteropBenchmarkName";
+    private static readonly string LongText = new('x', 400);
+
+    [NativeCall(Module = "Runtime", EntryPoint = "LuminaSharp_InteropBench_NoOp")]
+    private static partial int NativeCallNoOp();
+
+    [NativeCall(Module = "Runtime", EntryPoint = "LuminaSharp_InteropBench_NoOp", SuppressGCTransition = true)]
+    private static partial int NativeCallNoOpSuppressed();
+
+    [NativeCall(Module = "Runtime", EntryPoint = "LuminaSharp_InteropBench_AddVectors")]
+    private static partial FVector3 NativeCallAddVectors(FVector3 A, FVector3 B);
+
+    [NativeCall(Module = "Runtime", EntryPoint = "LuminaSharp_InteropBench_CountedUtf8")]
+    private static partial int NativeCallUtf8(string Text);
+
+    [DllImport(BenchLibrary, EntryPoint = "LuminaSharp_InteropBench_NoOp")]
+    private static extern int DllImportNoOp();
+
+    [LibraryImport(BenchLibrary, EntryPoint = "LuminaSharp_InteropBench_NoOp")]
+    private static partial int LibraryImportNoOp();
+
+    [LibraryImport(BenchLibrary, EntryPoint = "LuminaSharp_InteropBench_NoOp")]
+    [SuppressGCTransition]
+    private static partial int LibraryImportNoOpSuppressed();
+
+    [LibraryImport(BenchLibrary, EntryPoint = "LuminaSharp_InteropBench_AddVectors")]
+    private static partial FVector3 LibraryImportAddVectors(FVector3 A, FVector3 B);
+
+    [LibraryImport(BenchLibrary, EntryPoint = "LuminaSharp_InteropBench_TerminatedUtf8", StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int LibraryImportUtf8(string Text);
+
+    [LibraryImport(BenchLibrary, EntryPoint = "LuminaSharp_InteropBench_TerminatedUtf16", StringMarshalling = StringMarshalling.Utf16)]
+    private static partial int LibraryImportUtf16(string Text);
+
+    [LibraryImport(BenchLibrary, EntryPoint = "LuminaSharp_InteropBench_StaticUtf8")]
+    private static partial byte* LibraryImportStaticUtf8();
+
+    // The bare function pointer a NativeCall wraps, to split the cost of the pointer call from the wrapper around it.
+    private static readonly delegate* unmanaged[Cdecl]<int> RawNoOp = (delegate* unmanaged[Cdecl]<int>)NativeBindings.ResolveFrom(Host.ModuleHandle("Runtime"), "LuminaSharp_InteropBench_NoOp");
+    private static readonly delegate* unmanaged[Cdecl, SuppressGCTransition]<int> RawNoOpSuppressed = (delegate* unmanaged[Cdecl, SuppressGCTransition]<int>)RawNoOp;
+    private static readonly delegate* unmanaged[Cdecl]<FVector3, FVector3, FVector3> RawAddVectors = (delegate* unmanaged[Cdecl]<FVector3, FVector3, FVector3>)NativeBindings.ResolveFrom(Host.ModuleHandle("Runtime"), "LuminaSharp_InteropBench_AddVectors");
+
+    [ManagedExport]
+    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
+    public static double Bench_InteropCompare(int Which, int Iterations)
+    {
+        int Total = 0;
+        FVector3 One = new FVector3(1.0f, 2.0f, 3.0f);
+        long Start = Stopwatch.GetTimestamp();
+        switch (Which)
+        {
+            case 0: for (int i = 0; i < Iterations; ++i) { Total += NativeCallNoOp(); } break;
+            case 1: for (int i = 0; i < Iterations; ++i) { Total += NativeCallNoOpSuppressed(); } break;
+            case 2: for (int i = 0; i < Iterations; ++i) { Total += DllImportNoOp(); } break;
+            case 3: for (int i = 0; i < Iterations; ++i) { Total += LibraryImportNoOp(); } break;
+            case 4: for (int i = 0; i < Iterations; ++i) { Total += LibraryImportNoOpSuppressed(); } break;
+            case 5: for (int i = 0; i < Iterations; ++i) { Total += (int)NativeCallAddVectors(One, One).X; } break;
+            case 6: for (int i = 0; i < Iterations; ++i) { Total += (int)LibraryImportAddVectors(One, One).X; } break;
+            case 7: for (int i = 0; i < Iterations; ++i) { Total += NativeCallUtf8(ShortText); } break;
+            case 8: for (int i = 0; i < Iterations; ++i) { Total += LibraryImportUtf8(ShortText); } break;
+            case 9: for (int i = 0; i < Iterations; ++i) { Total += LibraryImportUtf16(ShortText); } break;
+            case 10: for (int i = 0; i < Iterations; ++i) { Total += NativeCallUtf8(LongText); } break;
+            case 11: for (int i = 0; i < Iterations; ++i) { Total += LibraryImportUtf8(LongText); } break;
+            case 12: for (int i = 0; i < Iterations; ++i) { Total += LibraryImportUtf16(LongText); } break;
+            case 13: for (int i = 0; i < Iterations; ++i) { Total += CInteropTestLibrary.BenchGetString().Length; } break;
+            case 14: for (int i = 0; i < Iterations; ++i) { Total += Marshal.PtrToStringUTF8((IntPtr)LibraryImportStaticUtf8())!.Length; } break;
+            case 15: for (int i = 0; i < Iterations; ++i) { Total += RawNoOp(); } break;
+            case 16: for (int i = 0; i < Iterations; ++i) { Total += RawNoOpSuppressed(); } break;
+            case 17: for (int i = 0; i < Iterations; ++i) { Total += (int)RawAddVectors(One, One).X; } break;
+        }
+        long Elapsed = Stopwatch.GetTimestamp() - Start;
+        Sink = Total;
+        return PerIterationNanos(Elapsed, Iterations);
+    }
 }

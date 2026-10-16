@@ -101,6 +101,10 @@ namespace Lumina
 
         FRenderManager();
         ~FRenderManager();
+        FRenderManager(const FRenderManager&) = delete;
+        FRenderManager& operator=(const FRenderManager&) = delete;
+        FRenderManager(FRenderManager&&) = delete;
+        FRenderManager& operator=(FRenderManager&&) = delete;
 
         void Initialize();
 

@@ -39,23 +39,54 @@ public readonly unsafe struct TVector<T> : IList<T>
     private VectorOps* OpsPtr => (VectorOps*)Ops;
 
     /// <summary>False when the property this came from did not resolve, so the view has no storage.</summary>
-    public bool IsValid => Vector != 0 && Ops != 0;
+    public bool IsValid
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => Vector != 0 && Ops != 0;
+    }
 
-    private int Stride => IsValid ? (int)OpsPtr->ElementSize : 0;
+    private int Stride
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => IsValid ? (int)OpsPtr->ElementSize : 0;
+    }
 
-    // From the ops table, which reports elements for a TVector and for a script array's byte storage alike.
-    public int Count => IsValid ? (int)OpsPtr->Size((void*)Vector) : 0;
+    // Read in place through the offsets the ops table carries, so counting never leaves managed code.
+    public int Count
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => IsValid ? (int)(*(uint*)((byte*)Vector + OpsPtr->CountOffset) / OpsPtr->CountDivisor) : 0;
+    }
+
+    private byte* Data
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => *(byte**)((byte*)Vector + OpsPtr->DataOffset);
+    }
 
     public bool IsReadOnly => false;
 
     /// <summary>The address of element <paramref name="index"/> in native storage.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private nint ElementAt(int index)
     {
         if ((uint)index >= (uint)Count)
         {
-            throw new ArgumentOutOfRangeException(nameof(index));
+            ThrowIndexOutOfRange(index);
         }
-        NativeMarshal.DecodeVectorRaw((byte*)Vector, out byte* Data, out _);
+        return UncheckedElementAt(index);
+    }
+
+    [System.Diagnostics.CodeAnalysis.DoesNotReturn]
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void ThrowIndexOutOfRange(int index)
+    {
+        throw new ArgumentOutOfRangeException(nameof(index), index, null);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private nint UncheckedElementAt(int index)
+    {
         return (nint)Data + index * (nint)Stride;
     }
 
@@ -67,7 +98,6 @@ public readonly unsafe struct TVector<T> : IList<T>
     {
         ThrowIfMarshalled(nameof(AsSpan));
         int Length = Count;
-        NativeMarshal.DecodeVectorRaw((byte*)Vector, out byte* Data, out _);
         return Length == 0 ? Span<T>.Empty : new Span<T>(Data, Length);
     }
 
@@ -80,6 +110,7 @@ public readonly unsafe struct TVector<T> : IList<T>
     /// </summary>
     public ref T this[int index]
     {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get
         {
             if (ElementKind<T>.IsMarshalled)
@@ -97,10 +128,12 @@ public readonly unsafe struct TVector<T> : IList<T>
     }
 
     /// <summary>Reads an element. Works for every element type.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public T Get(int index) => ElementMarshal.Read<T>(ElementAt(index));
 
     /// <summary>Overwrites an element, doing whatever its type requires -- a native assignment for a string,
     /// a refcounted assignment for an object reference, a byte write for a plain value.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void Set(int index, T value) => ElementMarshal.Write(ElementAt(index), value);
 
     public void Add(T item)
@@ -235,19 +268,27 @@ public readonly unsafe struct TVector<T> : IList<T>
     public struct Enumerator : IEnumerator<T>
     {
         private readonly TVector<T> List;
+        private readonly int Count;
         private int Index;
 
+        // Counted once, since a mutation invalidates the enumerator the same as List<T>'s.
         internal Enumerator(TVector<T> list)
         {
             List = list;
+            Count = list.Count;
             Index = -1;
         }
 
-        public T Current => List.Get(Index);
+        public T Current
+        {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            get => ElementMarshal.Read<T>(List.UncheckedElementAt(Index));
+        }
 
         object? IEnumerator.Current => Current;
 
-        public bool MoveNext() => ++Index < List.Count;
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public bool MoveNext() => ++Index < Count;
 
         public void Reset() => Index = -1;
 

@@ -62,6 +62,10 @@ namespace Lumina
             Memory::Free(Base);
             Base = nullptr;
         }
+        FLinearAllocator(const FLinearAllocator&) = delete;
+        FLinearAllocator& operator=(const FLinearAllocator&) = delete;
+        FLinearAllocator(FLinearAllocator&&) = delete;
+        FLinearAllocator& operator=(FLinearAllocator&&) = delete;
         
         void* Allocate(size_t Size, size_t Alignment) override
         {
@@ -140,6 +144,10 @@ namespace Lumina
                 Current = Next;
             }
         }
+        FBlockLinearAllocator(const FBlockLinearAllocator&) = delete;
+        FBlockLinearAllocator& operator=(const FBlockLinearAllocator&) = delete;
+        FBlockLinearAllocator(FBlockLinearAllocator&&) = delete;
+        FBlockLinearAllocator& operator=(FBlockLinearAllocator&&) = delete;
 
         void* allocate(size_t n, int flags = 0)
         {
@@ -424,6 +432,8 @@ namespace Lumina
 
         FMemMark(const FMemMark&)            = delete;
         FMemMark& operator=(const FMemMark&) = delete;
+        FMemMark(FMemMark&&) = delete;
+        FMemMark& operator=(FMemMark&&) = delete;
 
         void* Allocate(SIZE_T Size, SIZE_T Alignment = 16) { return Arena.Allocate(Size, Alignment); }
 

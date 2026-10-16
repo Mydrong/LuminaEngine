@@ -3,13 +3,15 @@ using System.Runtime.InteropServices;
 
 namespace LuminaSharp;
 
-// Log severity, mirroring the levels Export_Log switches on.
-public enum ELogLevel
+// Log severity, mirroring Lumina::ELogLevel value for value.
+public enum ELogLevel : byte
 {
     Trace = 0,
-    Info = 1,
-    Warn = 2,
-    Error = 3,
+    Debug = 1,
+    Info = 2,
+    Warn = 3,
+    Error = 4,
+    Critical = 5,
 }
 
 // The native function pointers handed over at bootstrap, mirroring Lumina::DotNet::FExporterTable.
@@ -17,6 +19,8 @@ public enum ELogLevel
 public unsafe struct FExporterTable
 {
     public delegate* unmanaged[Stdcall]<int, byte*, int, void> Log;
+    public byte* LogThreshold;
+    public byte* ScriptScopesActive;
 }
 
 // The handshake payload Host.Bootstrap receives, mirroring Lumina::DotNet::FBootstrapArgs. Managed exports are resolved by name instead.

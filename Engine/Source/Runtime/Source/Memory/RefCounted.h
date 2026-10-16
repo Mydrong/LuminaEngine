@@ -25,6 +25,8 @@ namespace Lumina
 		virtual ~IRefCounted() = default;
 		IRefCounted(const IRefCounted&) = delete;
 		IRefCounted& operator = (const IRefCounted&) = delete;
+		IRefCounted(IRefCounted&&) = delete;
+		IRefCounted& operator=(IRefCounted&&) = delete;
 
 		uint32 AddRef() const
 		{

@@ -46,34 +46,16 @@ namespace Lumina::Paths
 
     void InitializePaths()
     {
-        FString LuminaDir = Platform::GetEnvVariable("LUMINA_DIR");
-        Normalize(LuminaDir);
-
         FString ExePath = Platform::GetCurrentProcessPath();
         Normalize(ExePath);
 
-        // The exe lives two directories below the root, and without this every resource path is malformed.
-        const FString Candidate = Parent(Parent(Parent(ExePath, true), true), true);
+        // The exe lives in <root>/Binaries/<Platform>, so every checkout runs against its own engine tree.
+        const FString LuminaDir = Parent(Parent(Parent(ExePath, true), true), true);
 
-        // An installed build must not run against whatever source tree LUMINA_DIR names on this machine.
-        bInstalledBuild = !Candidate.empty() && Filesystem::Exists(Candidate + "/" + InstalledBuildMarker);
-        if (bInstalledBuild)
+        bInstalledBuild = !LuminaDir.empty() && Filesystem::Exists(LuminaDir + "/" + InstalledBuildMarker);
+        if (LuminaDir.empty() || !Filesystem::Exists(LuminaDir + "/Engine/Resources"))
         {
-            LuminaDir = Candidate;
-        }
-        else if (LuminaDir.empty() || !Filesystem::Exists(LuminaDir + "/Engine/Resources"))
-        {
-            if (!Candidate.empty() && Filesystem::Exists(Candidate + "/Engine/Resources"))
-            {
-                LOG_DISPLAY("LUMINA_DIR unset or invalid; using executable-relative engine root: {}", Candidate.c_str());
-                LuminaDir = Candidate;
-            }
-            else
-            {
-                LOG_ERROR("Could not resolve engine root. LUMINA_DIR='{}', exe-relative candidate='{}'. "
-                          "Run the engine's Setup.bat. Resources (fonts, shaders) will fail to load.",
-                          LuminaDir.c_str(), Candidate.c_str());
-            }
+            LOG_ERROR("Could not resolve the engine root from '{}'. Resources (fonts, shaders) will fail to load.", ExePath.c_str());
         }
 
         CachedDirectories[EngineInstallDirectoryName]   = LuminaDir;
@@ -273,6 +255,16 @@ namespace Lumina::Paths
     bool IsInstalledBuild()
     {
         return bInstalledBuild;
+    }
+
+    FString GetBuildToolScript()
+    {
+        #if defined(LE_PLATFORM_WINDOWS)
+        FString Script = GetEngineInstallDirectory() + "/LuminaBuild.bat";
+        #else
+        FString Script = GetEngineInstallDirectory() + "/LuminaBuild.sh";
+        #endif
+        return !bInstalledBuild && Exists(Script) ? Script : FString();
     }
 
     namespace

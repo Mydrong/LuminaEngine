@@ -16,19 +16,19 @@ namespace Lumina
     {
         GENERATED_BODY()
 
-        PROPERTY()
+        PROPERTY(Hidden)
         ECS::FEntity Projectile = ECS::NullEntity;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         ECS::FEntity HitEntity = ECS::NullEntity;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         FVector3 Point;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         FVector3 Normal;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         float Damage = 0.0f;
     };
 
@@ -69,7 +69,7 @@ namespace Lumina
         ECS::FEntity Instigator = ECS::NullEntity;
 
         /** Fired once when the projectile hits something. */
-        PROPERTY()
+        PROPERTY(Hidden)
         TScriptDelegate<SProjectileHitEvent> OnHit;
 
         // Transient: set once a hit registers, so the system stops sweeping a resting projectile.

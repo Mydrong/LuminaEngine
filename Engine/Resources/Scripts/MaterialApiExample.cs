@@ -8,19 +8,19 @@ namespace LuminaExamples;
 [Reflect]
 public class MaterialApiExample : CEntityScript
 {
-    [Property(Category = "Flash", Tooltip = "Vector parameter on the mesh material to drive.")]
+    [Property(Category = "Flash", ToolTip = "Vector parameter on the mesh material to drive.")]
     public string ColorParameter = "BaseColor";
 
-    [Property(Category = "Flash", Tooltip = "Color the surface flashes to when Hit is called.")]
+    [Property(Category = "Flash", ToolTip = "Color the surface flashes to when Hit is called.")]
     public FVector4 FlashColor = new FVector4(1.0f, 0.1f, 0.1f, 1.0f);
 
-    [Property(Category = "Flash", Tooltip = "Seconds the flash takes to fade back to the original color.")]
+    [Property(Category = "Flash", ToolTip = "Seconds the flash takes to fade back to the original color.")]
     public float FlashDuration = 0.25f;
 
-    [Property(Category = "Collection", Tooltip = "Collection this script drives; every material bound to it sees the write.")]
+    [Property(Category = "Collection", ToolTip = "Collection this script drives; every material bound to it sees the write.")]
     public CMaterialParameterCollection? Collection;
 
-    [Property(Category = "Collection", Tooltip = "Scalar the collection declares, driven from GlobalValue.")]
+    [Property(Category = "Collection", ToolTip = "Scalar the collection declares, driven from GlobalValue.")]
     public string CollectionParameter = "Wetness";
 
     [Property(Category = "Collection")]
@@ -32,14 +32,14 @@ public class MaterialApiExample : CEntityScript
 
     public override void OnReady()
     {
-        if (!World.TryGetComponent(Entity, out SStaticMeshComponent Mesh))
+        if (World.TryGetComponent<SStaticMeshComponent>(Entity) is not { } Mesh)
         {
             Debug.Log("MaterialApiExample: no static mesh component on this entity.");
             return;
         }
 
         // Transient, so nothing written below reaches the material asset on disk.
-        Material = Mesh.CreateDynamicMaterialInstance(0);
+        Material = Mesh.Get().CreateDynamicMaterialInstance(0);
         if (Material == null)
         {
             return;

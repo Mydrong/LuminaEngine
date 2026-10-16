@@ -7,6 +7,7 @@
 #include "ImportDedup.h"
 
 #include "Assets/AssetTypes/Mesh/Animation/Animation.h"
+#include "Containers/Algorithm.h"
 #include "Core/Math/Math.h"
 #include "Core/Math/Transform.h"
 #include "Core/Progress/SlowTask.h"
@@ -157,6 +158,35 @@ namespace Lumina
         FMatrix4 NodeLocalMatrix(const cgltf_node& Node)
         {
             return ToEngineSpace(SourceLocalMatrix(Node));
+        }
+
+        FMatrix4 NodeWorldMatrix(const cgltf_node* Node)
+        {
+            FMatrix4 World(1.0f);
+            for (; Node != nullptr; Node = Node->parent)
+            {
+                World = NodeLocalMatrix(*Node) * World;
+            }
+            return World;
+        }
+
+        // glTF applies every ancestor of a joint, joint or not, so an exporter's axis-fix armature above the root joint has to land on that bone.
+        THashMap<const cgltf_node*, FTransform> CollectRootJointParents(const cgltf_data& Data)
+        {
+            THashMap<const cgltf_node*, FTransform> Parents;
+            for (cgltf_size s = 0; s < Data.skins_count; ++s)
+            {
+                const cgltf_skin& Skin = Data.skins[s];
+                for (cgltf_size j = 0; j < Skin.joints_count; ++j)
+                {
+                    const cgltf_node* Joint = Skin.joints[j];
+                    if (Joint->parent != nullptr && !Algo::Contains(Skin.joints, Skin.joints + Skin.joints_count, Joint->parent))
+                    {
+                        Parents.emplace(Joint, FTransform(NodeWorldMatrix(Joint->parent)));
+                    }
+                }
+            }
+            return Parents;
         }
 
         struct FGeometryScratch
@@ -1381,6 +1411,8 @@ namespace Lumina
 
         //~ Skeletons and animations.
 
+        const THashMap<const cgltf_node*, FTransform> RootJointParents = CollectRootJointParents(Data);
+
         if (Options.bImportSkeleton)
         {
             OutData.Skeletons.reserve(Data.skins_count);
@@ -1431,6 +1463,10 @@ namespace Lumina
                     }
 
                     Bone.LocalTransform = NodeLocalMatrix(JointNode);
+                    if (auto Parent = RootJointParents.find(&JointNode); Parent != RootJointParents.end())
+                    {
+                        Bone.LocalTransform = Parent->second.GetMatrix() * Bone.LocalTransform;
+                    }
                     Bone.InvBindMatrix  = (j < InverseBindMatrices.size()) ? ToEngineSpace(InverseBindMatrices[j]) : FMatrix4(1.0f);
 
                     Skeleton->BoneNameToIndex[Bone.Name] = (int32)j;
@@ -1488,12 +1524,17 @@ namespace Lumina
                     TVector<float> Raw(Values->count * Components);
                     cgltf_accessor_unpack_floats(Values, Raw.data(), Raw.size());
 
+                    // A root joint's keys take its non-joint parent as the bone did, each channel on its own since that parent scales uniformly.
+                    const auto Parent = RootJointParents.find(Source.target_node);
+                    const FTransform ParentWorld = Parent != RootJointParents.end() ? Parent->second : FTransform();
+
                     if (Channel.TargetPath == FAnimationChannel::ETargetPath::Translation)
                     {
                         Channel.Translations.resize(Values->count);
                         for (cgltf_size i = 0; i < Values->count; ++i)
                         {
-                            Channel.Translations[i] = ToEngineSpace(FVector3(Raw[i * 3 + 0], Raw[i * 3 + 1], Raw[i * 3 + 2])) * Options.Scale;
+                            const FVector3 Local = ToEngineSpace(FVector3(Raw[i * 3 + 0], Raw[i * 3 + 1], Raw[i * 3 + 2]));
+                            Channel.Translations[i] = (ParentWorld.GetLocation() + ParentWorld.GetRotation() * (ParentWorld.GetScale() * Local)) * Options.Scale;
                         }
                     }
                     else if (Channel.TargetPath == FAnimationChannel::ETargetPath::Scale)
@@ -1501,7 +1542,7 @@ namespace Lumina
                         Channel.Scales.resize(Values->count);
                         for (cgltf_size i = 0; i < Values->count; ++i)
                         {
-                            Channel.Scales[i] = FVector3(Raw[i * 3 + 0], Raw[i * 3 + 1], Raw[i * 3 + 2]);
+                            Channel.Scales[i] = ParentWorld.GetScale() * FVector3(Raw[i * 3 + 0], Raw[i * 3 + 1], Raw[i * 3 + 2]);
                         }
                     }
                     else
@@ -1509,7 +1550,7 @@ namespace Lumina
                         Channel.Rotations.resize(Values->count);
                         for (cgltf_size i = 0; i < Values->count; ++i)
                         {
-                            Channel.Rotations[i] = ToEngineSpace(FQuat(Raw[i * 4 + 3], Raw[i * 4 + 0], Raw[i * 4 + 1], Raw[i * 4 + 2]));
+                            Channel.Rotations[i] = ParentWorld.GetRotation() * ToEngineSpace(FQuat(Raw[i * 4 + 3], Raw[i * 4 + 0], Raw[i * 4 + 1], Raw[i * 4 + 2]));
                         }
                     }
 

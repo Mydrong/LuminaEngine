@@ -50,7 +50,7 @@ namespace Lumina
 
         /** Hull points for a ConvexHull piece, already reduced to the hull itself rather than the source
          *  mesh's vertices. Serialized but not shown: a property grid over hundreds of points is noise. */
-        PROPERTY()
+        PROPERTY(Hidden)
         TVector<FVector3> HullPoints;
     };
 
@@ -84,10 +84,10 @@ namespace Lumina
         PROPERTY(Editable, Category = "Triangle Mesh")
         bool bUseTriangleMesh = false;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         TVector<FVector3> TriangleVertices;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         TVector<uint32> TriangleIndices;
 
         /** True when this asset can actually produce a shape; an empty asset is a silent no-collision bug

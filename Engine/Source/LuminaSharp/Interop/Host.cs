@@ -10,7 +10,7 @@ namespace LuminaSharp;
 public static unsafe partial class Host
 {
     // Must equal Lumina::DotNet::GAbiVersion. Bump on ABI breaks.
-    private const int AbiVersion = 15;
+    private const int AbiVersion = 16;
 
     // Logical name for the engine module hosting this assembly (Runtime); resolved to a native handle via ModuleHandle.
     public const string NativeLibrary = "LuminaNative";
@@ -20,6 +20,13 @@ public static unsafe partial class Host
     // A reload compiling on a worker thread, which the game thread swaps in once it finishes.
     private static System.Threading.Tasks.Task<FCompiledGeneration?>? PendingCompile;
     private static IntPtr NativeModule;
+
+    // Generated P/Invokes name an engine module, which is already loaded, so the name maps to its handle rather than a file search.
+    static Host()
+    {
+        System.Runtime.InteropServices.NativeLibrary.SetDllImportResolver(typeof(Host).Assembly,
+            (Name, Assembly, SearchPath) => ModuleHandle(Name));
+    }
     private static readonly Dictionary<string, IntPtr> ModuleHandles = new();
 
     // Bootstrap-critical exports, resolved directly from the host (Runtime) module.
@@ -388,11 +395,12 @@ public static unsafe partial class Host
 
             DiscardPendingCompile();
             List<ScriptAssemblyUnit> Read = ReadUnits(Units, Count);
+            bool bUseLastBuildOnError = Scripts.bUseLastBuildOnError;
             PendingCompile = System.Threading.Tasks.Task.Run<FCompiledGeneration?>(() =>
             {
                 try
                 {
-                    return ScriptManager.BuildGeneration(Read);
+                    return ScriptManager.BuildGeneration(Read, bUseLastBuildOnError);
                 }
                 catch (Exception Exception)
                 {

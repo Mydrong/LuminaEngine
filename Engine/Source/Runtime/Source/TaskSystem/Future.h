@@ -37,6 +37,8 @@ namespace Lumina
 
             FStateBase(const FStateBase&)            = delete;
             FStateBase& operator=(const FStateBase&) = delete;
+            FStateBase(FStateBase&&) = delete;
+            FStateBase& operator=(FStateBase&&) = delete;
 
             bool IsReady() const { return bReady.load(std::memory_order_acquire); }
             void Wait() const    { Jobs::WaitForCounter(Counter, 0); }
@@ -85,6 +87,11 @@ namespace Lumina
                     Ptr()->~T();
                 }
             }
+            TState() = default;
+            TState(const TState&) = delete;
+            TState& operator=(const TState&) = delete;
+            TState(TState&&) = delete;
+            TState& operator=(TState&&) = delete;
 
             T* Ptr() { return reinterpret_cast<T*>(Storage); }
 
@@ -105,6 +112,7 @@ namespace Lumina
     public:
         TPromise() : State(MakeShared<FutureDetail::TState<T>>()) {}
 
+        ~TPromise() = default;
         TPromise(const TPromise&)            = delete;
         TPromise& operator=(const TPromise&) = delete;
         TPromise(TPromise&&)                 = default;
@@ -138,6 +146,7 @@ namespace Lumina
     public:
         TPromise() : State(MakeShared<FutureDetail::TState<void>>()) {}
 
+        ~TPromise() = default;
         TPromise(const TPromise&)            = delete;
         TPromise& operator=(const TPromise&) = delete;
         TPromise(TPromise&&)                 = default;

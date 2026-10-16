@@ -50,6 +50,10 @@ namespace Lumina
 			{
 				Stop();
 			}
+			FWindowsAudioDevice(const FWindowsAudioDevice&) = delete;
+			FWindowsAudioDevice& operator=(const FWindowsAudioDevice&) = delete;
+			FWindowsAudioDevice(FWindowsAudioDevice&&) = delete;
+			FWindowsAudioDevice& operator=(FWindowsAudioDevice&&) = delete;
 
 			bool Start() override;
 			void Stop() override;

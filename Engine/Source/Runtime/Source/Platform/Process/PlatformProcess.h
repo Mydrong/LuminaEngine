@@ -50,10 +50,6 @@ namespace Lumina::Platform
     // Applies to this process and children spawned afterward, and an empty value removes the variable.
     RUNTIME_API bool SetEnvVariable(const FString& Name, const FString& Value);
 
-    // Persist an env var to the user environment so future processes inherit it; idempotent, returns true
-    // only on an actual change. No-op returning false where there's no user-environment store.
-    RUNTIME_API bool PersistUserEnvVariable(const FString& Name, const FString& Value);
-
 	RUNTIME_API int LaunchProcess(const TCHAR* URL, const TCHAR* Params = nullptr, bool bLaunchDetached = true);
     RUNTIME_API void LaunchURL(const TCHAR* URL);
 
@@ -89,6 +85,22 @@ namespace Lumina::Platform
 
     // Releases the handle without touching the child, which keeps running if it still is.
     RUNTIME_API void CloseProcess(FProcessHandle& Process);
+
+    // Released by the OS when its holder exits, so a crashed holder never strands it.
+    struct FInstanceLock
+    {
+        void* Handle = nullptr;
+
+        bool IsHeld() const { return Handle != nullptr; }
+    };
+
+    // False only when another process holds Path, whose id then lands in OutOwnerId, or 0 when unreadable.
+    RUNTIME_API bool TryAcquireInstanceLock(const FString& Path, FInstanceLock& OutLock, uint32& OutOwnerId);
+
+    RUNTIME_API void ReleaseInstanceLock(FInstanceLock& Lock);
+
+    // Restores and raises the process's main window. False when it has none or the OS refused the focus change.
+    RUNTIME_API bool FocusProcessWindow(uint32 ProcessId);
 
     RUNTIME_API const TCHAR* ExecutableName(bool bRemoveExtension = true);
 

@@ -19,6 +19,7 @@ namespace Lumina
         TSharedPtr<FPhysicsCharacterHandle> Handle;
 
         FCharacterHandleRef() = default;
+        ~FCharacterHandleRef() = default;
         FCharacterHandleRef(const FCharacterHandleRef&) {}
         FCharacterHandleRef(FCharacterHandleRef&&) noexcept = default;
         FCharacterHandleRef& operator=(const FCharacterHandleRef&) { Handle.reset(); return *this; }
@@ -154,7 +155,7 @@ namespace Lumina
         float Gravity = Physics::GEarthGravity;
 
         /** Current velocity of the character in world space. */
-        PROPERTY(Category = "Movement", Units = "m/s")
+        PROPERTY(Hidden, Category = "Movement", Units = "m/s")
         FVector3 Velocity;
 
         /** When true, the character's yaw matches the controller's look direction. */

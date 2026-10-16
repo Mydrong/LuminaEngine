@@ -12,10 +12,10 @@ namespace Lumina
     {
         GENERATED_BODY()
 
-        PROPERTY()
+        PROPERTY(Hidden)
         float X = 0.0f;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         int32 Count = 0;
     };
 
@@ -29,27 +29,27 @@ namespace Lumina
     {
         GENERATED_BODY()
 
-        PROPERTY()
+        PROPERTY(Hidden)
         TScriptDelegate<> OnNothing;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         TScriptDelegate<SDelegateTestPayload> OnOne;
 
         // A lone non-blittable argument, which the arity-one binding path used to skip silently.
-        PROPERTY()
+        PROPERTY(Hidden)
         TScriptDelegate<FString> OnOneString;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         TScriptDelegate<SDelegateTestPayload, float> OnTwo;
 
         // A string argument is the case the old single-blittable-payload design could not express.
-        PROPERTY()
+        PROPERTY(Hidden)
         TScriptDelegate<SDelegateTestPayload, float, FString> OnThree;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         FOnTestTwoArgs OnAliasedTwo;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         FOnTestThreeArgs OnTypedefThree;
     };
 }

@@ -156,6 +156,9 @@ namespace Lumina
 
         void Serialize(FArchive& Ar) override;
 
+        // Both registries, so a world loaded but never initialized, or no longer managed, still shows what its entities hold.
+        void VisitAdditionalObjectReferences(FObjectReferenceVisitor::FSlotFunc Func) override;
+
         void PreLoad() override;
 
         void PostLoad() override;
@@ -257,6 +260,13 @@ namespace Lumina
 
         FUNCTION()
         bool IsPaused() const { return bPaused; }
+
+        // Whether a paused editor world still previews animation, which an asset or prefab preview may not want.
+        FUNCTION()
+        void SetAnimatesWhilePaused(bool bAnimate) { bAnimatesWhilePaused = bAnimate; }
+
+        FUNCTION()
+        bool AnimatesWhilePaused() const { return bAnimatesWhilePaused; }
 
         // True from the start of teardown, so an OnDetach can tell the whole world going away from its own entity being removed.
         FUNCTION()
@@ -571,7 +581,7 @@ namespace Lumina
         void GetSystemSchedule(TVector<FSystemScheduleEntry>& Out) const;
 
         // One instance of every enabled system class; the per-stage FStageSlots only point into it.
-        PROPERTY(NoSerialize)
+        PROPERTY(Hidden, NoSerialize)
         TVector<TStrongObjectPtr<CEntitySystem>>           Systems;
 
         //~ Subsystems. One CObject per subsystem class per world, so a C++ and a C# one are the same
@@ -592,7 +602,7 @@ namespace Lumina
         NODISCARD const TVector<TStrongObjectPtr<CWorldSubsystem>>& GetSubsystems() const { return Subsystems; }
 
         // Runtime state rather than map data, but reflected so the hot reload reinstancer reaches it.
-        PROPERTY(NoSerialize)
+        PROPERTY(Hidden, NoSerialize)
         TVector<TStrongObjectPtr<CWorldSubsystem>>         Subsystems;
 
 
@@ -822,6 +832,7 @@ namespace Lumina
         void AdvanceThrottle(double NowSeconds);
 
         uint32                                              bPaused:1 = true;
+        uint32                                              bAnimatesWhilePaused:1 = true;
         uint32                                              bActive:1 = true;
         uint32                                              bThrottledThisFrame:1 = false;
         

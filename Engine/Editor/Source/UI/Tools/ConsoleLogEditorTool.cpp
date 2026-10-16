@@ -1,5 +1,7 @@
 ﻿#include "ConsoleLogEditorTool.h"
+#include "Config/Config.h"
 #include "Core/Math/Math.h"
+#include "Settings/EditorSettings.h"
 #include "UI/EditorUI.h"
 
 #include <utility>
@@ -175,6 +177,13 @@ namespace Lumina
             ImGui::Checkbox("Show Icons", &Settings.bShowIcons);
             ImGui::Checkbox("Word Wrap", &Settings.bWordWrap);
 
+            CWorldEditorSettings* WorldSettings = GetMutableDefault<CWorldEditorSettings>();
+            if (ImGui::Checkbox("Clear on Play", &WorldSettings->bClearConsoleOnPIE))
+            {
+                GConfig->SaveSettings(CWorldEditorSettings::StaticClass());
+            }
+            ImGuiX::TextTooltip("Empty the console each time play in editor starts. Also in Editor Settings, World Tool.");
+
             ImGui::Spacing();
             ImGui::SeparatorText("Performance");
             
@@ -234,6 +243,12 @@ namespace Lumina
         const bool bWasPinnedToBottom = ImGui::GetScrollY() >= ImGui::GetScrollMaxY() - 1.0f;
 
         const Logging::FLogQueue& Messages = Logging::GetConsoleLogQueue();
+        // A clear from anywhere, such as play starting, leaves the selected queue indices pointing at new lines.
+        if (Messages.size() < PreviousMessageSize)
+        {
+            SelectedMessages.clear();
+            SelectionAnchor = -1;
+        }
         PreviousMessageSize = Messages.size();
 
         if (Settings.FontScale != 1.0f)
@@ -768,8 +783,6 @@ namespace Lumina
     void FConsoleLogEditorTool::ClearConsole()
     {
         Logging::ClearLogQueue();
-        PreviousMessageSize = 0;
-        FilteredMessageCount = 0;
         bNeedsScrollToBottom = false;
     }
 

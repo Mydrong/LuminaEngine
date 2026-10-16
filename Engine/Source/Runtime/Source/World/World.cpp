@@ -1,6 +1,7 @@
 ﻿#include "RuntimePCH.h"
 #include "World.h"
 #include "World/ECS/Registry.h"
+#include "World/ECS/ECSReferenceProvider.h"
 #include "Networking/NetRealm.h"
 #include "World/ECS/EventDispatcher.h"
 #include <cmath>
@@ -327,6 +328,12 @@ namespace Lumina
             ECS::FRegistry& Source = (EntityRegistry.NumEntities() != 0) ? EntityRegistry : RegistryPending;
             ECS::Utils::SerializeRegistry(Ar, Source);
         }
+    }
+
+    void CWorld::VisitAdditionalObjectReferences(FObjectReferenceVisitor::FSlotFunc Func)
+    {
+        VisitRegistryObjectReferences(EntityRegistry, Func);
+        VisitRegistryObjectReferences(RegistryPending, Func);
     }
 
     void CWorld::PreLoad()
@@ -720,12 +727,12 @@ namespace Lumina
         if (View.bHasView)
         {
             RenderScene->SetActivePostProcessMaterials(View.PostProcessMaterials);
-            RenderScene->Extract(View.ViewVolume, View.bHasPostProcess ? &View.PostProcess : nullptr);
+            RenderScene->Extract(View.ViewVolume, View.bHasPostProcess ? &View.PostProcess : nullptr, View.Layers);
             return;
         }
 
         RenderScene->SetActivePostProcessMaterials({});
-        RenderScene->Extract(FViewVolume{}, nullptr);
+        RenderScene->Extract(FViewVolume{}, nullptr, FViewLayerSettings{});
     }
 
     ECS::FEntity CWorld::ConstructEntity(FName Name, const FTransform& Transform)
@@ -1663,26 +1670,37 @@ namespace Lumina
     {
         Out.clear();
 
-        // Read off the default object, so a disabled system still reports the stages it would tick in.
         EntitySystems::ForEachSystemClass([&](CClass* Class)
         {
-            CEntitySystem* Defaults = Class->GetDefaultObject<CEntitySystem>();
-            if (Defaults == nullptr || !Defaults->ShouldCreate())
+            CEntitySystem* Described = Class->GetDefaultObject<CEntitySystem>();
+            if (Described == nullptr || !Described->ShouldCreate())
             {
                 return;
             }
-            Defaults->ConfigureSystem();
+
+            // The world's own instance first, since a C# Configure only runs on an object with a managed side, which a default object lacks.
+            const auto Live = Algo::FindIf(Systems, [Class](const TStrongObjectPtr<CEntitySystem>& System) { return System.Get() != nullptr && System->GetClass() == Class; });
+            if (Live != Systems.end())
+            {
+                Described = Live->Get();
+            }
+            else
+            {
+                // A disabled system has no instance, so its default object still reports the stages it would tick in.
+                Described->ConfigureSystem();
+            }
 
             FSystemInfo& Info = Out.emplace_back();
             Info.Name     = Class->GetName();
             Info.bEnabled = PendingDisabledSystems.count(Info.Name) == 0;
 
+            const FUpdatePriorityList& Priorities = Described->GetPriorities();
             for (uint8 i = 0; i < (uint8)EUpdateStage::Max; ++i)
             {
-                if (Defaults->GetPriorities().IsStageEnabled((EUpdateStage)i))
+                if (Priorities.IsStageEnabled((EUpdateStage)i))
                 {
                     Info.Stages.push_back((EUpdateStage)i);
-                    Info.Priorities.push_back(Defaults->GetPriorities().GetPriorityForStage((EUpdateStage)i));
+                    Info.Priorities.push_back(Priorities.GetPriorityForStage((EUpdateStage)i));
                 }
             }
         });

@@ -25,7 +25,8 @@ namespace Lumina
         FObjectReferenceReplacer() = default;
         FObjectReferenceReplacer(CObject* ToReplace, CObject* Replacement);
 
-        LE_NO_COPY(FObjectReferenceReplacer);
+        ~FObjectReferenceReplacer() = default;
+        LE_NO_COPYMOVE(FObjectReferenceReplacer);
 
         /** Hard reference: matched by pointer. */
         void AddReplacement(CObject* ToReplace, CObject* Replacement);

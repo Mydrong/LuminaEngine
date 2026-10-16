@@ -71,22 +71,25 @@ internal sealed class ScriptManager
     // Names each context as it is built, which can be before the generation it becomes is known.
     private static int ContextSerial;
 
+    // With nothing running there are no current scripts to keep, so a broken unit loads its last good build instead.
+    public bool bUseLastBuildOnError => Library == null;
+
     public bool LoadOrReload(IReadOnlyList<ScriptAssemblyUnit> Units)
     {
-        FCompiledGeneration? Compiled = BuildGeneration(Units);
+        FCompiledGeneration? Compiled = BuildGeneration(Units, bUseLastBuildOnError);
         return Compiled != null && Commit(Compiled);
     }
 
     // Touches nothing the live generation uses, so it runs on any thread while the current scripts keep running.
-    public static FCompiledGeneration? BuildGeneration(IReadOnlyList<ScriptAssemblyUnit> Units)
+    public static FCompiledGeneration? BuildGeneration(IReadOnlyList<ScriptAssemblyUnit> Units, bool bUseLastBuildOnError)
     {
         lock (BuildLock)
         {
-            return BuildGenerationLocked(Units);
+            return BuildGenerationLocked(Units, bUseLastBuildOnError);
         }
     }
 
-    private static FCompiledGeneration? BuildGenerationLocked(IReadOnlyList<ScriptAssemblyUnit> Units)
+    private static FCompiledGeneration? BuildGenerationLocked(IReadOnlyList<ScriptAssemblyUnit> Units, bool bUseLastBuildOnError)
     {
         // Every dependency compiles before its dependents, since its image is their metadata reference.
         List<ScriptAssemblyUnit> Ordered = TopologicalOrder(Units);
@@ -108,30 +111,34 @@ internal sealed class ScriptManager
                 else
                 {
                     FScriptImage? Compiled = CompileUnit(Unit, Images);
-                    if (Compiled == null)
+                    if (Compiled != null)
+                    {
+                        Image = Compiled.Value;
+
+                        // A failed write leaves the previous DLL in place, so the key only follows a real one.
+                        bool bEmitted = EmitAssembly(Unit.Name, Unit.DllPath, Image);
+                        WriteCompileKey(Unit.DllPath, bEmitted ? CompileKey : null);
+                    }
+                    else if (bUseLastBuildOnError && TryReadImage(Unit.DllPath, out Image))
+                    {
+                        // Only a successful compile writes the DLL, so what is on disk is the last build that worked.
+                        Native.Log(ELogLevel.Error,
+                            $"Compilation of '{Unit.Name}' failed; its last successful build is loaded until the errors are fixed.");
+                    }
+                    else
                     {
                         Native.Log(ELogLevel.Error,
                             $"Script reload aborted: compilation of '{Unit.Name}' failed; keeping current scripts.");
                         return null;
                     }
-                    Image = Compiled.Value;
-
-                    // A failed write leaves the previous DLL in place, so the key only follows a real one.
-                    bool bEmitted = EmitAssembly(Unit.Name, Unit.DllPath, Image);
-                    WriteCompileKey(Unit.DllPath, bEmitted ? CompileKey : null);
                 }
             }
             else if (!string.IsNullOrEmpty(Unit.DllPath) && File.Exists(Unit.DllPath))
             {
                 // No sources: load the unit's prebuilt managed DLL as-is (a code-only plugin).
-                try
+                if (!TryReadImage(Unit.DllPath, out Image))
                 {
-                    Image = new FScriptImage(File.ReadAllBytes(Unit.DllPath!), ReadSymbols(Unit.DllPath!));
-                }
-                catch (Exception Exception)
-                {
-                    Native.Log(ELogLevel.Error,
-                        $"Script reload aborted: failed to read prebuilt assembly '{Unit.DllPath}': {Exception.Message}");
+                    Native.Log(ELogLevel.Error, $"Script reload aborted: failed to read prebuilt assembly '{Unit.DllPath}'.");
                     return null;
                 }
             }
@@ -406,7 +413,25 @@ internal sealed class ScriptManager
             {
                 return false;
             }
+        }
+        catch (Exception)
+        {
+            return false;
+        }
 
+        return TryReadImage(DllPath, out Image);
+    }
+
+    private static bool TryReadImage(string? DllPath, out FScriptImage Image)
+    {
+        Image = default;
+        if (string.IsNullOrEmpty(DllPath) || !File.Exists(DllPath))
+        {
+            return false;
+        }
+
+        try
+        {
             Image = new FScriptImage(File.ReadAllBytes(DllPath!), ReadSymbols(DllPath!));
             return true;
         }
@@ -531,7 +556,7 @@ internal sealed class ScriptManager
         Interop.ResetExceptionThrottle();     // the reloaded code earns a full stack on its first throw
         ScriptCallback.PurgeAll();            // every closure handed to native, callbacks, listeners and loads alike
         PropertyAccessor.ClearScriptCaches(); // cached get/set delegates over user property types
-        ScriptFunctionDispatch.Reset();        // [ScriptFunction] bindings, which root user MethodInfos
+        ScriptFunctionDispatch.Reset();        // [Function] bindings, which root user MethodInfos
         ScriptInvokerRegistry.Clear();         // generated invokers, which are delegates over user methods
         NativeObjectMarshal.ClearTypeCache();  // wrapper instantiations keyed by user parameter types
 

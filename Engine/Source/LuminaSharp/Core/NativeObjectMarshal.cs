@@ -6,6 +6,7 @@ namespace LuminaSharp;
 public static class NativeObjectMarshal
 {
     // The canonical wrapper, so reading a reference twice returns the same instance.
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
     public static T? FromHandle<T>(IntPtr Object) where T : NativeObject
     {
         return Object == IntPtr.Zero ? null : Wrapper<T>.ForObject(Object);
@@ -49,6 +50,7 @@ public static class NativeObjectMarshal
     }
 
     /// <summary>The native pointer behind a wrapper, or zero for null.</summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
     public static IntPtr ToHandle(NativeObject? Value)
     {
         return Value is null ? IntPtr.Zero : Value.Handle;

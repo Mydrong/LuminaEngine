@@ -330,7 +330,7 @@ namespace Lumina
     void FDefaultSceneRenderer::UploadSkinnedFrameData(RHI::FCmdListH CL, FFrameData& Frame)
     {
         TVector<FSkinnedFrameData>& Data  = Frame.Geometry.SkinnedFrameData;
-        const TVector<uint32>&      Slots = Frame.Geometry.SkinnedSlots;
+        const TVector<uint32>&      Slots = Frame.Geometry.SkinnedIndices;   // skinned indices, not retained slots
 
         // Minted here rather than reused from MeshletDrawTag, which wraps at 4095 and can alias.
         CurrentSkinnedFrameTag++;
@@ -485,7 +485,7 @@ namespace Lumina
 
     void FDefaultSceneRenderer::SkinnedMeshletBoundsPass(RHI::FCmdListH CL, const FFrameData& Frame)
     {
-        const uint32 NumSkinned = (uint32)Frame.Geometry.SkinnedSlots.size();
+        const uint32 NumSkinned = (uint32)Frame.Geometry.SkinnedIndices.size();
         if (NumSkinned == 0 || SkinnedBoundsMaxRange == 0 || SkinnedMeshletBoundsCapacity == 0
             || RetainedStaticCapacity == 0)
         {
@@ -872,7 +872,6 @@ namespace Lumina
             SceneRootShared.MeshletDrawList      = { GetMeshletDrawList(), DrawListCapacity };
             SceneRootShared.PreSkinnedVertices   = { GetPreSkinnedVerticesBuffer(), PreSkinnedVertexCapacity };
             SceneRootShared.PreSkinnedPrevPositions = { PreSkinnedPrevPositionsBuffer, PreSkinnedPrevCapacity };
-            SceneRootShared.SkinnedFrameData     = { SkinnedFrameDataBuffer };
             // Spheres and cones are indexed by one base, so each carries the same capacity.
             SceneRootShared.SkinnedMeshletBounds = { SkinnedMeshletBoundsBuffer, SkinnedMeshletBoundsCapacity };
             SceneRootShared.SkinnedMeshletCones  = { SkinnedMeshletConeBuffer, SkinnedMeshletBoundsCapacity };
@@ -911,7 +910,7 @@ namespace Lumina
         const FFrameData& Frame = *RenderFrame;
 
         // Two blocks per gathered skinned SLOT, the surface LOD and the coarser shadow LOD.
-        const uint32 NumSkinned = (uint32)Frame.Geometry.SkinnedSlots.size();
+        const uint32 NumSkinned = (uint32)Frame.Geometry.SkinnedIndices.size();
         if (NumSkinned == 0)
         {
             return;
@@ -1171,7 +1170,8 @@ namespace Lumina
             SCENE_GPU_SCOPE(CL, "Retained Upload");
 
             // Only when something is sent, since waiting on every earlier stage stalls the frame head for nothing otherwise.
-            const bool bUploadsThisFrame = Upload.bFull || Upload.bFullStatic || !Upload.DirtySlots.empty() || !Upload.DirtyStaticSlots.empty();
+            const bool bUploadsThisFrame = Upload.bFull || Upload.bFullStatic || !Upload.DirtySlots.empty() || !Upload.DirtyStaticSlots.empty()
+                                        || !Upload.DeactivatedSlots.empty();
             if (bUploadsThisFrame)
             {
                 RHI::CmdBarrier(CL,
@@ -1237,6 +1237,12 @@ namespace Lumina
                         i = j;
                     }
                 };
+
+                // Ahead of the writes, so a slot freed and reused this frame ends with its new entry.
+                if (!Upload.bFull && !Upload.DeactivatedSlots.empty())
+                {
+                    DeactivateRetainedSlots(CL, Upload.DeactivatedSlots);
+                }
 
                 if (Upload.bFull)
                 {

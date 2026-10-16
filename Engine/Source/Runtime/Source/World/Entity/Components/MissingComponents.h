@@ -3,6 +3,7 @@
 #include "Containers/Name.h"
 #include "Containers/Vector.h"
 #include "Core/Serialization/PortableBytes.h"
+#include "Core/Versioning/CoreVersion.h"
 #include "World/ECS/Registry.h"
 #include "MissingComponents.generated.h"
 
@@ -19,7 +20,23 @@ namespace Lumina
 
         FPortableBytes Data;
 
-        friend FArchive& operator<<(FArchive& Ar, SHeldValue& Held) { return Ar << Held.TypeName << Held.Data; }
+        // Copies cannot rewrite the entity handles inside Data, so each copy's remap is folded in here for the restore.
+        TVector<uint32> RemapFrom;
+        TVector<uint32> RemapTo;
+        bool bClearUnmappedEntities = false;
+
+        void RemapEntities(const THashMap<ECS::FEntity, ECS::FEntity>& Map, bool bClearUnmapped);
+        void ApplyEntityRemap(const CStruct* Struct, void* Value) const;
+
+        friend FArchive& operator<<(FArchive& Ar, SHeldValue& Held)
+        {
+            Ar << Held.TypeName << Held.Data;
+            if (Ar.GetFileVersion() >= (int32)ELuminaEngineVersion::HELD_VALUE_ENTITY_REMAP)
+            {
+                Ar << Held.RemapFrom << Held.RemapTo << Held.bClearUnmappedEntities;
+            }
+            return Ar;
+        }
     };
 
     // Components whose type was not loaded, saved and copied with the entity until a load or script reload brings the type back.

@@ -3,6 +3,7 @@
 #include "Assets/AssetTypes/Material/MaterialInterface.h"
 #include "Core/Math/Math.h"
 #include "Core/Object/ObjectHandleTyped.h"
+#include "Renderer/RenderLayers.h"
 #include "DecalComponent.generated.h"
 
 namespace Lumina
@@ -35,6 +36,10 @@ namespace Lumina
         /** Higher values draw later (on top of) lower ones when decals overlap. */
         PROPERTY(Editable, Category = "Decal")
         int32 SortOrder = 0;
+
+        // Drawn by any camera whose CullMask shares one of these layers.
+        PROPERTY(Editable, Category = "Decal")
+        SRenderLayerMask RenderLayers;
 
         // Multiplies the material's color and emission, and its alpha scales the whole decal.
         PROPERTY(Editable, Color, Category = "Decal|Appearance")

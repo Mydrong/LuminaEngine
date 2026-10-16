@@ -89,6 +89,10 @@ namespace Lumina
                     GBackgroundGrabs.fetch_sub(1, std::memory_order_relaxed);
                 }
             }
+            FBackgroundGrabScope(const FBackgroundGrabScope&) = delete;
+            FBackgroundGrabScope& operator=(const FBackgroundGrabScope&) = delete;
+            FBackgroundGrabScope(FBackgroundGrabScope&&) = delete;
+            FBackgroundGrabScope& operator=(FBackgroundGrabScope&&) = delete;
         };
 
         // Items this thread pulled off the cursor, so the caller can price the loop from work it ran anyway.

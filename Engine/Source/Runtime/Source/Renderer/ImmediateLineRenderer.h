@@ -49,6 +49,8 @@ namespace Lumina
 
         FImmediateLineRenderer(const FImmediateLineRenderer&) = delete;
         FImmediateLineRenderer& operator=(const FImmediateLineRenderer&) = delete;
+        FImmediateLineRenderer(FImmediateLineRenderer&&) = delete;
+        FImmediateLineRenderer& operator=(FImmediateLineRenderer&&) = delete;
 
         void BeginFrame();
 
@@ -119,8 +121,11 @@ namespace Lumina
         struct FChannel
         {
             FChannel() = default;
+            ~FChannel() = default;
             FChannel(const FChannel&) = delete;
             FChannel& operator=(const FChannel&) = delete;
+            FChannel(FChannel&&) = delete;
+            FChannel& operator=(FChannel&&) = delete;
 
             // Live slot's mapped range, republished each BeginFrame.
             FSimpleElementVertex*   Host     = nullptr;

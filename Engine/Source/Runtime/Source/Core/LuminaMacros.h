@@ -35,17 +35,11 @@
 #define LUM_RESTORE_DEPRECATION_WARNINGS _Pragma("GCC diagnostic pop")
 #endif
 
-#define LE_NO_COPY(X) \
+#define LE_NO_COPYMOVE(X) \
     X(const X&) = delete; \
-    X& operator = (const X&) = delete \
-
-#define LE_NO_MOVE(X) \
+    X& operator = (const X&) = delete; \
     X(X&&) = delete; \
     X& operator = (X&&) = delete \
-
-#define LE_NO_COPYMOVE(X) \
-    LE_NO_COPY(X); \
-    LE_NO_MOVE(X) \
     
 #define LE_DEFAULT_MOVE(X) \
     X(X&&) = default; \

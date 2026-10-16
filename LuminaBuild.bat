@@ -13,9 +13,7 @@ if errorlevel 1 (
     exit /b 1
 )
 
-rem Reached when this script is not sitting in an engine root, which is what happens when it is
-rem copied somewhere on its own or LUMINA_DIR points at the wrong tree. Checked here so the failure
-rem names the tree it looked in, rather than surfacing as an MSBuild error about a missing project.
+rem Reached when this script was copied out of an engine root, so the failure names the tree it looked in.
 if not exist "%BUILD_TOOL_PROJECT%" (
     echo error: LuminaBuildTool source is missing at "%BUILD_TOOL_PROJECT%".
     echo "%LUMINA_ROOT%" does not look like a Lumina engine root.

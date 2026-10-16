@@ -22,6 +22,9 @@ namespace Lumina
 
         FORCEINLINE bool HasModal() const { return ActiveModal.get() != nullptr; }
 
+        // Runs the open modal's teardown while the tools it draws for still exist.
+        void Dismiss() { ActiveModal.reset(); }
+
         void DrawDialogue();
 
     private:

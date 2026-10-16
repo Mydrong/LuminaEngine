@@ -1,9 +1,15 @@
 #pragma once
 
 #include "Containers/String.h"
+#include "imgui.h"
 
 namespace Lumina::AssetPickerFilter
 {
+    // One definition for every picker row, so object, id and document slots match and unity builds see no duplicates.
+    constexpr ImVec2 kButtonSize(42, 0);
+    constexpr ImVec4 kMutedText(0.6f, 0.6f, 0.6f, 1.0f);
+    constexpr ImVec4 kEmptyText(1.0f, 0.19f, 0.19f, 1.0f);
+
     /** Where an asset came from, derived from the VFS root its path is mounted under. */
     enum class EAssetSource : uint8
     {

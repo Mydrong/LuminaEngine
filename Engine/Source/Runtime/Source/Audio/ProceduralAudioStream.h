@@ -13,8 +13,11 @@ namespace Lumina
 
         FProceduralAudioStream(uint32 InSampleRate, uint32 InChannelCount, uint32 BufferFrames);
 
+        ~FProceduralAudioStream() = default;
         FProceduralAudioStream(const FProceduralAudioStream&) = delete;
         FProceduralAudioStream& operator=(const FProceduralAudioStream&) = delete;
+        FProceduralAudioStream(FProceduralAudioStream&&) = delete;
+        FProceduralAudioStream& operator=(FProceduralAudioStream&&) = delete;
 
         bool IsValid() const { return bInitialized; }
 

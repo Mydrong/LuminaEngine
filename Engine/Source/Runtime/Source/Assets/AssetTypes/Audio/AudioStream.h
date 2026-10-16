@@ -28,13 +28,13 @@ namespace Lumina
         float GetDuration() const override { return SampleRate != 0 ? (float)((double)NumFrames / (double)SampleRate) : 0.0f; }
 
         // Source file the audio was imported from; empty for in-place created assets.
-        PROPERTY()
+        PROPERTY(Hidden)
         FString SourcePath;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         uint32 SampleRate = 0;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         uint32 NumChannels = 0;
 
         uint64 NumFrames = 0;

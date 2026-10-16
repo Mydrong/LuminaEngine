@@ -36,7 +36,7 @@ public class ScriptPropertyTypeTest : CEntityScript
 
     //~ Blittable scalars: read and written in place at the property's offset, no boundary crossing.
 
-    [Property(Category = "Scalars", Tooltip = "A 32-bit float.")]
+    [Property(Category = "Scalars", ToolTip = "A 32-bit float.")]
     public float FloatValue = 3.5f;
 
     [Property(Category = "Scalars")]
@@ -51,7 +51,7 @@ public class ScriptPropertyTypeTest : CEntityScript
     [Property(Category = "Scalars")]
     public short Int16Value = -300;
 
-    [Property(Category = "Scalars", Min = -100.0f, Max = 100.0f)]
+    [Property(Category = "Scalars", ClampMin = -100.0f, ClampMax = 100.0f)]
     public int Int32Value = 7;
 
     [Property(Category = "Scalars")]
@@ -81,7 +81,7 @@ public class ScriptPropertyTypeTest : CEntityScript
     [Property(Category = "Structs")]
     public FVector2 Vector2Value = new FVector2(10.0f, 20.0f);
 
-    [Property(Category = "Structs", Color = true)]
+    [Property(ColorPicker, Category = "Structs")]
     public FVector3 Vector3Value = new FVector3(0.25f, 0.5f, 0.75f);
 
     [Property(Category = "Structs")]
@@ -97,27 +97,27 @@ public class ScriptPropertyTypeTest : CEntityScript
     //~ reads as a plausible empty string and corrupts on the first assignment, which is what makes them the
     //~ interesting case rather than just another type.
 
-    [Property(Category = "Text", Tooltip = "An FString living in native memory.")]
+    [Property(Category = "Text", ToolTip = "An FString living in native memory.")]
     public string StringValue = "declared default";
 
     // An interned name. POD on both sides -- an id, not text -- so it is read and written in place exactly
     // like FVector3 above, and only ToString()/FromString() ever touch the name table.
-    [Property(Category = "Text", Tooltip = "An interned FName.")]
+    [Property(Category = "Text", ToolTip = "An interned FName.")]
     public FName NameValue = new FName("DeclaredName");
 
-    [Property(Category = "References", Tooltip = "An asset reference, drawn as an asset picker.")]
+    [Property(Category = "References", ToolTip = "An asset reference, drawn as an asset picker.")]
     public FSoftObjectPath AssetValue = new FSoftObjectPath("/Engine/Resources/Content/DefaultMaterial");
 
     // A TYPED soft reference. Stored natively as the same single FSoftObjectPath the bare one above is, and
     // differing only in filtering the picker to CTexture -- which is the whole point of routing asset
     // references by the ISoftObjectReference interface rather than by type name: this needed no rewriter change.
-    [Property(Category = "References", Tooltip = "A typed soft reference, drawn as a CTexture picker.")]
+    [Property(Category = "References", ToolTip = "A typed soft reference, drawn as a CTexture picker.")]
     public TSoftObjectPtr<CTexture> TextureRef = new TSoftObjectPtr<CTexture>("/Engine/Resources/Content/DefaultTexture");
 
     // A HARD reference, and a different kind entirely: a native object property, so it holds a live pointer
     // that keeps its target alive and can name any CObject rather than only something with an asset path.
     // No initializer -- null is the only default a hard reference can express.
-    [Property(Category = "References", Tooltip = "A hard object reference, drawn as an object picker.")]
+    [Property(Category = "References", ToolTip = "A hard object reference, drawn as an object picker.")]
     public TStrongObjectPtr<CWorld> WorldRef;
 
     //~ Containers hand out a VIEW over the native container rather than a managed copy, because there is only

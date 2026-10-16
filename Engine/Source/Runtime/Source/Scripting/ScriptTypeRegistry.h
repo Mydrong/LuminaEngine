@@ -30,6 +30,8 @@ namespace Lumina
         ~FScriptStructRegistry();
         FScriptStructRegistry(const FScriptStructRegistry&) = delete;
         FScriptStructRegistry& operator=(const FScriptStructRegistry&) = delete;
+        FScriptStructRegistry(FScriptStructRegistry&&) = delete;
+        FScriptStructRegistry& operator=(FScriptStructRegistry&&) = delete;
 
         // An unchanged struct keeps its object across a reload; a reshaped or removed one is superseded and kept for migration.
         void Refresh(TSpan<const Scripting::FManagedTypeDefinition> Definitions);
@@ -79,10 +81,10 @@ namespace Lumina
     };
 
     // The struct a stored name means, native or C#, which share one name space since a C# type never takes a native name.
-    RUNTIME_API NODISCARD CStruct* ResolveStructByName(const FName& Name);
+    NODISCARD RUNTIME_API CStruct* ResolveStructByName(const FName& Name);
 
     // The name an asset stores for this type, which a superseded C# struct keeps although its object was renamed aside.
-    RUNTIME_API NODISCARD FName StructIdentity(const CStruct* Struct);
+    NODISCARD RUNTIME_API FName StructIdentity(const CStruct* Struct);
 
     // A resolved struct name, resolved again when the name changes or a reload supersedes a C# struct.
     struct FStructResolveCache

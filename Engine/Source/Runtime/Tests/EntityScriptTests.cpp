@@ -1105,6 +1105,45 @@ TEST(EntityScriptUnification, AnUnresolvableScriptClassSkipsOnlyItself)
     EntityScripts::DetachAll(Registry, Entity);
 }
 
+// Undo and duplicate copy entities through a proxy archive, and a held script's object slots once escaped to the inner one.
+TEST(EntityScriptUnification, AHeldScriptKeepsItsObjectsThroughAProxyArchive)
+{
+    RegisterPendingTypes();
+    CEntityScriptTest* Target = NewObject<CEntityScriptTest>(nullptr, NAME_None, FGuid::New(), OF_Transient);
+    ASSERT_NE(Target, nullptr);
+
+    SEntityScriptComponent Source;
+    SHeldValue& Held = Source.Pending.emplace_back();
+    Held.TypeName = FName("CScriptClassThatIsNotLoaded");
+    Held.Data.Bytes = { 1, 2, 3, 4 };
+    Held.Data.Names.push_back({ 0, FName("HeldName") });
+    Held.Data.Objects.push_back({ 0, Target->GetGUID() });
+
+    TVector<uint8> Bytes;
+    {
+        FMemoryWriter Writer(Bytes);
+        FObjectProxyArchiver Ar(Writer, /*bLoadIfFindFails*/ false);
+        Source.Serialize(Ar);
+    }
+
+    SEntityScriptComponent Restored;
+    {
+        FMemoryReader Reader(Bytes);
+        FObjectProxyArchiver Ar(Reader, /*bLoadIfFindFails*/ true);
+        Restored.Serialize(Ar);
+        EXPECT_FALSE(Ar.HasError());
+    }
+
+    ASSERT_EQ(Restored.Pending.size(), size_t(1));
+    const FPortableBytes& Data = Restored.Pending[0].Data;
+    EXPECT_EQ(Restored.Pending[0].TypeName, FName("CScriptClassThatIsNotLoaded"));
+    EXPECT_EQ(Data.Bytes, Held.Data.Bytes);
+    ASSERT_EQ(Data.Names.size(), size_t(1));
+    EXPECT_EQ(Data.Names[0].Name, FName("HeldName"));
+    ASSERT_EQ(Data.Objects.size(), size_t(1));
+    EXPECT_EQ(Data.Objects[0].Object, Target->GetGUID());
+}
+
 namespace
 {
     Scripting::FScriptExportSchema IntSchema(const char* FieldName)
@@ -1243,12 +1282,10 @@ TEST(ScriptClassInheritance, ARemovedParentOutlivesTheSubclassStillOnIt)
     ASSERT_NE(OldChild, nullptr);
     ASSERT_EQ(OldChild->GetSuperClass(), FindObject<CClass>(FName("Retire_GTestParent")));
 
-    CWorld* World = NewObject<CWorld>(nullptr, NAME_None, FGuid::New(), OF_Transient);
-    ECS::FRegistry& Registry = ECS::GetWorldRegistry(*World);
-    const ECS::FEntity Entity = Registry.Create();
-    CEntityScript* Script = EntityScripts::Attach(Registry, Entity, OldChild);
-    ASSERT_NE(Script, nullptr);
-    *OldChild->GetProperty(FName("ChildValue"))->GetValuePtr<int32>(Script) = 77;
+    // Held by a strong reference no walk can reach, so the reload cannot move it onto the replacement.
+    TStrongObjectPtr<CEntityScript> Script(static_cast<CEntityScript*>(NewObject(OldChild, nullptr, NAME_None, FGuid::New(), OF_Transient)));
+    ASSERT_NE(Script.Get(), nullptr);
+    *OldChild->GetProperty(FName("ChildValue"))->GetValuePtr<int32>(Script.Get()) = 77;
 
     // The parent goes and the child moves up to the native base, the way the stress run reshaped them.
     TVector<Scripting::FManagedTypeDefinition> Second;
@@ -1261,15 +1298,13 @@ TEST(ScriptClassInheritance, ARemovedParentOutlivesTheSubclassStillOnIt)
     EXPECT_NE(NewChild, OldChild);
     EXPECT_EQ(NewChild->GetSuperClass(), CEntityScript::StaticClass());
 
-    // This bare world is outside the reinstancer's reach, so the old subclass keeps its instance and its parent.
     ASSERT_NE(Parent, nullptr) << "a parent with a live subclass must not be freed";
     EXPECT_EQ(OldChild->GetSuperClass(), Parent);
     EXPECT_TRUE(Script->GetClass()->IsChildOf(CEntityScript::StaticClass()));
-    EXPECT_EQ(*OldChild->GetProperty(FName("ChildValue"))->GetValuePtr<int32>(Script), 77);
+    EXPECT_EQ(*OldChild->GetProperty(FName("ChildValue"))->GetValuePtr<int32>(Script.Get()), 77);
 
     // With the instance gone, the next refresh retires the old subclass and then the parent it was holding.
-    EXPECT_TRUE(EntityScripts::Remove(Registry, Entity, Script));
-    Registry.Destroy(Entity);
+    Script.Reset();
     FScriptableRegistry::RefreshMintedClasses(Second);
     EXPECT_EQ(FindObject<CClass>(FName("Retire_GTestParent")), nullptr);
     EXPECT_EQ(FindObject<CClass>(FName("Retire_GTestChild")), NewChild);
@@ -1306,4 +1341,20 @@ TEST(ScriptClassInheritance, AParentThatGainsItsFirstFieldRebuildsItsSubclasses)
     ASSERT_NE(ParentValue, nullptr);
     ASSERT_NE(ChildValue, nullptr);
     EXPECT_GE(ChildValue->Offset, ParentValue->Offset + sizeof(int32)) << "the two blocks must not overlap";
+}
+
+// A class under a C# parent is minted before that parent registers, and must still find its events on the native ancestor.
+TEST(ScriptClassInheritance, AClassUnderAScriptParentKeepsItsOverrides)
+{
+    Scripting::FManagedTypeDefinition Parent = ScriptClassDefinition("Override_GTestParent", "CEntityScript", "ParentValue");
+    Scripting::FManagedTypeDefinition Child = ScriptClassDefinition("Override_GTestChild", "Override_GTestParent", "ChildValue");
+    Parent.OverriddenEvents.push_back("OnReady");
+    Child.OverriddenEvents.push_back("OnReady");
+    Child.OverriddenEvents.push_back("OnUpdate");
+    ReloadClasses({ Parent, Child });
+
+    const CScriptClass* ChildClass = Cast<CScriptClass>(FindObject<CClass>(FName("Override_GTestChild")));
+    ASSERT_NE(ChildClass, nullptr);
+    EXPECT_NE(ChildClass->FindScriptOverride(FName("OnReady")), nullptr) << "an event overridden in C# under a C# parent must dispatch to it";
+    EXPECT_NE(ChildClass->FindScriptOverride(FName("OnUpdate")), nullptr);
 }

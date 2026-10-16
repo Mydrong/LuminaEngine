@@ -108,23 +108,23 @@ namespace Lumina
         PROPERTY(Editable, Category = "Physics|Constraints")
         bool bLockRotationZ = false;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         TScriptDelegate<SCollisionEvent> OnContactBegin;
 
         // Velocities are zero in this payload.
-        PROPERTY()
+        PROPERTY(Hidden)
         TScriptDelegate<SCollisionEvent> OnContactEnd;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         TScriptDelegate<SCollisionEvent> OnOverlapBegin;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         TScriptDelegate<SCollisionEvent> OnOverlapEnd;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         FScriptDelegate OnWake;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         FScriptDelegate OnSleep;
 
     };

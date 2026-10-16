@@ -132,6 +132,46 @@ namespace
     }
 }
 
+// A full rebake swaps in a new mesh, whose epoch has to move past the old one or followers keep the old corridor.
+TEST(NavMeshBuild, ReplacementMeshContinuesThePreviousEpoch)
+{
+    FNavMesh Replacement;
+    const uint64 OldEpoch = 10;
+    Replacement.ContinueTopologyEpochFrom(OldEpoch);
+
+    EXPECT_GT(Replacement.GetTopologyEpoch(), OldEpoch);
+    EXPECT_TRUE(Replacement.HasTileChangedSince(OldEpoch, FVector3(-1.0f), FVector3(1.0f)));
+
+    // Never moves backwards, so continuing from an older mesh leaves a newer count alone.
+    const uint64 Current = Replacement.GetTopologyEpoch();
+    Replacement.ContinueTopologyEpochFrom(1);
+    EXPECT_EQ(Replacement.GetTopologyEpoch(), Current);
+}
+
+// A tile is wider than this volume, and the ground past the volume's edges must not come out walkable.
+TEST(NavMeshBuild, VolumeSmallerThanATileStopsAtItsBounds)
+{
+    FNavBuildInput In;
+    ApplyTestSettings(In);
+    AddGroundQuad(In, -20.0f, -20.0f, 20.0f, 20.0f, 0.0f);
+    In.BoundsMin = FVector3(-2.0f, -1.0f, -2.0f);
+    In.BoundsMax = FVector3( 2.0f,  1.0f,  2.0f);
+
+    TUniquePtr<FNavMesh> Mesh = BakeAndHydrate(std::move(In));
+    ASSERT_NE(Mesh, nullptr);
+    ASSERT_GT(Mesh->GetDebugStats().Triangles, 0);
+
+    const float Slack = 0.25f;
+    Mesh->ForEachTriangle([Slack](const FVector3& A, const FVector3& B, const FVector3& C, uint8)
+    {
+        for (const FVector3& V : { A, B, C })
+        {
+            EXPECT_LE(Math::Abs(V.x), 2.0f + Slack);
+            EXPECT_LE(Math::Abs(V.z), 2.0f + Slack);
+        }
+    });
+}
+
 TEST(NavMeshBuild, GroundPlaneBakesAndPathsAcross)
 {
     TUniquePtr<FNavMesh> Mesh = BakeAndHydrate(MakeGroundPlane());

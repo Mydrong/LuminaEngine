@@ -61,32 +61,6 @@ namespace Lumina
             return FString(Name.data(), Name.size());
         }
 
-        FString ProjectFilePath()
-        {
-            const FString Directory = ProjectDirectory();
-            if (Directory.empty())
-            {
-                return {};
-            }
-
-            FString Candidate = StandaloneLauncherJoin(Directory, ProjectName() + ".lproject");
-            if (Filesystem::Exists(Candidate))
-            {
-                return Candidate;
-            }
-
-            FString Found;
-            Filesystem::IterateDirectory(Directory, [&Found](const Filesystem::FDirectoryEntry& Entry)
-            {
-                if (!Found.empty() || Entry.IsDirectory() || Entry.GetExtension() != FStringView(".lproject"))
-                {
-                    return;
-                }
-                Found.assign(Entry.FullPath.data(), Entry.FullPath.size());
-            });
-            return Found;
-        }
-
         FString ProjectBinaryPath(const FFixedString& FileName)
         {
             const FString Directory = ProjectDirectory();
@@ -108,15 +82,6 @@ namespace Lumina
         FString ProjectGameModulePath()
         {
             return ProjectBinaryPath(Paths::MakeGameModuleFileName(ProjectName()));
-        }
-
-        FString BuildToolPath()
-        {
-        #if defined(LE_PLATFORM_WINDOWS)
-            return StandaloneLauncherJoin(Paths::GetEngineInstallDirectory(), "LuminaBuild.bat");
-        #else
-            return StandaloneLauncherJoin(Paths::GetEngineInstallDirectory(), "LuminaBuild.sh");
-        #endif
         }
 
         FString BuildArguments()
@@ -141,7 +106,7 @@ namespace Lumina
                 return false;
             }
 
-            const FString ProjectFile = ProjectFilePath();
+            const FStringView ProjectFile = GEngine->GetProjectFile();
             if (ProjectFile.empty())
             {
                 OutError = "No .lproject file for the loaded project, so the game has nothing to open.";
@@ -207,7 +172,7 @@ namespace Lumina
 
     FString FStandaloneLauncher::GetBuildCommandLine()
     {
-        return BuildToolPath() + " " + BuildArguments();
+        return Paths::GetBuildToolScript() + " " + BuildArguments();
     }
 
     bool FStandaloneLauncher::IsBuilding()
@@ -249,7 +214,7 @@ namespace Lumina
         GSession->Options = Options;
 
         TSharedPtr<FLaunchSession> Session = GSession;
-        const FString Tool = BuildToolPath();
+        const FString Tool = Paths::GetBuildToolScript();
         const FString Args = BuildArguments();
         const FString WorkingDirectory(Paths::GetEngineInstallDirectory());
 

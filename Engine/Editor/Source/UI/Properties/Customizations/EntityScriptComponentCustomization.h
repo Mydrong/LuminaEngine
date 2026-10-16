@@ -23,7 +23,7 @@ namespace Lumina
      *  - a script's properties are real FPropertys on its (minted) class, so each one is drawn by a stock
      *    nested FPropertyTable instead of a bespoke drawer over a value blob.
      *
-     * A function with Button metadata, C++ FUNCTION(Button) or C# [Button], is drawn under those properties and called through reflection.
+     * A function with Button metadata, C++ FUNCTION(Button) or C# [Function(Button)], is drawn under those properties and called through reflection.
      */
     class FEntityScriptComponentCustomization : public IPropertyTypeCustomization
     {

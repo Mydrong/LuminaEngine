@@ -166,7 +166,7 @@ covered by Microsoft's redistribution terms, not MIT.
 
 ## What else setup does
 
-- Persists `LUMINA_DIR` to `HKCU\Environment` so standalone game projects can find the engine. Remove with `reg delete "HKCU\Environment" /v LUMINA_DIR /f`.
+- Registers the `.lproject` and `.lplugin` icons and the `.lproject` right-click verbs under `HKCU\Software\Classes`.
 - Points `core.hooksPath` at [`BuildScripts/Hooks`](BuildScripts/Hooks). The one hook, `post_merge`, wipes `Binaries/`, `Intermediates/`, and stale IDE files after a merge.
 - Generates the IDE project files by calling `LuminaBuild.bat GenerateProjectFiles`.
 

@@ -16,7 +16,10 @@ public:
 private:
 
     TSingleton() = default;
+    ~TSingleton() = default;
     TSingleton(const TSingleton&) = delete;
     TSingleton& operator=(const TSingleton&) = delete;
+    TSingleton(TSingleton&&) = delete;
+    TSingleton& operator=(TSingleton&&) = delete;
 };
 

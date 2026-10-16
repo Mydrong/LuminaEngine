@@ -15,6 +15,7 @@ namespace Lumina
     class CMaterialInterface;
     class FImmediateLineRenderer;
     struct SPostProcessSettings;
+    struct FViewLayerSettings;
 
     class IRenderScene : public IPrimitiveDrawInterface
     {
@@ -30,7 +31,7 @@ namespace Lumina
         virtual void Init() = 0;
 
         // Gather this frame's scene from the ECS.
-        virtual void Extract(const FViewVolume& ViewVolume, const SPostProcessSettings* PostProcess) = 0;
+        virtual void Extract(const FViewVolume& ViewVolume, const SPostProcessSettings* PostProcess, const FViewLayerSettings& Layers) = 0;
 
         virtual void RenderView(uint8 FrameIndex) = 0;
 

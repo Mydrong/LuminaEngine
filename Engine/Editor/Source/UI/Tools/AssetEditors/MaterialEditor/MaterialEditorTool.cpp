@@ -467,7 +467,46 @@ namespace Lumina
 
     void FMaterialEditorTool::DrawMaterialGraph()
     {
+        DrawCompileErrorBanner();
         NodeGraph->DrawGraph();
+    }
+
+    void FMaterialEditorTool::DrawCompileErrorBanner()
+    {
+        // Opening never compiles, so a material saved broken says so before anyone thinks to press Compile.
+        const CMaterial* Material = Cast<CMaterial>(Asset.Get());
+        const bool bBrokenOnOpen = !bHasCompiled && Material != nullptr && !Material->IsReadyForRender();
+        if (!CompilationResult.bIsError && !bBrokenOnOpen)
+        {
+            return;
+        }
+
+        ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.30f, 0.09f, 0.09f, 1.0f));
+        ImGui::BeginChild("##compile_error_banner", ImVec2(0, 0), ImGuiChildFlags_Borders | ImGuiChildFlags_AutoResizeY, ImGuiWindowFlags_NoScrollbar);
+
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.00f, 0.75f, 0.75f, 1.0f));
+        if (CompilationResult.bIsError)
+        {
+            ImGui::Text(LE_ICON_ALERT " Material failed to compile (%d error%s), so it and every instance of it render nothing.",
+                static_cast<int>(CompilationResult.Errors.size()), CompilationResult.Errors.size() == 1 ? "" : "s");
+        }
+        else
+        {
+            ImGui::TextUnformatted(LE_ICON_ALERT " This material has no usable shaders, so it and every instance of it render nothing.");
+        }
+        ImGui::PopStyleColor();
+
+        if (CompilationResult.bIsError)
+        {
+            DrawDiagnosticRows(CompilationResult.Errors, true);
+        }
+        else if (ImGui::SmallButton("Compile"))
+        {
+            Compile(true);
+        }
+
+        ImGui::EndChild();
+        ImGui::PopStyleColor();
     }
 
     void FMaterialEditorTool::DrawMaterialProperties()

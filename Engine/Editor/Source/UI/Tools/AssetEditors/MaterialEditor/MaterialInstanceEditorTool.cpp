@@ -269,8 +269,8 @@ namespace Lumina
         else
         {
             ImGui::TextWrapped("'%s' has no usable shaders, so this instance renders nothing and exposes no "
-                               "parameters. Open it and fix the compile errors listed in the console and the "
-                               "Shader Stats tab.", Root->GetName().c_str());
+                               "parameters. Open it to see the compile errors, which are marked on the failing "
+                               "nodes in its graph.", Root->GetName().c_str());
         }
         ImGui::PopStyleColor();
 

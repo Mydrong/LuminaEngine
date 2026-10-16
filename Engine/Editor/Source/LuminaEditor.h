@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Core/Application/Application.h"
+#include "Platform/Process/PlatformProcess.h"
 
 namespace Lumina
 {
@@ -42,17 +43,23 @@ namespace Lumina
          */
         bool CreatePlugin(FStringView NewPluginName, FStringView Description, FFixedString& OutPluginDir, FString& OutError);
 
-        /**
-         * Synchronously runs the project's GenerateProject.bat in a detached
-         * console so the user can watch the build tool's output. Returns true if
-         * the spawn succeeded; the user closes the console when it finishes.
-         */
+        // Runs this engine's build tool on a worker and streams its output to the log. False when it cannot start.
         bool GenerateProjectFiles(FStringView ProjectDirectory) const;
+
+        // Claims the --Project one before any window opens. False when another editor has it, which then gets focus.
+        bool ClaimStartupProject();
 
     protected:
 
         /** Editor doesn't auto-load a runtime world; the user picks one via the editor UI. */
         void LoadStartupMap() override {}
+
+        bool ClaimProject(FStringView ProjectDirectory) override;
+
+    private:
+
+        Platform::FInstanceLock ProjectLock;
+        FFixedString            LockedProjectDirectory;
     };
     
     

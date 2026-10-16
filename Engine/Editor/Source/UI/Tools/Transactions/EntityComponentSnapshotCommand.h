@@ -35,8 +35,8 @@ namespace Lumina
 
     private:
 
-        void Capture(TVector<uint8>& Out) const;
-        void Restore(const TVector<uint8>& In) const;
+        void Capture(TVector<uint8>& Out, TVector<TVector<FName>>& OutOverrides) const;
+        void Restore(const TVector<uint8>& In, const TVector<TVector<FName>>& Overrides) const;
 
         // Weak, since a strong ref would keep a torn-down world alive and stop a stale undo from no-opping.
         TWeakObjectPtr<CWorld>  World;
@@ -49,6 +49,10 @@ namespace Lumina
 
         TVector<uint8>          Before;
         TVector<uint8>          After;
+
+        // Each entity's prefab override paths for the component, restored with the value so the inherited rest follows the prefab.
+        TVector<TVector<FName>> OverridesBefore;
+        TVector<TVector<FName>> OverridesAfter;
 
         // Whether each entity carried the component when the before-image was taken.
         TVector<uint8>          PresentBefore;

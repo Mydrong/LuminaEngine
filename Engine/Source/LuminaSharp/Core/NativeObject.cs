@@ -140,36 +140,46 @@ public unsafe class NativeObject : IDisposable
 
     protected internal IntPtr Handle
     {
+        // Four loads and no crossing, inlined into every accessor; anything unusual goes out of line.
+        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
         get
         {
-            if (ObjectIndex < 0)
+            if (EntryPtr != null && *(int*)(EntryPtr + GenerationOffset) == ObjectGeneration)
             {
-                return RawHandle;
-            }
-
-            // Four loads and no crossing, which is the whole point; a recycled slot falls to the slow path
-            // because only a full resolve knows whether the handle was redirected by a reinstance.
-            if (EntryPtr != null)
-            {
-                if (*(int*)(EntryPtr + GenerationOffset) == ObjectGeneration)
+                byte* Object = *(byte**)(EntryPtr + ObjectOffset);
+                if (Object != null && (*(uint*)(Object + FlagsOffset) & MarkedDestroy) == 0)
                 {
-                    byte* Object = *(byte**)(EntryPtr + ObjectOffset);
-                    if (Object != null && (*(uint*)(Object + FlagsOffset) & MarkedDestroy) == 0)
-                    {
-                        return (IntPtr)Object;
-                    }
-                    throw Destroyed();
+                    return (IntPtr)Object;
                 }
-                return ResolveRedirected();
             }
+            return HandleSlow();
+        }
+    }
 
-            IntPtr Pointer = Native.ObjectResolve(ObjectIndex, ObjectGeneration);
-            if (Pointer == IntPtr.Zero)
+    // A recycled slot only a full resolve can tell from a reinstance, a destroyed object, or a wrapper with no fast path.
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private IntPtr HandleSlow()
+    {
+        if (ObjectIndex < 0)
+        {
+            return RawHandle;
+        }
+
+        if (EntryPtr != null)
+        {
+            if (*(int*)(EntryPtr + GenerationOffset) == ObjectGeneration)
             {
                 throw Destroyed();
             }
-            return Pointer;
+            return ResolveRedirected();
         }
+
+        IntPtr Pointer = Native.ObjectResolve(ObjectIndex, ObjectGeneration);
+        if (Pointer == IntPtr.Zero)
+        {
+            throw Destroyed();
+        }
+        return Pointer;
     }
 
     // A generation bump means the slot was recycled or the object reinstanced, and only native can tell which.

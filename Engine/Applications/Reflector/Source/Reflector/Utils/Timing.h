@@ -21,6 +21,8 @@ namespace Lumina::Reflection
 
         FScopedPhaseTimer(const FScopedPhaseTimer&) = delete;
         FScopedPhaseTimer& operator=(const FScopedPhaseTimer&) = delete;
+        FScopedPhaseTimer(FScopedPhaseTimer&&) = delete;
+        FScopedPhaseTimer& operator=(FScopedPhaseTimer&&) = delete;
 
         void Stop()
         {

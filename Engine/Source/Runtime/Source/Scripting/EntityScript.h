@@ -48,6 +48,11 @@ namespace Lumina
     public:
 
         ~CEntityScript() override;
+        CEntityScript() = default;
+        CEntityScript(const CEntityScript&) = delete;
+        CEntityScript& operator=(const CEntityScript&) = delete;
+        CEntityScript(CEntityScript&&) = delete;
+        CEntityScript& operator=(CEntityScript&&) = delete;
 
         FUNCTION()
         virtual void OnAttach() {}
@@ -105,6 +110,9 @@ namespace Lumina
             OwningEntity = InEntity;
             OwningWorld  = InWorld;
         }
+
+        // Points every PROPERTY(Component) reference at the owner's component, adding it unless the property says Component = Get.
+        void BindComponentRefs();
 
         /// OnAttach has run, so a script loaded but never adopted gets no OnDetach.
         bool IsAttached() const { return OwningEntity != ECS::NullEntity; }
@@ -171,7 +179,7 @@ namespace Lumina
         // The same, reading the arguments out of a call frame laid out for Function.
         void SendRpcFrame(const FFunction& Function, const void* Frame);
 
-        //~ The C# [Rpc] and [Sync] runtime, which finds a function or field once and then addresses it by pointer.
+        //~ The C# [Rpc] and [Property(Sync)] runtime, which finds a function or field once and then addresses it by pointer.
 
         // The reflected RPC named Name, or null when this script has none by that name.
         FUNCTION(ScriptInternal)
@@ -199,7 +207,7 @@ namespace Lumina
         // An RPC or an owner's Sync write arrived for this script, read through the same FProperty::NetSerialize it was written with.
         void ReceiveRpc(uint32 RpcId, uint32 CallerId, const uint8* Payload, uint32 PayloadSize);
 
-        //~ PROPERTY(Sync) support, used by the netcode, which checks Sync fields every tick the way a C# [Sync] setter would.
+        //~ PROPERTY(Sync) support, used by the netcode, which checks Sync fields every tick the way a C# Sync setter would.
 
         // The id an owner's write to a FromOwner field travels under, or the one the host's correction comes back under.
         uint32 SyncFieldId(const FProperty* Field, bool bCorrection) const;
@@ -219,7 +227,7 @@ namespace Lumina
         // Whether the field is PROPERTY(Sync = FromOwner), the only kind an owner may write.
         static bool IsSyncFromOwner(const FProperty* Field);
 
-        // Compares a C++ script's Sync fields with the values last seen, doing what a C# [Sync] setter does for each change.
+        // Compares a C++ script's Sync fields with the values last seen, doing what a C# Sync setter does for each change.
         void PollSync();
 
         // Replicated values are about to land, or just landed, in the named fields, which are zero-terminated back to back.
@@ -282,7 +290,7 @@ namespace Lumina
         SEntityScriptComponent& operator=(const SEntityScriptComponent& Other);
 
         // Reflected so references can be walked and repointed, NoSerialize since the component serializes itself.
-        PROPERTY(NoSerialize)
+        PROPERTY(Hidden, NoSerialize)
         TVector<TStrongObjectPtr<CEntityScript>> Scripts;
 
         // Unresolved at load, written back with what its bytes refer to, retried on the next script reload.

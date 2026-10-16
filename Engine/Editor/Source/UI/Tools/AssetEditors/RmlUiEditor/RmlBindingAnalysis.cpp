@@ -696,7 +696,7 @@ namespace Lumina::RmlBinding
             {
                 if (!Model->HasCommand(Name))
                 {
-                    Add(Ref.Line, "'" + Ref.Name + "()' is not a [Bind] method of " + TypeName + ".", true);
+                    Add(Ref.Line, "'" + Ref.Name + "()' is not a [Function(Bind)] method of " + TypeName + ".", true);
                 }
                 continue;
             }
@@ -718,14 +718,14 @@ namespace Lumina::RmlBinding
                 {
                     if (List.Name == Scope->List && std::find(List.Members.begin(), List.Members.end(), Ref.Member) == List.Members.end())
                     {
-                        Add(Ref.Line, "'" + Ref.Name + "." + Ref.Member + "' is not a [Bind] member of the items in " + List.Name + ".", true);
+                        Add(Ref.Line, "'" + Ref.Name + "." + Ref.Member + "' is not a [Property(Bind)] member of the items in " + List.Name + ".", true);
                     }
                 }
                 continue;
             }
             if (!Model->HasMember(Name))
             {
-                Add(Ref.Line, "'" + Ref.Name + "' is not a [Bind] member of " + TypeName + ".", true);
+                Add(Ref.Line, "'" + Ref.Name + "' is not a [Property(Bind)] member of " + TypeName + ".", true);
                 continue;
             }
             const bool bStruct = !Ref.Member.empty() && Model->FindScalar(Name) == nullptr && !ContainsName(Model->Lists, Name);
@@ -893,11 +893,11 @@ namespace Lumina::RmlBinding
             { "data-style-",       "Sets the named style property to the expression" },
             { "data-attr-",        "Sets the named attribute to the expression" },
             { "data-attrif-",      "Adds the named attribute while the expression is true" },
-            { "data-event-click",  "Runs a [Bind] method or assignment on click" },
-            { "data-event-change", "Runs a [Bind] method or assignment when an input changes" },
-            { "data-event-submit", "Runs a [Bind] method or assignment when a form submits" },
-            { "data-event-mouseover", "Runs a [Bind] method or assignment on hover" },
-            { "data-event-keydown", "Runs a [Bind] method or assignment on a key press" },
+            { "data-event-click",  "Runs a Bind function or assignment on click" },
+            { "data-event-change", "Runs a Bind function or assignment when an input changes" },
+            { "data-event-submit", "Runs a Bind function or assignment when a form submits" },
+            { "data-event-mouseover", "Runs a Bind function or assignment on hover" },
+            { "data-event-keydown", "Runs a Bind function or assignment on a key press" },
             { "data-alias-",       "Gives an expression a local name for a template" },
         };
         return Attributes;

@@ -51,6 +51,17 @@ namespace Lumina
 
         ECS::FRegistry& Registry = ECS::GetWorldRegistry(*W);
 
+        // Clearing the registry drops the last reference to every asset only this world holds, which would free and reload each one.
+        TVector<TStrongObjectPtr<CObject>> Pinned;
+        W->VisitAdditionalObjectReferences([&Pinned](CObject* Object)
+        {
+            if (Object != nullptr)
+            {
+                Pinned.emplace_back(Object);
+            }
+            return Object;
+        });
+
         // Editor entities and the settings singleton stay, since their unreflected components would dangle.
         TVector<ECS::FEntity> ToDestroy;
         Registry.ForEachEntityExcept<FEditorComponent, FSingletonEntityTag>([&](ECS::FEntity E) { ToDestroy.push_back(E); });

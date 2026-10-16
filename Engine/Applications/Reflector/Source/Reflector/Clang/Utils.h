@@ -90,6 +90,8 @@ namespace Lumina::ClangUtils
 
         FScopedCXString(const FScopedCXString&) = delete;
         FScopedCXString& operator=(const FScopedCXString&) = delete;
+        FScopedCXString(FScopedCXString&&) = delete;
+        FScopedCXString& operator=(FScopedCXString&&) = delete;
 
         const char* Get() const
         {

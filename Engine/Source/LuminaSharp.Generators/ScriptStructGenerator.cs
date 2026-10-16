@@ -8,13 +8,14 @@ using Microsoft.CodeAnalysis.Text;
 
 namespace LuminaSharp.Generators;
 
-// A [Reflect] struct extending a native struct or stored as a component is a handle over memory native mints from its fields, and this gives it the handle.
+// A [Reflect] root or native struct extension is a handle over memory native mints from its fields, and a component is that memory itself.
 [Generator]
 public sealed class ScriptStructGenerator : IIncrementalGenerator
 {
     private const string ReflectAttribute = "LuminaSharp.ReflectAttribute";
     private const string ExtendsInterface = "LuminaSharp.IExtends<TBase>";
     private const string ComponentInterface = "LuminaSharp.IComponent<TSelf>";
+    private const string RootInterface = "LuminaSharp.INativeStruct<TSelf>";
 
     private static readonly DiagnosticDescriptor NotPartial = new(
         id: "LUM0110",
@@ -53,7 +54,8 @@ public sealed class ScriptStructGenerator : IIncrementalGenerator
     private static bool IsNativeBackedStruct(INamedTypeSymbol Symbol)
     {
         return Symbol.GetAttributes().Any(Data => Data.AttributeClass?.ToDisplayString() == ReflectAttribute)
-            && Symbol.AllInterfaces.Any(Interface => Interface.OriginalDefinition.ToDisplayString() is ExtendsInterface or ComponentInterface);
+            && Symbol.AllInterfaces.Any(Interface => Interface.OriginalDefinition.ToDisplayString() is ExtendsInterface or ComponentInterface
+                || (Interface.OriginalDefinition.ToDisplayString() == RootInterface && SymbolEqualityComparer.Default.Equals(Interface.TypeArguments[0], Symbol)));
     }
 
     private static void Emit(SourceProductionContext Output, INamedTypeSymbol Symbol)
@@ -81,6 +83,12 @@ public sealed class ScriptStructGenerator : IIncrementalGenerator
         {
             Source.Append("namespace ").Append(Namespace).AppendLine(";");
         }
+        if (IsComponent(Symbol))
+        {
+            EmitComponent(Source, Name, Symbol.GetMembers("CopyFrom").IsEmpty);
+            Output.AddSource(Name + ".ScriptStruct.g.cs", SourceText.From(Source.ToString(), Encoding.UTF8));
+            return;
+        }
         Source.Append("partial struct ").Append(Name).Append(" : global::LuminaSharp.INativeStruct<").Append(Name).AppendLine(">");
         Source.AppendLine("{");
         Source.AppendLine("    private readonly global::LuminaSharp.NativeRef __Ref;");
@@ -98,5 +106,25 @@ public sealed class ScriptStructGenerator : IIncrementalGenerator
         Source.AppendLine("}");
 
         Output.AddSource(Name + ".ScriptStruct.g.cs", SourceText.From(Source.ToString(), Encoding.UTF8));
+    }
+
+    private static bool IsComponent(INamedTypeSymbol Symbol)
+    {
+        return Symbol.AllInterfaces.Any(Interface => Interface.OriginalDefinition.ToDisplayString() == ComponentInterface);
+    }
+
+    // A component is only ever reached in place, so its own address is the storage, and the private constructor only satisfies field initializers.
+    private static void EmitComponent(StringBuilder Source, string Name, bool bEmitCopyFrom)
+    {
+        Source.Append("unsafe partial struct ").AppendLine(Name);
+        Source.AppendLine("{");
+        Source.Append("    private ").Append(Name).AppendLine("(global::LuminaSharp.NativeRef __Unused) { }");
+        Source.Append("    public static string NativeName => \"").Append(Name).AppendLine("\";");
+        Source.AppendLine("    private readonly nint Handle => (nint)global::System.Runtime.CompilerServices.Unsafe.AsPointer(ref global::System.Runtime.CompilerServices.Unsafe.AsRef(in this));");
+        if (bEmitCopyFrom)
+        {
+            Source.Append("    public readonly void CopyFrom(in ").Append(Name).AppendLine(" Source) => global::LuminaSharp.Native.StructAssign(Handle, Source.Handle, NativeName);");
+        }
+        Source.AppendLine("}");
     }
 }

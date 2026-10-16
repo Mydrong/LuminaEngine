@@ -191,6 +191,48 @@ namespace LuminaAlgorithmTests
         }
     }
 
+    TEST(AlgoPartialSort, SortsTheSmallestIntoTheFront)
+    {
+        std::vector<int32> Values = MakeRandom(778, 5000, 13);
+        std::vector<int32> Reference = Values;
+        std::sort(Reference.begin(), Reference.end());
+
+        const size_t Take = 40;
+        Algo::PartialSort(Values.begin(), Values.begin() + Take, Values.end());
+
+        for (size_t Index = 0; Index < Take; ++Index)
+        {
+            ASSERT_EQ(Values[Index], Reference[Index]);
+        }
+        std::sort(Values.begin(), Values.end());
+        EXPECT_EQ(Values, Reference) << "nothing was lost or duplicated";
+    }
+
+    TEST(AlgoHeap, PopsInOrderUnderTheGivenPredicate)
+    {
+        const std::vector<int32> Source = MakeRandom(779, 2000, 17);
+        auto Later = [](int32 A, int32 B) { return A > B; };
+
+        std::vector<int32> Heap;
+        for (int32 Value : Source)
+        {
+            Heap.push_back(Value);
+            Algo::PushHeap(Heap.begin(), Heap.end(), Later);
+        }
+
+        std::vector<int32> Popped;
+        while (!Heap.empty())
+        {
+            Algo::PopHeap(Heap.begin(), Heap.end(), Later);
+            Popped.push_back(Heap.back());
+            Heap.pop_back();
+        }
+
+        std::vector<int32> Reference = Source;
+        std::sort(Reference.begin(), Reference.end());
+        EXPECT_EQ(Popped, Reference) << "a min-heap under Later pops smallest first";
+    }
+
     TEST(AlgoStablePartition, KeepsRelativeOrderOnBothSides)
     {
         std::vector<int32> Values;

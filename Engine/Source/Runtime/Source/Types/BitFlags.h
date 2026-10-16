@@ -154,18 +154,12 @@ namespace Lumina
             : FBitFlags(Int)
         {}
 
-        constexpr TBitFlags(const TBitFlags<T>& InFlags)
-            : FBitFlags(InFlags.Flags)
-        {}
-
         template<typename... Args>
         requires(... && std::is_convertible_v<Args, T>)
         constexpr TBitFlags(Args&&... args)
         {
             ((Flags |= 1u << (uint8)std::forward<Args>(args)), ...);
         }
-
-        constexpr TBitFlags& operator=(const TBitFlags& RHS) = default;
 
         constexpr bool IsFlagSet(T Flag) const { return FBitFlags::IsFlagSet((uint8)Flag); }
         constexpr bool IsFlagCleared(T Flag) const { return FBitFlags::IsFlagCleared((uint8)Flag); }

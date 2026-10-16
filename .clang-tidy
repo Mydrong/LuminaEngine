@@ -1,0 +1,9 @@
+# Engine checks, read by Rider and clangd as you type and by LuminaBuild Tidy across the tree.
+Checks: '-*,cppcoreguidelines-special-member-functions'
+HeaderFilterRegex: '.*[\\/]Engine[\\/](Source|Editor|Plugins|Applications)[\\/].*'
+ExcludeHeaderFilterRegex: '.*[\\/](ThirdParty|External|Intermediates|imgui-node-editor)[\\/].*'
+CheckOptions:
+  # A lone defaulted destructor, such as an interface's virtual one, still leaves every other member implicit and correct.
+  cppcoreguidelines-special-member-functions.AllowSoleDefaultDtor: true
+  # Copying is already deleted through a base such as CObjectBase or a member such as a mutex, so spelling it out again adds nothing.
+  cppcoreguidelines-special-member-functions.AllowImplicitlyDeletedCopyOrMove: true

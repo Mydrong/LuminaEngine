@@ -24,7 +24,7 @@ namespace Lumina::Physics
 {
     static TUniquePtr<FBox3DData> Box3DData;
 
-    static TConsoleVar CVarPhysicsDebug("Physics.Debug.Draw", false, "Toggles debug drawing for Box3D physics, has severe performance impact.");
+    static TConsoleVar CVarPhysicsDebug("Physics.Debug.Draw", false, "Draws Box3D collision in every world, on top of each scene's own toggle. Severe performance impact.");
     static TConsoleVar CVarPhysicsDebugShapes("Physics.Debug.Shapes", true, "Draw collision shape wireframes.");
     static TConsoleVar CVarPhysicsDebugJoints("Physics.Debug.Joints", true, "Draw joints.");
     static TConsoleVar CVarPhysicsDebugJointExtras("Physics.Debug.JointExtras", false, "Draw joint limits and reference frames.");
@@ -561,7 +561,7 @@ namespace Lumina::Physics
         return Draw;
     }
 
-    bool FBox3DPhysicsContext::IsDebugDrawEnabled()
+    bool FBox3DPhysicsContext::IsDebugDrawForced()
     {
         return CVarPhysicsDebug.GetValue();
     }

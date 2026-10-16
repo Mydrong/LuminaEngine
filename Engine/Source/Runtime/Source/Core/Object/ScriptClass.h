@@ -86,7 +86,7 @@ namespace Lumina
         THashMap<FName, FFunction*> ScriptOverrideFunctions;
 
         /** The overriding function for Name, or null when the subclass leaves the native body in place. */
-        RUNTIME_API NODISCARD const FFunction* FindScriptOverride(const FName& Name) const;
+        NODISCARD RUNTIME_API const FFunction* FindScriptOverride(const FName& Name) const;
 
         /** One bit per generated event slot, mirroring ScriptOverrideFunctions so a shim skips the name lookup. */
         TVector<uint64> ScriptOverrideSlots;

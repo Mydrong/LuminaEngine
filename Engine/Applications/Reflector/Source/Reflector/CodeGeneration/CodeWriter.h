@@ -102,6 +102,8 @@ namespace Lumina::Reflection
 
         FScopedIndent(const FScopedIndent&) = delete;
         FScopedIndent& operator=(const FScopedIndent&) = delete;
+        FScopedIndent(FScopedIndent&&) = delete;
+        FScopedIndent& operator=(FScopedIndent&&) = delete;
 
     private:
 
@@ -133,6 +135,8 @@ namespace Lumina::Reflection
 
         FScopedBlock(const FScopedBlock&) = delete;
         FScopedBlock& operator=(const FScopedBlock&) = delete;
+        FScopedBlock(FScopedBlock&&) = delete;
+        FScopedBlock& operator=(FScopedBlock&&) = delete;
 
     private:
 

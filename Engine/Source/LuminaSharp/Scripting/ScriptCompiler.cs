@@ -86,8 +86,8 @@ internal static class ScriptCompiler
         return null;
     }
 
-    // The generated IDE project adds the same import as a Using item, so IntelliSense agrees with this compile.
-    public const string ObjectCoreGlobalUsing = "global using static LuminaSharp.ObjectCore;";
+    // The generated IDE project adds the same imports as Using items, so IntelliSense agrees with this compile.
+    public const string ScriptGlobalUsings = "global using static LuminaSharp.ObjectCore;\nglobal using static LuminaSharp.ESpecifier;";
 
     /// Compiles all sources into a PE plus its PDB, or null on error (diagnostics logged). ExtraReferences are the dependency units' emitted images.
     public static FScriptImage? Compile(string AssemblyName, IReadOnlyList<(string Path, string Text)> Sources,
@@ -108,10 +108,10 @@ internal static class ScriptCompiler
             Trees = Trees.Append(Marshalling).ToArray();
         }
 
-        // Object loading reads as it does in C++, LoadObject<T>(Path) with no qualifier, in every script.
-        SyntaxTree ObjectCoreImport = CSharpSyntaxTree.ParseText(
-            SourceText.From(ObjectCoreGlobalUsing, Encoding.UTF8), ParseOptions, path: AssemblyName + ".ObjectCore.g.cs");
-        Trees = Trees.Append(ObjectCoreImport).ToArray();
+        // LoadObject<T>(Path) and [Property(Editable)] read as they do in C++, with no qualifier, in every script.
+        SyntaxTree GlobalUsings = CSharpSyntaxTree.ParseText(
+            SourceText.From(ScriptGlobalUsings, Encoding.UTF8), ParseOptions, path: AssemblyName + ".GlobalUsings.g.cs");
+        Trees = Trees.Append(GlobalUsings).ToArray();
 
         MetadataReference[] AllReferences = References;
         if (ExtraReferences != null && ExtraReferences.Count > 0)
@@ -239,9 +239,10 @@ internal static class ScriptCompiler
         "NativeCallGenerator",      // [NativeCall] -> the native binding glue
         // Emits nothing but reports a [Property] declared as a partial property, which would otherwise surface as a bare CS9248.
         "ScriptPropertyGenerator",
-        "ScriptFunctionInvokerGenerator",   // [ScriptFunction] -> the typed frame invoker
+        "ScriptFunctionInvokerGenerator",   // [Function] -> the typed frame invoker
         "ContainerIndexerWriteGenerator",   // rejects a write through a TVector indexer that reads a held copy
         "ScriptStructGenerator",            // gives a [Reflect] script struct the handle it views native memory through
+        "ComponentStorageGenerator",        // rejects a component held or created as a C# value, since it only exists in storage
     };
 
     private static ImmutableArray<ISourceGenerator> SourceGenerators => CachedGenerators ??= LoadGenerators();

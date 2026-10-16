@@ -115,7 +115,7 @@ namespace Lumina
         //~ Migration: actions authored before EInputActionType existed carry bAxis instead. Not Editable, so
         //  it never shows in the Input settings, but still round-trips through the config file until
         //  FInputActionMap::RebuildFromSettings folds it into Type.
-        PROPERTY()
+        PROPERTY(Hidden)
         bool bAxis = false;
 
         bool IsAxis() const { return Type != EInputActionType::Digital; }
@@ -186,17 +186,17 @@ namespace Lumina
             Flag_Tapped   = 1u << 4,  ///< Released this frame after less than TapTime down.
         };
 
-        PROPERTY()
+        PROPERTY(Hidden)
         float  X = 0.0f;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         float  Y = 0.0f;
 
         /** Seconds the current press has lasted, and zero while up. */
-        PROPERTY()
+        PROPERTY(Hidden)
         float  HeldTime = 0.0f;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         uint32 Flags = 0;
 
         bool IsDown()     const { return (Flags & Flag_Down) != 0; }

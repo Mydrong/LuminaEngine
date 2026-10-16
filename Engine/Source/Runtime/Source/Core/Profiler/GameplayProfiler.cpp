@@ -4,6 +4,7 @@
 #include "GameplayProfiler.h"
 
 #include "Platform/Process/PlatformProcess.h"
+#include "tracy/TracyC.h"
 
 namespace Lumina
 {
@@ -46,6 +47,10 @@ namespace Lumina
     void FGameplayProfiler::SetEnabled(bool bInEnabled)
     {
         const bool bWas = bEnabled.exchange(bInEnabled, std::memory_order_relaxed);
+        if (bInEnabled)
+        {
+            bScriptScopesActive.store(true, std::memory_order_relaxed);
+        }
         if (bInEnabled && !bWas)
         {
             // Fresh start so a stale partial frame can't leak in.
@@ -71,6 +76,8 @@ namespace Lumina
 
     void FGameplayProfiler::BeginFrame()
     {
+        bScriptScopesActive.store(IsEnabled() || TracyCIsConnected, std::memory_order_relaxed);
+
         if (!IsEnabled())
         {
             return;

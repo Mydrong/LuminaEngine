@@ -12,13 +12,14 @@ public static class NativeClass<T> where T : NativeObject
 
     public static TSubclassOf<T> Of
     {
-        get
-        {
-            if (!Resolved.IsValid)
-            {
-                Resolved = TSubclassOf<T>.FromName(RegisteredName);
-            }
-            return Resolved;
-        }
+        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
+        get => Resolved.IsValid ? Resolved : Resolve();
+    }
+
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static TSubclassOf<T> Resolve()
+    {
+        Resolved = TSubclassOf<T>.FromName(RegisteredName);
+        return Resolved;
     }
 }

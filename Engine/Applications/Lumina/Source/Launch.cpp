@@ -100,7 +100,13 @@ int LuminaMain(int ArgC, char** ArgV)  // NOLINT(misc-use-internal-linkage)
     }
     #endif
 
-    Result = Application.Run(ArgC, ArgV);
+    // A second editor on a project already open hands focus to the first and leaves before opening a window.
+    #if WITH_EDITOR
+    if (EdEngine.ClaimStartupProject())
+    #endif
+    {
+        Result = Application.Run(ArgC, ArgV);
+    }
 
     #if WITH_EDITOR
     GEditorEngine   = nullptr;

@@ -56,5 +56,7 @@ namespace Lumina::RHI::Native
         ~FScopedSubmitLock() { ReleaseSubmitLock(); }
         FScopedSubmitLock(const FScopedSubmitLock&) = delete;
         FScopedSubmitLock& operator=(const FScopedSubmitLock&) = delete;
+        FScopedSubmitLock(FScopedSubmitLock&&) = delete;
+        FScopedSubmitLock& operator=(FScopedSubmitLock&&) = delete;
     };
 }

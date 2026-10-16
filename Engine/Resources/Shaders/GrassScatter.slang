@@ -224,8 +224,9 @@ void main(uint3 Tid : SV_DispatchThreadID)
     Static.CustomData              = (FCustomPrimitiveData)0;
     Static.MaterialIndex           = P->MaterialIndex;
     Static.EntityID                = P->EntityID;
-    Static.BoneOffset              = 0u;
+    Static.SkinnedIndex            = kNoSkinnedIndex;
     Static.SkinnedVertexBase       = kNoPreSkinBase;
     Static.MeshletVisibilityBase   = kNoMeshletVisibility;
+    Static.RenderLayers            = RENDER_LAYER_DEFAULT_MASK;
     (P->OutStatic).Set(Slot, Static);
 }

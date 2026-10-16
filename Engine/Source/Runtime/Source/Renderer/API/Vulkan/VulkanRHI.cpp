@@ -813,6 +813,8 @@ namespace Lumina::RHI
 
         FAllQueuesLock(const FAllQueuesLock&) = delete;
         FAllQueuesLock& operator=(const FAllQueuesLock&) = delete;
+        FAllQueuesLock(FAllQueuesLock&&) = delete;
+        FAllQueuesLock& operator=(FAllQueuesLock&&) = delete;
     };
 
     static void DestroySwapchainImages(FSwapchain& SC);

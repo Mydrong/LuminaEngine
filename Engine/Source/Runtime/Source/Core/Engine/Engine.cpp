@@ -1,9 +1,9 @@
 ﻿#include "Platform/Time/PlatformTime.h"
-#include "World/ECS/ECSReferenceProvider.h"
 #include "World/Entity/PersistentEntities.h"
 #include "RuntimePCH.h"
 #include <string>
 #include "Engine.h"
+#include "Core/Object/ObjectReferenceProvider.h"
 #include "FrameStats.h"
 #include "Assets/AssetRegistry/AssetRegistry.h"
 #include "Core/Diagnostics/HangWatchdog.h"
@@ -68,6 +68,7 @@
 
 #if USING(WITH_EDITOR)
 #include "Tools/UI/ImGui/ImGuiX.h"   // editor toast for a refused project module (NotifyError)
+#include "Tools/Dialogs/Dialogs.h"
 #include "Log/Log.h"
 #endif
 
@@ -258,7 +259,6 @@ namespace Lumina
         };
 
         // Before anything can build an object, so a reinstance always sees every holder.
-        FECSObjectReferenceProvider::Register();
         if (GConfig != nullptr)
         {
             FObjectReferenceProviders::Register(GConfig);
@@ -943,7 +943,15 @@ namespace Lumina
             return false;
         }
 
-        ProjectPath                     .assign(VFS::Parent(Paths::Normalize(Descriptor)));
+        const FFixedString NormalizedDescriptor = Paths::Normalize(Descriptor);
+        const FFixedString Directory(VFS::Parent(NormalizedDescriptor));
+        if (!ClaimProject(Directory))
+        {
+            return false;
+        }
+
+        ProjectFile                     = NormalizedDescriptor;
+        ProjectPath                     = Directory;
         ProjectName                     = Data["Name"].get<std::string>().c_str();
 
         FFixedString ConfigDir          = Paths::Combine(ProjectPath, "Config");
@@ -1026,6 +1034,41 @@ namespace Lumina
         return true;
     }
 
+#if WITH_EDITOR
+    // The editor cannot relink binaries it has loaded, so it closes and the build tool reopens the project once built.
+    static bool OfferProjectRebuild(FStringView Name, FStringView ProjectFile, FStringView Reason)
+    {
+        const FString Script = Paths::GetBuildToolScript();
+        if (Script.empty() || GIsHeadless || GCommandLine->Has("benchmark"))
+        {
+            return false;
+        }
+
+        if (!Dialogs::Confirmation("Rebuild Project", "The code for {} {}.\n\nRebuild it now? The editor closes, builds the project, then opens it again.", Name, Reason))
+        {
+            return false;
+        }
+
+        #if defined(LE_PLATFORM_WINDOWS)
+        // The window stays open after a failed build so its errors can be read.
+        const FString Executable = "cmd.exe";
+        const FString Params = Format("/c \"\"{}\" Open \"{}\" -WaitForEditor || pause\"", Script, ProjectFile);
+        #else
+        const FString& Executable = Script;
+        const FString Params = Format("Open \"{}\" -WaitForEditor", ProjectFile);
+        #endif
+
+        if (const int Error = Platform::LaunchProcess(UTF8_TO_TCHAR(Executable.c_str()), UTF8_TO_TCHAR(Params.c_str())); Error != 0)
+        {
+            LOG_ERROR("Could not start the project rebuild (system error {}).", Error);
+            return false;
+        }
+
+        FApplication::RequestExit();
+        return true;
+    }
+#endif
+
     void FEngine::StartProject()
     {
         GConfig->DiscoverAndLoadSettings();
@@ -1062,6 +1105,10 @@ namespace Lumina
                 {
                     LOG_ERROR("Project module '{}' was not loaded: {}", ProjectName, LoadError);
 #if WITH_EDITOR
+                    if (OfferProjectRebuild(ProjectName, ProjectFile, Format("does not match this editor ({})", LoadError)))
+                    {
+                        return;
+                    }
                     ImGuiX::Notifications::NotifyError(
                         "Project '{}' code was not loaded: {}. Rebuild the project for this engine (matching configuration/platform).",
                         ProjectName, LoadError);
@@ -1073,6 +1120,13 @@ namespace Lumina
                 }
             }
         }
+#if WITH_EDITOR
+        else if (Paths::Exists(Paths::Combine(ProjectPath, "Source", FFixedString(ProjectName.c_str()).append(".Target.cs")))
+            && OfferProjectRebuild(ProjectName, ProjectFile, "has not been built yet"))
+        {
+            return;
+        }
+#endif
 
         // Project DLL is now in; plugin modules that wire up to project types load here.
         FPluginManager::Get().LoadModulesForPhase(EPluginLoadingPhase::PostProjectLoad);

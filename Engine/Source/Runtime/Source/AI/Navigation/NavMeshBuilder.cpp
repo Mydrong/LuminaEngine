@@ -344,6 +344,34 @@ namespace Lumina::NavMeshBuilder
             return true;
         }
 
+        // A tile is wider than a small volume, so the ground it covers past the volume's edges is made unwalkable rather than baked.
+        void ClipToVolume(rcContext& Ctx, const FNavBuildInput& In, rcCompactHeightfield& Compact)
+        {
+            const float MinX = Compact.bmin[0];
+            const float MinZ = Compact.bmin[2];
+            const float MaxX = Compact.bmax[0];
+            const float MaxZ = Compact.bmax[2];
+
+            // Each box only where the edge falls inside the heightfield, since Recast truncates a negative cell index to zero.
+            const float Outside[4][4] =
+            {
+                { MinX,           MinZ,           In.BoundsMin.x, MaxZ },
+                { In.BoundsMax.x, MinZ,           MaxX,           MaxZ },
+                { MinX,           MinZ,           MaxX,           In.BoundsMin.z },
+                { MinX,           In.BoundsMax.z, MaxX,           MaxZ },
+            };
+            for (const float (&Box)[4] : Outside)
+            {
+                if (Box[2] <= Box[0] || Box[3] <= Box[1] || Box[0] >= MaxX || Box[2] <= MinX || Box[1] >= MaxZ || Box[3] <= MinZ)
+                {
+                    continue;
+                }
+                const float BMin[3] = { Box[0], Compact.bmin[1], Box[1] };
+                const float BMax[3] = { Box[2], Compact.bmax[1], Box[3] };
+                rcMarkBoxArea(&Ctx, BMin, BMax, RC_NULL_AREA, Compact);
+            }
+        }
+
         bool BakeTile(const FNavBuildInput& In, const FTileGrid& Grid, int32 TX, int32 TY, const int32* TileTriIndices, int32 NumTileTris, SNavTileData& Out,
                       FNavTileCache* Cache = nullptr, uint32 Generation = 0)
         {
@@ -403,6 +431,8 @@ namespace Lumina::NavMeshBuilder
                     Cache->Store(TX, TY, Generation, *Compact);
                 }
             }
+
+            ClipToVolume(Ctx, In, *Compact);
 
             // Stamped after erosion so a Null volume carves a hole the agent radius cannot reopen.
             for (const FNavAreaVolume& Volume : In.AreaVolumes)

@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Runtime.CompilerServices;
 using LuminaSharp;
 
 namespace Lumina;
@@ -23,58 +22,27 @@ public unsafe partial class CDataTable
         }
     }
 
-    /// The row named RowName as a live view, or null. T must be the table's row type exactly.
-    public T? FindRow<T>(string RowName) where T : struct, INativeStruct<T>
+    // A live view of the row named RowName, throwing when it is absent or T is not the table's row type exactly.
+    public T GetRow<T>(string RowName) where T : struct, INativeStruct<T>
+        => TryGetRow<T>(RowName) ?? throw new InvalidOperationException($"DataTable has no {T.NativeName} row named '{RowName}'.");
+
+    public T? TryGetRow<T>(string RowName) where T : struct, INativeStruct<T>
     {
         return RowTypeIs<T>() ? NativeStructs.FromAddressOrNull<T>(FindRow(RowName)) : null;
     }
 
-    /// The row at Index as a live view, or null. T must be the table's row type exactly.
-    public T? RowAt<T>(int Index) where T : struct, INativeStruct<T>
+    public T GetRowAt<T>(int Index) where T : struct, INativeStruct<T>
+        => TryGetRowAt<T>(Index) ?? throw new InvalidOperationException($"DataTable has no {T.NativeName} row at {Index}.");
+
+    public T? TryGetRowAt<T>(int Index) where T : struct, INativeStruct<T>
     {
         return RowTypeIs<T>() ? NativeStructs.FromAddressOrNull<T>(GetRowMemoryAt(Index)) : null;
-    }
-
-    /// Copies the row named RowName into a blittable value struct. False when absent or T does not match.
-    public bool TryGetRow<T>(string RowName, out T Row) where T : unmanaged
-    {
-        Row = default;
-        if (!RowTypeMatchesValue<T>())
-        {
-            return false;
-        }
-        IntPtr Memory = FindRow(RowName);
-        if (Memory == IntPtr.Zero)
-        {
-            return false;
-        }
-        Row = Unsafe.ReadUnaligned<T>((void*)Memory);
-        return true;
     }
 
     // Exact match, mirroring the C++ FindDataTableRow bound, so a near-miss type cannot reinterpret fields.
     private bool RowTypeIs<T>() where T : struct, INativeStruct<T>
     {
         return string.Equals(RowStructName, T.NativeName, StringComparison.Ordinal);
-    }
-
-    // A value read also has to agree on size, or a layout drift would copy the wrong bytes silently.
-    private bool RowTypeMatchesValue<T>() where T : unmanaged
-    {
-        if (!string.Equals(RowStructName, typeof(T).Name, StringComparison.Ordinal))
-        {
-            return false;
-        }
-
-        int NativeSize = GetRowStructSize();
-        if (NativeSize != Unsafe.SizeOf<T>())
-        {
-            Native.Log(ELogLevel.Error,
-                $"DataTable row '{RowStructName}' is {NativeSize} bytes natively but {Unsafe.SizeOf<T>()} as "
-                + $"'{typeof(T).FullName}'; refusing the read. The C# type has drifted from the row struct.");
-            return false;
-        }
-        return true;
     }
 }
 
@@ -84,8 +52,11 @@ public readonly unsafe partial struct SDataTableRowHandle
     /// True when nothing is referenced at all, as opposed to referencing a row that fails to resolve.
     public bool IsNull => DataTable == null || string.IsNullOrEmpty(RowName);
 
-    /// The referenced row as a live view, or null when the handle is empty or the name is not in the table.
-    public T? Resolve<T>() where T : struct, INativeStruct<T>
+    public T Get<T>() where T : struct, INativeStruct<T>
+        => TryGet<T>() ?? throw new InvalidOperationException($"Row handle does not resolve to a {T.NativeName}.");
+
+    // Null when the handle is empty, the name is not in the table, or the table's rows are not T.
+    public T? TryGet<T>() where T : struct, INativeStruct<T>
     {
         IntPtr Row = GetRowMemory();
         if (Row == IntPtr.Zero || DataTable is not { } Table

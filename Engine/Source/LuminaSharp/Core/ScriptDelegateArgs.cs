@@ -253,8 +253,7 @@ public readonly unsafe struct ScriptDelegate<T1>
             return default;
         }
 
-        Lumina.CEntityScript? Owner = Engine.ActiveScript;
-        return DelegateBindings.Bind(Address, new ArgsInvoker1<T1> { Handler = Handler, Slots = Slots, Owner = Owner });
+        return DelegateBindings.Bind(Address, new ArgsInvoker1<T1> { Handler = Handler, Slots = Slots });
     }
 }
 
@@ -287,8 +286,7 @@ public readonly unsafe struct ScriptDelegate<T1, T2>
             return default;
         }
 
-        Lumina.CEntityScript? Owner = Engine.ActiveScript;
-        return DelegateBindings.Bind(Address, new ArgsInvoker2<T1, T2> { Handler = Handler, Slots = Slots, Owner = Owner });
+        return DelegateBindings.Bind(Address, new ArgsInvoker2<T1, T2> { Handler = Handler, Slots = Slots });
     }
 }
 
@@ -321,8 +319,7 @@ public readonly unsafe struct ScriptDelegate<T1, T2, T3>
             return default;
         }
 
-        Lumina.CEntityScript? Owner = Engine.ActiveScript;
-        return DelegateBindings.Bind(Address, new ArgsInvoker3<T1, T2, T3> { Handler = Handler, Slots = Slots, Owner = Owner });
+        return DelegateBindings.Bind(Address, new ArgsInvoker3<T1, T2, T3> { Handler = Handler, Slots = Slots });
     }
 }
 
@@ -355,8 +352,7 @@ public readonly unsafe struct ScriptDelegate<T1, T2, T3, T4>
             return default;
         }
 
-        Lumina.CEntityScript? Owner = Engine.ActiveScript;
-        return DelegateBindings.Bind(Address, new ArgsInvoker4<T1, T2, T3, T4> { Handler = Handler, Slots = Slots, Owner = Owner });
+        return DelegateBindings.Bind(Address, new ArgsInvoker4<T1, T2, T3, T4> { Handler = Handler, Slots = Slots });
     }
 }
 
@@ -389,8 +385,7 @@ public readonly unsafe struct ScriptDelegate<T1, T2, T3, T4, T5>
             return default;
         }
 
-        Lumina.CEntityScript? Owner = Engine.ActiveScript;
-        return DelegateBindings.Bind(Address, new ArgsInvoker5<T1, T2, T3, T4, T5> { Handler = Handler, Slots = Slots, Owner = Owner });
+        return DelegateBindings.Bind(Address, new ArgsInvoker5<T1, T2, T3, T4, T5> { Handler = Handler, Slots = Slots });
     }
 }
 
@@ -423,7 +418,6 @@ public readonly unsafe struct ScriptDelegate<T1, T2, T3, T4, T5, T6>
             return default;
         }
 
-        Lumina.CEntityScript? Owner = Engine.ActiveScript;
-        return DelegateBindings.Bind(Address, new ArgsInvoker6<T1, T2, T3, T4, T5, T6> { Handler = Handler, Slots = Slots, Owner = Owner });
+        return DelegateBindings.Bind(Address, new ArgsInvoker6<T1, T2, T3, T4, T5, T6> { Handler = Handler, Slots = Slots });
     }
 }

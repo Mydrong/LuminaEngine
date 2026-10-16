@@ -103,6 +103,7 @@ namespace Lumina
         {
         }
 
+        ~TTuple() = default;
         constexpr TTuple(const TTuple&) = default;
         constexpr TTuple(TTuple&&) = default;
         constexpr TTuple& operator=(const TTuple&) = default;

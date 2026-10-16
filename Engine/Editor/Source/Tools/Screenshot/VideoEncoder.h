@@ -14,6 +14,8 @@ namespace Lumina
 
         FVideoEncoder(const FVideoEncoder&) = delete;
         FVideoEncoder& operator=(const FVideoEncoder&) = delete;
+        FVideoEncoder(FVideoEncoder&&) = delete;
+        FVideoEncoder& operator=(FVideoEncoder&&) = delete;
 
         // Width and Height must be even, since H.264 stores color at half resolution. A zero AudioSampleRate writes no sound track.
         bool Open(const FString& Path, uint32 InWidth, uint32 InHeight, uint32 InFrameRate, uint32 BitRate, FString& OutError,

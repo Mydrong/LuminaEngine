@@ -124,7 +124,7 @@ TEST(ScriptFunctionMint, AScriptDeclaredFunctionBecomesAReflectedOne)
     EXPECT_TRUE(Minted.Function->HasReturn());
 }
 
-// What the inspector reads for a [Button], kept by the function once the schema it came from is gone.
+// What the inspector reads for a [Function(Button)], kept by the function once the schema it came from is gone.
 TEST(ScriptFunctionMint, MetadataOutlivesTheSchemaItCameFrom)
 {
     FMinted Minted;

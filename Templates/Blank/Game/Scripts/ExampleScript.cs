@@ -14,7 +14,7 @@ namespace GameScripts;
 [Reflect]
 public sealed class ExampleScript : CEntityScript
 {
-    [Property(Tooltip = "Degrees per second to spin around the up (Y) axis.")]
+    [Property(ToolTip = "Degrees per second to spin around the up (Y) axis.")]
     public float SpinSpeed = 90.0f;
 
     public override void OnReady()

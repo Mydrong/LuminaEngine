@@ -12,7 +12,7 @@ public enum EPropertyType : byte
     Float, Double,
     Bool, Object, SoftObject, Class, Name, String,
     Enum, Vector, Struct, Optional, SubStruct, Delegate, InstancedStruct, Map,
-    Entity,
+    Entity, ComponentRef,
 }
 
 /// <summary>The resolved, recursive shape of a script property's type, resolved once per type and shared.</summary>
@@ -61,7 +61,7 @@ public sealed class ScriptFunction
         this.Meta = Meta ?? Array.Empty<KeyValuePair<string, string>>();
     }
 
-    // Function metadata native keeps on the FFunction, such as a [Button]'s label.
+    // Function metadata native keeps on the FFunction, such as a Button label.
     public IReadOnlyList<KeyValuePair<string, string>> Meta { get; }
 
     // EFunctionFlags the declaration adds, such as where an [Rpc] method runs.
@@ -86,7 +86,7 @@ public sealed class ScriptProperty
     public ScriptType Type { get; init; } = new();
     public PropertyAttribute? Meta { get; init; }
 
-    // Marked [Serialize] rather than [Property], so it gets storage and saving but no inspector row.
+    // A [Property(Hidden)], stored and saved but drawn nowhere.
     public bool Hidden { get; init; }
 
     /// <summary>Prior member names so a renamed field's saved value still replays.</summary>
@@ -94,7 +94,7 @@ public sealed class ScriptProperty
     /// <summary>Reset to default on a hot reload instead of carrying the previous value.</summary>
     public bool SkipHotReload { get; init; }
 
-    // The most sends a second a [Sync] field allows, or zero for every change.
+    // The most sends a second a Sync field allows, or zero for every change.
     public float NetRate { get; init; }
 
     // Metadata keys the C++ spelling of the same declaration would write, such as Sync or AssetType.
@@ -104,7 +104,7 @@ public sealed class ScriptProperty
     // Parameter direction, folded onto the minted property's flags. Always None for a member.
     internal EScriptParamFlags ParamFlags { get; init; }
 
-    // Flags a member earns from an attribute other than [Property], such as Replicated from [Sync].
+    // Flags a member earns from its specifiers, such as Replicated from Sync.
     internal EPropertyFlags ExtraFlags { get; init; }
 }
 

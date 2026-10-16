@@ -13,6 +13,7 @@
 #include "Core/Object/SubclassOf.h"
 #include "Core/Reflection/ReflectionDesc.h"
 #include "World/ECS/Entity.h"
+#include "World/Entity/Components/ComponentRef.h"
 
 namespace Lumina
 {
@@ -124,6 +125,12 @@ namespace Lumina
         static constexpr const FPropertyType* Inner[] = { PropertyTypeOf<std::underlying_type_t<T>> };
         static constexpr FPropertyType Value{ .Kind = EPropertyTypeFlags::Enum, .Flags = PropertyTypeTraits::FlagsOf<T>(),
                                               .Link = { .Enum = &StaticEnum<T> }, .Inner = Inner, .NumInner = 1 };
+    };
+
+    template<typename T>
+    struct TPropertyTypeOf<TComponentRef<T>>
+    {
+        static constexpr FPropertyType Value = PropertyTypeTraits::StructOf<TComponentRef<T>, T>(EPropertyTypeFlags::ComponentRef);
     };
 
     template<>

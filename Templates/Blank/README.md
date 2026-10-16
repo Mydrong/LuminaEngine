@@ -4,13 +4,13 @@ A Lumina Engine project.
 
 ## Requirements
 
-- The `LUMINA_DIR` environment variable must point at your engine install (set up by the engine's `Setup.bat` on Windows, `Setup.sh` on Linux).
+- A Lumina engine checkout that has run its `Setup.bat` (Windows) or `Setup.sh` (Linux) once.
 - **Windows:** Visual Studio 2026 (18.0+) with the C++ workload. (The engine's C# layer targets `net10.0`, which needs VS 18.0+; the standalone .NET 10 SDK alone is not enough.)
 - **Linux:** GCC 13+ and the .NET 10 SDK. See the engine's README for the full package list.
 
 ## First-time setup (Windows)
 
-1. Run `GenerateProject.bat` from this folder. It calls `%LUMINA_DIR%\LuminaBuild.bat GenerateProjectFiles` for this project and writes `$PROJECTNAME.sln`.
+1. Run `GenerateProject.bat` from this folder. It finds an engine on this machine and runs its `LuminaBuild.bat GenerateProjectFiles` for this project and writes `$PROJECTNAME.sln`.
 2. Open `$PROJECTNAME.sln` in **Visual Studio** or **JetBrains Rider**.
 3. Press **F5**.
 
@@ -22,8 +22,8 @@ editor with this project pre-loaded. Breakpoints in your game module hit as soon
 
 ```bash
 ./GenerateProject.sh                                              # writes compile_commands.json
-"$LUMINA_DIR/LuminaBuild.sh" Build $PROJECTNAME -TargetType=Editor
-"$LUMINA_DIR/LuminaBuild.sh" Run   $PROJECTNAME -TargetType=Editor
+/path/to/LuminaEngine/LuminaBuild.sh Build $PROJECTNAME -TargetType=Editor -Project="$PWD"
+/path/to/LuminaEngine/LuminaBuild.sh Run   $PROJECTNAME -TargetType=Editor -Project="$PWD"
 ```
 
 That builds the game shared library (`Binaries/Linux64/lib$PROJECTNAME-Development.so`) and launches

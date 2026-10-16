@@ -48,8 +48,6 @@ struct FSceneRoot
     GPUSpan<uint>                StreamingFeedback;
     // Object-space meshlet spheres for this frame's poses, written by SkinnedMeshletBounds.slang.
     GPUSpan<FMeshletSphere>      SkinnedMeshletBounds;
-    // Indexed by retained slot, and the cull reads only SkinnedBoundsBase out of it.
-    GPUSpan<FSkinnedFrameData>   SkinnedFrameData;
     // Same index space as SkinnedMeshletBounds, so one base addresses both.
     GPUSpan<FMeshletCone>        SkinnedMeshletCones;
     // Parallel to PreSkinnedVertices, and empty when no view wants motion vectors.
@@ -126,7 +124,6 @@ GPUSpan<FMeshletDraw>        MeshletDrawList()       { return GetSceneRoot().Mes
 GPUSpan<FPreSkinnedVertex>   PreSkinnedVertices()    { return GetSceneRoot().PreSkinnedVertices; }
 GPUSpan<FPrevSkinnedPosition> PreSkinnedPrevPositions() { return GetSceneRoot().PreSkinnedPrevPositions; }
 GPUSpan<FMeshletSphere>      SkinnedMeshletBounds()  { return GetSceneRoot().SkinnedMeshletBounds; }
-GPUSpan<FSkinnedFrameData>   SkinnedFrameData()      { return GetSceneRoot().SkinnedFrameData; }
 GPUSpan<FMeshletCone>        SkinnedMeshletCones()   { return GetSceneRoot().SkinnedMeshletCones; }
 GPUSpan<FWidgetInstance>     Widgets()               { return GetSceneRoot().Widgets; }
 GPUSpan<FGPUSpline>          Splines()               { return GetSceneRoot().Splines; }

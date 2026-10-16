@@ -1,4 +1,5 @@
 #include "EntityScriptComponentCustomization.h"
+#include "UI/Properties/Customizations/AssetPickerFilter.h"
 
 #include "imgui.h"
 #include "Core/Object/Class.h"
@@ -19,9 +20,6 @@ namespace Lumina
     namespace
     {
         constexpr const char* GScriptIcon = LE_ICON_LANGUAGE_CSHARP;
-
-        // The object picker's button size, so a script header and an asset slot use the same controls.
-        constexpr ImVec2 GButtonSize(42, 0);
 
         /** "Game.ZombieFPS.ZombieBrain" -> "ZombieBrain" plus "Game.ZombieFPS", so the name can lead. */
         void SplitTypeName(const FString& Full, FStringView& OutShort, FStringView& OutNamespace)
@@ -72,7 +70,7 @@ namespace Lumina
 
             const float Spacing     = ImGui::GetStyle().ItemSpacing.x;
             const float HeaderRight = ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x;
-            const float ButtonsLeft = HeaderRight - GButtonSize.x * 3.0f - Spacing * 2.0f;
+            const float ButtonsLeft = HeaderRight - AssetPickerFilter::kButtonSize.x * 3.0f - Spacing * 2.0f;
 
             // Breathing room around the title, which is what stops the stack of scripts reading as one block.
             ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(ImGui::GetStyle().FramePadding.x, 6.0f));
@@ -94,7 +92,7 @@ namespace Lumina
 
             ImGui::SameLine(ButtonsLeft);
             ImGui::BeginDisabled(View.SourceFile.empty());
-            if (ImGui::Button(LE_ICON_FILE_CODE "##OpenEntityScriptSource", GButtonSize))
+            if (ImGui::Button(LE_ICON_FILE_CODE "##OpenEntityScriptSource", AssetPickerFilter::kButtonSize))
             {
                 // The Content Browser's route, which honors the script editor chosen in the editor settings.
                 if (IEditorToolContext* Tools = SessionOps::GetToolContext())
@@ -107,7 +105,7 @@ namespace Lumina
 
             ImGui::SameLine();
             ImGui::BeginDisabled(!bValid);
-            if (ImGui::Button(LE_ICON_CONTENT_COPY "##CopyEntityScriptName", GButtonSize))
+            if (ImGui::Button(LE_ICON_CONTENT_COPY "##CopyEntityScriptName", AssetPickerFilter::kButtonSize))
             {
                 ImGui::SetClipboardText(TypeName.c_str());
             }
@@ -118,7 +116,7 @@ namespace Lumina
             ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.6f, 0.2f, 0.2f, 1.0f));
             ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.7f, 0.25f, 0.25f, 1.0f));
             ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.5f, 0.15f, 0.15f, 1.0f));
-            const bool bRemove = ImGui::Button(LE_ICON_CLOSE_CIRCLE "##RemoveEntityScript", GButtonSize);
+            const bool bRemove = ImGui::Button(LE_ICON_CLOSE_CIRCLE "##RemoveEntityScript", AssetPickerFilter::kButtonSize);
             ImGui::PopStyleColor(3);
             if (bRemove)
             {

@@ -452,7 +452,7 @@ public class MeshBuilder
     }
 
     /// Replaces the dynamic mesh's geometry with this one, for geometry unique to one entity or rebuilt often.
-    public bool CommitTo(SDynamicMeshComponent Mesh, CMaterialInterface? Material = null)
+    public bool CommitTo(in SDynamicMeshComponent Mesh, CMaterialInterface? Material = null)
     {
         if (IsEmpty)
         {

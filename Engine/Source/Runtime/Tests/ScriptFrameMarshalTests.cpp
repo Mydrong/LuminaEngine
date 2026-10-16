@@ -783,6 +783,32 @@ TEST_F(FFrameMarshalTest, ANullableResolvesToAnOptionalOverItsPayload)
     EXPECT_EQ(PayloadKind, (int32)EPropertyTypeFlags::Float);
 }
 
+TEST_F(FFrameMarshalTest, EachScriptStructFormRegistersOnceWithOneHandle)
+{
+    auto* Compile = (int32(*)())DotNet::ResolveManagedExport("Test_CompileScriptStructForms");
+    ASSERT_NE(Compile, nullptr);
+
+    // Nibbles are root, extension, component; bits are native backed, registered once, handle shape, NativeName.
+    int32 Failures = Compile();
+    EXPECT_EQ(Failures, 0) << "failure bits 0x" << std::hex << Failures;
+}
+
+TEST_F(FFrameMarshalTest, InstancedStructGetThrowsAndTryGetReportsAMismatch)
+{
+    auto* Run = (int32(*)(void*, float))DotNet::ResolveManagedExport("Test_InstancedStructGetTryGet");
+    ASSERT_NE(Run, nullptr);
+
+    FInstancedStruct Instanced;
+    CStruct* Opaque = FindObject<CStruct>(FName("SInteropOpaqueStruct"));
+    ASSERT_NE(Opaque, nullptr);
+    Instanced.InitializeAs(Opaque);
+
+    // Bits are matching TryGet, mismatched TryGet, mismatched Get throwing, and an unbound slot.
+    int32 Failures = Run(&Instanced, 4.5f);
+    EXPECT_EQ(Failures, 0) << "failure bits 0x" << std::hex << Failures;
+    EXPECT_FLOAT_EQ(static_cast<SInteropOpaqueStruct*>(Instanced.GetMutableMemory())->Value, 4.5f) << "a write through Get lands in place";
+}
+
 TEST_F(FFrameMarshalTest, AScriptMintedOptionalRoundTripsThroughTheDispatcher)
 {
     auto* MakeTarget = (FMakeTargetFn)DotNet::ResolveManagedExport("Test_MakeMarshalTarget");

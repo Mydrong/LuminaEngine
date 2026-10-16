@@ -1,4 +1,5 @@
 #include "EditorPCH.h"
+#include "Tools/Import/ImportPaths.h"
 #include "EditorAssetActions.h"
 
 #include "EditorToolContext.h"
@@ -68,9 +69,13 @@ namespace Lumina
         FFixedString Name(Base.data(), Base.size());
         Name.append(Suffix);
 
-        FFixedString Path = Paths::Combine(Parent, Name);
-        CPackage::AddPackageExt(Path);
-        return VFS::MakeUniqueFilePath(Path);
+        // Free of loaded packages and in-flight imports as well as files, since CreatePackage refuses all three.
+        FFixedString Path = Import::PathReservations::FindFree(Paths::Combine(Parent, Name));
+        if (!Path.empty())
+        {
+            CPackage::AddPackageExt(Path);
+        }
+        return Path;
     }
 
     CObject* DuplicateAssetPackage(CObject* PrimaryAsset, FStringView DestPath)

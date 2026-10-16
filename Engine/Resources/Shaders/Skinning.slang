@@ -8,8 +8,8 @@ struct FPushConstants
     // One running base per entry of SlotList, which bounds the search below.
     GPUSpan<uint>              WorkBase;
     GPUSpan<uint>              SlotList;
-    GPUSpan<FSkinnedFrameData> SkinnedData;    // indexed by retained slot
-    GPUSpan<FInstanceStatic>   RetainedStatic; // ditto; carries the header pointer and the bone arena base
+    GPUSpan<FSkinnedFrameData> SkinnedData;    // indexed by the skinned index SlotList holds
+    GPUSpan<FInstanceStatic>   RetainedStatic; // indexed by the entry's RetainedSlot; carries the header pointer
 
     GPUSpan<FPreSkinnedVertex> OutVertices;
     // Last frame's pose for the same vertices, empty when no view wants motion vectors.
@@ -55,9 +55,14 @@ void ComputeMain(uint3 GroupID : SV_GroupID, uint Lane : SV_GroupThreadID)
     }
 
     const uint Entry = FindSlotEntryForWork(WorkIndex, NumEntries);
-    const uint Slot  = Pass().SlotList.Get(Entry);
+    const uint SkinnedIndex = Pass().SlotList.Get(Entry);
 
-    const FSkinnedFrameData Data = Pass().SkinnedData.Get(Slot);
+    const FSkinnedFrameData Data = Pass().SkinnedData.Get(SkinnedIndex);
+    const uint Slot = Data.RetainedSlot;
+    if (!Pass().RetainedStatic.Contains(Slot))
+    {
+        return;
+    }
 
     // Safe by value because FInstanceStatic carries a header slot, not a device address.
     const FInstanceStatic Static = Pass().RetainedStatic.GetAligned(Slot);

@@ -162,30 +162,79 @@ public readonly unsafe struct THashMap<K, V> : IDictionary<K, V>
         }
     }
 
-    public ICollection<K> Keys
+    public KeyView Keys => new(this);
+
+    public ValueView Values => new(this);
+
+    // The interface wants collections it can hold onto, so only these copy.
+    ICollection<K> IDictionary<K, V>.Keys
     {
         get
         {
             var Result = new List<K>(Count);
-            foreach (KeyValuePair<K, V> Pair in this)
+            foreach (K Key in Keys)
             {
-                Result.Add(Pair.Key);
+                Result.Add(Key);
             }
             return Result;
         }
     }
 
-    public ICollection<V> Values
+    ICollection<V> IDictionary<K, V>.Values
     {
         get
         {
             var Result = new List<V>(Count);
-            foreach (KeyValuePair<K, V> Pair in this)
+            foreach (V Value in Values)
             {
-                Result.Add(Pair.Value);
+                Result.Add(Value);
             }
             return Result;
         }
+    }
+
+    public readonly struct KeyView
+    {
+        private readonly THashMap<K, V> Map;
+
+        internal KeyView(THashMap<K, V> map) => Map = map;
+
+        public int Count => Map.Count;
+
+        public KeyEnumerator GetEnumerator() => new(Map.GetEnumerator());
+    }
+
+    public readonly struct ValueView
+    {
+        private readonly THashMap<K, V> Map;
+
+        internal ValueView(THashMap<K, V> map) => Map = map;
+
+        public int Count => Map.Count;
+
+        public ValueEnumerator GetEnumerator() => new(Map.GetEnumerator());
+    }
+
+    public struct KeyEnumerator
+    {
+        private Enumerator Pairs;
+
+        internal KeyEnumerator(Enumerator pairs) => Pairs = pairs;
+
+        public K Current => Pairs.CurrentKey;
+
+        public bool MoveNext() => Pairs.MoveNext();
+    }
+
+    public struct ValueEnumerator
+    {
+        private Enumerator Pairs;
+
+        internal ValueEnumerator(Enumerator pairs) => Pairs = pairs;
+
+        public V Current => Pairs.CurrentValue;
+
+        public bool MoveNext() => Pairs.MoveNext();
     }
 
     public void Add(KeyValuePair<K, V> item) => Add(item.Key, item.Value);
@@ -211,23 +260,29 @@ public readonly unsafe struct THashMap<K, V> : IDictionary<K, V>
 
     IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
 
-    /// <summary>Allocation-free struct enumerator over the native iteration order, addressed by index so it
-    /// tolerates the container reallocating between steps.</summary>
+    // Resumes from a native cursor, so a walk is linear and stays in bounds if the map rehashes between steps.
     public struct Enumerator : IEnumerator<KeyValuePair<K, V>>
     {
         private readonly nint Map;
         private readonly nint Ops;
-        private int Index;
+        private nuint Cursor;
+        private nint Key;
+        private nint Value;
 
         internal Enumerator(nint map, nint ops)
         {
             Map = map;
             Ops = ops;
-            Index = -1;
-            Current = default;
+            Cursor = 0;
+            Key = 0;
+            Value = 0;
         }
 
-        public KeyValuePair<K, V> Current { get; private set; }
+        public KeyValuePair<K, V> Current => new(CurrentKey, CurrentValue);
+
+        internal K CurrentKey => ElementMarshal.Read<K>(Key);
+
+        internal V CurrentValue => ElementMarshal.Read<V>(Value);
 
         object IEnumerator.Current => Current;
 
@@ -238,29 +293,21 @@ public readonly unsafe struct THashMap<K, V> : IDictionary<K, V>
                 return false;
             }
 
-            MapOps* Table = (MapOps*)Ops;
-            ++Index;
-            if ((nuint)Index >= Table->Size((void*)Map))
-            {
-                return false;
-            }
-
-            void* Key = null;
-            void* Value = null;
-            Table->At((void*)Map, (nuint)Index, &Key, &Value);
-            if (Key == null || Value == null)
-            {
-                return false;
-            }
-
-            Current = new KeyValuePair<K, V>(ElementMarshal.Read<K>((nint)Key), ElementMarshal.Read<V>((nint)Value));
-            return true;
+            nuint Next = Cursor;
+            void* FoundKey = null;
+            void* FoundValue = null;
+            bool bFound = ((MapOps*)Ops)->Next((void*)Map, &Next, &FoundKey, &FoundValue) != 0;
+            Cursor = Next;
+            Key = (nint)FoundKey;
+            Value = (nint)FoundValue;
+            return bFound;
         }
 
         public void Reset()
         {
-            Index = -1;
-            Current = default;
+            Cursor = 0;
+            Key = 0;
+            Value = 0;
         }
 
         public void Dispose() { }

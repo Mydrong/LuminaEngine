@@ -25,6 +25,7 @@ namespace Lumina
 
         // Non-copyable
         FProxyArchive(FProxyArchive&&) = delete;
+        ~FProxyArchive() = default;
         FProxyArchive(const FProxyArchive&) = delete;
         FProxyArchive& operator=(FProxyArchive&&) = delete;
         FProxyArchive& operator=(const FProxyArchive&) = delete;
@@ -47,28 +48,22 @@ namespace Lumina
         // container and enum templates) visible instead of hidden by the ones below.
         using FArchive::operator<<;
 
-        // Forward all standard types to the inner archive
-        FArchive& operator<<(uint8& Value)  override { return InnerArchive << Value; }
-        FArchive& operator<<(int8& Value) override { return InnerArchive << Value; }
-        FArchive& operator<<(uint16& Value) override { return InnerArchive << Value; }
-        FArchive& operator<<(int16& Value) override { return InnerArchive << Value; }
-        FArchive& operator<<(uint32& Value) override { return InnerArchive << Value; }
-        FArchive& operator<<(int32& Value) override { return InnerArchive << Value; }
-        FArchive& operator<<(uint64& Value) override { return InnerArchive << Value; }
-        FArchive& operator<<(int64& Value) override { return InnerArchive << Value; }
-        FArchive& operator<<(bool& Value) override { return InnerArchive << Value; }
-        FArchive& operator<<(float& Value) override { return InnerArchive << Value; }
-        FArchive& operator<<(double& Value) override { return InnerArchive << Value; }
-        FArchive& operator<<(FString& Value) override { return InnerArchive << Value; }
-        FArchive& operator<<(FName& Value) override { return InnerArchive << Value; }
-        FArchive& operator<<(FField*& Value) override { return InnerArchive << Value; }
-        FArchive& operator<<(FObjectHandle& Value) override { return InnerArchive << Value; }
-        
-        template<typename ValueType>
-        FArchive& operator<<(TVector<ValueType>& Array)
-        {
-            return InnerArchive << Array;
-        }
+        // Each forward returns this archive, so a chained `Ar << A << B` never falls through to the inner one.
+        FArchive& operator<<(uint8& Value)  override { InnerArchive << Value; return *this; }
+        FArchive& operator<<(int8& Value) override { InnerArchive << Value; return *this; }
+        FArchive& operator<<(uint16& Value) override { InnerArchive << Value; return *this; }
+        FArchive& operator<<(int16& Value) override { InnerArchive << Value; return *this; }
+        FArchive& operator<<(uint32& Value) override { InnerArchive << Value; return *this; }
+        FArchive& operator<<(int32& Value) override { InnerArchive << Value; return *this; }
+        FArchive& operator<<(uint64& Value) override { InnerArchive << Value; return *this; }
+        FArchive& operator<<(int64& Value) override { InnerArchive << Value; return *this; }
+        FArchive& operator<<(bool& Value) override { InnerArchive << Value; return *this; }
+        FArchive& operator<<(float& Value) override { InnerArchive << Value; return *this; }
+        FArchive& operator<<(double& Value) override { InnerArchive << Value; return *this; }
+        FArchive& operator<<(FString& Value) override { InnerArchive << Value; return *this; }
+        FArchive& operator<<(FName& Value) override { InnerArchive << Value; return *this; }
+        FArchive& operator<<(FField*& Value) override { InnerArchive << Value; return *this; }
+        FArchive& operator<<(FObjectHandle& Value) override { InnerArchive << Value; return *this; }
     
     
     protected:

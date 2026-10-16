@@ -52,6 +52,11 @@ namespace Lumina::Import::Mesh
             size_t Offset = 0;
 
             ~FMeshoptArena() { if (Base != nullptr) { Memory::Free(Base); } }
+            FMeshoptArena() = default;
+            FMeshoptArena(const FMeshoptArena&) = delete;
+            FMeshoptArena& operator=(const FMeshoptArena&) = delete;
+            FMeshoptArena(FMeshoptArena&&) = delete;
+            FMeshoptArena& operator=(FMeshoptArena&&) = delete;
         };
 
         FMeshoptArena& GetMeshoptArena()

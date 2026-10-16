@@ -8,28 +8,28 @@ namespace Lumina.Examples;
 [Reflect(UIDocument = "/Engine/Resources/Content/UI/Examples/Menu.rml", Interactive = true, DataModel = "menu")]
 public sealed class MenuExample : CUIScript
 {
-    [Property(Tooltip = "Settings dialog, composed inside Window.rml's chrome.", AssetType = "rml")]
+    [Property(ToolTip = "Settings dialog, composed inside Window.rml's chrome.", AssetType = "rml")]
     public string SettingsDocument = "/Engine/Resources/Content/UI/Examples/Composition/Settings.rml";
 
-    [Bind] public string Tagline = "Press Continue, or wander the settings.";
-    [Bind] public string Profile = "commander.lumina";
-    [Bind] public bool Online = true;
+    [Property(Hidden, Bind, NoSerialize)] public string Tagline = "Press Continue, or wander the settings.";
+    [Property(Hidden, Bind, NoSerialize)] public string Profile = "commander.lumina";
+    [Property(Hidden, Bind, NoSerialize)] public bool Online = true;
 
     // Read by the modal's data-if, which drops the overlay out of the tree entirely when false.
-    [Bind] public bool Confirming;
+    [Property(Hidden, Bind, NoSerialize)] public bool Confirming;
 
     // Computed, so the engine reads it through its getter and compares it every frame.
-    [Bind] public string ThemeLabel => _Dark ? "Light theme" : "Dark theme";
+    [Property(Bind)] public string ThemeLabel => _Dark ? "Light theme" : "Dark theme";
 
     // Window.rml reads this through the composing document's model, so its chrome needs no script.
-    [Bind] public string Title = "Settings";
+    [Property(Hidden, Bind, NoSerialize)] public string Title = "Settings";
 
-    [Bind] public int Volume = 70;
+    [Property(Hidden, Bind, NoSerialize)] public int Volume = 70;
 
-    // Each choice applies at once through its [Change] handler, which runs when the UI writes the field, and Done is what keeps it.
-    [Bind, Change(nameof(ApplyFullscreen))] public bool Fullscreen;
-    [Bind, Change(nameof(ApplyVSync))] public bool VSync;
-    [Bind, Change(nameof(ApplyQuality))] public string Quality = "";
+    // Each choice applies at once through its Change handler, which runs when the UI writes the field, and Done is what keeps it.
+    [Property(Hidden, Bind, NoSerialize, Change = nameof(ApplyFullscreen))] public bool Fullscreen;
+    [Property(Hidden, Bind, NoSerialize, Change = nameof(ApplyVSync))] public bool VSync;
+    [Property(Hidden, Bind, NoSerialize, Change = nameof(ApplyQuality))] public string Quality = "";
 
     private bool _Dark = true;
     private int _PlayCount;
@@ -63,21 +63,21 @@ public sealed class MenuExample : CUIScript
         _Settings.Close();
     }
 
-    [Bind]
+    [Function(Bind)]
     public void Play()
     {
         _PlayCount++;
         Tagline = _PlayCount >= 3 ? "Loading..." : $"Play pressed {_PlayCount}x";
     }
 
-    [Bind]
+    [Function(Bind)]
     public void ToggleTheme()
     {
         _Dark = !_Dark;
         Tagline = _Dark ? "Dark theme" : "Light theme";
     }
 
-    [Bind]
+    [Function(Bind)]
     public void OpenSettings()
     {
         if (EnsureSettings())
@@ -87,14 +87,14 @@ public sealed class MenuExample : CUIScript
         }
     }
 
-    [Bind]
+    [Function(Bind)]
     public void CloseSettings()
     {
         CGameUserSettingsLibrary.SaveSettings();
         _Settings.Hide();
     }
 
-    [Bind]
+    [Function(Bind)]
     public void RevertSettings()
     {
         CGameUserSettingsLibrary.RevertSettings();
@@ -129,17 +129,17 @@ public sealed class MenuExample : CUIScript
         }
     }
 
-    [Bind] public void Confirm() => Confirming = true;
-    [Bind] public void Cancel() => Confirming = false;
+    [Function(Bind)] public void Confirm() => Confirming = true;
+    [Function(Bind)] public void Cancel() => Confirming = false;
 
-    [Bind]
+    [Function(Bind)]
     public void Quit()
     {
         Confirming = false;
         Debug.Log("MenuExample: Quit confirmed.");
     }
 
-    [Bind]
+    [Function(Bind)]
     public void ApplyPreset(string Preset)
     {
         Quality = Preset;

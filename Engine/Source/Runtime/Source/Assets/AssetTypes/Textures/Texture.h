@@ -427,7 +427,7 @@ namespace Lumina
         float ChromaKeyThreshold = 1.0f / 255.0f;
 
         /** Source path persisted so the editor can re-cook after ColorSpace changes; empty for embedded. */
-        PROPERTY()
+        PROPERTY(Hidden)
         FString SourcePath;
 
         /** Bytes of the imported file, so every cook setting stays absolute even with the file gone. */

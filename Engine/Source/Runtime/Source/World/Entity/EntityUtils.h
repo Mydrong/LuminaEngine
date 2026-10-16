@@ -3,6 +3,7 @@
 #include "World/ECS/Registry.h"
 
 #include "Containers/Invoke.h"
+#include "Containers/FunctionRef.h"
 #include <atomic>
 #include "Components/Component.h"
 #include "Containers/HashTable.h"
@@ -170,19 +171,25 @@ namespace Lumina::ECS::Utils
 
 	RUNTIME_API bool EntityHasTag(const FName& Tag, ECS::FRegistry& Registry, ECS::FEntity Entity);
 
-	// Moves the entity between per-tag storages, which is what a lookup reads; assigning Tag by hand does not.
+	// A tag lives only in its own per-tag storage, so this walks those and never the unnamed one.
+	RUNTIME_API void ForEachEntityTag(const ECS::FRegistry& Registry, ECS::FEntity Entity, TFunctionRef<void(const FName&)> Func);
+
+	// The first tag, for callers that treat an entity as carrying one, or None.
+	NODISCARD RUNTIME_API FName GetEntityTag(const ECS::FRegistry& Registry, ECS::FEntity Entity);
+
+	// Replaces every tag the entity carries with Tag, or clears them all for None.
 	RUNTIME_API void SetEntityTag(ECS::FRegistry& Registry, ECS::FEntity Entity, const FName& Tag);
 
-	// Drops the entity from its tag storage and removes the component. No-op when it carries no tag.
 	RUNTIME_API void ClearEntityTag(ECS::FRegistry& Registry, ECS::FEntity Entity);
 
-	// Refills the per-tag storages from the serialized components, which is what a loaded world has.
+	// Moves tags a copy or a replicated spawn left in the unnamed storage into their per-tag storages.
 	RUNTIME_API void RebuildTagStorages(ECS::FRegistry& Registry);
 	RUNTIME_API bool HasComponent(ECS::FRegistry& Registry, ECS::FEntity Entity, const CStruct* Type);
 
 	// Remaps every reflected entity field through Map, leaving hierarchy links alone. Unmapped ids stay unless bClearUnmapped.
 	RUNTIME_API void RemapEntityReferences(ECS::FRegistry& Registry, ECS::FEntity Entity, const THashMap<ECS::FEntity, ECS::FEntity>& Map, bool bClearUnmapped);
 	RUNTIME_API void RemapEntityReferences(CObject* Object, const THashMap<ECS::FEntity, ECS::FEntity>& Map, bool bClearUnmapped);
+	RUNTIME_API void RemapEntityReferences(const CStruct* Struct, void* Value, const THashMap<ECS::FEntity, ECS::FEntity>& Map, bool bClearUnmapped);
 
 	// Appends every non-null entity RemapEntityReferences would rewrite, duplicates included.
 	RUNTIME_API void CollectEntityReferences(ECS::FRegistry& Registry, ECS::FEntity Entity, TVector<ECS::FEntity>& Out);

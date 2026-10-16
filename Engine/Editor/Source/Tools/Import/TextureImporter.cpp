@@ -13,24 +13,6 @@ namespace Lumina
 {
     namespace Import::Textures
     {
-        // Nothing outside the import has seen this package, so a failed cook takes it down with the texture.
-        static void DiscardFailedCook(CTexture* Texture)
-        {
-            CPackage* Package = Texture->GetPackage();
-
-            Texture->ConditionalBeginDestroy();
-
-            if (Package == nullptr || Package->IsTransientPackage() || Package->HasAnyFlag(OF_MarkedDestroy))
-            {
-                return;
-            }
-
-            Package->ClearDirty();
-            Package->SetFlag(OF_MarkedDestroy);
-            // The root set holds the only strong reference, so unrooting is what destroys it.
-            Package->RemoveFromRoot();
-        }
-
         CTexture* ImportTextureAsset(const FFixedString& PackagePath, const FTextureCookRequest& Request)
         {
             CTexture* Texture = CFactory::CreateNewOf<CTexture>(PackagePath);
@@ -44,7 +26,7 @@ namespace Lumina
 
             if (!CTextureFactory::CookIntoTexture(Texture, Request))
             {
-                DiscardFailedCook(Texture);
+                CFactory::DiscardNew(Texture);
                 return nullptr;
             }
 
@@ -81,7 +63,7 @@ namespace Lumina
 
         if (!CTextureFactory::CookIntoTexture(Texture, CookRequest))
         {
-            Import::Textures::DiscardFailedCook(Texture);
+            CFactory::DiscardNew(Texture);
             OutResult.Error = FString("Failed to cook ") + FString(Request.SourcePath.c_str());
             return;
         }
@@ -96,7 +78,7 @@ namespace Lumina
         {
             // Discarded rather than left unsaved in memory, where it would make every retry at this path skip.
             OutResult.Error = FString("Failed to save ") + FString(Package->GetPackagePath().c_str());
-            Import::Textures::DiscardFailedCook(Texture);
+            CFactory::DiscardNew(Texture);
             return;
         }
 

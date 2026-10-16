@@ -16,6 +16,8 @@ namespace Lumina
 
         FParticleCompileScheduler(const FParticleCompileScheduler&) = delete;
         FParticleCompileScheduler& operator=(const FParticleCompileScheduler&) = delete;
+        FParticleCompileScheduler(FParticleCompileScheduler&&) = delete;
+        FParticleCompileScheduler& operator=(FParticleCompileScheduler&&) = delete;
 
         void Tick();
 

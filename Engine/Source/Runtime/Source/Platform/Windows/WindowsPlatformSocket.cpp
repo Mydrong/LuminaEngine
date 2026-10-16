@@ -83,6 +83,10 @@ namespace Lumina::Platform
             {}
 
             ~FWindowsSocketConnection() override { Close(); }
+            FWindowsSocketConnection(const FWindowsSocketConnection&) = delete;
+            FWindowsSocketConnection& operator=(const FWindowsSocketConnection&) = delete;
+            FWindowsSocketConnection(FWindowsSocketConnection&&) = delete;
+            FWindowsSocketConnection& operator=(FWindowsSocketConnection&&) = delete;
 
             int32 Receive(uint8* Buffer, int32 Capacity, ESocketResult& OutResult) override;
             int32 Send(const uint8* Bytes, int32 Count, ESocketResult& OutResult) override;
@@ -158,6 +162,11 @@ namespace Lumina::Platform
         public:
 
             ~FWindowsSocketListener() override { Close(); }
+            FWindowsSocketListener() = default;
+            FWindowsSocketListener(const FWindowsSocketListener&) = delete;
+            FWindowsSocketListener& operator=(const FWindowsSocketListener&) = delete;
+            FWindowsSocketListener(FWindowsSocketListener&&) = delete;
+            FWindowsSocketListener& operator=(FWindowsSocketListener&&) = delete;
 
             bool Start(const FSocketListenParams& Params);
 

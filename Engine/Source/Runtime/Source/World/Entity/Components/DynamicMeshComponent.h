@@ -221,6 +221,12 @@ namespace Lumina
         // Last RenderDataVersion whose materials the resolve pass examined. Transient, never serialized.
         uint32 ResolvedRenderDataVersion = 0;
 
+        // FMeshResolveCache::DependencyBit of every material the last resolve read, so an unrelated change skips this mesh.
+        uint64 ResolvedMaterialBits = 0;
+
+        // A material was still compiling at the last resolve, so any pending resolve work looks again.
+        bool bResolvedMaterialsPending = true;
+
         /// Re-runs the material half of the resolve against the current MaterialOverrides. Called by the
         /// render scene's resolve pass while a material is still compiling, and after an override changes.
         void RefreshResolvedMaterials();

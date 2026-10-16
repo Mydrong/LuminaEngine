@@ -78,23 +78,24 @@ namespace Lumina
 
         RUNTIME_API void SetReadyToClose(bool bReadyToClose) { bEngineReadyToClose = bReadyToClose; }
         
-        RUNTIME_API NODISCARD double GetDeltaTime() const { return UpdateContext.DeltaTime; }
+        NODISCARD RUNTIME_API double GetDeltaTime() const { return UpdateContext.DeltaTime; }
         
-        RUNTIME_API NODISCARD bool HasLoadedProject() const { return !ProjectName.empty(); }
+        NODISCARD RUNTIME_API bool HasLoadedProject() const { return !ProjectName.empty(); }
 
         RUNTIME_API const FUpdateContext& GetUpdateContext() const { return UpdateContext; }
 
         RUNTIME_API void SetEngineReadyToClose(bool bReady) { bEngineReadyToClose = bReady; }
-        RUNTIME_API NODISCARD bool IsCloseRequested() const { return bCloseRequested; }
+        NODISCARD RUNTIME_API bool IsCloseRequested() const { return bCloseRequested; }
         
         RUNTIME_API FProjectLoadedDelegate& GetProjectLoadedDelegate() { return OnProjectLoaded; }
         
-        RUNTIME_API NODISCARD FStringView GetProjectName() const { return ProjectName; }
-        RUNTIME_API NODISCARD FStringView GetProjectPath() const { return ProjectPath; }
-        RUNTIME_API NODISCARD FArtifactCache& GetArtifactCache() { return ArtifactCache; }
-        RUNTIME_API NODISCARD FFixedString GetProjectContentDirectory() const;
-        RUNTIME_API NODISCARD FFixedString GetProjectScriptsDirectory() const;
-        RUNTIME_API NODISCARD FFixedString GetProjectShadersDirectory() const;
+        NODISCARD RUNTIME_API FStringView GetProjectName() const { return ProjectName; }
+        NODISCARD RUNTIME_API FStringView GetProjectPath() const { return ProjectPath; }
+        NODISCARD RUNTIME_API FStringView GetProjectFile() const { return ProjectFile; }
+        NODISCARD RUNTIME_API FArtifactCache& GetArtifactCache() { return ArtifactCache; }
+        NODISCARD RUNTIME_API FFixedString GetProjectContentDirectory() const;
+        NODISCARD RUNTIME_API FFixedString GetProjectScriptsDirectory() const;
+        NODISCARD RUNTIME_API FFixedString GetProjectShadersDirectory() const;
 
         // Union of project + enabled-plugin cook roots; legacy GameStartupMap auto-converts
         // to a single root when no explicit roots exist. Cooker iterates this for BFS seeds.
@@ -154,6 +155,9 @@ namespace Lumina
 
         // The half of opening a project that needs no engine subsystem, so a startup project runs it before any starts.
         RUNTIME_API bool MountProject(FStringView Path);
+
+        // False refuses the mount, which the editor does for a project another editor already has open.
+        virtual bool ClaimProject(FStringView /*ProjectDirectory*/) { return true; }
 
         // Settings, the project module, assets, scripts and the game instance, once the engine is up.
         RUNTIME_API void StartProject();
@@ -215,6 +219,7 @@ namespace Lumina
         
         FString                     ProjectName;
         FFixedString                ProjectPath;
+        FFixedString                ProjectFile;
         FArtifactCache              ArtifactCache;
 
         // Read by MountProject, applied by StartProject once project settings are writable.

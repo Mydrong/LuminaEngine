@@ -316,7 +316,7 @@ namespace Lumina
             Rows.reserve(Assets.size());
             RowIndexByGUID.reserve(Assets.size());
 
-            for (const TUniquePtr<FAssetData>& Data : Assets)
+            for (const TSharedPtr<FAssetData>& Data : Assets)
             {
                 FAssetRow Row;
                 Row.GUID      = Data->AssetGUID;

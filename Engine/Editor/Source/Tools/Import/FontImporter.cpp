@@ -82,7 +82,7 @@ namespace Lumina
 
         if (!LoadFontFromFile(Font, Request.SourcePath, OutResult.Error))
         {
-            Font->ConditionalBeginDestroy();
+            CFactory::DiscardNew(Font);
             return;
         }
 
@@ -92,15 +92,14 @@ namespace Lumina
         }
 
         CPackage* Package = Font->GetPackage();
-        if (CPackage::SavePackage(Package, Package->GetPackagePath()))
+        if (!CPackage::SavePackage(Package, Package->GetPackagePath()))
         {
-            FAssetRegistry::Get().AssetCreated(Font);
-        }
-        else
-        {
-            LOG_ERROR("[FontImport] failed to save '{0}'; asset will not be registered", Package->GetPackagePath());
+            OutResult.Error = FString("Could not save ") + FString(Package->GetPackagePath().c_str());
+            CFactory::DiscardNew(Font);
+            return;
         }
 
+        FAssetRegistry::Get().AssetCreated(Font);
         OutResult.CreatedObjects.push_back(Font);
     }
 

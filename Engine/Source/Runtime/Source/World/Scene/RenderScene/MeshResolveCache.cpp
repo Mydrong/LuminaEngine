@@ -5,6 +5,7 @@
 #include "Assets/AssetTypes/Material/Material.h"
 #include "Assets/AssetTypes/Material/MaterialInterface.h"
 #include "Assets/AssetTypes/Mesh/Mesh.h"
+#include "Containers/Algorithm.h"
 #include "Renderer/MeshletHeaderSlab.h"
 
 namespace Lumina
@@ -36,9 +37,27 @@ namespace Lumina
         {
             FScopeLock Lock(PendingMutex);
             PendingInvalidations.push_back(Asset);
+
+            const uint64 Bit = DependencyBit(Asset);
+            for (std::atomic<uint64>* Sink : Get().InvalidationSinks)
+            {
+                Sink->fetch_or(Bit, std::memory_order_release);
+            }
         }
 
         MarkPendingWork();
+    }
+
+    void FMeshResolveCache::AddInvalidationSink(std::atomic<uint64>* Sink)
+    {
+        FScopeLock Lock(PendingMutex);
+        InvalidationSinks.push_back(Sink);
+    }
+
+    void FMeshResolveCache::RemoveInvalidationSink(std::atomic<uint64>* Sink)
+    {
+        FScopeLock Lock(PendingMutex);
+        InvalidationSinks.erase(Algo::Remove(InvalidationSinks, Sink), InvalidationSinks.end());
     }
 
     void FMeshResolveCache::MarkEntryStale(uint32 Handle)
@@ -283,7 +302,12 @@ namespace Lumina
             {
                 bReady = false;
             }
-            Material = CMaterial::GetDefaultMaterial();
+
+            // A material still compiling keeps the plain default, so only a real failure shows the checker.
+            const CMaterial* Root = IsValid(RawMaterial) ? RawMaterial->GetMaterial() : nullptr;
+            CMaterial* ErrorMaterial = CMaterial::GetErrorMaterial();
+            const bool bShowError = IsValid(Root) && Root->HasCompileFailed() && IsValid(ErrorMaterial) && ErrorMaterial->IsReadyForRender();
+            Material = bShowError ? ErrorMaterial : CMaterial::GetDefaultMaterial();
         }
 
         // Second gate. IsReadyForRender reports that the material finished COMPILING.

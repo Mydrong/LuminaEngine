@@ -279,9 +279,7 @@ namespace Lumina
     		ImFont* pFont = io.Fonts->AddFontFromFileTTF(Path.data(), FontSize, &FontConfig);
     		if (pFont == nullptr)
     		{
-    			PANIC("Failed to load font '{}'. Engine resources could not be resolved -- "
-    			      "LUMINA_DIR may be unset or pointing at the wrong directory. Run the engine's Setup.bat.",
-    			      Path.data());
+    			PANIC("Failed to load font '{}'. The engine's resources were not found beside this executable.", Path.data());
     		}
 		    ImGuiX::Font::GFonts[static_cast<uint8>(FontID)] = pFont;
 
@@ -289,7 +287,7 @@ namespace Lumina
     		IconFontConfig.GlyphMinAdvanceX = IconFontSize;
     		if (io.Fonts->AddFontFromFileTTF(IconFontFile.c_str(), IconFontSize, &IconFontConfig, IconRanges) == nullptr)
     		{
-    			LOG_ERROR("Failed to load icon font '{}'; editor icons will be missing. Check engine resources / LUMINA_DIR.", IconFontFile.c_str());
+    			LOG_ERROR("Failed to load icon font '{}'; editor icons will be missing. Check the engine's resources.", IconFontFile.c_str());
     		}
     	};
 		

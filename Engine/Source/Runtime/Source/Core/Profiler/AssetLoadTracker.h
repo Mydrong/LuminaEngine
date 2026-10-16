@@ -81,8 +81,11 @@ namespace Lumina
         static FAssetLoadTracker& Get();
 
         FAssetLoadTracker() = default;
+        ~FAssetLoadTracker() = default;
         FAssetLoadTracker(const FAssetLoadTracker&) = delete;
         FAssetLoadTracker& operator = (const FAssetLoadTracker&) = delete;
+        FAssetLoadTracker(FAssetLoadTracker&&) = delete;
+        FAssetLoadTracker& operator=(FAssetLoadTracker&&) = delete;
 
         /** Loads run on whichever thread asked, so this is callable from any of them. */
         void Record(const FAssetLoadRecord& Record);

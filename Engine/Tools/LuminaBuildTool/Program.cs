@@ -39,16 +39,34 @@ public static class Program
 
         try
         {
+            // Open, Launch and SwitchEngine name their project by its .lproject rather than -Project.
+            string? ProjectFileArgument = Arguments.GetPositional(1) is string Positional
+                && Positional.EndsWith(".lproject", StringComparison.OrdinalIgnoreCase) ? Positional : null;
+
             BuildDirectories Directories = BuildDirectories.Discover(
                 Arguments.GetString("EngineRoot"),
-                Arguments.GetString("Project"));
+                Arguments.GetString("Project") ?? ProjectFileArgument);
 
             Log.Verbose("Engine root: {0}", Directories.EngineRoot);
+
+            EngineAssociation.Register(Directories.EngineRoot);
+            FileTypeRegistration.EnsureRegistered(Directories.EngineRoot);
+
+            // SwitchEngine stays here, since it is how a project naming the wrong engine gets fixed.
+            bool bSwitchingEngine = Mode.Equals("SwitchEngine", StringComparison.OrdinalIgnoreCase);
+            if (!bSwitchingEngine && Directories.ProjectRoot is not null
+                && EngineAssociation.TryForward(Directories.ProjectRoot, Directories.EngineRoot, Args, out int ForwardedExitCode))
+            {
+                return ForwardedExitCode;
+            }
 
             return Mode.ToLowerInvariant() switch
             {
                 "build" => await BuildMode.RunAsync(Arguments, Directories, Cancellation.Token).ConfigureAwait(false),
                 "run" => RunMode.Run(Arguments, Directories),
+                "open" => await OpenMode.RunAsync(Arguments, Directories, TargetType.Editor, Cancellation.Token).ConfigureAwait(false),
+                "launch" => await OpenMode.RunAsync(Arguments, Directories, TargetType.Game, Cancellation.Token).ConfigureAwait(false),
+                "switchengine" => SwitchEngineMode.Run(Arguments, Directories),
                 "test" => await TestMode.RunAsync(Arguments, Directories, Cancellation.Token).ConfigureAwait(false),
                 "profile" => await ProfileMode.RunAsync(Arguments, Directories, Cancellation.Token).ConfigureAwait(false),
                 "clean" => CleanMode.Run(Arguments, Directories),
@@ -56,6 +74,7 @@ public static class Program
                 "includes" => AnalyzeMode.RunIncludes(Arguments, Directories),
                 "deps" => AnalyzeMode.RunDependencies(Arguments, Directories),
                 "unityconflicts" => AnalyzeMode.RunUnityConflicts(Arguments, Directories),
+                "tidy" => await TidyMode.RunAsync(Arguments, Directories, Cancellation.Token).ConfigureAwait(false),
                 "setup" => await SetupMode.RunAsync(Arguments, Directories, Cancellation.Token).ConfigureAwait(false),
                 "package" => await PackageMode.RunAsync(Arguments, Directories, Cancellation.Token).ConfigureAwait(false),
                 "generateprojectfiles" or "genprojects" => ProjectFilesMode.Run(Arguments, Directories),
@@ -99,6 +118,9 @@ public static class Program
               Setup                     Fetch external dependencies and configure the environment
               Build <Target>            Compile and link a target
               Run <Target>              Launch a target's executable, located from its own rules
+              Open <File.lproject>      Build a project's editor target if stale, then open it in the editor
+              Launch <File.lproject>    Build a project's game target if stale, then run it as a standalone game
+              SwitchEngine <File.lproject>  Choose which engine checkout the project opens with (-Engine=<id or path>)
               Test [Module]             Build and run test suites; a module with a Tests or Benchmarks
                                         directory beside its Build.cs gets one binary per directory
               Profile <Target>          Run a target under Tracy and rank its zones by self time
@@ -107,6 +129,8 @@ public static class Program
               Includes <Target>         Rank headers by how many translation units include them
               Deps <Target>             Compare declared module dependencies against reached ones
               UnityConflicts <Target>   Find file-scope names that collide when unity merges two sources
+              Tidy [PathFilter]         Run clang-tidy with the workspace .clang-tidy over first-party sources
+                                        (-Checks=<list>, -Jobs=<n>, -WarningsAsErrors, -ClangTidy=<path>)
               GenerateProjectFiles      Write IDE project and solution files
               Package                   Build and zip a prebuilt editor that runs without sources or a toolchain
 
@@ -148,7 +172,7 @@ public static class Program
               -Platform=<name>          Windows64 | Linux64 (default: host platform)
               -Configuration=<name>     Debug | Development | Shipping (default: Development)
               -TargetType=<name>        Editor | Game | Program (default: from the target rules)
-              -EngineRoot=<path>        Engine installation root (default: LUMINA_DIR or auto-detected)
+              -EngineRoot=<path>        Engine installation root (default: the tree this tool lives in)
               -Project=<path>           Game project root, for building against an installed engine
               -MaxParallel=<n>          Concurrent actions (default: processor count minus one,
                                         lowered to fit available memory)

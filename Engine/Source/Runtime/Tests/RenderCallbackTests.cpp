@@ -14,7 +14,7 @@ namespace
         FNullRenderScene() : IRenderScene(nullptr) {}
 
         void Init() override {}
-        void Extract(const FViewVolume&, const SPostProcessSettings*) override {}
+        void Extract(const FViewVolume&, const SPostProcessSettings*, const FViewLayerSettings&) override {}
         void RenderView(uint8) override {}
         void Resize(const FUIntVector2&) override {}
         FUIntVector2 GetRenderExtent() const override { return FUIntVector2(0); }

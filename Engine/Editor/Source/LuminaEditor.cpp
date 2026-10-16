@@ -9,11 +9,13 @@
 #include <Memory/Memory.h>
 #include <Tools/UI/DevelopmentToolUI.h>
 #include "Config/Config.h"
+#include "Core/CommandLine/CommandLine.h"
 #include "FileSystem/FileSystem.h"
 #include "GUID/GUID.h"
 #include "Log/Log.h"
 #include "Paths/Paths.h"
 #include "Platform/Process/PlatformProcess.h"
+#include "Tools/UI/ImGui/ImGuiX.h"
 #include "UI/EditorUI.h"
 #include "World/WorldManager.h"
 
@@ -23,18 +25,6 @@ namespace Lumina
 
     bool FEditorEngine::Init()
     {
-        // Heals a missing or stale LUMINA_DIR for shells, the IDE and external game builds that need it.
-        // An installed build has no build tools to serve, and would point an engineer's source builds at itself.
-        const FString& EngineRoot = Paths::GetEngineInstallDirectory();
-        if (!EngineRoot.empty() && !Paths::IsInstalledBuild())
-        {
-            Platform::SetEnvVariable("LUMINA_DIR", EngineRoot);
-            if (Platform::PersistUserEnvVariable("LUMINA_DIR", EngineRoot))
-            {
-                LOG_DISPLAY("Persisted LUMINA_DIR={} for future shells and build tools.", EngineRoot);
-            }
-        }
-
         VFS::Mount<VFS::FNativeFileSystem>("/Editor", Paths::Combine(Paths::GetEngineDirectory(), "Editor"));
 
         GConfig->LoadPath("/Editor/Config");
@@ -50,7 +40,48 @@ namespace Lumina
 
     bool FEditorEngine::Shutdown()
     {
-        return FEngine::Shutdown();
+        const bool bResult = FEngine::Shutdown();
+        Platform::ReleaseInstanceLock(ProjectLock);
+        return bResult;
+    }
+
+    bool FEditorEngine::ClaimStartupProject()
+    {
+        TOptional<FFixedString> Project = GCommandLine->Get("Project");
+        if (!Project.has_value())
+        {
+            return true;
+        }
+
+        const FFixedString Normalized = Paths::Normalize(FStringView(Project.value()));
+        return ClaimProject(Filesystem::IsDirectory(Normalized) ? FStringView(Normalized) : FStringView(VFS::Parent(Normalized)));
+    }
+
+    bool FEditorEngine::ClaimProject(FStringView ProjectDirectory)
+    {
+        // A benchmark opens the project read-only beside whoever is working in it.
+        if (GCommandLine->Has("benchmark") || (ProjectLock.IsHeld() && Paths::PathsEqual(ProjectDirectory, LockedProjectDirectory)))
+        {
+            return true;
+        }
+
+        const FFixedString IntermediatesDirectory = Paths::Combine(ProjectDirectory, "Intermediates");
+        Filesystem::MakeDirectoryTree(IntermediatesDirectory);
+
+        Platform::FInstanceLock NewLock;
+        uint32 OwnerId = 0;
+        if (!Platform::TryAcquireInstanceLock(FString(Paths::Combine(IntermediatesDirectory, "Editor.lock").c_str()), NewLock, OwnerId))
+        {
+            LOG_WARN("'{}' is already open in another editor (process {}), so it was not opened here.", ProjectDirectory, OwnerId);
+            ImGuiX::Notifications::NotifyWarning("That project is already open in another editor window.");
+            Platform::FocusProcessWindow(OwnerId);
+            return false;
+        }
+
+        Platform::ReleaseInstanceLock(ProjectLock);
+        ProjectLock = NewLock;
+        LockedProjectDirectory.assign(ProjectDirectory.data(), ProjectDirectory.size());
+        return true;
     }
 
     CWorld* FEditorEngine::GetCurrentEditorWorld() const
@@ -259,7 +290,7 @@ namespace Lumina
         const FString& EngineDir = Paths::GetEngineInstallDirectory();
         if (EngineDir.empty())
         {
-            OutError = "Engine install directory is not set (LUMINA_DIR missing). Run the engine's Setup.bat.";
+            OutError = "The engine root could not be found beside this editor.";
             return false;
         }
 
@@ -334,7 +365,7 @@ namespace Lumina
         const FString& EngineDir = Paths::GetEngineInstallDirectory();
         if (EngineDir.empty())
         {
-            OutError = "Engine install directory is not set (LUMINA_DIR missing). Run the engine's Setup.bat.";
+            OutError = "The engine root could not be found beside this editor.";
             return false;
         }
 
@@ -399,33 +430,28 @@ namespace Lumina
 
     bool FEditorEngine::GenerateProjectFiles(FStringView ProjectDirectory) const
     {
-        // The host decides which to run, since handing a .bat to a POSIX exec says nothing useful.
-#if defined(_WIN32)
-        constexpr const char* ScriptName = "GenerateProject.bat";
-#else
-        constexpr const char* ScriptName = "GenerateProject.sh";
-#endif
-
-        FFixedString ScriptPath = Paths::Combine(ProjectDirectory, ScriptName);
-        if (!Paths::Exists(ScriptPath))
+        // This editor's own engine, which hands the work on if the project names another.
+        const FString Script = Paths::GetBuildToolScript();
+        if (Script.empty())
         {
-            LOG_ERROR("GenerateProjectFiles: missing {0}", ScriptPath.c_str());
+            LOG_ERROR("GenerateProjectFiles: this engine has no build tool, so project files cannot be generated.");
             return false;
         }
 
         // Streams each line under a [BuildTool] tag so the user sees progress without a console window.
-        const std::string ScriptPathStr(ScriptPath.c_str(), ScriptPath.size());
+        const std::string ScriptPathStr(Script.c_str(), Script.size());
+        const std::string ParamsStr = Format("GenerateProjectFiles -Project=\"{}\"", ProjectDirectory).c_str();
         const std::string WorkingDirStr(ProjectDirectory.data(), ProjectDirectory.size());
 
-        FThread([ScriptPathStr, WorkingDirStr]()
+        FThread([ScriptPathStr, ParamsStr, WorkingDirStr]()
         {
             FScopedSlowTask Task(1.0f, "Generating project files", "Running LuminaBuildTool GenerateProjectFiles...");
 
-            LOG_INFO("[BuildTool] running {0}", ScriptPathStr.c_str());
+            LOG_INFO("[BuildTool] running {0} {1}", ScriptPathStr.c_str(), ParamsStr.c_str());
 
             const int ExitCode = Platform::RunProcessAndWaitCapture(
                 UTF8_TO_TCHAR(ScriptPathStr.c_str()),
-                nullptr,
+                UTF8_TO_TCHAR(ParamsStr.c_str()),
                 UTF8_TO_TCHAR(WorkingDirStr.c_str()),
                 [](FStringView Line)
                 {

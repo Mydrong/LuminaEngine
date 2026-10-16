@@ -44,10 +44,10 @@ namespace Lumina
         FVector4 Color = FVector4(0.29f, 0.44f, 0.68f, 1.0f);
 
         // The body under the title bar in canvas units, mirrored from the canvas so undo and saves carry a resize.
-        PROPERTY()
+        PROPERTY(Hidden)
         float Width = 480.0f;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         float Height = 280.0f;
     };
 }

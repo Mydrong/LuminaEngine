@@ -309,9 +309,9 @@ namespace Lumina
     using FU16Vector3 = TVec<uint16, 3>;
     using FU16Vector4 = TVec<uint16, 4>;
 
-    using FDoubleVector2 = TVec<double, 2>;
-    using FDoubleVector3 = TVec<double, 3>;
-    using FDoubleVector4 = TVec<double, 4>;
+    using FDVector2 = TVec<double, 2>;
+    using FDVector3 = TVec<double, 3>;
+    using FDVector4 = TVec<double, 4>;
 
 }
 

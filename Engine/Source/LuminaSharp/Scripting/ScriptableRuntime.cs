@@ -73,7 +73,9 @@ internal sealed class ScriptableRuntime
                 // A struct living in native memory writes through its own accessors, and a plain value is constructed and written whole.
                 if (Row.Type.GetMethod("__ApplyScriptDefaults", BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public) is { } Apply)
                 {
-                    Apply.Invoke(null, new object[] { new NativeRef(Defaults) });
+                    // A component is its storage, so it takes the address where a struct handle takes a NativeRef.
+                    bool bByAddress = Apply.GetParameters()[0].ParameterType == typeof(nint);
+                    Apply.Invoke(null, new object[] { bByAddress ? Defaults : new NativeRef(Defaults) });
                 }
                 else
                 {

@@ -10,12 +10,7 @@ namespace LuminaSharp;
 /// </summary>
 public static partial class Engine
 {
-    /// <summary>
-    /// Switches to another level. The world swap is deferred to the next frame start, so this is safe to
-    /// call from any script callback; everything in the current world (entities, scripts, timers) is torn
-    /// down and the new world starts fresh. URL forms: a world asset path ("/Game/Maps/Arena"), a hosted
-    /// map ("/Game/Maps/Arena?listen?port=7777"), or a server address to connect to ("192.168.1.5:7777").
-    /// </summary>
+    // Switches level at the next frame start, keeping only SPersistentComponent entities, which arrive with their children and scripts and get OnTraveled.
     public static void OpenLevel(string Url) => Lumina.CGameLibrary.OpenLevel(World, Url);
 
     /// <summary>

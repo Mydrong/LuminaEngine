@@ -11,6 +11,7 @@
 #include "World/Entity/Components/Component.h"
 #include "World/Entity/Components/MissingComponents.h"
 #include "ScriptTestUtil.h"
+#include "Assets/AssetTypes/Prefabs/PrefabOverrideTestTypes.h"
 
 using namespace Lumina;
 using namespace Lumina::Scripting;
@@ -168,4 +169,40 @@ TEST(MissingComponents, ARenamedTypeTakesOverItsOldPool)
     EXPECT_EQ(FScriptableRegistry::ResolveStruct(FName("SComp_GTestBefore")), After->StaticStruct());
 
     FScriptableRegistry::SetRedirects({});
+}
+
+// Copies made while the type is gone stack their remaps, and the restore applies them as if each had run on the live value.
+TEST(MissingComponents, HeldEntityRemapsComposeAcrossCopies)
+{
+    RegisterPendingTypes();
+    const CStruct* Layout = SPrefabLinkTestComponent::StaticStruct();
+    auto E = [](uint32 Packed) { return ECS::FEntity(Packed); };
+
+    SHeldValue Held;
+    Held.RemapEntities({ { E(1), E(10) }, { E(2), E(20) } }, /*bClearUnmapped*/ false);
+    Held.RemapEntities({ { E(10), E(100) } }, /*bClearUnmapped*/ true);
+
+    auto Resolve = [&](uint32 Original)
+    {
+        SPrefabLinkTestComponent Value;
+        Value.Target = E(Original);
+        Held.ApplyEntityRemap(Layout, &Value);
+        return Value.Target;
+    };
+
+    EXPECT_EQ(Resolve(1), E(100)) << "both copies apply in order";
+    EXPECT_EQ(Resolve(2), ECS::FEntity(ECS::NullEntity)) << "the second copy did not carry the first copy's target";
+    EXPECT_EQ(Resolve(10), E(100)) << "a handle the first copy left alone takes the second map";
+    EXPECT_EQ(Resolve(5), ECS::FEntity(ECS::NullEntity)) << "an unmapped handle clears once a copy says so";
+
+    // Round trips with the value, so a level saved while the type is gone keeps the pending remap.
+    TVector<uint8> Bytes;
+    FMemoryWriter Writer(Bytes);
+    Writer << Held;
+    SHeldValue Loaded;
+    FMemoryReader Reader(Bytes);
+    Reader << Loaded;
+    EXPECT_EQ(Loaded.RemapFrom, Held.RemapFrom);
+    EXPECT_EQ(Loaded.RemapTo, Held.RemapTo);
+    EXPECT_TRUE(Loaded.bClearUnmappedEntities);
 }

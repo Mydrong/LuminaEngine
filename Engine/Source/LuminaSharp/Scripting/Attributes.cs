@@ -1,4 +1,5 @@
 ﻿using System;
+using JetBrains.Annotations;
 using Lumina;
 using System.Collections.Generic;
 using System.Reflection;
@@ -228,7 +229,7 @@ public enum EPropertyFlags : uint
 {
     None               = 0,
 
-    /// <summary>Shown in the details panel. Implied by <see cref="PropertyAttribute"/>.</summary>
+    /// <summary>Shown in the details panel.</summary>
     Editable           = 1u << 0,
     /// <summary>Shown but not editable.</summary>
     ReadOnly           = 1u << 1,
@@ -242,7 +243,7 @@ public enum EPropertyFlags : uint
     Replicated         = 1u << 12,
     /// <summary>Duplication resets this to its default rather than copying it.</summary>
     DuplicateTransient = 1u << 16,
-    /// <summary>Written into save games. The same as <see cref="SaveGameAttribute"/>.</summary>
+    /// <summary>Written into save games.</summary>
     SaveGame           = 1u << 19,
 }
 
@@ -259,76 +260,105 @@ internal enum EScriptParamFlags : uint
     RefParam = 1u << 18,
 }
 
-/// <summary>
-/// Exposes a script field/property to the editor (and saves it).
-/// </summary>
+// How a [Property(Component = ...)] reference is filled before OnAttach.
+public enum EComponentBind
+{
+    None,
+
+    // Finds the entity's component, leaving the reference unbound when it has none.
+    Get,
+
+    // Adds the component first when the entity has none.
+    GetOrAdd,
+}
+
+// The bare words a [Property] or [Function] takes, as C++ PROPERTY(...) and FUNCTION(...) do, imported into every script.
+public enum ESpecifier
+{
+    Editable,
+    ReadOnly,
+    Hidden,
+    NoSerialize,
+    SaveGame,
+    EditorOnly,
+    DuplicateTransient,
+    Sync,
+    Bind,
+
+    // C++ spells this Color, which a bare name in C# cannot, since it would collide with LuminaSharp.Color.
+    ColorPicker,
+
+    Button,
+}
+
+// The C# spelling of a C++ PROPERTY(...), which stores the member natively, saves it and shows it as Editable unless it says ReadOnly or Hidden.
+[MeansImplicitUse(ImplicitUseKindFlags.Access | ImplicitUseKindFlags.Assign)]
 [AttributeUsage(AttributeTargets.Field | AttributeTargets.Property, AllowMultiple = false)]
 public sealed class PropertyAttribute : Attribute
 {
-    /// <summary>Inspector group.</summary>
+    private readonly ESpecifier[] Specifiers;
+    private Lumina.ESyncFlags SyncValue;
+    private bool bSyncNamed;
+
+    public PropertyAttribute(params ESpecifier[] Specifiers)
+    {
+        this.Specifiers = Specifiers;
+    }
+
     public string? Category { get; set; }
 
-    /// <summary>Hover help.</summary>
-    public string? Tooltip { get; set; }
+    public string? ToolTip { get; set; }
 
-    /// <summary>Display label override (defaults to the member name).</summary>
-    public string? Name { get; set; }
+    public string? DisplayName { get; set; }
 
-    /// <summary>Slider/drag lower bound (NaN = unbounded).</summary>
-    public float Min { get; set; } = float.NaN;
+    public float ClampMin { get; set; } = float.NaN;
 
-    /// <summary>Slider/drag upper bound (NaN = unbounded).</summary>
-    public float Max { get; set; } = float.NaN;
+    public float ClampMax { get; set; } = float.NaN;
 
-    /// <summary>Unit suffix shown after the value (e.g. "m/s").</summary>
     public string? Units { get; set; }
 
-    /// <summary>Draw a color picker for a Vector3/Vector4 value instead of drag fields.</summary>
-    public bool Color { get; set; }
-
-    // Turns a string into a picker of those file kinds, such as "rml" or "rml,rcss", the same as a C++ PROPERTY(AssetType = ...).
     public string? AssetType { get; set; }
 
-    // Soft references in this field load with their owner when the named bundle is asked for, the same as a C++ PROPERTY(Bundle = ...).
     public string? Bundle { get; set; }
 
-    // Narrows an SAssetId field's picker to one asset group, the same as a C++ PROPERTY(Group = ...).
     public string? Group { get; set; }
 
-    /// <summary>
-    /// Reflected flags for this property, on top of the Editable one <see cref="PropertyAttribute"/> implies.
-    ///
-    /// This is how a script field says the things the engine already understood but C# could not express:
-    /// <c>Replicated</c>, <c>ReadOnly</c>, <c>EditorOnly</c>, <c>Const</c>, <c>DuplicateTransient</c>.
-    /// </summary>
-    public EPropertyFlags Flags { get; set; } = EPropertyFlags.None;
+    public EComponentBind Component { get; set; }
 
-    public bool HasMin => !float.IsNaN(Min);
-    public bool HasMax => !float.IsNaN(Max);
+    // The name a UI document binds this under, which implies Bind.
+    public string? Bind { get; set; }
+
+    // Implies Sync, and FromOwner lets the owning client write the field too.
+    public Lumina.ESyncFlags Sync
+    {
+        get => SyncValue;
+        set
+        {
+            SyncValue = value;
+            bSyncNamed = true;
+        }
+    }
+
+    public float Rate { get; set; }
+
+    public double Quantize { get; set; }
+
+    public string? Validate { get; set; }
+
+    public string? Change { get; set; }
+
+    public bool HasClampMin => !float.IsNaN(ClampMin);
+    public bool HasClampMax => !float.IsNaN(ClampMax);
+
+    public bool Has(ESpecifier Specifier)
+    {
+        return Array.IndexOf(Specifiers, Specifier) >= 0
+            || (Specifier == ESpecifier.Sync && bSyncNamed)
+            || (Specifier == ESpecifier.Bind && Bind != null);
+    }
+
+    public bool Has(string Specifier) => Enum.TryParse(Specifier, out ESpecifier Parsed) && Has(Parsed);
 }
-
-/// <summary>
-/// Persists a field/property with the entity without exposing it in the inspector.
-/// </summary>
-[AttributeUsage(AttributeTargets.Field | AttributeTargets.Property, AllowMultiple = false)]
-public sealed class SerializeAttribute : Attribute
-{
-}
-
-/// <summary>
-/// Written into save games whole, and stored natively without [Property], so a save-only field stays out of the inspector.
-/// </summary>
-[AttributeUsage(AttributeTargets.Field | AttributeTargets.Property, AllowMultiple = false)]
-public sealed class SaveGameAttribute : Attribute
-{
-}
-
-/// <summary>Marks a field/property as never serialized or shown, even if otherwise eligible.</summary>
-[AttributeUsage(AttributeTargets.Field | AttributeTargets.Property, AllowMultiple = false)]
-public sealed class HideAttribute : Attribute
-{
-}
-
 
 /// <summary>Marks a generated wrapper method as a native reflected virtual that a C# subclass of a
 /// <c>REFLECT(Scriptable)</c> class may override. Emitted by the Reflector, never hand-written. <see cref="Index"/>
@@ -346,38 +376,30 @@ public sealed class ScriptEventAttribute : Attribute
     public int Index { get; }
 }
 
-/// <summary>
-/// Publishes this method as a reflected function on the minted class, so native and other scripts can find
-/// it by name and call it without a generated binding.
-/// </summary>
-/// <remarks>
-/// Parameters and the return value become real FPropertys describing the call frame, so they are limited to
-/// kinds the reflection system can describe. A method whose signature cannot be described is reported at
-/// mint time and left unreflected rather than half-bound.
-/// </remarks>
+// The C# spelling of a C++ FUNCTION(...), which publishes the method as a reflected function native and other scripts call by name.
+[MeansImplicitUse]
 [AttributeUsage(AttributeTargets.Method, AllowMultiple = false)]
-public sealed class ScriptFunctionAttribute : Attribute
+public sealed class FunctionAttribute : Attribute
 {
-}
+    private readonly ESpecifier[] Specifiers;
 
-/// <summary>Exposes a parameterless method as a clickable button in the script component's inspector.
-/// Clicking it invokes the method on the live script instance (only while the game is running). Methods
-/// taking arguments are ignored with a warning.</summary>
-[AttributeUsage(AttributeTargets.Method, AllowMultiple = false)]
-public sealed class ButtonAttribute : Attribute
-{
-    public ButtonAttribute()
+    public FunctionAttribute(params ESpecifier[] Specifiers)
     {
+        this.Specifiers = Specifiers;
     }
 
-    public ButtonAttribute(string Label)
+    public string? ToolTip { get; set; }
+
+    // The label of the inspector button that calls this parameterless method, which implies Button.
+    public string? Button { get; set; }
+
+    // The name a UI document runs or reads this under, which implies Bind.
+    public string? Bind { get; set; }
+
+    public bool Has(ESpecifier Specifier)
     {
-        this.Label = Label;
+        return Array.IndexOf(Specifiers, Specifier) >= 0
+            || (Specifier == ESpecifier.Button && Button != null)
+            || (Specifier == ESpecifier.Bind && Bind != null);
     }
-
-    /// <summary>Button text override (defaults to the method name).</summary>
-    public string? Label { get; set; }
-
-    /// <summary>Hover help.</summary>
-    public string? Tooltip { get; set; }
 }

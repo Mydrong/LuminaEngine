@@ -63,12 +63,6 @@ namespace Lumina::Platform
         return false;
     }
 
-    bool PersistUserEnvVariable(const FString& /*Name*/, const FString& /*Value*/)
-    {
-        LUMINA_WARN_ONCE("Platform::PersistUserEnvVariable");
-        return false;
-    }
-
     #undef LUMINA_WARN_ONCE
 }
 

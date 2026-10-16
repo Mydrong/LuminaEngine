@@ -189,15 +189,15 @@ namespace Lumina
         void NotifySubGraphCreated();
 
         /** Horizontal position of the node in the graph canvas. */
-        PROPERTY(DuplicateTransient)
+        PROPERTY(Hidden, DuplicateTransient)
         float GridX;
 
         /** Vertical position of the node in the graph canvas. */
-        PROPERTY(DuplicateTransient)
+        PROPERTY(Hidden, DuplicateTransient)
         float GridY;
 
         /** Unique identifier for this node within the graph. */
-        PROPERTY(DuplicateTransient)
+        PROPERTY(Hidden, DuplicateTransient)
         int64 NodeID = 0;
         
         

@@ -117,6 +117,8 @@ namespace Lumina
         // The destructor closes the scope, so a copy would close it twice and leave the backend's node stack short.
         FArchiveRecord(const FArchiveRecord&) = delete;
         FArchiveRecord& operator=(const FArchiveRecord&) = delete;
+        FArchiveRecord(FArchiveRecord&&) = delete;
+        FArchiveRecord& operator=(FArchiveRecord&&) = delete;
 
         ~FArchiveRecord();
 
@@ -148,6 +150,8 @@ namespace Lumina
         // Scope-closing destructor; see FArchiveRecord.
         FArchiveArray(const FArchiveArray&) = delete;
         FArchiveArray& operator=(const FArchiveArray&) = delete;
+        FArchiveArray(FArchiveArray&&) = delete;
+        FArchiveArray& operator=(FArchiveArray&&) = delete;
 
         ~FArchiveArray();
 
@@ -171,6 +175,8 @@ namespace Lumina
         // Scope-closing destructor; see FArchiveRecord.
         FArchiveStream(const FArchiveStream&) = delete;
         FArchiveStream& operator=(const FArchiveStream&) = delete;
+        FArchiveStream(FArchiveStream&&) = delete;
+        FArchiveStream& operator=(FArchiveStream&&) = delete;
 
         ~FArchiveStream();
 
@@ -193,6 +199,8 @@ namespace Lumina
         // Scope-closing destructor; see FArchiveRecord.
         FArchiveMap(const FArchiveMap&) = delete;
         FArchiveMap& operator=(const FArchiveMap&) = delete;
+        FArchiveMap(FArchiveMap&&) = delete;
+        FArchiveMap& operator=(FArchiveMap&&) = delete;
 
         ~FArchiveMap();
 

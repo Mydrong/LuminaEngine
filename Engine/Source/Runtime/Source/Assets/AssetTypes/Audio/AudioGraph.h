@@ -47,7 +47,7 @@ namespace Lumina
         const TVector<FAudioGraphParameterDecl>& GetOutputs() const { return Program.Outputs; }
 
         /** Wave assets the compiled program addresses by index. Filled by the compiler. */
-        PROPERTY()
+        PROPERTY(Hidden)
         TVector<TStrongObjectPtr<CAudioStream>> ReferencedWaves;
 
         /** Shown in the asset tooltip and the sound picker. */

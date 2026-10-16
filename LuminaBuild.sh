@@ -25,9 +25,7 @@ if ! command -v dotnet >/dev/null 2>&1; then
     exit 1
 fi
 
-# Reached when this script is not sitting in an engine root, which is what happens when it is copied
-# somewhere on its own or LUMINA_DIR points at the wrong tree. Checked here so the failure names the
-# tree it looked in, rather than surfacing as an MSBuild error about a missing project.
+# Reached when this script was copied out of an engine root, so the failure names the tree it looked in.
 if [ ! -f "$BuildToolProject" ]; then
     echo "error: LuminaBuildTool source is missing at \"$BuildToolProject\"." >&2
     echo "\"$LuminaRoot\" does not look like a Lumina engine root." >&2

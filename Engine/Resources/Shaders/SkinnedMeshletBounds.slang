@@ -33,13 +33,12 @@ void ComputeMain(uint3 GlobalID : SV_DispatchThreadID)
         return;
     }
 
-    const uint SlotIdx = Pass().SlotList.Get(SlotListIdx);
+    FSkinnedFrameData Skin = Pass().SkinnedFrameData.Get(Pass().SlotList.Get(SlotListIdx));
+    const uint SlotIdx = Skin.RetainedSlot;
     if (!Pass().RetainedStatic.Contains(SlotIdx))
     {
         return;
     }
-
-    FSkinnedFrameData Skin = Pass().SkinnedFrameData.Get(SlotIdx);
 
     if (Skin.SkinnedBoundsBase == kNoSkinnedBounds)
     {

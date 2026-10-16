@@ -892,10 +892,11 @@ namespace Lumina
                     {
                         LOG_ERROR("[MaterialImport] Generated PBR material '{}' failed to compile [{}]: {}", Master->GetName(), Error.Name, Error.Description);
                     }
-                    // A failed compile leaves the master parameterless, so emitting it would only spam errors.
+                    // A failed compile leaves the master parameterless, so emitting it would only spam errors, and its name goes back.
+                    Import::PathReservations::Release(Master->GetPackage()->GetPackagePath());
                     Graph->SetMaterial(nullptr);
                     Graph->ConditionalBeginDestroy();
-                    Master->ConditionalBeginDestroy();
+                    CFactory::DiscardNew(Master);
                     return nullptr;
                 }
 

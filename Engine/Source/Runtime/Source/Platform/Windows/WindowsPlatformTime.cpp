@@ -60,6 +60,10 @@ namespace Lumina::PlatformTime
                     CloseHandle(Handle);
                 }
             }
+            FHighResolutionTimer(const FHighResolutionTimer&) = delete;
+            FHighResolutionTimer& operator=(const FHighResolutionTimer&) = delete;
+            FHighResolutionTimer(FHighResolutionTimer&&) = delete;
+            FHighResolutionTimer& operator=(FHighResolutionTimer&&) = delete;
         };
 
         FDateTime FromBrokenDown(const tm& Parts, int64 UnixNanoseconds) noexcept

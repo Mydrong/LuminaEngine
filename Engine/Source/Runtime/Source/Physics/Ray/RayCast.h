@@ -24,13 +24,13 @@ namespace Lumina
     {
         GENERATED_BODY()
 
-        PROPERTY()
+        PROPERTY(Hidden)
         uint64 Scene = 0;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         uint32 Slot = Constants::kIndexNoneU32;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         uint32 Generation = 0;
 
         bool IsSet() const { return Scene != 0 && Slot != Constants::kIndexNoneU32; }
@@ -50,21 +50,21 @@ namespace Lumina
     {
         GENERATED_BODY()
 
-        PROPERTY()
+        PROPERTY(Hidden)
         EQueryShapeType Type = EQueryShapeType::Sphere;
 
         // Meters, for a sphere and a capsule's caps.
-        PROPERTY()
+        PROPERTY(Hidden)
         float Radius = 0.0f;
 
         // Half a capsule's straight section, so its full height is double the sum of HalfHeight and Radius.
-        PROPERTY()
+        PROPERTY(Hidden)
         float HalfHeight = 0.0f;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         FVector3 HalfExtents = FVector3(0.0f);
 
-        PROPERTY()
+        PROPERTY(Hidden)
         FQuat Rotation = FQuat::Identity();
 
         static SQueryShape Sphere(float Radius)
@@ -99,37 +99,37 @@ namespace Lumina
     {
         GENERATED_BODY()
 
-        PROPERTY()
+        PROPERTY(Hidden)
         SPhysicsBodyTarget Target;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         uint32 Entity = ECS::NullEntity.Value;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         FVector3 Start;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         FVector3 End;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         FVector3 Location;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         FVector3 Normal;
 
         /** Normalized distance along ray (0 = start, 1 = end). */
-        PROPERTY()
+        PROPERTY(Hidden)
         float Fraction;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         float Distance;
 
         /** Skeleton bone the hit body belongs to (ragdoll per-bone bodies); Constants::kIndexNone otherwise. */
-        PROPERTY()
+        PROPERTY(Hidden)
         int32 BoneIndex = Constants::kIndexNone;
 
         // A miss keeps the requested Start and End but has no hit data.
-        PROPERTY()
+        PROPERTY(Hidden)
         bool bHit = false;
     };
 
@@ -138,32 +138,32 @@ namespace Lumina
     {
         GENERATED_BODY()
 
-        PROPERTY()
+        PROPERTY(Hidden)
         FVector3 Start = FVector3(0.0f);
 
-        PROPERTY()
+        PROPERTY(Hidden)
         FVector3 End = FVector3(0.0f);
 
-        PROPERTY()
+        PROPERTY(Hidden)
         bool bDrawDebug = false;
 
         /** Seconds; 0 = one frame. */
-        PROPERTY()
+        PROPERTY(Hidden)
         float DebugDuration = 0.0f;
         
-        PROPERTY()
+        PROPERTY(Hidden)
         bool bIgnoreSelf = false;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         FVector3 DebugHitColor = FVector3(0.0, 1.0f, 0.0f);
 
-        PROPERTY()
+        PROPERTY(Hidden)
         FVector3 DebugMissColor = FVector3(1.0f, 0.0f, 0.0f);
 
-        PROPERTY()
+        PROPERTY(Hidden)
         ECollisionProfiles LayerMask = AllCollisionProfiles;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         TFixedVector<ECS::FEntity, MaxInlineIgnoreEntities> IgnoreEntities;
 
         FUNCTION()
@@ -178,33 +178,33 @@ namespace Lumina
     {
         GENERATED_BODY()
 
-        PROPERTY()
+        PROPERTY(Hidden)
         FVector3 Start = FVector3(0.0f);
 
-        PROPERTY()
+        PROPERTY(Hidden)
         FVector3 End = FVector3(0.0f);
 
         /** Sphere radius (meters). */
-        PROPERTY()
+        PROPERTY(Hidden)
         float Radius = 0.0f;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         bool bDrawDebug = false;
 
         /** Seconds; 0 = one frame. */
-        PROPERTY()
+        PROPERTY(Hidden)
         float DebugDuration = 0.0f;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         FVector3 DebugHitColor = FVector3(0.0, 1.0f, 0.0f);
 
-        PROPERTY()
+        PROPERTY(Hidden)
         FVector3 DebugMissColor = FVector3(1.0f, 0.0f, 0.0f);
 
-        PROPERTY()
+        PROPERTY(Hidden)
         ECollisionProfiles LayerMask = AllCollisionProfiles;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         TFixedVector<ECS::FEntity, MaxInlineIgnoreEntities> IgnoreEntities;
 
         FUNCTION()

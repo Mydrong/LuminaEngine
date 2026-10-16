@@ -31,6 +31,11 @@ namespace Lumina
                 RHI::Textures::Release(LoadedImage);
             }
         }
+        FPackageThumbnail() = default;
+        FPackageThumbnail(const FPackageThumbnail&) = delete;
+        FPackageThumbnail& operator=(const FPackageThumbnail&) = delete;
+        FPackageThumbnail(FPackageThumbnail&&) = delete;
+        FPackageThumbnail& operator=(FPackageThumbnail&&) = delete;
 
         TAtomic<EState> LoadState{EState::None};
 

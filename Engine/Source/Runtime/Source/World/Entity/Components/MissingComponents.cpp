@@ -4,6 +4,60 @@
 #include "Component.h"
 #include "Scripting/ScriptStruct.h"
 #include "Scripting/ScriptTypeRegistry.h"
+#include "World/Entity/EntityUtils.h"
+
+namespace Lumina
+{
+    void SHeldValue::RemapEntities(const THashMap<ECS::FEntity, ECS::FEntity>& Map, bool bClearUnmapped)
+    {
+        const uint32 Null = static_cast<ECS::FEntity>(ECS::NullEntity).Value;
+        for (uint32& To : RemapTo)
+        {
+            if (To == Null)
+            {
+                continue;
+            }
+            if (const auto It = Map.find(ECS::FEntity(To)); It != Map.end())
+            {
+                To = It->second.Value;
+            }
+            else if (bClearUnmapped)
+            {
+                To = Null;
+            }
+        }
+
+        // A handle no earlier copy remapped still names its original entity, so this map applies to it directly.
+        if (!bClearUnmappedEntities)
+        {
+            THashSet<uint32> Remapped;
+            Remapped.insert(RemapFrom.begin(), RemapFrom.end());
+            for (const auto& [From, To] : Map)
+            {
+                if (Remapped.find(From.Value) == Remapped.end())
+                {
+                    RemapFrom.push_back(From.Value);
+                    RemapTo.push_back(To.Value);
+                }
+            }
+            bClearUnmappedEntities = bClearUnmapped;
+        }
+    }
+
+    void SHeldValue::ApplyEntityRemap(const CStruct* Struct, void* Value) const
+    {
+        if (RemapFrom.empty() && !bClearUnmappedEntities)
+        {
+            return;
+        }
+        THashMap<ECS::FEntity, ECS::FEntity> Map;
+        for (size_t Index = 0; Index < RemapFrom.size(); ++Index)
+        {
+            Map.emplace(ECS::FEntity(RemapFrom[Index]), ECS::FEntity(RemapTo[Index]));
+        }
+        ECS::Utils::RemapEntityReferences(Struct, Value, Map, bClearUnmappedEntities);
+    }
+}
 
 namespace Lumina::MissingComponents
 {
@@ -48,6 +102,7 @@ namespace Lumina::MissingComponents
                 return true;
             }
             Ops->EmplaceSerialized(Registry, Entity, *Held.Data.MakeReader());
+            Held.ApplyEntityRemap(Struct, Ops->Get(Registry, Entity));
             ++Restored;
             return true;
         });

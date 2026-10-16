@@ -25,7 +25,7 @@ namespace Lumina
     {
         GENERATED_BODY()
 
-        PROPERTY()
+        PROPERTY(Hidden)
         uint64 Handle = 0;
     };
 
@@ -35,7 +35,7 @@ namespace Lumina
     {
         GENERATED_BODY()
 
-        PROPERTY()
+        PROPERTY(Hidden)
         uint64 Handle = 0;
     };
 
@@ -45,7 +45,7 @@ namespace Lumina
     {
         GENERATED_BODY()
 
-        PROPERTY()
+        PROPERTY(Hidden)
         uint64 Handle = 0;
     };
 
@@ -55,7 +55,7 @@ namespace Lumina
     {
         GENERATED_BODY()
 
-        PROPERTY()
+        PROPERTY(Hidden)
         uint64 Handle = 0;
     };
 }

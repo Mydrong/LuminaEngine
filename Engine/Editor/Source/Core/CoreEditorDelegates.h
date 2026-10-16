@@ -20,9 +20,6 @@ namespace Lumina
         // After the package reached disk. Not fired when the save failed.
         EDITOR_API static TMulticastDelegate<void, CObject*> OnAssetSaved;
 
-        // A factory produced a new asset and it has been saved.
-        EDITOR_API static TMulticastDelegate<void, CObject*> OnAssetCreated;
-
         // VFS path of what was removed. The object is already gone, so the path is all there is.
         EDITOR_API static TMulticastDelegate<void, FStringView> OnAssetDeleted;
 

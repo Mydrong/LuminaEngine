@@ -19,10 +19,10 @@ namespace Lumina
     {
         GENERATED_BODY()
 
-        PROPERTY()
+        PROPERTY(Hidden)
         FVector3 Position;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         FVector4 Color;
     };
 }

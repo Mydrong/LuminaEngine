@@ -122,20 +122,12 @@ namespace Lumina::MCP
                         return Agent::FToolResult::Error(Lumina::Format("{} already exists.", Path));
                     }
 
-                    // Only the class's own factory knows its starting content, such as a particle system's first emitter.
-                    const FStringView PathView(Path.c_str(), Path.size());
-                    const TStrongObjectPtr<CObject> Asset(Factory->GetAssetClass() == Class ? Factory->TryCreateNew(PathView) : CFactory::CreateNewOf(Class, PathView));
-                    if (Asset == nullptr)
+                    FString CreateError;
+                    const TStrongObjectPtr<CObject> Asset = CFactory::CreateAsset(Factory, Class, FStringView(Path.c_str(), Path.size()), CreateError);
+                    if (!Asset)
                     {
-                        return Agent::FToolResult::Error(Lumina::Format("Could not create a {} at {}.", In.ClassName, Path));
+                        return Agent::FToolResult::Error(Lumina::Format("{} at {}: {}.", In.ClassName, Path, CreateError));
                     }
-
-                    if (!CPackage::SavePackage(Asset->GetPackage(), Path))
-                    {
-                        return Agent::FToolResult::Error(Lumina::Format("Could not save {}.", Path));
-                    }
-
-                    FAssetRegistry::Get().AssetCreated(Asset.Get());
 
                     Out.Name       = FString(Asset->GetName().ToString().c_str());
                     Out.Path       = FString(Path.c_str());

@@ -20,6 +20,7 @@ namespace Lumina
         : IRenderScene(InWorld)
         , ShadowAtlas(FShadowAtlasConfig())
     {
+        FMeshResolveCache::Get().AddInvalidationSink(&DynamicMaterialInvalidations);
     }
 
         void FDefaultSceneRenderer::Init()
@@ -225,6 +226,7 @@ namespace Lumina
 
     FDefaultSceneRenderer::~FDefaultSceneRenderer()
     {
+        FMeshResolveCache::Get().RemoveInvalidationSink(&DynamicMaterialInvalidations);
         JoinInstanceBlockBounds();
         RHI::WaitDeviceIdle();
 
@@ -3023,6 +3025,49 @@ namespace Lumina
         DispatchCompute(CL, ScatterCS, PC, RenderUtils::GetGroupCount(Count, 64u), 1u, 1u);
     }
 
+    void FDefaultSceneRenderer::DeactivateRetainedSlots(RHI::FCmdListH CL, const TVector<uint32>& Slots)
+    {
+        LUMINA_PROFILE_SCOPE();
+
+        static const FShaderH DeactivateCS = FShaderLibrary::Get("DeactivateInstances.slang");
+        const uint32 Count = (uint32)Slots.size();
+        if (!DeactivateCS || Count == 0 || !RetainedCullEntryBuffer)
+        {
+            return;
+        }
+
+        struct FDeactivateInstancesPC
+        {
+            RHI::TGPUSpan<uint32> Slots;
+            RHI::TGPUSpan<uint32> CullWords;
+            uint32                Count;
+            uint32                WordsPerEntry;
+            uint32                FlagsWord;
+            uint32                ClearMask;
+        } PC = {};
+        static_assert(sizeof(FDeactivateInstancesPC) == 48, "FDeactivateInstancesPC must match DeactivateInstances.slang FDeactivateInstancesArgs.");
+
+        PC.Slots         = RHI::CopyTransientArray(Slots.data(), Count);
+        PC.CullWords     = RHI::TGPUSpan<uint32>::FromAddress(RetainedCullEntryBuffer.Gpu,
+                                                              (uint32)Math::Min<uint64>(RetainedCullEntryBuffer.Size / sizeof(uint32), 0xFFFFFFFFull));
+        PC.Count         = Count;
+        PC.WordsPerEntry = (uint32)(sizeof(FInstanceCullEntry) / sizeof(uint32));
+        PC.FlagsWord     = (uint32)(offsetof(FInstanceCullEntry, DrawIDAndFlags) / sizeof(uint32));
+        PC.ClearMask     = ~((uint32)EInstanceFlags::Active << 16);
+
+        // The previous frame read these entries in every stage.
+        RHI::CmdBarrier(CL,
+            RHI::EStageFlags::AllCommands, RHI::EAccessFlags::ShaderRead | RHI::EAccessFlags::TransferWrite,
+            RHI::EStageFlags::Compute, RHI::EAccessFlags::ShaderRead | RHI::EAccessFlags::ShaderWrite);
+
+        DispatchCompute(CL, DeactivateCS, PC, RenderUtils::GetGroupCount(Count, 64u), 1u, 1u);
+
+        // The writes that follow land on the same entries, by copy or by scatter.
+        RHI::CmdBarrier(CL,
+            RHI::EStageFlags::Compute, RHI::EAccessFlags::ShaderWrite,
+            RHI::EStageFlags::AllCommands, RHI::EAccessFlags::ShaderRead | RHI::EAccessFlags::ShaderWrite | RHI::EAccessFlags::TransferWrite);
+    }
+
     void FDefaultSceneRenderer::StageWrite(RHI::GPUPtr Dst, const void* Data, uint64 Size, bool bFillBeforeSubmit)
     {
         if (Size == 0)
@@ -3157,6 +3202,12 @@ namespace Lumina
         // Allocates before retiring the old one, so a failed grow leaves the previous usable.
         const auto Reallocate = [&]() -> bool
         {
+            LUMINA_PROFILE_SECTION_COLORED("Reallocate Scene Buffer", tracy::Color::OrangeRed);
+            if (Buffer.DebugName != nullptr)
+            {
+                LUMINA_PROFILE_TAG(Buffer.DebugName);
+            }
+
             const RHI::FGPUAllocation Grown = CreateSceneBuffer(Buffer.SlackedBytes(NeededBytes), Buffer.DebugName);
             if (!Grown)
             {

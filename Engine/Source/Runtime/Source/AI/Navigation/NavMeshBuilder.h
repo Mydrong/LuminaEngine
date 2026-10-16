@@ -22,6 +22,8 @@ namespace Lumina
 
         FNavTileCache(const FNavTileCache&) = delete;
         FNavTileCache& operator=(const FNavTileCache&) = delete;
+        FNavTileCache(FNavTileCache&&) = delete;
+        FNavTileCache& operator=(FNavTileCache&&) = delete;
 
         // Geometry under the tile changed, so whatever is held for it no longer counts.
         void Invalidate(int32 X, int32 Y);

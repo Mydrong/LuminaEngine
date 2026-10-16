@@ -373,8 +373,9 @@ namespace Lumina::DotNet
         Xml += "    <Analyzer Include=\""
             + std::string(NativePath(Join(ParentOf(LuminaSharpDll), "LuminaSharp.Generators.dll")).c_str())
             + "\" />\n";
-        // Matches the import ScriptCompiler adds to every runtime compile, so LoadObject<T> resolves the same in the IDE.
+        // Matches the imports ScriptCompiler adds to every runtime compile, so LoadObject<T> and bare specifiers resolve the same in the IDE.
         Xml += "    <Using Include=\"LuminaSharp.ObjectCore\" Static=\"true\" />\n";
+        Xml += "    <Using Include=\"LuminaSharp.ESpecifier\" Static=\"true\" />\n";
         Xml += "  </ItemGroup>\n";
 
         // Named as packages rather than as their restored DLLs, so the IDE restores them the usual way.

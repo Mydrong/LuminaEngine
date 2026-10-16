@@ -318,8 +318,7 @@ TEST(ScriptSchemaCodec, AMisorderedRecordIsCaughtByItsTag)
 }
 
 
-// [Property(Flags = Replicated | ReadOnly)] has to survive the wire, because the alternative is a field the
-// author marked replicated that silently is not.
+// The flags of a [Property(ReadOnly, Sync)] have to survive the wire, or a field marked replicated silently is not.
 TEST(ScriptSchemaCodec, DeclaredPropertyFlagsRoundTrip)
 {
     constexpr uint32 Declared = (uint32)EPropertyFlags::Replicated | (uint32)EPropertyFlags::ReadOnly;

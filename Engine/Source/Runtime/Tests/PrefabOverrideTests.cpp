@@ -300,3 +300,173 @@ TEST(PrefabInstances, RefreshRespawnsANodeDestroyedWithItsDeletedParent)
     ASSERT_NE(Rebuilt, ECS::NullEntity) << "the prefab still ships this node, so refresh must restore it";
     EXPECT_TRUE(Registry.IsValid(Rebuilt));
 }
+
+namespace
+{
+    // An outer instance of Prefab whose child holds a second, nested instance of that same prefab.
+    struct FSelfNested
+    {
+        ECS::FEntity OuterRoot, OuterChild, InnerRoot, InnerChild;
+    };
+
+    FSelfNested PlaceSelfNested(ECS::FRegistry& Registry, CPrefab* Prefab)
+    {
+        FSelfNested Out;
+        Out.OuterRoot  = AddInstanceNode(Registry, Prefab, "root", true);
+        Out.OuterChild = AddInstanceNode(Registry, Prefab, "child", false);
+        Out.InnerRoot  = AddInstanceNode(Registry, Prefab, "root", true);
+        Out.InnerChild = AddInstanceNode(Registry, Prefab, "child", false);
+        ECS::Utils::ReparentEntity(Registry, Out.OuterChild, Out.OuterRoot);
+        ECS::Utils::ReparentEntity(Registry, Out.InnerRoot, Out.OuterChild);
+        ECS::Utils::ReparentEntity(Registry, Out.InnerChild, Out.InnerRoot);
+        return Out;
+    }
+
+    CPrefab* MakeRootChildPrefab()
+    {
+        CPrefab* Prefab = MakePrefab();
+        const ECS::FEntity Root = AddNode(Prefab->Registry, "root");
+        ECS::Utils::ReparentEntity(Prefab->Registry, AddNode(Prefab->Registry, "child"), Root);
+        return Prefab;
+    }
+}
+
+// The nested copy shares every StableID with its outer instance, and a refresh of the outer must leave it a placement of its own.
+TEST(PrefabInstances, RefreshLeavesANestedCopyOfTheSamePrefabAlone)
+{
+    CWorld* World = MakeWorld();
+    CPrefab* Prefab = MakeRootChildPrefab();
+    ECS::FRegistry& Registry = ECS::GetWorldRegistry(*World);
+    const FSelfNested Placed = PlaceSelfNested(Registry, Prefab);
+
+    Prefab->RefreshInstance(World, Placed.OuterRoot);
+
+    ASSERT_TRUE(Registry.IsValid(Placed.InnerRoot));
+    ASSERT_TRUE(Registry.IsValid(Placed.InnerChild));
+    EXPECT_TRUE(Registry.Get<SPrefabInstanceComponent>(Placed.InnerRoot).bIsRoot) << "the nested root stays a root";
+    EXPECT_TRUE(Registry.Get<SPrefabInstanceComponent>(Placed.OuterRoot).bIsRoot);
+    EXPECT_EQ(Registry.GetHierarchy().GetParent(Placed.InnerChild), Placed.InnerRoot) << "the nested child stays under its own root";
+    EXPECT_EQ(Registry.GetHierarchy().GetParent(Placed.OuterChild), Placed.OuterRoot);
+}
+
+TEST(PrefabInstances, DetachLeavesANestedCopyOfTheSamePrefabLinked)
+{
+    CWorld* World = MakeWorld();
+    CPrefab* Prefab = MakeRootChildPrefab();
+    ECS::FRegistry& Registry = ECS::GetWorldRegistry(*World);
+    const FSelfNested Placed = PlaceSelfNested(Registry, Prefab);
+
+    ASSERT_TRUE(CPrefab::DetachInstance(World, Placed.OuterRoot));
+
+    EXPECT_FALSE(Registry.HasAny<SPrefabInstanceComponent>(Placed.OuterChild));
+    EXPECT_TRUE(Registry.HasAny<SPrefabInstanceComponent>(Placed.InnerRoot));
+    EXPECT_TRUE(Registry.HasAny<SPrefabInstanceComponent>(Placed.InnerChild)) << "the nested copy's own child keeps its link";
+}
+
+// Two nested placements of one prefab carry the same ids, so a capture holding both must give each its own.
+TEST(PrefabInstances, CaptureGivesEveryNestedNodeItsOwnStableID)
+{
+    CWorld* World = MakeWorld();
+    CPrefab* Inner = MakeRootChildPrefab();
+    CPrefab* Outer = MakePrefab();
+    ECS::FRegistry& Registry = ECS::GetWorldRegistry(*World);
+
+    const ECS::FEntity Root = Registry.Create();
+    Registry.Emplace<STransformComponent>(Root);
+    for (int32 Copy = 0; Copy < 2; ++Copy)
+    {
+        const ECS::FEntity InnerRoot = AddInstanceNode(Registry, Inner, "root", true);
+        const ECS::FEntity InnerChild = AddInstanceNode(Registry, Inner, "child", false);
+        ECS::Utils::ReparentEntity(Registry, InnerRoot, Root);
+        ECS::Utils::ReparentEntity(Registry, InnerChild, InnerRoot);
+    }
+
+    Outer->CaptureFromWorld(World, Root, /*bAdoptSourceAsInstance*/ true);
+
+    THashSet<FName> IDs;
+    int32 Nodes = 0;
+    Outer->Registry.View<SPrefabComponent>().ForEach([&](ECS::FEntity, const SPrefabComponent& Node)
+    {
+        ++Nodes;
+        IDs.insert(Node.StableID);
+    });
+    EXPECT_EQ(Nodes, 5);
+    EXPECT_EQ((int32)IDs.size(), Nodes) << "no two captured nodes may share an id";
+
+    // Adopted as the new prefab's instance, the source refreshes onto itself without spawning or losing a node.
+    Outer->RefreshInstance(World, Root);
+    int32 Placed = 1;
+    Registry.GetHierarchy().ForEachDescendant(Root, [&](ECS::FEntity) { ++Placed; });
+    EXPECT_EQ(Placed, 5);
+}
+
+// An overridden handle names a world entity, and a world id that happens to equal a prefab id must not be taken for one.
+TEST(PrefabInstances, RefreshKeepsAnOverriddenHandleThatCollidesWithAPrefabID)
+{
+    CWorld* World = MakeWorld();
+    CPrefab* Prefab = MakePrefab();
+    ECS::FRegistry& Registry = ECS::GetWorldRegistry(*World);
+
+    const ECS::FEntity PrefabRoot = AddNode(Prefab->Registry, "root");
+    const ECS::FEntity PrefabLink = AddNode(Prefab->Registry, "link");
+    ECS::Utils::ReparentEntity(Prefab->Registry, PrefabLink, PrefabRoot);
+    Prefab->Registry.Emplace<SPrefabLinkTestComponent>(PrefabLink).Target = PrefabRoot;
+
+    // Created first, so its id is the same number as the prefab root's.
+    const ECS::FEntity WorldEntity = Registry.Create();
+    ASSERT_EQ(WorldEntity.GetIndex(), PrefabRoot.GetIndex());
+
+    const ECS::FEntity Root = AddInstanceNode(Registry, Prefab, "root", true);
+    const ECS::FEntity Link = AddInstanceNode(Registry, Prefab, "link", false);
+    ECS::Utils::ReparentEntity(Registry, Link, Root);
+    Registry.Emplace<SPrefabLinkTestComponent>(Link).Target = WorldEntity;
+
+    SPrefabOverrideComponent& Ledger = Registry.Emplace<SPrefabOverrideComponent>(Root);
+    Ledger.PropertyOverrides.push_back({ FName("link"), SPrefabLinkTestComponent::StaticStruct()->GetName(), FName("Target") });
+
+    Prefab->Registry.Get<SPrefabLinkTestComponent>(PrefabLink).Value = 7;
+    Prefab->RefreshInstance(World, Root);
+
+    EXPECT_EQ(Registry.Get<SPrefabLinkTestComponent>(Link).Target, WorldEntity) << "the override keeps naming the world entity";
+    EXPECT_EQ(Registry.Get<SPrefabLinkTestComponent>(Link).Value, 7) << "an inherited leaf still follows the prefab";
+}
+
+// Capture compares handles in the instance's ids, so an inherited handle never reads as edited and a world one never as inherited.
+TEST(PrefabInstances, OverrideCaptureComparesHandlesInTheInstancesIDs)
+{
+    CWorld* World = MakeWorld();
+    CPrefab* Prefab = MakePrefab();
+    ECS::FRegistry& Registry = ECS::GetWorldRegistry(*World);
+
+    const ECS::FEntity PrefabRoot = AddNode(Prefab->Registry, "root");
+    const ECS::FEntity PrefabLink = AddNode(Prefab->Registry, "link");
+    ECS::Utils::ReparentEntity(Prefab->Registry, PrefabLink, PrefabRoot);
+    Prefab->Registry.Emplace<SPrefabLinkTestComponent>(PrefabLink).Target = PrefabRoot;
+
+    const ECS::FEntity WorldEntity = Registry.Create();
+    ASSERT_EQ(WorldEntity.GetIndex(), PrefabRoot.GetIndex());
+
+    const ECS::FEntity Root = AddInstanceNode(Registry, Prefab, "root", true);
+    const ECS::FEntity Link = AddInstanceNode(Registry, Prefab, "link", false);
+    ECS::Utils::ReparentEntity(Registry, Link, Root);
+    Registry.Emplace<SPrefabLinkTestComponent>(Link).Target = Root;
+
+    auto Paths = [&]()
+    {
+        TVector<FName> Out;
+        for (const SPrefabPropertyOverride& Override : Registry.Get<SPrefabOverrideComponent>(Root).PropertyOverrides)
+        {
+            Out.push_back(Override.PropertyPath);
+        }
+        return Out;
+    };
+
+    Registry.Get<SPrefabLinkTestComponent>(Link).Value = 5;
+    CPrefab::RecaptureComponentOverrides(Registry, Link, SPrefabLinkTestComponent::StaticStruct());
+    EXPECT_EQ(Paths(), TVector<FName>{ FName("Value") }) << "the inherited handle is not an edit";
+
+    Registry.Get<SPrefabLinkTestComponent>(Link).Target = WorldEntity;
+    CPrefab::RecaptureComponentOverrides(Registry, Link, SPrefabLinkTestComponent::StaticStruct());
+    const TVector<FName> Recorded = Paths();
+    EXPECT_TRUE(Algo::Contains(Recorded, FName("Target"))) << "a world handle sharing the prefab root's number is still an edit";
+}

@@ -359,6 +359,7 @@ namespace Lumina
         }
 
         Resolved.ViewVolume      = Camera.GetViewVolume();
+        Resolved.Layers          = Camera.GetViewLayers();
         Resolved.PostProcess     = FinalPostProcess;
         Resolved.bHasView        = true;
         Resolved.bHasPostProcess = true;

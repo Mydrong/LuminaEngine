@@ -48,65 +48,65 @@ internal static unsafe class Interop
         return Encoding.UTF8.GetString(Span);
     }
 
-    // A NUL-terminated UTF-8 copy for one native call, on the stack when it fits. Always Free it in a finally.
+    // UTF-8 for one native call, NUL-terminated, written into the caller's stack scratch whenever it fits.
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static byte* ToUtf8(string? Value, byte* Scratch, int Capacity, out int Length)
+    {
+        // UTF-8 never takes more than three bytes per UTF-16 unit, so this bound needs no counting pass.
+        if (Value != null && Value.Length * 3 < Capacity)
+        {
+            Length = Encoding.UTF8.GetBytes(Value, new Span<byte>(Scratch, Capacity));
+            Scratch[Length] = 0;
+            return Scratch;
+        }
+        return ToUtf8Slow(Value, Scratch, Capacity, out Length);
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static byte* ToUtf8Slow(string? Value, byte* Scratch, int Capacity, out int Length)
+    {
+        Length = 0;
+        if (Value == null)
+        {
+            return null;
+        }
+
+        Length = Encoding.UTF8.GetByteCount(Value);
+        byte* Target = Length < Capacity ? Scratch : (byte*)NativeMemory.Alloc((nuint)Length + 1);
+        fixed (char* Source = Value)
+        {
+            Encoding.UTF8.GetBytes(Source, Value.Length, Target, Length);
+        }
+        Target[Length] = 0;
+        return Target;
+    }
+
+    // Only a string too long for the scratch went to the heap.
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static void FreeUtf8(byte* Encoded, byte* Scratch)
+    {
+        if (Encoded != Scratch && Encoded != null)
+        {
+            NativeMemory.Free(Encoded);
+        }
+    }
+
+    // ToUtf8 over a span, for hand-written crossings. Always Free it in a finally.
     public unsafe ref struct FInteropString
     {
-        /// <summary>UTF-8 bytes (NUL-terminated); null when the source string was null.</summary>
         public byte* Pointer;
-
-        /// <summary>UTF-8 byte count excluding the NUL terminator.</summary>
         public int Length;
-
-        private bool bHeap;
+        private readonly byte* Scratch;
 
         public FInteropString(string Value, Span<byte> ScratchBuffer)
         {
-            Pointer = null;
-            Length = 0;
-            bHeap = false;
-            if (Value == null)
-            {
-                return;
-            }
-
-            // UTF-8 never takes more than three bytes per UTF-16 unit, so a string that fits that bound encodes in one pass.
-            if (Value.Length * 3 + 1 <= ScratchBuffer.Length)
-            {
-                int Encoded = Encoding.UTF8.GetBytes(Value, ScratchBuffer);
-                ScratchBuffer[Encoded] = 0;
-                Pointer = (byte*)Unsafe.AsPointer(ref MemoryMarshal.GetReference(ScratchBuffer));
-                Length = Encoded;
-                return;
-            }
-
-            int ByteCount = Encoding.UTF8.GetByteCount(Value);
-            if (ByteCount + 1 <= ScratchBuffer.Length)
-            {
-                int Written = Encoding.UTF8.GetBytes(Value, ScratchBuffer);
-                ScratchBuffer[Written] = 0;
-                Pointer = (byte*)Unsafe.AsPointer(ref MemoryMarshal.GetReference(ScratchBuffer));
-                Length = Written;
-                return;
-            }
-
-            byte* Memory = (byte*)NativeMemory.Alloc((nuint)ByteCount + 1);
-            fixed (char* Source = Value)
-            {
-                Encoding.UTF8.GetBytes(Source, Value.Length, Memory, ByteCount);
-            }
-            Memory[ByteCount] = 0;
-            Pointer = Memory;
-            Length = ByteCount;
-            bHeap = true;
+            Scratch = (byte*)Unsafe.AsPointer(ref MemoryMarshal.GetReference(ScratchBuffer));
+            Pointer = ToUtf8(Value, Scratch, ScratchBuffer.Length, out Length);
         }
 
         public void Free()
         {
-            if (bHeap && Pointer != null)
-            {
-                NativeMemory.Free(Pointer);
-                bHeap = false;
-            }
+            FreeUtf8(Pointer, Scratch);
             Pointer = null;
         }
     }

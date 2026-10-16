@@ -64,6 +64,8 @@ namespace Lumina
     static constexpr uint32 GNodeErrorHeaderColor   = IM_COL32(200, 45, 45, 255);
     static constexpr uint32 GNodeWarningHeaderColor = IM_COL32(205, 155, 35, 255);
     static constexpr uint32 GNodeErrorPinColor      = IM_COL32(255, 70, 70, 255);
+    static constexpr uint32 GNodeErrorBubbleColor   = IM_COL32(58, 18, 18, 240);
+    static constexpr uint32 GNodeErrorTextColor     = IM_COL32(255, 220, 220, 255);
 
     static void DrawPinIcon(bool bConnected, int Alpha, ImVec4 Color)
     {
@@ -399,6 +401,50 @@ namespace Lumina
         {
             DrawList->AddCircleFilled(Center, DotRadius + 1.5f, DotShadow, 16);
             DrawList->AddCircleFilled(Center, DotRadius,        DotColor,  16);
+        }
+    }
+
+    void CEdNodeGraph::DrawNodeErrorBubble(const CEdGraphNode* Node)
+    {
+        using namespace ax;
+
+        const int64  NodeID   = Node->GetNodeID();
+        const ImVec2 Position = NodeEditor::GetNodePosition(NodeID);
+        const ImVec2 NodeSize = NodeEditor::GetNodeSize(NodeID);
+        ImDrawList*  DrawList = NodeEditor::GetNodeBackgroundDrawList(NodeID);
+        if (DrawList == nullptr || Position.x == FLT_MAX)
+        {
+            return;
+        }
+
+        constexpr float kGap      = 8.0f;
+        constexpr float kPadding  = 8.0f;
+        constexpr float kMinWidth = 260.0f;
+        constexpr float kRounding = 6.0f;
+        constexpr float kArrowX   = 18.0f;
+
+        const EdNodeGraph::FError& Error = Node->GetError();
+        const FString Title = FString(LE_ICON_EXCLAMATION_THICK " ") + Error.Name;
+
+        ImFont*     Font      = ImGui::GetFont();
+        const float FontSize  = ImGui::GetFontSize();
+        const float Width     = Math::Max(NodeSize.x, kMinWidth);
+        const float WrapWidth = Width - kPadding * 2.0f;
+        const float TitleHeight = Font->CalcTextSizeA(FontSize, FLT_MAX, WrapWidth, Title.c_str()).y;
+        const float BodyHeight  = Error.Description.empty() ? 0.0f : Font->CalcTextSizeA(FontSize, FLT_MAX, WrapWidth, Error.Description.c_str()).y + kPadding * 0.5f;
+
+        const ImVec2 Min(Position.x, Position.y + NodeSize.y + kGap);
+        const ImVec2 Max(Min.x + Width, Min.y + kPadding * 2.0f + TitleHeight + BodyHeight);
+
+        DrawList->AddTriangleFilled(ImVec2(Min.x + kArrowX, Min.y), ImVec2(Min.x + kArrowX + kGap, Min.y - kGap), ImVec2(Min.x + kArrowX + kGap * 2.0f, Min.y), GNodeErrorHeaderColor);
+        DrawList->AddRectFilled(Min, Max, GNodeErrorBubbleColor, kRounding);
+        DrawList->AddRect(Min, Max, GNodeErrorHeaderColor, kRounding, 1.5f);
+
+        const ImVec2 TextPos = Min + ImVec2(kPadding, kPadding);
+        DrawList->AddText(Font, FontSize, TextPos, GNodeErrorPinColor, Title.c_str(), nullptr, WrapWidth);
+        if (!Error.Description.empty())
+        {
+            DrawList->AddText(Font, FontSize, TextPos + ImVec2(0.0f, TitleHeight + kPadding * 0.5f), GNodeErrorTextColor, Error.Description.c_str(), nullptr, WrapWidth);
         }
     }
 
@@ -1414,6 +1460,11 @@ namespace Lumina
             }
             
             NodeBuilder.End(Node->WantsTitlebar());
+
+            if (Node->HasError())
+            {
+                DrawNodeErrorBubble(Node);
+            }
 
             if (bDeadNode)
             {

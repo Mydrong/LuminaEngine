@@ -29,9 +29,15 @@ namespace Lumina
         /** Everything the import minted, in creation order; the caller saves and tears down in reverse. */
         TVector<TStrongObjectPtr<CObject>> CreatedObjects;
 
+        // Left with no file by a failed save, and only safe to discard once their exports are gone.
+        TVector<CPackage*> UnsavedPackages;
+
         FString Error;
 
         NODISCARD bool Succeeded() const { return Error.empty(); }
+
+        // Turns an import that made nothing into an error, then lets every created asset go and frees the names of unsaved ones.
+        EDITOR_API void Finish(const FImportRequest& Request);
     };
 
     /**

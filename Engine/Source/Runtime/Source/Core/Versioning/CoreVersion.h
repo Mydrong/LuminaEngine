@@ -111,6 +111,9 @@ enum class ELuminaEngineVersion : uint32
 	// A soft import lists the asset bundles that reference it.
 	ASSET_BUNDLES,
 
+	// A held value carries the entity remaps that copies made while its type was gone.
+	HELD_VALUE_ENTITY_REMAP,
+
 	AUTOMATIC_VERSION_PLUS_ONE,
 	AUTOMATIC_VERSION = AUTOMATIC_VERSION_PLUS_ONE - 1
 };

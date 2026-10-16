@@ -14,7 +14,13 @@ public unsafe partial class CWorld
 
     // The subsystem of type T in this world, or null when none was created. Finds a C++ one just the same.
     public T? GetSubsystem<T>() where T : NativeObject
-        => CGameLibrary.GetSubsystem(this, typeof(T).Name) as T;
+        => CGameLibrary.GetSubsystem(this, SubsystemName<T>.Value) as T;
+
+    // Interned once per type, so a lookup sends an 8-byte id instead of text the native side re-interns.
+    private static class SubsystemName<T>
+    {
+        public static readonly FName Value = typeof(T).Name;
+    }
 
     public float DeltaTime => (float)GetWorldDeltaTime();
     public double ElapsedTime => GetTimeSinceWorldCreation();

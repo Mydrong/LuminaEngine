@@ -56,6 +56,8 @@ namespace Lumina
 
 		FAudioMixer(const FAudioMixer&) = delete;
 		FAudioMixer& operator=(const FAudioMixer&) = delete;
+		FAudioMixer(FAudioMixer&&) = delete;
+		FAudioMixer& operator=(FAudioMixer&&) = delete;
 
 		bool Initialize(uint32 InSampleRate, uint32 InChannels);
 		void Shutdown();

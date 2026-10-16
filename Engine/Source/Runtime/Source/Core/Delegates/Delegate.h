@@ -112,6 +112,10 @@ namespace Lumina
                 Frame->bAlive = false;
             }
         }
+        TMulticastDelegate(const TMulticastDelegate&) = delete;
+        TMulticastDelegate& operator=(const TMulticastDelegate&) = delete;
+        TMulticastDelegate(TMulticastDelegate&&) = delete;
+        TMulticastDelegate& operator=(TMulticastDelegate&&) = delete;
 
         template<typename TFunc>
         NODISCARD FDelegateHandle AddStatic(TFunc&& Func)

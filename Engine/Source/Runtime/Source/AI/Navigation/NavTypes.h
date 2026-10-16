@@ -181,13 +181,13 @@ namespace Lumina
     {
         GENERATED_BODY()
 
-        PROPERTY()
+        PROPERTY(Hidden)
         int32 X = 0;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         int32 Y = 0;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         TVector<uint8> Blob;
     };
 
@@ -271,19 +271,19 @@ namespace Lumina
         GENERATED_BODY()
 
         /** Where the walk stopped, so the wall it hit, or End when nothing blocked it. */
-        PROPERTY()
+        PROPERTY(Hidden)
         FVector3 Point = FVector3(0.0f);
 
         /** Wall normal at the hit; zero when unobstructed. */
-        PROPERTY()
+        PROPERTY(Hidden)
         FVector3 Normal = FVector3(0.0f);
 
         /** Fraction along Start to End at which the walk stopped, and one when unobstructed. */
-        PROPERTY()
+        PROPERTY(Hidden)
         float T = 1.0f;
 
         /** True when a navmesh edge blocked the walk. */
-        PROPERTY()
+        PROPERTY(Hidden)
         bool bHit = false;
     };
 
@@ -293,10 +293,10 @@ namespace Lumina
     {
         GENERATED_BODY()
 
-        PROPERTY()
+        PROPERTY(Hidden)
         FVector3 Point = FVector3(0.0f);
 
-        PROPERTY()
+        PROPERTY(Hidden)
         bool bFound = false;
     };
 

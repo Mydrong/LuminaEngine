@@ -29,6 +29,11 @@ namespace Lumina
         size_t GetReservedBytes() const { return TotalReserved; }
 
         ~FStringPool();
+        FStringPool() = default;
+        FStringPool(const FStringPool&) = delete;
+        FStringPool& operator=(const FStringPool&) = delete;
+        FStringPool(FStringPool&&) = delete;
+        FStringPool& operator=(FStringPool&&) = delete;
 
     private:
 

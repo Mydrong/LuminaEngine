@@ -16,39 +16,39 @@ namespace Lumina
         GENERATED_BODY()
 
         /** This script's entity. */
-        PROPERTY()
+        PROPERTY(Hidden)
         ECS::FEntity Entity = ECS::NullEntity;
 
         /** The other body's entity. */
-        PROPERTY()
+        PROPERTY(Hidden)
         ECS::FEntity Other = ECS::NullEntity;
 
         /** World-space contact point. */
-        PROPERTY()
+        PROPERTY(Hidden)
         FVector3 Point = FVector3(0.0f);
 
         /** Contact normal pointing away from self toward the other body. */
-        PROPERTY()
+        PROPERTY(Hidden)
         FVector3 Normal = FVector3(0.0f, 1.0f, 0.0f);
 
         /** This body's linear velocity at contact time (m/s). */
-        PROPERTY()
+        PROPERTY(Hidden)
         FVector3 Velocity = FVector3(0.0f);
 
         /** The other body's linear velocity at contact time (m/s). */
-        PROPERTY()
+        PROPERTY(Hidden)
         FVector3 OtherVelocity = FVector3(0.0f);
 
         /** Other - Self linear velocity (m/s). */
-        PROPERTY()
+        PROPERTY(Hidden)
         FVector3 RelativeVelocity = FVector3(0.0f);
 
         /** |relative velocity along the normal| (m/s). */
-        PROPERTY()
+        PROPERTY(Hidden)
         float ImpactSpeed = 0.0f;
 
         /** True if the OTHER side was a trigger/sensor. */
-        PROPERTY()
+        PROPERTY(Hidden)
         bool bIsTrigger = false;
     };
 }

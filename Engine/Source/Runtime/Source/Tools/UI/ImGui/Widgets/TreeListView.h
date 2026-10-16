@@ -120,6 +120,8 @@ namespace Lumina
         // Tree mutation
         FTreeNodeID CreateNode(FTreeNodeID Parent, FStringView Name, uint64 Hash = 0);
         void RemoveNode(FTreeNodeID Handle);
+        // Rebuilds each affected sibling list once, since removing one at a time scans a big folder per row.
+        void RemoveNodes(const TVector<FTreeNodeID>& Handles);
         void ClearTree();
 
         // Dirty state
@@ -155,6 +157,9 @@ namespace Lumina
         // Marks Handle as the sole selection without firing ItemSelectedFunction; for programmatic
         // reveals where the caller has already applied whatever the selection would have done.
         void SetSelectionSilent(FTreeNodeID Handle);
+
+        // What a click on Row selects, apart from the ImGui input that detected it.
+        void ClickRow(FTreeNodeID Row, bool bShift, bool bCtrl, const FTreeListViewContext& Context);
 
         // Get<FTreeNodeState>, Get<FTreeNodeDisplay>, or Get<UserDataT> (the type previously
         // installed via EmplaceUserData on this node).
@@ -209,6 +214,7 @@ namespace Lumina
             uint8                       bChildrenBuilt:1 = false;
             uint8                       bHasLazyChildren:1 = false;
             uint8                       bWasExpanded:1 = false;
+            uint8                       bPendingRemoval:1 = false;
         };
 
         void DestroyNodeData(int32 Idx);
@@ -218,8 +224,9 @@ namespace Lumina
         void DrawSingleRow(int32 NodeIdx, const FTreeListViewContext& Context, bool& bAnyRowExpansionChanged);
         void EnsureChildrenBuilt(int32 NodeIdx, const FTreeListViewContext& Context);
         void SetSelection(FTreeNodeID Item, const FTreeListViewContext& Context, bool bShouldClear);
-        // Shift-click: selects the displayed rows between two nodes inclusive, anchor order independent.
-        void SelectRange(int32 AnchorIdx, int32 TargetIdx, const FTreeListViewContext& Context, bool bShouldClear);
+        // Selects Rows from FromRow to ToRow inclusive, in that order, reporting each newly selected row.
+        void SelectRange(const TVector<int32>& Rows, int32 FromRow, int32 ToRow, const FTreeListViewContext& Context, bool bShouldClear);
+        NODISCARD int32 FindRangeAnchorRow(const TVector<int32>& Rows, int32 TargetRow) const;
         bool HandleKeyPressed(const FTreeListViewContext& Context, FTreeNodeID Item, ImGuiKey Key);
         void ClearSelections(const FTreeListViewContext& Context);
 
@@ -239,7 +246,7 @@ namespace Lumina
         // The row list Draw is iterating; only valid inside Draw, where range selection happens.
         const TVector<int32>* CurrentRows = nullptr;
 
-        // Row a shift-click ranges from: the last one clicked without shift. -1 when there is none.
+        // Node a shift-click ranges from, the last one clicked without shift, or -1.
         int32               SelectionAnchor = -1;
 
         // VisibleList with the context's filter applied, rebuilt every frame a filter is set. Separate

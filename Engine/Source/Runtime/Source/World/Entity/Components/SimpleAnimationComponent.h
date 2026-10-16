@@ -50,7 +50,7 @@ namespace Lumina
          * completes. Stays true until the next PlayAnimation() call. Lets game
          * code react to "the punch finished" without manually polling time.
          */
-        PROPERTY(Category = "Animation")
+        PROPERTY(Hidden, Category = "Animation")
         bool bFinished = false;
 
         // Forces a fresh pose sample even when not playing (e.g. just-called PlayAnimation or rewound

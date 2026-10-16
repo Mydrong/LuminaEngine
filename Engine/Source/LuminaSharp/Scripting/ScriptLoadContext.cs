@@ -51,6 +51,12 @@ internal sealed class ScriptLoadContext : AssemblyLoadContext
         }
     }
 
+    // A script's generated P/Invokes name engine modules the same way the engine assembly's do.
+    protected override IntPtr LoadUnmanagedDll(string UnmanagedDllName)
+    {
+        return Host.ModuleHandle(UnmanagedDllName);
+    }
+
     protected override Assembly? Load(AssemblyName Name)
     {
         if (Name.Name == EngineAssemblyName)

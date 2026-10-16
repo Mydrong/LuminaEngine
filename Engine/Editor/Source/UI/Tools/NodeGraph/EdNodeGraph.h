@@ -53,6 +53,10 @@ namespace Lumina
         
         CEdNodeGraph();
         ~CEdNodeGraph() override;
+        CEdNodeGraph(const CEdNodeGraph&) = delete;
+        CEdNodeGraph& operator=(const CEdNodeGraph&) = delete;
+        CEdNodeGraph(CEdNodeGraph&&) = delete;
+        CEdNodeGraph& operator=(CEdNodeGraph&&) = delete;
 
         virtual void Initialize();
         virtual void Shutdown();
@@ -293,6 +297,9 @@ namespace Lumina
         // Restates each comment's title in screen space once the canvas is zoomed out too far to read it.
         void DrawCommentHints();
 
+        // Spells out a failing node's error right under it, so it is read in the graph rather than found in a log.
+        void DrawNodeErrorBubble(const CEdGraphNode* Node);
+
         // Pushes a node's stored position, and a comment's stored size, into the canvas.
         void ApplyNodeLayoutToCanvas(CEdGraphNode* Node);
 
@@ -380,23 +387,23 @@ namespace Lumina
         int64 GenerateUniqueNodeID(int64 PreferredID) const;
 
         // All nodes currently in this graph.
-        PROPERTY()
+        PROPERTY(Hidden)
         TVector<TStrongObjectPtr<CEdGraphNode>>         Nodes;
 
         // Pin-to-pin links, stored as pairs of 32-bit pin ids.
-        PROPERTY()
+        PROPERTY(Hidden)
         TVector<uint32>                                 Connections;
 
         // Node editor layout state, meaning node positions and group sizes.
-        PROPERTY()
+        PROPERTY(Hidden)
         FString GraphSaveData;
 
         // Bumped by NotifyContentChanged. See GetContentVersion.
-        PROPERTY()
+        PROPERTY(Hidden)
         uint64 ContentVersion = 0;
 
         // ContentVersion at the last compile. A legacy graph loads 0 for both and so reads as compiled.
-        PROPERTY()
+        PROPERTY(Hidden)
         uint64 CompiledContentVersion = 0;
         
         // Reach this through GetSupportedNodes(), which fills it from reflection on first use.
@@ -443,6 +450,8 @@ namespace Lumina
 
         FNodeGraphEditScope(const FNodeGraphEditScope&) = delete;
         FNodeGraphEditScope& operator=(const FNodeGraphEditScope&) = delete;
+        FNodeGraphEditScope(FNodeGraphEditScope&&) = delete;
+        FNodeGraphEditScope& operator=(FNodeGraphEditScope&&) = delete;
 
     private:
 

@@ -62,6 +62,10 @@ void ComputeMain(uint3 GroupID : SV_GroupID, uint3 LocalID : SV_GroupThreadID)
     {
         return;
     }
+    if (Cull.bCustomLayers && (Pass().RetainedStatic.At(SlotIdx).RenderLayers & Scene().CullData.CameraLayerMask) == 0u)
+    {
+        return;
+    }
 
     // Reached through the pass block, since a local copy would put its span pointers in a function variable.
     FSunDFShadowGrid* Grid = &Pass().Grid;

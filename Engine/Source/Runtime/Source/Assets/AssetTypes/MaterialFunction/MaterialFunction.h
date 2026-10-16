@@ -33,17 +33,17 @@ namespace Lumina
     {
         GENERATED_BODY()
 
-        PROPERTY()
+        PROPERTY(Hidden)
         FName Name;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         EMaterialValueType Type = EMaterialValueType::Float;
 
         /** Used when a call node leaves this input pin unconnected. */
-        PROPERTY()
+        PROPERTY(Hidden)
         FVector4 DefaultValue = FVector4(0.0f);
 
-        PROPERTY()
+        PROPERTY(Hidden)
         FString Description;
     };
 
@@ -53,13 +53,13 @@ namespace Lumina
     {
         GENERATED_BODY()
 
-        PROPERTY()
+        PROPERTY(Hidden)
         FName Name;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         EMaterialValueType Type = EMaterialValueType::Float;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         FString Description;
     };
 
@@ -82,11 +82,11 @@ namespace Lumina
         FString Description;
 
         /** Derived from the function graph's FunctionInput nodes on save; do not hand-edit. */
-        PROPERTY()
+        PROPERTY(Hidden)
         TVector<SMaterialFunctionInput> Inputs;
 
         /** Derived from the function graph's FunctionOutput nodes on save; do not hand-edit. */
-        PROPERTY()
+        PROPERTY(Hidden)
         TVector<SMaterialFunctionOutput> Outputs;
     };
 }

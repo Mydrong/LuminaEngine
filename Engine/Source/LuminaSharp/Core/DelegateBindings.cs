@@ -3,26 +3,14 @@ using System.Runtime.CompilerServices;
 
 namespace LuminaSharp;
 
-// A delegate listener, run inside its script's context with the broadcast's argument pack as the payload.
+// A delegate listener, with the broadcast's argument pack as the payload.
 internal abstract class DelegateInvoker : ScriptClosure
 {
-    public Lumina.CEntityScript? Owner;
-
     protected abstract void Run(IntPtr Payload);
 
     public sealed override ulong Invoke(ulong Payload)
     {
-        if (Owner is { } Script)
-        {
-            using (Engine.Push(Script.World, Script.Entity))
-            {
-                Run((IntPtr)Payload);
-            }
-        }
-        else
-        {
-            Run((IntPtr)Payload);
-        }
+        Run((IntPtr)Payload);
         return 0;
     }
 }

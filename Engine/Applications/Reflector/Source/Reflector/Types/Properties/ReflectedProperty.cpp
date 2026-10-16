@@ -106,6 +106,34 @@ namespace Lumina
             }
         }
 
+        if (HasSpecifier("Hidden") && EnumHasAnyFlags(PropertyFlags, EPropertyFlags::Editable | EPropertyFlags::ReadOnly))
+        {
+            OutMessage = std::string("PROPERTY '") + Name + "' declares 'Hidden' with '"
+                       + (EnumHasAnyFlags(PropertyFlags, EPropertyFlags::Editable) ? "Editable" : "ReadOnly")
+                       + "', which conflict. Hidden keeps it out of the details panel; drop one.";
+            return true;
+        }
+
+        return false;
+    }
+
+    void FReflectedProperty::ApplyDefaultVisibility()
+    {
+        if (!EnumHasAnyFlags(PropertyFlags, EPropertyFlags::ReadOnly) && !HasSpecifier("Hidden"))
+        {
+            PropertyFlags |= EPropertyFlags::Editable;
+        }
+    }
+
+    bool FReflectedProperty::HasSpecifier(std::string_view Key) const
+    {
+        for (const FMetadataPair& Pair : Metadata)
+        {
+            if (Pair.Key == Key)
+            {
+                return true;
+            }
+        }
         return false;
     }
 }

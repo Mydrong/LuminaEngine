@@ -17,8 +17,11 @@ namespace Lumina
 
         constexpr FMutex() noexcept = default;
 
+        ~FMutex() = default;
         FMutex(const FMutex&) = delete;
         FMutex& operator=(const FMutex&) = delete;
+        FMutex(FMutex&&) = delete;
+        FMutex& operator=(FMutex&&) = delete;
 
         void Lock() noexcept;
         NODISCARD bool TryLock() noexcept;
@@ -46,8 +49,11 @@ namespace Lumina
 
         constexpr FSharedMutex() noexcept = default;
 
+        ~FSharedMutex() = default;
         FSharedMutex(const FSharedMutex&) = delete;
         FSharedMutex& operator=(const FSharedMutex&) = delete;
+        FSharedMutex(FSharedMutex&&) = delete;
+        FSharedMutex& operator=(FSharedMutex&&) = delete;
 
         void Lock() noexcept;
         NODISCARD bool TryLock() noexcept;
@@ -78,8 +84,11 @@ namespace Lumina
 
         FRecursiveMutex() noexcept = default;
 
+        ~FRecursiveMutex() = default;
         FRecursiveMutex(const FRecursiveMutex&) = delete;
         FRecursiveMutex& operator=(const FRecursiveMutex&) = delete;
+        FRecursiveMutex(FRecursiveMutex&&) = delete;
+        FRecursiveMutex& operator=(FRecursiveMutex&&) = delete;
 
         void Lock() noexcept;
         NODISCARD bool TryLock() noexcept;
@@ -106,6 +115,8 @@ namespace Lumina
 
         TScopeLock(const TScopeLock&) = delete;
         TScopeLock& operator=(const TScopeLock&) = delete;
+        TScopeLock(TScopeLock&&) = delete;
+        TScopeLock& operator=(TScopeLock&&) = delete;
 
     private:
 
@@ -140,6 +151,8 @@ namespace Lumina
 
         FReadScopeLock(const FReadScopeLock&) = delete;
         FReadScopeLock& operator=(const FReadScopeLock&) = delete;
+        FReadScopeLock(FReadScopeLock&&) = delete;
+        FReadScopeLock& operator=(FReadScopeLock&&) = delete;
 
         NODISCARD bool OwnsLock() const noexcept { return bOwns; }
 
@@ -174,6 +187,8 @@ namespace Lumina
 
         FUniqueLock(const FUniqueLock&) = delete;
         FUniqueLock& operator=(const FUniqueLock&) = delete;
+        FUniqueLock(FUniqueLock&&) = delete;
+        FUniqueLock& operator=(FUniqueLock&&) = delete;
 
         void Lock() noexcept { Mutex->Lock(); bOwns = true; }
         void Unlock() noexcept { Mutex->Unlock(); bOwns = false; }
@@ -193,8 +208,11 @@ namespace Lumina
 
         constexpr FConditionVariable() noexcept = default;
 
+        ~FConditionVariable() = default;
         FConditionVariable(const FConditionVariable&) = delete;
         FConditionVariable& operator=(const FConditionVariable&) = delete;
+        FConditionVariable(FConditionVariable&&) = delete;
+        FConditionVariable& operator=(FConditionVariable&&) = delete;
 
         void Wait(FUniqueLock& Lock) noexcept;
 
@@ -243,8 +261,11 @@ namespace Lumina
 
         constexpr FOnceFlag() noexcept = default;
 
+        ~FOnceFlag() = default;
         FOnceFlag(const FOnceFlag&) = delete;
         FOnceFlag& operator=(const FOnceFlag&) = delete;
+        FOnceFlag(FOnceFlag&&) = delete;
+        FOnceFlag& operator=(FOnceFlag&&) = delete;
 
         NODISCARD bool IsDone() const noexcept { return State.load(std::memory_order_acquire) == 2; }
 

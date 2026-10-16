@@ -56,7 +56,7 @@ namespace Lumina
         FName StateName;
 
         /** This state's blend tree. Allocated lazily; edited by double-clicking the node. */
-        PROPERTY()
+        PROPERTY(Hidden)
         TStrongObjectPtr<CAnimationGraphNodeGraph> BlendTree;
 
         // StateName, or a placeholder when unnamed. What the canvas and transition lists label it with.

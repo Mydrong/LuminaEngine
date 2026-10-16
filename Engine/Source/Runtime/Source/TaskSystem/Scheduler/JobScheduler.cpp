@@ -45,6 +45,9 @@ namespace Lumina::Jobs
         // Only created fibers cost anything, so this bounds a leak into an error rather than address space.
         constexpr uint32 kDefaultMaxWorkFibers = 4096;
 
+        // Park-capable jobs a thread may run nested on its own stack while it waits, beyond which they go back for a worker.
+        constexpr uint32 kMaxNativeParkDepth = 4;
+
         struct FQueuedJob
         {
             FJobFunction Function = nullptr;
@@ -192,11 +195,17 @@ namespace Lumina::Jobs
             uint32         FruitlessWaits = 0;       // consecutive waits that spun and then parked anyway
             bool           bOwnsExternalSlot = false; // this thread holds an external slot to give back
             bool           bNativeJob        = false; // running a job on the scheduler fiber, with no work fiber
+            uint32         NativeParkDepth   = 0;     // park-capable jobs nested on this stack with no fiber of their own
 
             FWorkFiber*    CachedFiber    = nullptr;
 
             // A worker index is claimed LAZILY by any thread completing a job inline, so exits would leak one.
             ~FThreadState();
+            FThreadState() = default;
+            FThreadState(const FThreadState&) = delete;
+            FThreadState& operator=(const FThreadState&) = delete;
+            FThreadState(FThreadState&&) = delete;
+            FThreadState& operator=(FThreadState&&) = delete;
         };
         thread_local FThreadState TLS;
 
@@ -487,6 +496,10 @@ namespace Lumina::Jobs
                     G->PoppersInFlight.fetch_sub(1, std::memory_order_relaxed);
                 }
             }
+            FPopperScope(const FPopperScope&) = delete;
+            FPopperScope& operator=(const FPopperScope&) = delete;
+            FPopperScope(FPopperScope&&) = delete;
+            FPopperScope& operator=(FPopperScope&&) = delete;
         };
         #define POPPER_SCOPE() FPopperScope LE_PopperScope_
 #else
@@ -582,7 +595,7 @@ namespace Lumina::Jobs
             return Row[0];
         }
 
-        FORCEINLINE bool TryStealFromWorker(FQueuedJob& Out, uint32 V, uint32 MaxPrio)
+        FORCEINLINE bool TryStealFromWorker(FQueuedJob& Out, uint32 V, uint32 MaxPrio, uint32* OutBand = nullptr)
         {
             const uint8 Filter = static_cast<uint8>((1u << (MaxPrio + 1u)) - 1u);
             uint8 Mask = G->Workers[V].BandMask.load(std::memory_order_acquire) & Filter;
@@ -593,6 +606,10 @@ namespace Lumina::Jobs
                 if (G->Workers[V].Queues[P].TryDequeue(Out))
                 {
                     NoteJobDequeued(P);
+                    if (OutBand != nullptr)
+                    {
+                        *OutBand = P;
+                    }
                     return true;
                 }
                 // Empty despite the bit, so clear it, then re-set if an enqueue raced the clear.
@@ -639,7 +656,7 @@ namespace Lumina::Jobs
         }
 
         // Untargeted, so without the cap an assisting thread would adopt a long build mid-frame.
-        bool TryStealAny(FQueuedJob& Out, uint32 MaxPrio = kMaxAssistPriority)
+        bool TryStealAny(FQueuedJob& Out, uint32 MaxPrio = kMaxAssistPriority, uint32* OutBand = nullptr)
         {
             // Gate on the assist count when Background is excluded; both counts are bumped before any enqueue.
             const int64 Avail = MaxPrio > kMaxAssistPriority
@@ -657,14 +674,14 @@ namespace Lumina::Jobs
             if (Slot < W)
             {
                 // Its own queue first, since a worker assisting inside a native job is its home consumer.
-                if (TryStealFromWorker(Out, Slot, MaxPrio))
+                if (TryStealFromWorker(Out, Slot, MaxPrio, OutBand))
                 {
                     return true;
                 }
                 for (uint32 i = 0; i + 1 < W; ++i)
                 {
                     const uint32 V = StealCandidate(Slot, i, Cursor);
-                    if (TryStealFromWorker(Out, V, MaxPrio))
+                    if (TryStealFromWorker(Out, V, MaxPrio, OutBand))
                     {
                         TLS.StealCursor = Cursor + i + 1;
                         return true;
@@ -676,7 +693,7 @@ namespace Lumina::Jobs
             for (uint32 i = 0; i < W; ++i)
             {
                 const uint32 V = (Cursor + i) % W;
-                if (TryStealFromWorker(Out, V, MaxPrio))
+                if (TryStealFromWorker(Out, V, MaxPrio, OutBand))
                 {
                     TLS.StealCursor = Cursor + i + 1;
                     return true;
@@ -720,12 +737,42 @@ namespace Lumina::Jobs
                 G->AdoptedNames[Slot].store(Label != nullptr ? Label : "<unnamed>", std::memory_order_relaxed);
             }
 
+            TLS.NativeParkDepth += Job.MayPark() ? 1u : 0u;
             Job.Function(Job.Argument, Slot);
+            TLS.NativeParkDepth -= Job.MayPark() ? 1u : 0u;
 
             if (G->AdoptedNames != nullptr && Slot < G->NumThreadSlots)
             {
                 G->AdoptedNames[Slot].store(nullptr, std::memory_order_relaxed);
             }
+        }
+
+        // Still counted against its counter and InFlight, so only the queued hints move, bumped before the enqueue.
+        void RequeueJob(const FQueuedJob& Job, uint32 Band)
+        {
+            G->AvailJobs.fetch_add(1, std::memory_order_relaxed);
+            if (Band <= kMaxAssistPriority)
+            {
+                G->AvailAssistJobs.fetch_add(1, std::memory_order_relaxed);
+            }
+            const FSubmitSpan Span = DistributeJobs(&Job, 1, (int)Band);
+            WakeWorkers(1, Span.Start, Span.NumRecipients);
+        }
+
+        // A park-capable job adopted here can wait in turn and adopt another, so its nesting is what bounds the stack.
+        bool TryAdoptJob(FQueuedJob& Out, uint32 MaxPrio)
+        {
+            uint32 Band = 0;
+            if (!TryStealAny(Out, MaxPrio, &Band))
+            {
+                return false;
+            }
+            if (!Out.MayPark() || TLS.NativeParkDepth < kMaxNativeParkDepth)
+            {
+                return true;
+            }
+            RequeueJob(Out, Band);
+            return false;
         }
 
         void PushReady(FWorkFiber* Fiber)
@@ -1148,7 +1195,9 @@ namespace Lumina::Jobs
             TLS.CurrentFiber = nullptr;
             GNoParkGuardName = nullptr;
 
+            TLS.NativeParkDepth += Job.MayPark() ? 1u : 0u;
             Job.Function(Job.Argument, Slot);
+            TLS.NativeParkDepth -= Job.MayPark() ? 1u : 0u;
             OnJobComplete(Job.GetCounter(), Slot);
 
             GNoParkGuardName = SavedGuard;
@@ -1956,7 +2005,7 @@ namespace Lumina::Jobs
         while (Counter->Value.load(std::memory_order_acquire) > Value)
         {
             FQueuedJob Job;
-            if (TryStealAny(Job, AssistMaxPriority()))
+            if (TryAdoptJob(Job, AssistMaxPriority()))
             {
                 RunAdoptedJob(Job, Slot);
                 OnJobComplete(Job.GetCounter(), Slot);
@@ -2049,7 +2098,7 @@ namespace Lumina::Jobs
         while (Counter->Value.load(std::memory_order_acquire) > Value)
         {
             FQueuedJob Job;
-            if (TryStealAny(Job, AssistMaxPriorityFor(Counter)))
+            if (TryAdoptJob(Job, AssistMaxPriorityFor(Counter)))
             {
                 RunAdoptedJob(Job, Slot);
                 OnJobComplete(Job.GetCounter(), Slot);
@@ -2229,7 +2278,7 @@ namespace Lumina::Jobs
         }
         const uint32 Slot = GetWorkerIndex();
         FQueuedJob Job;
-        if (TryStealAny(Job, AssistMaxPriority()))
+        if (TryAdoptJob(Job, AssistMaxPriority()))
         {
             RunAdoptedJob(Job, Slot);
             OnJobComplete(Job.GetCounter(), Slot);

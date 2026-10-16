@@ -302,6 +302,39 @@ namespace Lumina::SessionOps
         return Tool != nullptr ? Tool->DuplicateEntityForScene(Source) : ECS::NullEntity;
     }
 
+    bool ResyncPrefabInstance(ECS::FEntity InstanceRoot, FString& OutError)
+    {
+        FWorldEditorTool* Tool = RequireSceneEditor(OutError);
+        if (Tool != nullptr)
+        {
+            Tool->ResyncPrefabInstance(InstanceRoot);
+        }
+        return Tool != nullptr;
+    }
+
+    bool DetachPrefabInstance(ECS::FEntity InstanceRoot, FString& OutError)
+    {
+        FWorldEditorTool* Tool = RequireSceneEditor(OutError);
+        if (Tool != nullptr)
+        {
+            Tool->DetachPrefabInstance(InstanceRoot);
+        }
+        return Tool != nullptr;
+    }
+
+    CPrefab* CreatePrefabFromSelection(FStringView Folder, FStringView Name, FString& OutError)
+    {
+        FWorldEditorTool* Tool = RequireSceneEditor(OutError);
+        if (Tool == nullptr)
+        {
+            return nullptr;
+        }
+        FFixedString Error;
+        CPrefab* Prefab = Tool->CreatePrefabFromSelection(Folder, Name, Error);
+        OutError = FString(Error.c_str());
+        return Prefab;
+    }
+
     void AdoptCreatedEntity(ECS::FEntity Entity)
     {
         if (FSceneEditorTool* Tool = FindSceneTarget())

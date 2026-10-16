@@ -21,17 +21,17 @@ namespace Lumina
     {
         GENERATED_BODY()
 
-        PROPERTY()
+        PROPERTY(Hidden)
         ESaveGameAction Action = ESaveGameAction::Save;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         FString SlotName;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         int32 UserIndex = 0;
 
         // What a save captures the world into and writes. A load ignores it.
-        PROPERTY()
+        PROPERTY(Hidden)
         TStrongObjectPtr<CSaveGame> SaveGame;
     };
 
@@ -41,19 +41,19 @@ namespace Lumina
     {
         GENERATED_BODY()
 
-        PROPERTY()
+        PROPERTY(Hidden)
         ESaveGameAction Action = ESaveGameAction::Save;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         FString SlotName;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         int32 UserIndex = 0;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         TStrongObjectPtr<CSaveGame> SaveGame;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         bool bSucceeded = false;
     };
 
@@ -63,7 +63,7 @@ namespace Lumina
     {
         GENERATED_BODY()
 
-        PROPERTY()
+        PROPERTY(Hidden)
         TStrongObjectPtr<CSaveGame> SaveGame;
     };
 
@@ -73,7 +73,7 @@ namespace Lumina
     {
         GENERATED_BODY()
 
-        PROPERTY()
+        PROPERTY(Hidden)
         TStrongObjectPtr<CSaveGame> SaveGame;
     };
 }

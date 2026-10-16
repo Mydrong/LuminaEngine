@@ -408,6 +408,11 @@ namespace Lumina::Physics
             b3HullData*     Hull = nullptr;
 
             ~FDynamicMeshCook();
+            FDynamicMeshCook() = default;
+            FDynamicMeshCook(const FDynamicMeshCook&) = delete;
+            FDynamicMeshCook& operator=(const FDynamicMeshCook&) = delete;
+            FDynamicMeshCook(FDynamicMeshCook&&) = delete;
+            FDynamicMeshCook& operator=(FDynamicMeshCook&&) = delete;
         };
 
         struct FDynamicMeshCookEntry

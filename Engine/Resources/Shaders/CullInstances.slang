@@ -158,16 +158,18 @@ void ComputeMain(uint3 GlobalID : SV_DispatchThreadID, uint3 GroupID : SV_GroupI
     const bool bSkinned = Cull.HasFlag(EInstanceFlags::Skinned);
 
     FSkinnedFrameData Skin = (FSkinnedFrameData)0;
+    uint SkinnedIndex = kNoSkinnedIndex;
     if (bSkinned)
     {
-        if (!Pass().SkinnedFrameData.Contains(SlotIdx))
+        SkinnedIndex = Pass().RetainedStatic.At(SlotIdx).SkinnedIndex;
+        if (!Pass().SkinnedFrameData.Contains(SkinnedIndex))
         {
             return;
         }
 
-        // The array is never cleared, so the tag separates this frame's gather from stale ranges.
-        Skin = Pass().SkinnedFrameData.Get(SlotIdx);
-        if (!Skin.IsFromFrame(Pass().SkinFrameTag))
+        // The array is never cleared and its indices are reused, so the tag and the owner reject stale entries.
+        Skin = Pass().SkinnedFrameData.Get(SkinnedIndex);
+        if (!Skin.IsFromFrame(Pass().SkinFrameTag) || Skin.RetainedSlot != SlotIdx)
         {
             return;
         }
@@ -249,6 +251,7 @@ void ComputeMain(uint3 GlobalID : SV_DispatchThreadID, uint3 GroupID : SV_GroupI
     const bool bShadowOnly = Cull.HasFlag(EInstanceFlags::ShadowOnly);
     const bool bFarCaster  = Cull.HasFlag(EInstanceFlags::CastFarShadow);
     const bool bFoliage    = Cull.HasFlag(EInstanceFlags::Foliage);
+    const uint Layers      = Cull.bCustomLayers ? Pass().RetainedStatic.At(SlotIdx).RenderLayers : RENDER_LAYER_DEFAULT_MASK;
     const uint DrawID   = Cull.DrawID;
     const bool bInRange = DrawID < Pass().NumBatches;
     bool bAnyView = false;
@@ -265,7 +268,7 @@ void ComputeMain(uint3 GlobalID : SV_DispatchThreadID, uint3 GroupID : SV_GroupI
     // Needed before the compacted slot is claimed, because that slot indexes the range slab.
     for (uint v = 0; v < NumViews; ++v)
     {
-        if (IsInstanceVisibleToView(GetCullView(v), Center, Radius, bNoCull, bCaster, bShadowOnly, bFarCaster, bFoliage))
+        if (IsInstanceVisibleToView(GetCullView(v), Center, Radius, bNoCull, bCaster, bShadowOnly, bFarCaster, bFoliage, Layers))
         {
             bAnyView = true;
             break;
@@ -315,7 +318,7 @@ void ComputeMain(uint3 GlobalID : SV_DispatchThreadID, uint3 GroupID : SV_GroupI
         uint2 Range   = uint2(0u, 0u);
         uint  Emitted = 0u;
 
-        if (IsInstanceVisibleToView(View, Center, Radius, bNoCull, bCaster, bShadowOnly, bFarCaster, bFoliage))
+        if (IsInstanceVisibleToView(View, Center, Radius, bNoCull, bCaster, bShadowOnly, bFarCaster, bFoliage, Layers))
         {
             if (bSelectPerView)
             {
@@ -362,8 +365,8 @@ void ComputeMain(uint3 GlobalID : SV_DispatchThreadID, uint3 GroupID : SV_GroupI
             SkinBase = ClaimPreSkinSlice(Static.MeshletHeader, SurfaceMeshletOffset, SurfaceMeshletCount, MeshletTotal);
         }
 
-        // Written back so the skinning passes, keyed by retained slot, see the base the draw path reads off the compacted instance.
-        Pass().SkinnedFrameData.At(SlotIdx).SkinnedVertexBase = SkinBase;
+        // Written back so the skinning passes see the base the draw path reads off the compacted instance.
+        Pass().SkinnedFrameData.At(SkinnedIndex).SkinnedVertexBase = SkinBase;
     }
 
     // Safe to assemble in a local because FGPUInstance holds a header slot, not an address.
@@ -378,14 +381,16 @@ void ComputeMain(uint3 GlobalID : SV_DispatchThreadID, uint3 GroupID : SV_GroupI
     Inst.MaterialIndex           = Static.MaterialIndex;
     Inst.EntityID                = Static.EntityID;
     // Per frame for skinned, since the compacted arena base cannot live in the retained payload.
-    Inst.BoneOffset              = bSkinned ? Skin.BoneOffset : Static.BoneOffset;
+    Inst.BoneOffset              = bSkinned ? Skin.BoneOffset : 0u;
     Inst.SkinnedVertexBase       = bSkinned ? SkinBase : Static.SkinnedVertexBase;
+    Inst.SkinnedBoundsBase       = bSkinned ? Skin.SkinnedBoundsBase : kNoSkinnedBounds;
     Inst.SurfaceMeshletOffset    = SurfaceMeshletOffset;
     Inst.SurfaceMeshletCount     = SurfaceMeshletCount;
     Inst.SurfaceDescIndex        = bSelectPerView ? Cull.SurfaceDescIndex : kNoSurfaceDesc;
     Inst.MeshletTotalCount       = MeshletTotal;
     // Survives compaction, unlike OutSlot, and keys the two-phase visibility flags.
     Inst.RetainedSlot            = SlotIdx;
+    Inst.RenderLayers            = Layers;
 
     Pass().OutInstances.Set(OutSlot, Inst);
 }

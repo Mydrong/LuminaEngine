@@ -26,6 +26,7 @@
 
 namespace Lumina
 {
+    class CPrefab;
     class CStaticMesh;
     DECLARE_MULTICAST_DELEGATE(FOnGamePreview);
     
@@ -79,7 +80,6 @@ namespace Lumina
         void DrawViewportToolbarModeSelector(float ButtonSize) override;
         void DrawViewModeExtraItems() override;
 
-        void PushAddTagModal(ECS::FEntity Entity);
         void PushAddComponentModal(ECS::FEntity Entity);
 
         // GetComponentEditTargets / ApplyAddComponentToTargets / DrawAddableComponentList and the
@@ -88,9 +88,14 @@ namespace Lumina
         void PushCreatePrefabFromSelectionModal();
         void PushCreatePrefabModalForEntity(ECS::FEntity Entity);
 
+        // The modal's Create button, also reached from agent tools so both take one path.
+        EDITOR_API CPrefab* CreatePrefabFromSelection(FStringView Folder, FStringView Name, FFixedString& OutError);
+        CPrefab* CreatePrefabFromRoots(const TVector<ECS::FEntity>& Roots, const FVector3& Pivot, FStringView Folder, FStringView Name, FFixedString& OutError);
+        TVector<ECS::FEntity> GatherPrefabSelectionRoots() const;
+
         // Prefab instance context-menu actions, shared between the outliner and viewport menus.
-        void ResyncPrefabInstance(ECS::FEntity InstanceRoot);
-        void DetachPrefabInstance(ECS::FEntity InstanceRoot);
+        EDITOR_API void ResyncPrefabInstance(ECS::FEntity InstanceRoot);
+        EDITOR_API void DetachPrefabInstance(ECS::FEntity InstanceRoot);
 
         // Script context-menu helpers, shared between the outliner and viewport menus. The inline
         // assign/change dropdown is always offered; "Remove Script" only when one is present.
@@ -267,13 +272,6 @@ namespace Lumina
         void DrawWorldSettings(bool bFocused);
         void DrawSystemsPanel(bool bFocused);
         void DrawSelectedSystemDetails(const CWorld::FSystemInfo& Info, const TVector<FSystemScheduleEntry>& Schedule);
-        void DrawEntityActionButtons(ECS::FEntity Entity);
-        void DrawTagList(ECS::FEntity Entity);
-
-        // The shared details panel lives in FSceneEditorTool; the world editor adds the Tags UI
-        // through these hooks (the add-tag header button + the tag-chip section).
-        void DrawDetailsHeaderExtraButtons(ECS::FEntity Entity) override;
-        void DrawDetailsExtraSections(ECS::FEntity Entity) override;
 
 
     private:

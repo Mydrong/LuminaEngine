@@ -187,16 +187,15 @@ namespace Lumina
         Minted->ScriptOverrideFunctions.clear();
         Minted->ScriptOverrideSlots.clear();
 
-        CStruct* Base = Minted->GetSuperStruct();
-        if (Base == nullptr)
-        {
-            return;
-        }
-
+        // Only a native class declares an event, so a class under a C# parent looks past it, registered yet or not, to the native ancestor.
         const CClass* NativeBase = Minted->GetSuperClass();
-        while (NativeBase != nullptr && ToScriptClass(NativeBase) != nullptr)
+        while (NativeBase != nullptr && (ToScriptClass(NativeBase) != nullptr || IsMintedThisReload(NativeBase)))
         {
             NativeBase = NativeBase->GetSuperClass();
+        }
+        if (NativeBase == nullptr)
+        {
+            return;
         }
         TVector<FScriptableEventThunk> Thunks;
         AppendEventThunks(NativeBase, Thunks);
@@ -205,10 +204,10 @@ namespace Lumina
         for (const FString& Event : OverriddenEvents)
         {
             const FName EventName(Event.c_str());
-            const FFunction* Declared = Base->FindFunction(EventName);
+            const FFunction* Declared = NativeBase->FindFunction(EventName);
             if (Declared == nullptr)
             {
-                LOG_WARN("Scriptable '{}' overrides '{}', which its base does not declare as a reflected "
+                LOG_WARN("Scriptable '{}' overrides '{}', which its native base does not declare as a reflected "
                          "function; the native body stays in place.", Minted->GetName(), EventName);
                 continue;
             }
@@ -653,6 +652,7 @@ namespace Lumina
             if (!Reinstancer.IsEmpty())
             {
                 const FReinstanceResult Result = Reinstancer.Commit();
+                Scripting::FManagedTypeRegistry::Get().NoteReplaced(Result.Replaced);
                 LOG_DISPLAY("Scriptable: reinstanced {} object(s), repointed {} reference(s) across {} object(s) "
                             "and {} provider(s).", Result.InstancesReplaced, Result.ReferencesPatched,
                             Result.ObjectsScanned, Result.ProvidersVisited);

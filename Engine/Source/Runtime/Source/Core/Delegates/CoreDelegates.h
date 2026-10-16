@@ -19,21 +19,21 @@ namespace Lumina
         GENERATED_BODY()
 
         /** Fired after a world is torn down, before the next one exists. */
-        PROPERTY()
+        PROPERTY(Hidden)
         FScriptDelegate PostWorldUnload;
 
         /** Fired once as the engine begins shutting down, after which listeners are dropped. */
-        PROPERTY()
+        PROPERTY(Hidden)
         FScriptDelegate OnPreEngineShutdown;
 
         // Fired by FEngine::RequestExitGame when gameplay asks to quit. The editor binds this to end the
         // PIE session instead; when unbound (packaged game) the engine exits the process.
-        PROPERTY()
+        PROPERTY(Hidden)
         FScriptDelegate OnGameQuitRequested;
 
         // Fired each frame right after the OS event pump, before input actions are evaluated. Synthetic input
         // delivered here takes the same path and the same frame as a real key.
-        PROPERTY()
+        PROPERTY(Hidden)
         FScriptDelegate OnInputPumped;
     };
 

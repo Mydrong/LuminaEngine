@@ -119,6 +119,8 @@ namespace Lumina
         ~FGameplayMessageBus();
         FGameplayMessageBus(const FGameplayMessageBus&) = delete;
         FGameplayMessageBus& operator = (const FGameplayMessageBus&) = delete;
+        FGameplayMessageBus(FGameplayMessageBus&&) = delete;
+        FGameplayMessageBus& operator=(FGameplayMessageBus&&) = delete;
 
         uint64 Subscribe(const FSubscribeParams& Params);
         bool   Unsubscribe(uint64 Id);

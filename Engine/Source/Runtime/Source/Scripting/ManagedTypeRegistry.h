@@ -1,9 +1,15 @@
 #pragma once
 
+#include "Containers/HashTable.h"
 #include "Containers/Span.h"
 #include "Containers/String.h"
 #include "Containers/Vector.h"
 #include "ScriptExports.h"
+
+namespace Lumina
+{
+    class CObject;
+}
 
 namespace Lumina::Scripting
 {
@@ -69,6 +75,43 @@ namespace Lumina::Scripting
         virtual void Compile(TSpan<const FManagedTypeDefinition> Definitions, TSpan<const FManagedTypeAlias> Aliases) = 0;
     };
 
+    // Everything one script reload changed, handed to every listener once the new generation is live.
+    struct FScriptReload
+    {
+        int32                                   Generation = 0;
+        TSpan<const FManagedTypeDefinition>     Types;
+
+        // Originals to their replacements, classes included. An original may already be freed, so it is only ever compared.
+        const THashMap<CObject*, CObject*>*     Replaced = nullptr;
+
+        NODISCARD CObject* FindReplacement(const void* Original) const
+        {
+            if (Replaced == nullptr)
+            {
+                return nullptr;
+            }
+            const auto Found = Replaced->find(static_cast<CObject*>(const_cast<void*>(Original)));
+            return Found != Replaced->end() ? Found->second : nullptr;
+        }
+    };
+
+    // Derive and every script reload calls OnScriptsReloaded, registered for exactly the listener's lifetime.
+    class RUNTIME_API IScriptReloadListener
+    {
+    public:
+
+        IScriptReloadListener();
+        virtual ~IScriptReloadListener();
+
+        IScriptReloadListener(const IScriptReloadListener&) = delete;
+        IScriptReloadListener& operator=(const IScriptReloadListener&) = delete;
+        IScriptReloadListener(IScriptReloadListener&&) = delete;
+        IScriptReloadListener& operator=(IScriptReloadListener&&) = delete;
+
+        // On the game thread, after every stage compiled and every entity script heard OnReloaded.
+        virtual void OnScriptsReloaded(const FScriptReload& Reload) = 0;
+    };
+
     /** Installs the engine's own stages, in the order they must run. Idempotent. */
     RUNTIME_API void RegisterBuiltInManagedTypeStages();
 
@@ -93,11 +136,22 @@ namespace Lumina::Scripting
 
         NODISCARD TSpan<IManagedTypeCompiler* const> GetStages() const { return Stages; }
 
+        void AddListener(IScriptReloadListener* Listener);
+        void RemoveListener(IScriptReloadListener* Listener);
+
+        // A stage that moved objects onto replacement classes records them here for the coming broadcast.
+        void NoteReplaced(const THashMap<CObject*, CObject*>& Replaced);
+
+        // Tells every listener the generation is live, handing over what the stages replaced on the way.
+        void BroadcastReload(int32 Generation, TSpan<const FManagedTypeDefinition> Types);
+
         /** Test seam: drops every registered stage. */
         void ResetForTesting() { Stages.clear(); }
 
     private:
 
         TVector<IManagedTypeCompiler*> Stages;
+        TVector<IScriptReloadListener*> Listeners;
+        THashMap<CObject*, CObject*>    PendingReplaced;
     };
 }

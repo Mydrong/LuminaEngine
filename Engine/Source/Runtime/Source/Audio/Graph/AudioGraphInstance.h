@@ -40,6 +40,8 @@ namespace Lumina
 
         FAudioGraphInstance(const FAudioGraphInstance&) = delete;
         FAudioGraphInstance& operator=(const FAudioGraphInstance&) = delete;
+        FAudioGraphInstance(FAudioGraphInstance&&) = delete;
+        FAudioGraphInstance& operator=(FAudioGraphInstance&&) = delete;
 
         /** Allocates the arena and builds one operator per node. Call off the audio thread. */
         bool Initialize(const FAudioGraphProgram& Program,

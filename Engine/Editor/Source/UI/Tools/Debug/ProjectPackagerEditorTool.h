@@ -21,6 +21,10 @@ namespace Lumina
         {}
 
         ~FProjectPackagerEditorTool() override;
+        FProjectPackagerEditorTool(const FProjectPackagerEditorTool&) = delete;
+        FProjectPackagerEditorTool& operator=(const FProjectPackagerEditorTool&) = delete;
+        FProjectPackagerEditorTool(FProjectPackagerEditorTool&&) = delete;
+        FProjectPackagerEditorTool& operator=(FProjectPackagerEditorTool&&) = delete;
 
         bool IsSingleWindowTool() const override { return true; }
         const char* GetTitlebarIcon() const override { return LE_ICON_PACKAGE_VARIANT; }

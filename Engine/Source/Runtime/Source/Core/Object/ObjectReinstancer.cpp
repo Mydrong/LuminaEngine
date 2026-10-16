@@ -11,6 +11,7 @@
 #include "Core/Serialization/Archiver.h"
 #include "Core/Serialization/MemoryArchiver.h"
 #include "Core/Serialization/ObjectArchiver.h"
+#include "Core/Object/Package/Package.h"
 
 namespace Lumina
 {
@@ -41,9 +42,8 @@ namespace Lumina
         const FGuid        Guid    = Old->GetGUID();
         const EObjectFlags Flags   = Old->GetFlags();
 
-        // Name and GUID are both the instance's identity to whatever resolves one, so the replacement takes
-        // both and the original steps aside on each, rather than the other way round.
-        Old->Rename(MakeRetiredName(Name), Package);
+        // The replacement takes the name, GUID and package, and the original steps aside out of the package so no save writes it.
+        Old->Rename(MakeRetiredName(Name), CPackage::GetTransientPackage());
         Old->HandleGUIDChange(FGuid::New());
 
         CObject* New = NewObject(NewClass, Package, Name, Guid, Flags);
@@ -217,6 +217,7 @@ namespace Lumina
                      Result.OriginalsOutlivingTheSwap, Stranded);
         }
 
+        Result.Replaced = Move(ObjectMap);
         return Result;
     }
 }

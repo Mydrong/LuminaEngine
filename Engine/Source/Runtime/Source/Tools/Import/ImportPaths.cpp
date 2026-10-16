@@ -19,6 +19,21 @@ namespace Lumina::Import::PathReservations
 
         constexpr uint32 kMaxSuffix = 10000;
 
+        // Neither the extension nor case tells two packages apart, so neither may tell two reservations apart.
+        FFixedString KeyOf(FStringView Path)
+        {
+            FFixedString Key(Path.data(), Path.size());
+            if (VFS::HasExtension(Key, ".lasset"))
+            {
+                Key.resize(Key.size() - FStringView(".lasset").size());
+            }
+            for (char& Character : Key)
+            {
+                Character = (char)std::tolower((unsigned char)Character);
+            }
+            return Key;
+        }
+
         bool IsOwnedUnlocked(const FFixedString& Path)
         {
             // What CreatePackage actually refuses on.
@@ -35,7 +50,26 @@ namespace Lumina::Import::PathReservations
                 return true;
             }
 
-            return GReserved.find(Path) != GReserved.end();
+            return GReserved.find(KeyOf(Path)) != GReserved.end();
+        }
+
+        FFixedString FindFreeUnlocked(const FFixedString& Base)
+        {
+            if (!IsOwnedUnlocked(Base))
+            {
+                return Base;
+            }
+
+            for (uint32 N = 1; N < kMaxSuffix; ++N)
+            {
+                FFixedString Candidate = Base;
+                Candidate.append("_").append(Format("{}", N).c_str());
+                if (!IsOwnedUnlocked(Candidate))
+                {
+                    return Candidate;
+                }
+            }
+            return {};
         }
     }
 
@@ -50,6 +84,17 @@ namespace Lumina::Import::PathReservations
         return !IsOwnedUnlocked(FFixedString(Path.data(), Path.size()));
     }
 
+    FFixedString FindFree(FStringView Path)
+    {
+        if (Path.empty())
+        {
+            return {};
+        }
+
+        FScopeLock Lock(GMutex);
+        return FindFreeUnlocked(FFixedString(Path.data(), Path.size()));
+    }
+
     FFixedString Reserve(FStringView Path)
     {
         if (Path.empty())
@@ -57,27 +102,13 @@ namespace Lumina::Import::PathReservations
             return {};
         }
 
-        const FFixedString Base(Path.data(), Path.size());
-
         FScopeLock Lock(GMutex);
-        if (!IsOwnedUnlocked(Base))
+        FFixedString Free = FindFreeUnlocked(FFixedString(Path.data(), Path.size()));
+        if (!Free.empty())
         {
-            GReserved.insert(Base);
-            return Base;
+            GReserved.insert(KeyOf(Free));
         }
-
-        for (uint32 N = 1; N < kMaxSuffix; ++N)
-        {
-            FFixedString Candidate = Base;
-            Candidate.append("_").append(Format("{}", N).c_str());
-            if (!IsOwnedUnlocked(Candidate))
-            {
-                GReserved.insert(Candidate);
-                return Candidate;
-            }
-        }
-
-        return {};
+        return Free;
     }
 
     void Release(FStringView Path)
@@ -88,7 +119,7 @@ namespace Lumina::Import::PathReservations
         }
 
         FScopeLock Lock(GMutex);
-        GReserved.erase(FFixedString(Path.data(), Path.size()));
+        GReserved.erase(KeyOf(Path));
     }
 
     void ReleaseAll()

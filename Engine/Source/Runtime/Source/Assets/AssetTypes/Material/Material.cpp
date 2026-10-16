@@ -30,6 +30,7 @@ namespace Lumina
     namespace
     {
         CMaterial* GDefaultMaterial = nullptr;
+        CMaterial* GErrorMaterial = nullptr;
         CMaterial* GDefaultTerrainMaterial = nullptr;
 
         constexpr const char* kMaterialShaderDirectory = "/Engine/Resources/Shaders/MaterialShader/";
@@ -450,6 +451,7 @@ namespace Lumina
 #else
                 LOG_ERROR("Material '{}' has no shaders for templates {:016x}. Open the project in the editor once so they compile into the artifact cache, or cook the content.",
                           GetPackage()->GetPackagePath().c_str(), GetShaderTemplateHash());
+                SetCompileFailed(true);
 #endif
             }
 
@@ -466,7 +468,12 @@ namespace Lumina
                 AcquireOrUploadMaterialSlot();
 
                 // Stale templates committed nothing, and a corrupt asset can be missing a stage, so this is derived.
-                SetReadyForRender(!bStale && HasRequiredStages());
+                const bool bReady = !bStale && HasRequiredStages();
+                SetReadyForRender(bReady);
+                if (bReady)
+                {
+                    SetCompileFailed(false);
+                }
 
                 PropagateToChildren();
             }
@@ -474,6 +481,11 @@ namespace Lumina
 #if !USING(WITH_EDITOR)
             DropCommittedBinaries();
 #endif
+        }
+        else if (GetPackage() != nullptr)
+        {
+            // Saved without a compile that ever succeeded, so nothing will produce shaders until it is fixed.
+            SetCompileFailed(true);
         }
 
         // Only entries that resolved a surface against this material need rebuilding, and surfaces record both levels.
@@ -987,6 +999,15 @@ namespace Lumina
         FMeshResolveCache::InvalidateDependency(this);
     }
 
+    void CMaterial::SetCompileFailed(bool bFailed)
+    {
+        // A failed compile keeps the previous shaders loaded, so surfaces resolved against them only switch when told.
+        if (bCompileFailed.exchange(bFailed, std::memory_order_acq_rel) != bFailed)
+        {
+            FMeshResolveCache::InvalidateDependency(this);
+        }
+    }
+
     int32 CMaterial::FindStaticSwitchBit(const FName& ParameterName) const
     {
         auto It = Algo::FindIf(StaticSwitches, [&ParameterName](const SMaterialStaticSwitch& Switch) { return Switch.ParameterName == ParameterName; });
@@ -1243,6 +1264,11 @@ namespace Lumina
         return GDefaultMaterial;
     }
 
+    CMaterial* CMaterial::GetErrorMaterial()
+    {
+        return GErrorMaterial;
+    }
+
     CMaterial* CMaterial::GetDefaultTerrainMaterial()
     {
         return GDefaultTerrainMaterial;
@@ -1257,6 +1283,37 @@ namespace Lumina
 
         // Procedural geometry colors itself per vertex, and an imported mesh without a color stream reads white.
         GDefaultMaterial = CreateBuiltinMaterial("DefaultMaterial", MakeSurfaceInputs("VertexColor.rgb", 1.0f));
+
+        if (BeginBuiltinRebuild(GErrorMaterial, "error material") == nullptr)
+        {
+            return;
+        }
+
+        // ERROR in a 5x7 bitmap font, tiled in world space on the axis the surface faces, so it reads on any mesh with or without UVs.
+        FString ErrorInputs = R"(
+    const uint _ErrorGlyphRows[21] = { 0x1F, 0x10, 0x10, 0x1E, 0x10, 0x10, 0x1F,
+                                       0x1E, 0x11, 0x11, 0x1E, 0x14, 0x12, 0x11,
+                                       0x0E, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0E };
+    float3 _ErrorAxis = abs(WorldNormal);
+    float2 _ErrorPlane = (_ErrorAxis.x > _ErrorAxis.y && _ErrorAxis.x > _ErrorAxis.z) ? float2(sign(WorldNormal.x) * WorldPosition.z, WorldPosition.y)
+                       : (_ErrorAxis.z > _ErrorAxis.y) ? float2(-sign(WorldNormal.z) * WorldPosition.x, WorldPosition.y)
+                       : float2(-WorldPosition.x, -sign(WorldNormal.y) * WorldPosition.z);
+    // Shifted by a multiple of 180 so the row and column math never sees a negative cell and the tiling is unchanged.
+    uint2 _ErrorCell = uint2(int2(floor(_ErrorPlane.x / 0.015), floor(-_ErrorPlane.y / 0.015)) + 1048680);
+    uint _ErrorRow = _ErrorCell.y % 10u;
+    uint _ErrorColumn = (_ErrorCell.x + ((_ErrorCell.y / 10u) & 1u) * 18u) % 36u;
+    bool _ErrorInk = false;
+    if (_ErrorRow < 7u && _ErrorColumn < 30u && _ErrorColumn % 6u < 5u)
+    {
+        uint _ErrorLetter = _ErrorColumn / 6u;
+        uint _ErrorGlyph = _ErrorLetter == 0u ? 0u : (_ErrorLetter == 3u ? 2u : 1u);
+        _ErrorInk = ((_ErrorGlyphRows[_ErrorGlyph * 7u + _ErrorRow] >> (4u - _ErrorColumn % 6u)) & 1u) != 0u;
+    }
+    float3 _ErrorColor = _ErrorInk ? float3(0.02, 0.02, 0.02) : float3(1.0, 0.0, 1.0);
+)";
+        ErrorInputs += MakeSurfaceInputs("_ErrorColor", 1.0f);
+        ErrorInputs += "\tMaterial.Emissive = _ErrorColor * 0.25;\n";
+        GErrorMaterial = CreateBuiltinMaterial("ErrorMaterial", ErrorInputs);
     }
 
     CMaterial* CMaterial::CreateBuiltinMaterial(const FName& Name, const FString& PixelInputs, TSpan<const SMaterialParameter> InParameters)

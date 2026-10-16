@@ -705,7 +705,7 @@ namespace Lumina::Algo
         Private::InsertionSort(First, Last, Pred);
     }
 
-    /** Sifts the element at Last - 1 into the heap before it. The front is the greatest under Pred. */
+    // Sifts the element at Last - 1 into the heap before it, where the front is the greatest under Pred.
     template <typename TIt, typename TPred = FLess>
     constexpr void PushHeap(TIt First, TIt Last, TPred Pred = {})
     {
@@ -729,7 +729,7 @@ namespace Lumina::Algo
         First[Hole] = std::move(Value);
     }
 
-    /** Moves the front of the heap to Last - 1 and restores the heap over the rest. */
+    // Moves the front of the heap to Last - 1 and restores the heap over the rest.
     template <typename TIt, typename TPred = FLess>
     constexpr void PopHeap(TIt First, TIt Last, TPred Pred = {})
     {
@@ -830,6 +830,17 @@ namespace Lumina::Algo
         }
 
         Private::InsertionSort(First, Last, Pred);
+    }
+
+    // Sorts the smallest Middle - First elements into the front, leaving the rest after them in no order.
+    template <typename TIt, typename TPred = FLess>
+    constexpr void PartialSort(TIt First, TIt Middle, TIt Last, TPred Pred = {})
+    {
+        if (Middle != Last)
+        {
+            NthElement(First, Middle, Last, Pred);
+        }
+        Sort(First, Middle, Pred);
     }
 
     /** Moves everything Pred accepts to the front, keeping relative order on both sides. */

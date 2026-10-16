@@ -5,6 +5,7 @@
 #include "Core/Object/Object.h"
 #include "Core/Object/Cast.h"
 #include "Memory/SmartPtr.h"
+#include "Core/Object/ObjectHandleTyped.h"
 #include "Factory.generated.h"
 
 namespace Lumina
@@ -57,6 +58,13 @@ namespace Lumina
         {
             return Cast<T>(CreateNewOf(T::StaticClass(), Path));
         }
+
+        // Creates, saves and registers one Class asset, and takes it down again when the save fails so its name stays free.
+        static TStrongObjectPtr<CObject> CreateAsset(CFactory* Factory, CClass* Class, FStringView Path, FString& OutError);
+
+        // Takes down an asset created here that nothing else has seen, with its package, so the name is free again.
+        static void DiscardNew(CObject* Asset);
+        static void DiscardNewPackage(CPackage* Package);
             
         
         virtual FString GetAssetName() const { return ""; }
@@ -73,7 +81,8 @@ namespace Lumina
         // Importing source files is CImporter's job (Tools/Import/Importer.h); a factory only mints empty
         // assets from the content browser's New Asset menu.
 
-        static bool ShowCreationDialogue(CFactory* Factory, FStringView Path);
+        // True once the dialogue is done, with bOutCreating saying whether it handed creation to a task rather than canceled.
+        static bool ShowCreationDialogue(CFactory* Factory, FStringView Path, bool& bOutCreating);
 
         virtual bool HasCreationDialogue() const { return false; }
 

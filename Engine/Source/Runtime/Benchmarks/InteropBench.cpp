@@ -173,6 +173,56 @@ namespace LuminaInteropBench
         SUCCEED();
     }
 
+    TEST_F(FInteropBench, NativeCallAgainstPInvoke)
+    {
+        auto* Compare = (double(*)(int32, int32))DotNet::ResolveManagedExport("Bench_InteropCompare");
+        ASSERT_NE(Compare, nullptr);
+
+        auto Best = [Compare](int32 Which)
+        {
+            double Result = 1e30;
+            for (int32 Attempt = 0; Attempt < kRepeats; ++Attempt)
+            {
+                const double Nanos = Compare(Which, kIterations);
+                Result = Nanos < Result ? Nanos : Result;
+            }
+            return Result;
+        };
+
+        struct FRow { const char* Name; int32 Which; };
+        const FRow Rows[] =
+        {
+            { "NativeCall int(), GC transition",              0 },
+            { "NativeCall int(), SuppressGCTransition",       1 },
+            { "DllImport int()",                              2 },
+            { "LibraryImport int()",                          3 },
+            { "LibraryImport int(), SuppressGCTransition",    4 },
+            { "NativeCall FVector3(FVector3, FVector3)",      5 },
+            { "LibraryImport FVector3(FVector3, FVector3)",   6 },
+            { "NativeCall int(string), 20 chars UTF-8",       7 },
+            { "LibraryImport int(string), 20 chars UTF-8",    8 },
+            { "LibraryImport int(string), 20 chars UTF-16",   9 },
+            { "NativeCall int(string), 400 chars UTF-8",      10 },
+            { "LibraryImport int(string), 400 chars UTF-8",   11 },
+            { "LibraryImport int(string), 400 chars UTF-16",  12 },
+            { "NativeCall string(), two-pass FString copy",   13 },
+            { "LibraryImport byte*() + PtrToStringUTF8",      14 },
+            { "bare pointer int(), GC transition",            15 },
+            { "bare pointer int(), SuppressGCTransition",     16 },
+            { "bare pointer FVector3(FVector3, FVector3)",    17 },
+        };
+
+        const double Floor = BestOfManagedLoop("Bench_ManagedOnly", kIterations);
+        ReportHeader("NativeCall against P/Invoke, same native function per pair");
+        ReportRow("managed call, no crossing (the floor)", Floor, 0.0);
+        for (const FRow& Row : Rows)
+        {
+            ReportRow(Row.Name, Best(Row.Which), Floor);
+        }
+
+        SUCCEED();
+    }
+
     TEST_F(FInteropBench, PropertyAccess)
     {
         auto* OffsetLoop = (FPropLoopFn)DotNet::ResolveManagedExport("Bench_PropertyOffsetRead");
@@ -230,7 +280,7 @@ namespace LuminaInteropBench
         SUCCEED();
     }
 
-    // The reflection dispatcher every [ScriptFunction] goes through, which is the one path that boxes.
+    // The reflection dispatcher every [Function] goes through, which is the one path that boxes.
     TEST_F(FInteropBench, ScriptFunctionDispatch)
     {
         auto* MakeTarget = (FMakeTargetFn)DotNet::ResolveManagedExport("Test_MakeMarshalTarget");

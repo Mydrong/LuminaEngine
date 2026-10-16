@@ -886,7 +886,9 @@ namespace Lumina
         {
             FFileDropEvent& FileEvent = Event.As<FFileDropEvent>();
 
-            ImVec2 DropCursor = ImVec2(FileEvent.GetMouseX(), FileEvent.GetMouseY());
+            // The OS reports the drop relative to the main window, while ImGui rects are in viewport space.
+            const ImVec2 WindowOrigin = ImGui::GetMainViewport()->Pos;
+            const ImVec2 DropCursor = ImVec2(FileEvent.GetMouseX() + WindowOrigin.x, FileEvent.GetMouseY() + WindowOrigin.y);
 
             for (const FFixedString& Path : FileEvent.GetPaths())
             {
@@ -1670,7 +1672,11 @@ namespace Lumina
 
     void FContentBrowserEditorTool::Update(const FUpdateContext& UpdateContext)
     {
-        
+        // The watcher runs on its own thread, so its change is only applied to the listing here.
+        if (bDiskListingChanged.exchange(false, std::memory_order_acquire))
+        {
+            RefreshContentBrowser();
+        }
     }
     
     // Shared with the agent endpoint, so both refuse the same deletions for the same reasons.
@@ -1908,7 +1914,7 @@ namespace Lumina
     void FContentBrowserEditorTool::RefreshFilterClasses()
     {
         // Seeding from factories omitted types that have none, and a missing entry defaulted to shown.
-        for (const TUniquePtr<FAssetData>& Data : FAssetRegistry::Get().GetAssets())
+        for (const TSharedPtr<FAssetData>& Data : FAssetRegistry::Get().GetAssets())
         {
             if (Data && !Data->AssetClass.IsNone() && FilterState.find(Data->AssetClass) == FilterState.end())
             {
@@ -2295,11 +2301,11 @@ namespace Lumina
                     });
                 }
 
-                // C# is not a text asset, so its extension is checked explicitly.
-                const bool bIsCSharp = VFS::HasExtension(Event.Path, ".cs");
-                if ((TextAsset::IsTextAssetPath(RelView) || bIsCSharp) && Event.Action != EFileAction::Modified)
+                // A file any path wrote, an import or a creation task included, reaches the listing through here.
+                const bool bListed = TextAsset::IsTextAssetPath(RelView) || VFS::HasExtension(Event.Path, ".cs") || VFS::HasExtension(RelativePath, ".lasset");
+                if (bListed && Event.Action != EFileAction::Modified)
                 {
-                    RefreshContentBrowser();
+                    bDiskListingChanged.store(true, std::memory_order_release);
                 }
 
                 // Which files are script sources and how long to wait for a burst to settle both belong to
@@ -2466,14 +2472,7 @@ namespace Lumina
 
             FImportResult Result;
             Importer->BuildAssets(Request, Result, &SlowTask);
-
-            // Reverse order, since a generated graph must die before the material it back-references.
-            // Popping releases the last pin, so each object dies on its own turn rather than when a
-            // neighbor's destructor drops the last reference to it.
-            while (!Result.CreatedObjects.empty())
-            {
-                Result.CreatedObjects.pop_back();
-            }
+            Result.Finish(Request);
 
             const bool bSucceeded = Result.Succeeded();
             const FString Error   = Result.Error;
@@ -2507,6 +2506,12 @@ namespace Lumina
 
     void FContentBrowserEditorTool::TryImport(const TVector<FFixedString>& Paths)
     {
+        if (!AssetOps::IsAssetLocation(FStringView(SelectedPath.c_str(), SelectedPath.size())))
+        {
+            ImGuiX::Notifications::NotifyWarning("Cannot import into \"{0}\". Assets have to live under a Content folder.", SelectedPath);
+            return;
+        }
+
         // Only importers that ask something are queued, so forty PNGs and one FBX is a single prompt.
         for (const FFixedString& Path : Paths)
         {
@@ -2541,6 +2546,48 @@ namespace Lumina
             ProcessNextImport();
         }
     }
+
+    struct FContentBrowserEditorTool::FImportDialogState
+    {
+        FContentBrowserEditorTool* Browser;
+        CImporter*                 Importer;
+        FImportRequest             Request;
+
+        // A queued import reserved its name and moves the queue on, where a reimport writes over its own asset.
+        bool                       bQueued;
+        bool                       bShouldClose = false;
+        bool                       bStarted     = false;
+
+        FImportDialogState(FContentBrowserEditorTool* InBrowser, CImporter* InImporter, const FImportRequest& InRequest, bool bInQueued)
+            : Browser(InBrowser), Importer(InImporter), Request(InRequest), bQueued(bInQueued)
+        {
+        }
+
+        FImportDialogState(const FImportDialogState&) = delete;
+        FImportDialogState& operator=(const FImportDialogState&) = delete;
+
+        ~FImportDialogState()
+        {
+            Browser->ImportSettingsTable.reset();
+
+            // Canceled means the build never ran, so nothing else releases the name or the importer.
+            if (!bStarted)
+            {
+                CImporterRegistry::DestroyImporter(Importer);
+                if (bQueued)
+                {
+                    Import::PathReservations::Release(Request.DestinationPath);
+                }
+            }
+
+            Browser->bImportWindowOpen = false;
+            if (bQueued)
+            {
+                // Advanced here, not from the confirm branch, so canceling one file skips only it.
+                MainThread::Enqueue([Browser = Browser]() { Browser->ProcessNextImport(); });
+            }
+        }
+    };
 
     void FContentBrowserEditorTool::ProcessNextImport()
     {
@@ -2611,12 +2658,8 @@ namespace Lumina
                 ImportSettingsTable = MakeUnique<FPropertyTable>(Importer);
                 ImportSettingsTable->SetShowSearchBar(false);
 
-                struct FModalState
-                {
-                    bool bShouldClose = false;
-                    bool bStarted     = false;
-                };
-                auto SharedState = MakeShared<FModalState>();
+                constexpr bool bQueued = true;
+                auto SharedState = MakeShared<FImportDialogState>(this, Importer, Request, bQueued);
 
                 ToolContext->PushModal("Import", {940, 900},
                     [this, Importer, Request, SharedState]() mutable
@@ -2629,22 +2672,6 @@ namespace Lumina
                             bApplyImportSettingsToAll = bApplyToAll;
                             SharedState->bStarted = true;
                             StartImport(Importer, Request);
-                        }
-
-                        if (SharedState->bShouldClose)
-                        {
-                            ImportSettingsTable.reset();
-
-                            // Canceled means StartImport never ran, so nothing else releases the name or the importer.
-                            if (!SharedState->bStarted)
-                            {
-                                CImporterRegistry::DestroyImporter(Importer);
-                                Import::PathReservations::Release(Request.DestinationPath);
-                            }
-
-                            // Advanced here, not from the confirm branch, so canceling one file skips only it.
-                            bImportWindowOpen = false;
-                            MainThread::Enqueue([this]() { ProcessNextImport(); });
                         }
 
                         return SharedState->bShouldClose;
@@ -3019,6 +3046,13 @@ namespace Lumina
 
     void FContentBrowserEditorTool::StartReimport(const FGuid& AssetGUID, CClass* ImporterClass, const FFixedString& SourceFile)
     {
+        // One settings dialog at a time, and an open import owns the flag its queue waits on.
+        if (bImportWindowOpen)
+        {
+            ImGuiX::Notifications::NotifyWarning("Finish the open import before reimporting.");
+            return;
+        }
+
         CObject* Asset = LoadObject<CObject>(AssetGUID);
         if (Asset == nullptr)
         {
@@ -3066,12 +3100,8 @@ namespace Lumina
                 ImportSettingsTable = MakeUnique<FPropertyTable>(Importer);
                 ImportSettingsTable->SetShowSearchBar(false);
 
-                struct FModalState
-                {
-                    bool bShouldClose = false;
-                    bool bStarted     = false;
-                };
-                auto SharedState = MakeShared<FModalState>();
+                constexpr bool bQueued = false;
+                auto SharedState = MakeShared<FImportDialogState>(this, Importer, Request, bQueued);
 
                 ToolContext->PushModal("Reimport", {940, 900},
                     [this, AssetGUID, Importer, Request, SharedState]() mutable
@@ -3083,16 +3113,6 @@ namespace Lumina
                         {
                             SharedState->bStarted = true;
                             FinishReimport(AssetGUID, Importer, Request.SourcePath);
-                        }
-
-                        if (SharedState->bShouldClose)
-                        {
-                            ImportSettingsTable.reset();
-                            if (!SharedState->bStarted)
-                            {
-                                CImporterRegistry::DestroyImporter(Importer);
-                            }
-                            bImportWindowOpen = false;
                         }
 
                         return SharedState->bShouldClose;
@@ -3667,41 +3687,42 @@ namespace Lumina
                     return;
                 }
 
-                FFixedString Path = Paths::Combine(SelectedPath, Factory->GetDefaultAssetCreationName());
+                // Free of loaded packages and in-flight imports as well as files, since CreatePackage refuses all three.
+                auto Reservation = MakeShared<Import::PathReservations::FScopedReservation>(Paths::Combine(SelectedPath, Factory->GetDefaultAssetCreationName()));
+                if (!Reservation->IsValid())
+                {
+                    ImGuiX::Notifications::NotifyError("No free asset name in \"{0}\"", SelectedPath);
+                    return;
+                }
+                FFixedString Path = Reservation->Get();
                 CPackage::AddPackageExt(Path);
-                Path = VFS::MakeUniqueFilePath(Path);
 
                 if (Factory->HasCreationDialogue())
                 {
-                    ToolContext->PushModal("Create New", {500, 500}, [this, Factory, Path = Move(Path)]
+                    // The reservation lives as long as the dialogue, however it closes.
+                    ToolContext->PushModal("Create New", {500, 500}, [this, Factory, Path = Move(Path), Reservation]
                     {
-                        bool bShouldClose = CFactory::ShowCreationDialogue(Factory, Path);
-                        if (bShouldClose)
+                        bool bCreating = false;
+                        const bool bShouldClose = CFactory::ShowCreationDialogue(Factory, Path, bCreating);
+                        if (bCreating)
                         {
-                            ImGuiX::Notifications::NotifySuccess("Successfully Created: \"{0}\"", Path);
-
                             // The dialogue hands creation to a task, so the tile may not exist for several frames.
                             QueueRenameAfterCreate(FStringView(Path.c_str(), Path.size()));
                         }
                         return bShouldClose;
                     });
+                    return;
                 }
-                else if (CObject* Object = Factory->TryCreateNew(Path))
+
+                FString Error;
+                if (CFactory::CreateAsset(Factory, Factory->GetAssetClass(), Path, Error).IsValid())
                 {
-                    if (CPackage::SavePackage(Object->GetPackage(), Path))
-                    {
-                        FAssetRegistry::Get().AssetCreated(Object);
-                        ImGuiX::Notifications::NotifySuccess("Successfully Created: \"{0}\"", Path);
-                        QueueRenameAfterCreate(FStringView(Path.c_str(), Path.size()));
-                    }
-                    else
-                    {
-                        ImGuiX::Notifications::NotifyError("Failed to save new asset: \"{0}\"", Path);
-                    }
+                    ImGuiX::Notifications::NotifySuccess("Successfully Created: \"{0}\"", Path);
+                    QueueRenameAfterCreate(FStringView(Path.c_str(), Path.size()));
                 }
                 else
                 {
-                    ImGuiX::Notifications::NotifyError("Failed to create new: \"{0}\"", Path);
+                    ImGuiX::Notifications::NotifyError("Failed to create \"{0}\": {1}", Path, Error);
                 }
             };
 

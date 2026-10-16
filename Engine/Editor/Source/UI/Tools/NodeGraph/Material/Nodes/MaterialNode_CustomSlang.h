@@ -110,7 +110,7 @@ namespace Lumina
 
         // Set once the starter signature has been installed, and serialized, so a node whose pins were
         // deliberately deleted stays deleted instead of re-seeding itself on the next load.
-        PROPERTY()
+        PROPERTY(Hidden)
         bool bDefaultsSeeded = false;
 
         // (Re)creates pins from Inputs/Outputs, preserving wires whose pin name still exists.

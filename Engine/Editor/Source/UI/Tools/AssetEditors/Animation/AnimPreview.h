@@ -42,6 +42,8 @@ namespace Lumina
 
         FCompatibleAssetList(const FCompatibleAssetList&) = delete;
         FCompatibleAssetList& operator=(const FCompatibleAssetList&) = delete;
+        FCompatibleAssetList(FCompatibleAssetList&&) = delete;
+        FCompatibleAssetList& operator=(FCompatibleAssetList&&) = delete;
 
         // Assets of the class whose skeleton matches by bones, sorted by name.
         const TVector<FEntry>& Get(const CSkeleton* Skeleton);

@@ -78,6 +78,11 @@ namespace Lumina::Platform
         public:
 
             ~FWindowsPtySession() override { Close(); }
+            FWindowsPtySession() = default;
+            FWindowsPtySession(const FWindowsPtySession&) = delete;
+            FWindowsPtySession& operator=(const FWindowsPtySession&) = delete;
+            FWindowsPtySession(FWindowsPtySession&&) = delete;
+            FWindowsPtySession& operator=(FWindowsPtySession&&) = delete;
 
             bool Start(const FPtyLaunchParams& Params);
 

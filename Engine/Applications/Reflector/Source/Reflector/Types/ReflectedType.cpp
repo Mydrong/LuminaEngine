@@ -171,6 +171,7 @@ namespace Lumina::Reflection
                 { "Lumina::CObject",          EPropertyTypeFlags::Object          },
                 { "Lumina::TSubclassOf",      EPropertyTypeFlags::Class           },
                 { "Lumina::TSubStructOf",     EPropertyTypeFlags::SubStruct       },
+                { "Lumina::TComponentRef",    EPropertyTypeFlags::ComponentRef    },
                 { "Lumina::TInstancedStruct", EPropertyTypeFlags::InstancedStruct },
                 { "Lumina::FInstancedStruct", EPropertyTypeFlags::InstancedStruct },
                 { "Lumina::TSoftObjectPtr",   EPropertyTypeFlags::SoftObject      },

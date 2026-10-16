@@ -21,13 +21,13 @@ namespace Lumina
 
     public:
 
-        PROPERTY()
+        PROPERTY(Hidden)
         FString Label;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         int32 Count = 0;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         TStrongObjectPtr<CSaveGameTestObject> Next;
     };
 
@@ -36,22 +36,22 @@ namespace Lumina
     {
         GENERATED_BODY()
 
-        PROPERTY(SaveGame)
+        PROPERTY(Hidden, SaveGame)
         int32 Coins = 0;
 
-        PROPERTY(SaveGame)
+        PROPERTY(Hidden, SaveGame)
         ECS::FEntity Target = ECS::NullEntity;
 
-        PROPERTY(SaveGame)
+        PROPERTY(Hidden, SaveGame)
         TVector<int32> History;
 
-        PROPERTY(SaveGame)
+        PROPERTY(Hidden, SaveGame)
         TStrongObjectPtr<CSaveGameTestObject> Inventory;
 
-        PROPERTY(SaveGame, NoSerialize)
+        PROPERTY(Hidden, SaveGame, NoSerialize)
         float RuntimeOnly = 0.0f;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         int32 NotSaved = 0;
     };
 
@@ -65,10 +65,10 @@ namespace Lumina
         void OnRestored() override { ++RestoredCount; }
         void OnSaving() override { ++SavingCount; }
 
-        PROPERTY(SaveGame)
+        PROPERTY(Hidden, SaveGame)
         int32 Level = 0;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         int32 NotSaved = 0;
 
         int32 RestoredCount = 0;
@@ -102,16 +102,16 @@ namespace Lumina
         void OnBeforeSave() override { ++BeforeSaveCount; }
         void OnAfterLoad() override { ++AfterLoadCount; }
 
-        PROPERTY()
+        PROPERTY(Hidden)
         int32 Score = 0;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         FString PlayerName;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         TStrongObjectPtr<CSaveGameTestObject> Item;
 
-        PROPERTY(SaveGame, NoSerialize)
+        PROPERTY(Hidden, SaveGame, NoSerialize)
         int32 SessionOnly = 0;
 
         int32 BeforeSaveCount = 0;

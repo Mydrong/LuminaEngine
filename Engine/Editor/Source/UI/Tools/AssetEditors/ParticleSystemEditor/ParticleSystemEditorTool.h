@@ -63,6 +63,7 @@ namespace Lumina
 
         void DrawStack();
         void DrawAddEmitterButtons();
+        void AddSharedEmitter(CParticleEmitter* Shared);
         // Saving an inline emitter as an asset, or making a shared one local again.
         void DrawEmitterAssetMenu(int32 EmitterIndex, CParticleEmitter* Emitter);
         void DrawEmitterSection(int32 EmitterIndex);

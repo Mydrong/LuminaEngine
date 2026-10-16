@@ -62,6 +62,14 @@ namespace Lumina
         PROPERTY(Editable, Category = "Animation")
         ERootMotionLockMode RootMotionLock = ERootMotionLockMode::FromAsset;
 
+        // When false the graph holds its current pose, clocks and montages included.
+        PROPERTY(Editable, Replicated, Category = "Animation")
+        bool bPlaying = true;
+
+        // Playback rate multiplier for the whole graph, 1 being normal speed.
+        PROPERTY(Editable, Replicated, Category = "Animation")
+        float PlaybackSpeed = 1.0f;
+
         // Per-instance VM state (registers, playback clocks, parameter values). Sized lazily from Graph; not serialized.
         FAnimGraphVMState VMState;
 

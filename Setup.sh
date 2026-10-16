@@ -140,58 +140,6 @@ if [ -z "${SKIP_PREREQ_CHECKS:-}" ]; then
     fi
 fi
 
-# --- LUMINA_DIR -----------------------------------------------------------------------------
-#
-# There is no user environment store to persist this to, unlike the Windows registry, so the
-# closest equivalent is the login shell's profile. Offered rather than done: a setup script that
-# edits a shell profile unasked is not a trade most people would accept for one variable.
-
-export LUMINA_DIR="$LuminaDir"
-
-# Whichever file the user's own shell actually reads, so the export takes effect on next login
-# instead of sitting in a file that shell never sources.
-case "$(basename "${SHELL:-}")" in
-    zsh)  ShellProfile="$HOME/.zshrc" ;;
-    bash) ShellProfile="$HOME/.bashrc" ;;
-    *)    ShellProfile="$HOME/.profile" ;;
-esac
-
-if grep -qs "LUMINA_DIR=" "$HOME/.profile" "$HOME/.bashrc" "$HOME/.zshrc" 2>/dev/null; then
-    echo "LUMINA_DIR is already exported from a shell profile; leaving it alone."
-else
-    PersistLuminaDir=""
-
-    # Prompted only when there is somebody to answer. Under -Yes, in CI, or with stdin redirected,
-    # printing the line to add is the right answer: an unattended run has no business rewriting the
-    # profile of whatever account it happens to be running as.
-    if [ -t 0 ] && [ -z "${LUMINA_SETUP_YES:-}" ] && [[ " $* " != *" -Yes "* ]] && [[ " $* " != *" --yes "* ]]; then
-        echo "Standalone game projects locate the engine through LUMINA_DIR, which is set for this"
-        echo "run only unless it goes into a shell profile."
-        echo
-        read -r -p "Add 'export LUMINA_DIR=\"$LuminaDir\"' to $ShellProfile? [y/N] " Answer
-        case "$Answer" in
-            [Yy]*) PersistLuminaDir="1" ;;
-        esac
-    fi
-
-    if [ -n "$PersistLuminaDir" ]; then
-        {
-            echo
-            echo "# Lumina Engine root, added by Setup.sh"
-            echo "export LUMINA_DIR=\"$LuminaDir\""
-        } >> "$ShellProfile"
-
-        echo "Added to $ShellProfile. It applies to shells started from now on."
-    else
-        echo "note: LUMINA_DIR is set for this run only. Standalone game projects locate the engine"
-        echo "      through it, so add this to your shell profile to make it permanent:"
-        echo
-        echo "        export LUMINA_DIR=\"$LuminaDir\""
-    fi
-
-    echo
-fi
-
 # --- dependencies and hooks -----------------------------------------------------------------
 
 "$LuminaDir/LuminaBuild.sh" Setup "$@"

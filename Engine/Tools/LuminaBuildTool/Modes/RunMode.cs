@@ -32,6 +32,26 @@ public static class RunMode
         TargetType TypeValue = Arguments.GetEnum("TargetType", TargetType.Editor);
 
         RulesAssembly Assembly = RulesAssembly.Create(Directories, Arguments.HasFlag("RecompileRules"));
+        LaunchCommand Command = ResolveLaunch(Assembly, Directories, Arguments, TargetName, TypeValue, PlatformValue, ConfigurationValue);
+
+        // Forwarded after the rules' own arguments so anything after "--" can override them, reading left to right.
+        Command.Arguments.AddRange(Arguments.ForwardedArguments);
+
+        return Launch(Command, bWaitForExit: true);
+    }
+
+    internal sealed record LaunchCommand(string Executable, string WorkingDirectory, List<string> Arguments);
+
+    // What running a built target means, read from its rules and checked to exist.
+    internal static LaunchCommand ResolveLaunch(
+        RulesAssembly Assembly,
+        BuildDirectories Directories,
+        CommandLine Arguments,
+        string TargetName,
+        TargetType TypeValue,
+        BuildPlatform PlatformValue,
+        BuildConfiguration ConfigurationValue)
+    {
         IBuildPlatform PlatformSupport = BuildPlatformRegistry.Get(PlatformValue);
         BuildOptions Options = BuildOptions.Load(Directories, Arguments);
 
@@ -56,17 +76,11 @@ public static class RunMode
                 + $"  {HostScriptName("LuminaBuild")} Build {TargetName} -TargetType={TypeValue} -Configuration={ConfigurationValue}");
         }
 
-        // Target arguments first so anything forwarded after "--" can override them, reading left to right.
-        List<string> LaunchArguments = new();
+        List<string> LaunchArguments = Target.Rules.DebuggerArguments.Length > 0
+            ? SplitArguments(Target.Rules.DebuggerArguments)
+            : new List<string>();
 
-        if (Target.Rules.DebuggerArguments.Length > 0)
-        {
-            LaunchArguments.AddRange(SplitArguments(Target.Rules.DebuggerArguments));
-        }
-
-        LaunchArguments.AddRange(Arguments.ForwardedArguments);
-
-        return Launch(Executable, Target.Rules.DebuggerWorkingDirectory, LaunchArguments);
+        return new LaunchCommand(Executable, Target.Rules.DebuggerWorkingDirectory, LaunchArguments);
     }
 
     /// <summary>Front-end script for this host, so a diagnostic never names the wrong one.</summary>
@@ -116,8 +130,10 @@ public static class RunMode
         return Result;
     }
 
-    private static int Launch(string Executable, string WorkingDirectory, IReadOnlyList<string> LaunchArguments)
+    internal static int Launch(LaunchCommand Command, bool bWaitForExit)
     {
+        (string Executable, string WorkingDirectory, List<string> LaunchArguments) = Command;
+
         Log.Info("Running {0}", Executable);
 
         if (LaunchArguments.Count > 0)
@@ -125,9 +141,10 @@ public static class RunMode
             Log.Verbose("Arguments: {0}", string.Join(' ', LaunchArguments));
         }
 
+        // A launch nobody waits on goes through the shell, so it holds none of this console's handles once it closes.
         ProcessStartInfo StartInfo = new(Executable)
         {
-            UseShellExecute = false,
+            UseShellExecute = !bWaitForExit,
         };
 
         // Only when the rules asked for one, since the engine finds its root from the executable.
@@ -149,6 +166,11 @@ public static class RunMode
             {
                 Log.Error("Could not start '{0}'.", Executable);
                 return 1;
+            }
+
+            if (!bWaitForExit)
+            {
+                return 0;
             }
 
             Runner.WaitForExit();

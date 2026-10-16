@@ -21,6 +21,10 @@ namespace Lumina
 		{
 			RefValue = OriginalValue;
 		}
+		TGuardValue(const TGuardValue&) = delete;
+		TGuardValue& operator=(const TGuardValue&) = delete;
+		TGuardValue(TGuardValue&&) = delete;
+		TGuardValue& operator=(TGuardValue&&) = delete;
     	
 		FORCEINLINE const AssignedType& GetOriginalValue() const
 		{
@@ -48,6 +52,10 @@ namespace Lumina
 	    {
 	        AtomicRef.store(OriginalValue, std::memory_order_relaxed);
 	    }
+	    TGuardAtomicValue(const TGuardAtomicValue&) = delete;
+	    TGuardAtomicValue& operator=(const TGuardAtomicValue&) = delete;
+	    TGuardAtomicValue(TGuardAtomicValue&&) = delete;
+	    TGuardAtomicValue& operator=(TGuardAtomicValue&&) = delete;
 	
 	    FORCEINLINE const AtomicType& GetOriginalValue() const
 	    {
@@ -76,6 +84,10 @@ namespace Lumina
 	    {
 	        Ref.fetch_sub(Delta, std::memory_order_acq_rel);
 	    }
+	    TAtomicScopeGuard(const TAtomicScopeGuard&) = delete;
+	    TAtomicScopeGuard& operator=(const TAtomicScopeGuard&) = delete;
+	    TAtomicScopeGuard(TAtomicScopeGuard&&) = delete;
+	    TAtomicScopeGuard& operator=(TAtomicScopeGuard&&) = delete;
 	};
 	
     

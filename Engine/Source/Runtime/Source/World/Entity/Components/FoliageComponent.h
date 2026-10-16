@@ -26,17 +26,17 @@ namespace Lumina
     {
         GENERATED_BODY()
 
-        PROPERTY()
+        PROPERTY(Hidden)
         FVector3 Position = FVector3(0.0f);
 
-        PROPERTY()
+        PROPERTY(Hidden)
         FVector4 Rotation = FVector4(0.0f, 0.0f, 0.0f, 1.0f);
 
-        PROPERTY()
+        PROPERTY(Hidden)
         FVector3 Scale = FVector3(1.0f);
 
         /** Index into the owning component's Types array. */
-        PROPERTY()
+        PROPERTY(Hidden)
         int32 TypeIndex = 0;
 
         FQuat GetRotationQuat() const { return FQuat(Rotation.w, Rotation.x, Rotation.y, Rotation.z); }
@@ -161,7 +161,7 @@ namespace Lumina
         PROPERTY(Editable, Category = "Foliage")
         TVector<SFoliageType> Types;
 
-        PROPERTY(Category = "Foliage")
+        PROPERTY(Hidden, Category = "Foliage")
         TVector<SFoliageInstance> Instances;
 
         // Transient: last terrain HeightmapVersion this component re-projected against (terrain follow).

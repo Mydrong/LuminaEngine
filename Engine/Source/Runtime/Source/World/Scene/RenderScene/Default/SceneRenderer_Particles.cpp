@@ -156,7 +156,7 @@ namespace Lumina
 
     static bool IsParticleDrawable(const FParticleExtract& Item)
     {
-        return Item.Resolved.RenderMode != EParticleRenderMode::Mesh || Item.MeshletHeaderSlot != 0u;
+        return Item.bOnDrawnLayer && (Item.Resolved.RenderMode != EParticleRenderMode::Mesh || Item.MeshletHeaderSlot != 0u);
     }
 
     RHI::FGPUAllocation FDefaultSceneRenderer::AcquireParticleBuffer(uint64 Size, const char* DebugName)

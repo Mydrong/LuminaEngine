@@ -45,6 +45,10 @@ namespace Lumina::Containers
                     Value.~T();
                 }
             }
+            TOptionalStorage(const TOptionalStorage&) = delete;
+            TOptionalStorage& operator=(const TOptionalStorage&) = delete;
+            TOptionalStorage(TOptionalStorage&&) = delete;
+            TOptionalStorage& operator=(TOptionalStorage&&) = delete;
         };
 
         /** Keeps TOptional trivially destructible when T is, so it stays cheap in an array or a struct. */
@@ -94,6 +98,7 @@ namespace Lumina::Containers
             Construct(std::forward<TArgs>(Args)...);
         }
 
+        ~TOptional() = default;
         TOptional(const TOptional& Other)
         {
             if (Other.bEngaged)

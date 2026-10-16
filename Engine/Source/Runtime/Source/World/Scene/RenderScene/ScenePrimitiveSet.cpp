@@ -19,9 +19,20 @@
 #include "World/Entity/Components/SkeletalMeshComponent.h"
 #include "World/Entity/Components/StaticMeshComponent.h"
 #include "World/Entity/Components/TransformComponent.h"
+#include "Containers/Algorithm.h"
 
 namespace Lumina
 {
+    template <typename TArray>
+    static void ReserveGeometric(TArray& Array, SIZE_T Target)
+    {
+        const SIZE_T Capacity = Array.capacity();
+        if (Target <= Capacity)
+        {
+            return;
+        }
+        Array.reserve(Math::Max(Target, Capacity + Capacity / 2u));
+    }
 
     static FORCEINLINE uint64 PackDirty(ECS::FEntity Entity, EPrimitiveSource Source, EPrimitiveDirty Flags)
     {
@@ -188,22 +199,21 @@ namespace Lumina
 
     void FSceneBatchRegistry::ReleaseBatchRef(uint32 BatchIndex, bool bSkinned)
     {
-        if (BatchIndex >= (uint32)Batches.size())
+        ReleaseBatchRefs(BatchIndex, bSkinned, 1u);
+    }
+
+    void FSceneBatchRegistry::ReleaseBatchRefs(uint32 BatchIndex, bool bSkinned, uint32 Count)
+    {
+        if (BatchIndex >= (uint32)Batches.size() || Count == 0u)
         {
             return;
         }
 
         FBatch& Batch = Batches[BatchIndex];
-        if (Batch.RefCount > 0)
-        {
-            --Batch.RefCount;
-        }
+        Batch.RefCount -= Math::Min(Batch.RefCount, Count);
 
         uint32& Kind = bSkinned ? Batch.SkinnedRefCount : Batch.StaticRefCount;
-        if (Kind > 0)
-        {
-            --Kind;
-        }
+        Kind -= Math::Min(Kind, Count);
 
         if (Batch.RefCount == 0u)
         {
@@ -358,7 +368,12 @@ namespace Lumina
         {
             ++SkinnedCount;
             ++BonelessSkinnedCount;
-            ++SkeletalSetGeneration;
+
+            // Kept in step here, so streaming other primitives never pays for a walk over all of them.
+            if (SkeletalIndicesGeneration == SkeletalSetGeneration)
+            {
+                SkeletalIndices.push_back(Index);
+            }
         }
 
         ++StructureGeneration;
@@ -386,11 +401,24 @@ namespace Lumina
         Primitives[Index].BoneCount = 0u;
         UnlinkHandle(Index, Primitives[Index].ResolveHandle);
 
-        // The tail primitive moves into this slot, so the skeletal index list shifts only when either is skeletal.
-        if (Primitives[Index].Source == EPrimitiveSource::SkeletalMesh
-            || Primitives[Last].Source == EPrimitiveSource::SkeletalMesh)
+        // The tail primitive moves into this slot, so only the removed entry and the tail's entry change.
+        if (SkeletalIndicesGeneration == SkeletalSetGeneration)
         {
-            ++SkeletalSetGeneration;
+            if (Primitives[Index].Source == EPrimitiveSource::SkeletalMesh)
+            {
+                if (auto It = Algo::Find(SkeletalIndices, Index); It != SkeletalIndices.end())
+                {
+                    *It = SkeletalIndices.back();
+                    SkeletalIndices.pop_back();
+                }
+            }
+            if (Index != Last && Primitives[Last].Source == EPrimitiveSource::SkeletalMesh)
+            {
+                if (auto It = Algo::Find(SkeletalIndices, Last); It != SkeletalIndices.end())
+                {
+                    *It = Index;
+                }
+            }
         }
 
         if (Index != Last)
@@ -453,10 +481,7 @@ namespace Lumina
             {
                 return;
             }
-            for (FFoliageInstanceRef& Ref : It->second.Instances)
-            {
-                ReleaseFoliageInstance(Ref);
-            }
+            PendingFoliageReleases.push_back(Move(It->second));
             FoliageByEntity.erase(It);
             ++StructureGeneration;
             return;
@@ -474,6 +499,9 @@ namespace Lumina
 
     void FScenePrimitiveSet::CompactBindings()
     {
+        // Pending releases still point into the old layout, so they go before anything moves.
+        FlushFoliageReleases();
+
         TVector<FSurfaceBinding> Packed;
         Packed.reserve(Bindings.size() - DeadBindings);
 
@@ -512,6 +540,43 @@ namespace Lumina
 
         Bindings.swap(Packed);
         DeadBindings = 0;
+        BindingFreeRanges.clear();
+        FreeRangeBindings = 0;
+    }
+
+    bool FScenePrimitiveSet::ShouldCompactBindings() const
+    {
+        const uint32 Wasted = DeadBindings - Math::Min(DeadBindings, FreeRangeBindings);
+        return (Wasted > 1024 && Wasted * 4 > (uint32)Bindings.size())
+            || FreeRangeBindings > (uint32)Bindings.size() / 2u;
+    }
+
+    uint32 FScenePrimitiveSet::TakeBindingRange(uint32 Count)
+    {
+        for (size_t i = 0; i < BindingFreeRanges.size() && Count != 0u; ++i)
+        {
+            FUIntVector2& Range = BindingFreeRanges[i];
+            if (Range.y < Count)
+            {
+                continue;
+            }
+
+            const uint32 Base = Range.x;
+            Range.x += Count;
+            Range.y -= Count;
+            if (Range.y == 0u)
+            {
+                Range = BindingFreeRanges.back();
+                BindingFreeRanges.pop_back();
+            }
+            DeadBindings      -= Math::Min(DeadBindings, Count);
+            FreeRangeBindings -= Math::Min(FreeRangeBindings, Count);
+            return Base;
+        }
+
+        const uint32 Base = (uint32)Bindings.size();
+        Bindings.resize(Base + Count);
+        return Base;
     }
 
     uint32 FScenePrimitiveSet::AllocateInstanceSlot()
@@ -535,6 +600,25 @@ namespace Lumina
         return Slot;
     }
 
+    uint32 FScenePrimitiveSet::AllocateSkinnedIndex()
+    {
+        if (!SkinnedIndexFreeList.empty())
+        {
+            const uint32 Index = SkinnedIndexFreeList.back();
+            SkinnedIndexFreeList.pop_back();
+            return Index;
+        }
+        return SkinnedIndexExtent++;
+    }
+
+    void FScenePrimitiveSet::FreeSkinnedIndex(uint32 Index)
+    {
+        if (Index != kNoSkinnedIndex)
+        {
+            SkinnedIndexFreeList.push_back(Index);
+        }
+    }
+
     void FScenePrimitiveSet::FreeInstanceSlot(uint32 Slot)
     {
         if (Slot >= (uint32)RetainedCullEntries.size())
@@ -553,10 +637,7 @@ namespace Lumina
         if (Slot < (uint32)SlotMeshletVisibility.size())
         {
             FUIntVector2& Range = SlotMeshletVisibility[Slot];
-            if (Range.y != 0u)
-            {
-                MeshletVisibilityFreeLists[Range.y].push_back(Range.x);
-            }
+            FreeMeshletVisibilityRange(Range.x, Range.y);
             Range = FUIntVector2(kNoMeshletVisibility, 0u);
         }
 
@@ -590,11 +671,10 @@ namespace Lumina
             ReleaseMeshletVisibility(Slot);
             if (Words != 0u)
             {
-                auto It = MeshletVisibilityFreeLists.find(Words);
-                if (It != MeshletVisibilityFreeLists.end() && !It->second.empty())
+                if (Words < (uint32)MeshletVisibilityFreeLists.size() && !MeshletVisibilityFreeLists[Words].empty())
                 {
-                    Range.x = It->second.back();
-                    It->second.pop_back();
+                    Range.x = MeshletVisibilityFreeLists[Words].back();
+                    MeshletVisibilityFreeLists[Words].pop_back();
                 }
                 else
                 {
@@ -640,6 +720,19 @@ namespace Lumina
                 UpdateMeshletVisibility(Slot);
             }
         }
+    }
+
+    void FScenePrimitiveSet::FreeMeshletVisibilityRange(uint32 Base, uint32 Words)
+    {
+        if (Words == 0u)
+        {
+            return;
+        }
+        if (Words >= (uint32)MeshletVisibilityFreeLists.size())
+        {
+            MeshletVisibilityFreeLists.resize(Words + 1u);
+        }
+        MeshletVisibilityFreeLists[Words].push_back(Base);
     }
 
     void FScenePrimitiveSet::ResetMeshletVisibility()
@@ -1010,7 +1103,10 @@ namespace Lumina
 
         const FScenePrimitive&    Prim = Primitives[Index];
         const FPrimitiveCullData& Cull = CullData[Index];
-        const FVector4&           Sphere = Bounds[Index];
+        const FVector4            Sphere = InstanceSphereOf(Index);
+        // Its shadow would fall from where it is drawn rather than where it is.
+        const bool                bRemapped   = IsRemappedForeground(Prim);
+        const bool                bCastShadow = Prim.bCastShadow && !bRemapped;
 
         for (uint32 s = 0; s < Prim.SurfaceCount; ++s)
         {
@@ -1022,13 +1118,17 @@ namespace Lumina
             }
 
             EInstanceFlags Flags = Prim.BaseFlags | Binding.MaterialFlags;
-            if (Prim.bCastShadow && Binding.bMaterialCastsShadows)
+            if (bCastShadow && Binding.bMaterialCastsShadows)
             {
                 Flags |= EInstanceFlags::CastShadow;
                 if (Prim.bCastFarShadow)
                 {
                     Flags |= EInstanceFlags::CastFarShadow;
                 }
+            }
+            if (bRemapped)
+            {
+                Flags &= ~EInstanceFlags::HasDistanceField;
             }
 
             // Skeletal primitives are Active now, so CullInstances compacts them like everything else.
@@ -1049,17 +1149,19 @@ namespace Lumina
             NewCull.DrawIDAndFlags   = PackDrawIDAndFlags(Binding.BatchIndex, Flags);
             NewCull.SurfaceDescIndex = Binding.SurfaceDescIndex;
             NewCull.MaxDrawDistance  = Cull.MaxDrawDistance;
-            NewCull.LODAndThinning   = PackLODAndThinning(Prim.ForcedLODIndex, 0.0f);
+            NewCull.LODAndThinning   = PackLODAndThinning(Prim.ForcedLODIndex, 0.0f, Prim.RenderLayers);
 
-            const FTransform3x4 NewTransform = PackTransform3x4(Prim.Transform);
+            const FTransform3x4 NewTransform = PackTransform3x4(InstanceTransformOf(Prim));
 
             FInstanceStatic NewStatic = {};
             NewStatic.MeshletHeaderSlot = Prim.MeshletHeaderSlot;
             NewStatic.CustomData        = Prim.CustomData;
             NewStatic.MaterialIndex     = Binding.MaterialIndex;
             NewStatic.EntityID          = Prim.EntityID;
+            NewStatic.SkinnedIndex      = Binding.SkinnedIndex;
             // Owned by AssignMeshletVisibility, which a rebuilt payload must not undo.
             NewStatic.MeshletVisibilityBase = RetainedStatic[Slot].MeshletVisibilityBase;
+            NewStatic.RenderLayers      = Prim.RenderLayers;
 
             // A resolve bump onto identical values must not dirty the slot, or every instance re-uploads.
             const bool bCullChanged      = StoreIfChanged(RetainedCullEntries[Slot], NewCull);
@@ -1090,8 +1192,8 @@ namespace Lumina
         }
 
         const FScenePrimitive& Prim   = Primitives[Index];
-        const FVector4&        Sphere = Bounds[Index];
-        const FTransform3x4    Packed = PackTransform3x4(Prim.Transform);
+        const FVector4         Sphere = InstanceSphereOf(Index);
+        const FTransform3x4    Packed = PackTransform3x4(InstanceTransformOf(Prim));
 
         for (uint32 s = 0; s < Prim.SurfaceCount; ++s)
         {
@@ -1119,6 +1221,77 @@ namespace Lumina
         }
     }
 
+    FMatrix4 FScenePrimitiveSet::InstanceTransformOf(const FScenePrimitive& Prim) const
+    {
+        return IsRemappedForeground(Prim) ? ForegroundTransform * Prim.Transform : Prim.Transform;
+    }
+
+    FVector4 FScenePrimitiveSet::InstanceSphereOf(uint32 Index) const
+    {
+        const FVector4& Sphere = Bounds[Index];
+        if (!IsRemappedForeground(Primitives[Index]))
+        {
+            return Sphere;
+        }
+        return FVector4(FVector3(ForegroundTransform * FVector4(FVector3(Sphere), 1.0f)), Sphere.w * ForegroundRadiusScale);
+    }
+
+    void FScenePrimitiveSet::TrackForeground(uint32 Index)
+    {
+        if ((Primitives[Index].RenderLayers & RenderLayers::kForegroundMask) != 0u && !Algo::Contains(ForegroundKeys, Keys[Index]))
+        {
+            ForegroundKeys.push_back(Keys[Index]);
+        }
+    }
+
+    void FScenePrimitiveSet::SetForegroundView(const FViewVolume& View, const FViewLayerSettings& Layers)
+    {
+        const bool bActive = Layers.IsForegroundActive() && !View.IsOrthographic();
+
+        // Scaled about the eye, toward it by the depth scale and across by the field of view ratio, so every point keeps its pixel ray.
+        FMatrix4 Transform(1.0f);
+        float    RadiusScale = 1.0f;
+        if (bActive)
+        {
+            const float Widen = Math::Tan(Math::Radians(View.GetFOV()) * 0.5f) / Math::Tan(Math::Radians(Layers.ForegroundFOV) * 0.5f);
+            const float Depth = Layers.ForegroundDepthScale;
+            Transform   = View.GetInverseViewMatrix() * Math::Scale(FMatrix4(1.0f), FVector3(Widen * Depth, Widen * Depth, Depth)) * View.GetViewMatrix();
+            RadiusScale = Math::Max(Widen, 1.0f) * Depth;
+        }
+
+        const bool bToggled = bActive != bForegroundActive;
+        if (!bToggled && Transform == ForegroundTransform)
+        {
+            return;
+        }
+
+        bForegroundActive     = bActive;
+        ForegroundTransform   = Transform;
+        ForegroundRadiusScale = RadiusScale;
+
+        for (SIZE_T i = 0; i < ForegroundKeys.size();)
+        {
+            const uint32 Index = FindPrimitive(ForegroundKeys[i]);
+            if (Index == Constants::kIndexNoneU32 || (Primitives[Index].RenderLayers & RenderLayers::kForegroundMask) == 0u)
+            {
+                ForegroundKeys[i] = ForegroundKeys.back();
+                ForegroundKeys.pop_back();
+                continue;
+            }
+
+            // Toggling changes whether it casts shadows, which only the full refresh rewrites.
+            if (bToggled)
+            {
+                RefreshInstances(Index);
+            }
+            else
+            {
+                RefreshInstanceTransform(Index);
+            }
+            ++i;
+        }
+    }
+
     void FScenePrimitiveSet::ReleaseBindingSpan(uint32 Base, uint32 Count)
     {
         for (uint32 s = 0; s < Count; ++s)
@@ -1126,11 +1299,12 @@ namespace Lumina
             const FSurfaceBinding& Binding = Bindings[Base + s];
             Batches.ReleaseBatchRef(Binding.BatchIndex, Binding.bSkinned);
             FreeInstanceSlot(Binding.InstanceSlot);
+            FreeSkinnedIndex(Binding.SkinnedIndex);
         }
         DeadBindings += Count;
     }
 
-    uint32 FScenePrimitiveSet::AppendBindingSpan(const FBindingMemo& Memo, bool bSkinned)
+    uint32 FScenePrimitiveSet::AppendBindingSpan(const FBindingMemo& Memo, bool bSkinned, bool bAssignSkinnedIndex)
     {
         const uint32 Base = (uint32)Bindings.size();
         for (const FSurfaceBinding& Proto : Memo.Protos)
@@ -1138,6 +1312,7 @@ namespace Lumina
             FSurfaceBinding& Binding = Bindings.emplace_back(Proto);
             Binding.InstanceSlot = AllocateInstanceSlot();
             Binding.bSkinned     = bSkinned;
+            Binding.SkinnedIndex = (bSkinned && bAssignSkinnedIndex) ? AllocateSkinnedIndex() : kNoSkinnedIndex;
 
             Batches.AddBatchRef(Binding.BatchIndex, bSkinned);
         }
@@ -1305,7 +1480,7 @@ namespace Lumina
 
         if (Memo != nullptr)
         {
-            AppendBindingSpan(*Memo, bSkinned);
+            AppendBindingSpan(*Memo, bSkinned, true);
         }
         else
         {
@@ -1323,10 +1498,11 @@ namespace Lumina
                 Binding.bMaterialCastsShadows = Surface.bMaterialCastsShadows;
                 Binding.bSkinned              = bSkinned;
                 Binding.TexelFactor           = Surface.TexelFactor;
+                Binding.SkinnedIndex          = bSkinned ? AllocateSkinnedIndex() : kNoSkinnedIndex;
             }
         }
 
-        if (DeadBindings > 1024 && DeadBindings * 4 > (uint32)Bindings.size())
+        if (ShouldCompactBindings())
         {
             CompactBindings();
         }
@@ -1368,6 +1544,7 @@ namespace Lumina
             Prim.ForcedLODIndex  = Component.ForcedLODIndex;
             Prim.bCastShadow     = Component.bCastShadow;
             Prim.bCastFarShadow  = Component.bCastFarShadow;
+            Prim.RenderLayers    = Component.RenderLayers.Bits;
 
             Cull.MaxDrawDistance = Component.MaxDrawDistance;
             Cull.bCastShadow     = Component.bCastShadow ? 1u : 0u;
@@ -1557,6 +1734,7 @@ namespace Lumina
         }
 
         RebuildWorldBounds(Index);
+        TrackForeground(Index);
         RefreshInstances(Index);
         ++StructureGeneration;
 
@@ -1627,6 +1805,207 @@ namespace Lumina
         }
 
         RefreshPrimitiveData(Pools, Index);
+    }
+
+    void FScenePrimitiveSet::FlushFoliageReleases()
+    {
+        if (PendingFoliageReleases.empty())
+        {
+            return;
+        }
+
+        LUMINA_PROFILE_SECTION("Sync/Release Foliage");
+
+        // Blocks across every pending entity, since one chunk's foliage is too small to split on its own.
+        constexpr uint32 kInstancesPerBlock = 4096;
+        uint32 NumBlocks = 0;
+        for (const FFoliageEntityState& State : PendingFoliageReleases)
+        {
+            NumBlocks += ((uint32)State.Instances.size() + kInstancesPerBlock - 1u) / kInstancesPerBlock;
+        }
+        if ((uint32)FoliageReleaseBlocks.size() < NumBlocks)
+        {
+            FoliageReleaseBlocks.resize(NumBlocks);
+        }
+        {
+            uint32 Next = 0;
+            for (uint32 StateIndex = 0; StateIndex < (uint32)PendingFoliageReleases.size(); ++StateIndex)
+            {
+                const uint32 NumInstances = (uint32)PendingFoliageReleases[StateIndex].Instances.size();
+                for (uint32 Begin = 0; Begin < NumInstances; Begin += kInstancesPerBlock)
+                {
+                    FFoliageReleaseBlock& Block = FoliageReleaseBlocks[Next++];
+                    Block.State = StateIndex;
+                    Block.Begin = Begin;
+                    Block.End   = Math::Min(NumInstances, Begin + kInstancesPerBlock);
+                }
+            }
+        }
+
+        // Counted first, so each block knows where its slots land before any are written.
+        Task::ParallelFor(NumBlocks, [this](const Task::FParallelRange& Range)
+        {
+            for (uint32 b = Range.Start; b < Range.End; ++b)
+            {
+                FFoliageReleaseBlock& Block = FoliageReleaseBlocks[b];
+                const TVector<FFoliageInstanceRef>& Instances = PendingFoliageReleases[Block.State].Instances;
+                Block.NumBindings = 0u;
+                Block.bContiguous = true;
+                for (uint32 i = Block.Begin; i < Block.End; ++i)
+                {
+                    const FFoliageInstanceRef& Ref = Instances[i];
+                    if (Ref.SurfaceCount == 0u)
+                    {
+                        continue;
+                    }
+                    if (Block.NumBindings == 0u)
+                    {
+                        Block.FirstBase = Ref.BindingBase;
+                    }
+                    else if (Ref.BindingBase != Block.EndBase)
+                    {
+                        Block.bContiguous = false;
+                    }
+                    Block.EndBase      = Ref.BindingBase + Ref.SurfaceCount;
+                    Block.NumBindings += Ref.SurfaceCount;
+                }
+            }
+        }, 4);
+
+        // An entity whose bindings form one span leaves it whole for the next fresh bind.
+        uint32 Total = 0;
+        for (uint32 b = 0; b < NumBlocks;)
+        {
+            const uint32 StateIndex = FoliageReleaseBlocks[b].State;
+            uint32 StateBindings = 0;
+            uint32 SpanBase      = 0;
+            uint32 SpanEnd       = 0;
+            bool   bContiguous   = true;
+            for (; b < NumBlocks && FoliageReleaseBlocks[b].State == StateIndex; ++b)
+            {
+                FFoliageReleaseBlock& Block = FoliageReleaseBlocks[b];
+                Block.SlotOffset = Total;
+                if (Block.NumBindings == 0u)
+                {
+                    continue;
+                }
+                if (StateBindings == 0u)
+                {
+                    SpanBase = Block.FirstBase;
+                }
+                else if (Block.FirstBase != SpanEnd)
+                {
+                    bContiguous = false;
+                }
+                bContiguous    = bContiguous && Block.bContiguous;
+                SpanEnd        = Block.EndBase;
+                StateBindings += Block.NumBindings;
+                Total         += Block.NumBindings;
+            }
+            if (bContiguous && StateBindings != 0u)
+            {
+                BindingFreeRanges.emplace_back(SpanBase, StateBindings);
+                FreeRangeBindings += StateBindings;
+            }
+        }
+
+        FoliageSlotScratch.resize(Total);
+        Task::ParallelFor(NumBlocks, [this](const Task::FParallelRange& Range)
+        {
+            for (uint32 b = Range.Start; b < Range.End; ++b)
+            {
+                FFoliageReleaseBlock& Block = FoliageReleaseBlocks[b];
+                const TVector<FFoliageInstanceRef>& Instances = PendingFoliageReleases[Block.State].Instances;
+                Block.Runs.clear();
+                uint32 Write = Block.SlotOffset;
+                for (uint32 i = Block.Begin; i < Block.End; ++i)
+                {
+                    const FFoliageInstanceRef& Ref = Instances[i];
+                    for (uint32 s = 0; s < Ref.SurfaceCount; ++s)
+                    {
+                        const FSurfaceBinding& Binding = Bindings[Ref.BindingBase + s];
+                        if (Block.Runs.empty() || Block.Runs.back().x != Binding.BatchIndex || Block.Runs.back().y != (uint32)Binding.bSkinned)
+                        {
+                            Block.Runs.emplace_back(Binding.BatchIndex, (uint32)Binding.bSkinned, 0u);
+                        }
+                        ++Block.Runs.back().z;
+                        FoliageSlotScratch[Write++] = Binding.InstanceSlot;
+                    }
+                }
+            }
+        }, 4);
+
+        for (uint32 b = 0; b < NumBlocks; ++b)
+        {
+            for (const FUIntVector3& Run : FoliageReleaseBlocks[b].Runs)
+            {
+                Batches.ReleaseBatchRefs(Run.x, Run.y != 0u, Run.z);
+            }
+        }
+
+        DeadBindings += Total;
+        PendingFoliageReleases.clear();
+
+        // A slot past the retained arrays was never live, so it must not reach the free list.
+        const uint32 SlotLimit = (uint32)RetainedCullEntries.size();
+        FoliageSlotScratch.erase(Algo::RemoveIf(FoliageSlotScratch, [SlotLimit](uint32 Slot) { return Slot >= SlotLimit; }),
+                                 FoliageSlotScratch.end());
+
+        const uint32 Count = (uint32)FoliageSlotScratch.size();
+        LUMINA_PROFILE_VALUE("Sync/ReleasedFoliageSlots", (int64)Count);
+        if (Count == 0u)
+        {
+            return;
+        }
+
+        const uint32 NumThreads = (GTaskSystem != nullptr) ? GTaskSystem->GetNumTaskThreads() : 0u;
+        if ((uint32)ParallelDirtySlots.size() < NumThreads)
+        {
+            ParallelDirtySlots.resize(NumThreads);
+        }
+        for (FDirtySlotBucket& Bucket : ParallelDirtySlots)
+        {
+            Bucket.Slots.clear();
+        }
+
+        // The slots scatter across the retained arrays, so the cache misses spread over workers instead of one thread.
+        Task::ParallelFor(Count, [this](const Task::FParallelRange& Range)
+        {
+            // Pairs of base and word count, so the serial pass after only appends to the free lists.
+            TVector<uint32>& FreedRanges = ParallelDirtySlots[Range.Thread].Slots;
+            for (uint32 i = Range.Start; i < Range.End; ++i)
+            {
+                const uint32 Slot = FoliageSlotScratch[i];
+                RetainedCullEntries[Slot].DrawIDAndFlags &= ~((uint32)EInstanceFlags::Active << 16);
+                RetainedStatic[Slot].MeshletVisibilityBase = kNoMeshletVisibility;
+                if (Slot < (uint32)SlotMeshletVisibility.size())
+                {
+                    FUIntVector2& Visibility = SlotMeshletVisibility[Slot];
+                    if (Visibility.y != 0u)
+                    {
+                        FreedRanges.push_back(Visibility.x);
+                        FreedRanges.push_back(Visibility.y);
+                    }
+                    Visibility = FUIntVector2(kNoMeshletVisibility, 0u);
+                }
+            }
+        }, 16384);
+
+        for (const FDirtySlotBucket& Bucket : ParallelDirtySlots)
+        {
+            for (size_t i = 0; i + 1 < Bucket.Slots.size(); i += 2)
+            {
+                FreeMeshletVisibilityRange(Bucket.Slots[i], Bucket.Slots[i + 1]);
+            }
+        }
+
+        InstanceFreeSlots.insert(InstanceFreeSlots.end(), FoliageSlotScratch.begin(), FoliageSlotScratch.end());
+
+        // Only the active bit changed, which the GPU clears from the slot list instead of a re-send of each entry.
+        if (!bFullInstanceUpload)
+        {
+            DeactivatedSlots.insert(DeactivatedSlots.end(), FoliageSlotScratch.begin(), FoliageSlotScratch.end());
+        }
     }
 
     void FScenePrimitiveSet::ReleaseFoliageInstance(FFoliageInstanceRef& Ref)
@@ -1803,6 +2182,7 @@ namespace Lumina
         OutStatic.MeshletHeaderSlot = Type.MeshletHeaderSlot;
         OutStatic.MaterialIndex     = Binding.MaterialIndex;
         OutStatic.EntityID          = EntityID;
+        OutStatic.SkinnedIndex      = kNoSkinnedIndex;
     }
 
     void FScenePrimitiveSet::BindFreshFoliage(FFoliageEntityState& State, const SFoliageComponent& Foliage, const TVector<FFoliageBakedInstance>& Baked, uint32 EntityID)
@@ -1811,9 +2191,8 @@ namespace Lumina
 
         const uint32 TypeCount   = (uint32)FoliageTypeScratch.size();
         const uint32 NewCount    = (uint32)Baked.size();
-        const uint32 BindingBase = (uint32)Bindings.size();
 
-        // Serial, because each span starts where the previous one ended.
+        // Serial, because each span starts where the previous one ended. Offsets are relative until the span is placed.
         TVector<uint32> InstancesPerType(TypeCount, 0u);
         uint32 TotalBindings = 0;
         for (uint32 i = 0; i < NewCount; ++i)
@@ -1826,7 +2205,7 @@ namespace Lumina
             FFoliageInstanceRef& Ref = State.Instances[i];
             Ref.TypeRow      = bValidType ? (uint16)TypeIndex : 0xFFFFu;
             Ref.SurfaceCount = (uint16)WantCount;
-            Ref.BindingBase  = (WantCount != 0u) ? BindingBase + TotalBindings : 0u;
+            Ref.BindingBase  = TotalBindings;
             TotalBindings   += WantCount;
             if (Memo != nullptr)
             {
@@ -1847,18 +2226,35 @@ namespace Lumina
             }
         }
 
-        Bindings.resize(BindingBase + TotalBindings);
-        const uint32 SlotBase = AllocateInstanceSlotBlock(TotalBindings);
+        // A removed chunk's foliage left a span about this size, so streaming reuses it rather than growing toward a compaction.
+        const uint32 BindingBase = TakeBindingRange(TotalBindings);
+
+        // From the free list, since a streamed chunk's foliage frees its slots one at a time and a fresh block never reused them.
+        FoliageSlotScratch.resize(TotalBindings);
+        for (uint32& Slot : FoliageSlotScratch)
+        {
+            // A fresh slot is marked by the allocator, and a reused one is not.
+            const bool bReused = !InstanceFreeSlots.empty();
+            Slot = AllocateInstanceSlot();
+            if (bReused)
+            {
+                MarkInstanceDirty(Slot);
+                MarkStaticDirty(Slot);
+            }
+        }
 
         Task::ParallelFor(NewCount, [&](const Task::FParallelRange& Range)
         {
             for (uint32 i = Range.Start; i < Range.End; ++i)
             {
-                const FFoliageInstanceRef& Ref = State.Instances[i];
+                FFoliageInstanceRef& Ref = State.Instances[i];
                 if (Ref.SurfaceCount == 0u)
                 {
+                    Ref.BindingBase = 0u;
                     continue;
                 }
+                const uint32 Offset = Ref.BindingBase;
+                Ref.BindingBase     = BindingBase + Offset;
 
                 const FFoliageTypeResolve& Type = FoliageTypeScratch[Ref.TypeRow];
                 const FBindingMemo&        Memo = *FoliageMemoScratch[Ref.TypeRow];
@@ -1868,7 +2264,7 @@ namespace Lumina
                 {
                     FSurfaceBinding& Binding = Bindings[Ref.BindingBase + s];
                     Binding              = Memo.Protos[s];
-                    Binding.InstanceSlot = SlotBase + (Ref.BindingBase - BindingBase) + s;
+                    Binding.InstanceSlot = FoliageSlotScratch[Offset + s];
                     Binding.bSkinned     = bSkinned;
 
                     BuildFoliageEntries(Binding, Type, Baked[i], EntityID, Foliage.IsInstanceHidden(i),
@@ -2042,7 +2438,7 @@ namespace Lumina
                 if (Memo != nullptr)
                 {
                     const bool bSkinned = EnumHasAnyFlags(Type.BaseFlags, EInstanceFlags::Skinned);
-                    Ref.BindingBase  = AppendBindingSpan(*Memo, bSkinned);
+                    Ref.BindingBase  = AppendBindingSpan(*Memo, bSkinned, false);
                     Ref.SurfaceCount = (uint16)WantCount;
                 }
                 Ref.TypeRow = TypeRow;
@@ -2063,7 +2459,7 @@ namespace Lumina
         // The binds above already read the hidden flags, so edits queued before them are settled.
         Foliage->PendingVisibilityEdits.clear();
 
-        if (DeadBindings > 1024 && DeadBindings * 4 > (uint32)Bindings.size())
+        if (ShouldCompactBindings())
         {
             CompactBindings();
         }
@@ -2194,6 +2590,11 @@ namespace Lumina
         BoneSliceSweepCursor = 0;
         ++SkeletalSetGeneration;
         DeadBindings = 0;
+        BindingFreeRanges.clear();
+        FreeRangeBindings = 0;
+        PendingFoliageReleases.clear();
+        SkinnedIndexFreeList.clear();
+        SkinnedIndexExtent = 0;
         LinksByEntityIndex.clear();
         SkinnedCount = 0;
         BonelessSkinnedCount = 0;
@@ -2242,6 +2643,7 @@ namespace Lumina
         {
             SyncFoliage(Registry, Pools, Entity, EPrimitiveDirty::All);
         }
+        FlushFoliageReleases();
 
         ++StructureGeneration;
     }
@@ -2408,17 +2810,6 @@ namespace Lumina
         SyncStats.CoalescedEntities = (uint32)CoalescedScratch.size();
     }
 
-    template <typename TArray>
-    static void ReserveGeometric(TArray& Array, SIZE_T Target)
-    {
-        const SIZE_T Capacity = Array.capacity();
-        if (Target <= Capacity)
-        {
-            return;
-        }
-        Array.reserve(Math::Max(Target, Capacity + Capacity / 2u));
-    }
-
     void FScenePrimitiveSet::ReserveForDrain()
     {
         uint32 NewPrimitives = 0;
@@ -2496,6 +2887,7 @@ namespace Lumina
     void FScenePrimitiveSet::ApplyStructuralRecords(ECS::FRegistry& Registry, const FSyncPools& Pools)
     {
         LUMINA_PROFILE_SECTION("Sync/Apply/Structural");
+        LUMINA_PROFILE_VALUE("Sync/StructuralRecords", (int64)StructuralRecords.size());
 
         for (uint32 RecordIndex : StructuralRecords)
         {
@@ -2519,7 +2911,9 @@ namespace Lumina
             }
         }
 
-        if (DeadBindings > 1024 && DeadBindings * 4 > (uint32)Bindings.size())
+        FlushFoliageReleases();
+
+        if (ShouldCompactBindings())
         {
             CompactBindings();
         }
@@ -2859,6 +3253,7 @@ namespace Lumina
                     SyncEntity(Registry, Pools, Entity, Source, EPrimitiveDirty::Data);
                 }
             }
+            FlushFoliageReleases();
         }
 
         PublishSyncStats();
@@ -2911,6 +3306,11 @@ namespace Lumina
         BoneSliceSweepCursor = 0;
         ++SkeletalSetGeneration;
         DeadBindings = 0;
+        BindingFreeRanges.clear();
+        FreeRangeBindings = 0;
+        PendingFoliageReleases.clear();
+        SkinnedIndexFreeList.clear();
+        SkinnedIndexExtent = 0;
         LinksByEntityIndex.clear();
         SkinnedCount = 0;
         BonelessSkinnedCount = 0;

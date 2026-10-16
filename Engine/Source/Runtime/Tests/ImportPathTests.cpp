@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include "Tools/Import/ImportPaths.h"
+#include "Core/Object/ObjectCore.h"
 
 using namespace Lumina;
 
@@ -80,6 +81,53 @@ TEST(ImportPaths, AScopedReservationReleasesUnlessCommitted)
         Reservation.Commit();
     }
     EXPECT_FALSE(Import::PathReservations::IsFree(Path)) << "a committed scope keeps the name";
+
+    Import::PathReservations::Release(Path);
+}
+
+// A package's file name and its object name differ by the extension, so releasing either frees the reservation.
+TEST(ImportPaths, ReleasingThePackageFileFreesTheName)
+{
+    const FFixedString Path = TestPath("WithExtension");
+    Import::PathReservations::Release(Path);
+
+    ASSERT_EQ(Import::PathReservations::Reserve(Path), Path);
+    Import::PathReservations::Release(FFixedString(Path).append(".lasset"));
+
+    EXPECT_TRUE(Import::PathReservations::IsFree(Path));
+}
+
+// Package names ignore case, so a differently cased request must not slip past a held name.
+TEST(ImportPaths, ANameDifferingOnlyInCaseIsTaken)
+{
+    const FFixedString Path = TestPath("CaseHeld");
+    Import::PathReservations::Release(Path);
+
+    ASSERT_EQ(Import::PathReservations::Reserve(Path), Path);
+    EXPECT_FALSE(Import::PathReservations::IsFree(TestPath("CASEHELD")));
+
+    Import::PathReservations::Release(Path);
+}
+
+// Only the package extension goes, so a dot in a folder or file name survives, and a second pass changes nothing.
+TEST(ImportPaths, SanitizingKeepsDotsInFoldersAndFileNames)
+{
+    EXPECT_EQ(SanitizeObjectName("/Game/Props.v2/Crate.lasset"), FFixedString("/Game/Props.v2/Crate"));
+    EXPECT_EQ(SanitizeObjectName("/Game/Textures/rock.diffuse.lasset"), FFixedString("/Game/Textures/rock.diffuse"));
+    EXPECT_EQ(SanitizeObjectName(SanitizeObjectName("/Game/Textures/rock.diffuse.lasset")), FFixedString("/Game/Textures/rock.diffuse"));
+}
+
+// A name found free is only a name, so the next caller can still be handed it.
+TEST(ImportPaths, FindingAFreeNameDoesNotReserveIt)
+{
+    const FFixedString Path = TestPath("Probed");
+    Import::PathReservations::Release(Path);
+
+    EXPECT_EQ(Import::PathReservations::FindFree(Path), Path);
+    EXPECT_TRUE(Import::PathReservations::IsFree(Path));
+
+    ASSERT_EQ(Import::PathReservations::Reserve(Path), Path);
+    EXPECT_EQ(Import::PathReservations::FindFree(Path), FFixedString(Path).append("_1"));
 
     Import::PathReservations::Release(Path);
 }

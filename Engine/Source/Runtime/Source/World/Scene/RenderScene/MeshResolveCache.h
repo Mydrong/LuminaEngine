@@ -143,6 +143,16 @@ namespace Lumina
 
         static void InvalidateDependency(const void* Asset);
 
+        // One bit per asset, so a set of dependencies folds into a word and a test against it is one AND.
+        static FORCEINLINE uint64 DependencyBit(const void* Asset)
+        {
+            return 1ull << ((((uint64)(uintptr_t)Asset >> 4) * 0x9E3779B97F4A7C15ull) >> 58);
+        }
+
+        // Every scene renderer holds one, so an invalidation reaches each world rather than whichever reads it first.
+        void AddInvalidationSink(std::atomic<uint64>* Sink);
+        void RemoveInvalidationSink(std::atomic<uint64>* Sink);
+
         void ApplyPendingInvalidations();
 
         static FORCEINLINE uint32 GetPendingGeneration() { return PendingGeneration.load(std::memory_order_acquire); }
@@ -174,6 +184,9 @@ namespace Lumina
 
         uint32                      TableGeneration = 1;
         uint32                      AppliedEpoch = 0;
+
+        // Guarded by PendingMutex, since InvalidateDependency runs on any thread.
+        TVector<std::atomic<uint64>*> InvalidationSinks;
 
         static std::atomic<uint32>  Epoch;
         static std::atomic<uint32>  PendingGeneration;

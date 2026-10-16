@@ -19,8 +19,6 @@
 
 namespace Lumina
 {
-    static constexpr ImVec2 GSoftButtonSize(42, 0);
-
     // Trailing path segment for a compact label ("/Game/Maps/Main" -> "Main").
     static FFixedString SoftLeafName(FStringView PathView)
     {
@@ -189,7 +187,7 @@ namespace Lumina
             }
 
             ImGui::BeginDisabled(!bHasPath);
-            if (ImGui::Button(LE_ICON_CONTENT_COPY "##Copy", GSoftButtonSize))
+            if (ImGui::Button(LE_ICON_CONTENT_COPY "##Copy", AssetPickerFilter::kButtonSize))
             {
                 ImGui::SetClipboardText(PathString.c_str());
             }
@@ -198,7 +196,7 @@ namespace Lumina
             ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.6f, 0.2f, 0.2f, 1.0f));
             ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.7f, 0.25f, 0.25f, 1.0f));
             ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.5f, 0.15f, 0.15f, 1.0f));
-            if (ImGui::Button(LE_ICON_CLOSE_CIRCLE "##Clear", GSoftButtonSize))
+            if (ImGui::Button(LE_ICON_CLOSE_CIRCLE "##Clear", AssetPickerFilter::kButtonSize))
             {
                 Path.Reset();
                 bWasChanged = true;

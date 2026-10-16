@@ -55,7 +55,7 @@ namespace Lumina
         FName MachineName;
 
         /** The state machine's canvas. Allocated lazily; edited by double-clicking the node. */
-        PROPERTY()
+        PROPERTY(Hidden)
         TStrongObjectPtr<CAnimStateMachineGraph> StateMachineGraph;
 
         CAnimGraphPin* ResultPin = nullptr;

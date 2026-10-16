@@ -430,10 +430,6 @@ namespace Lumina::MCP
                 Result.Error = ParseError.empty() ? FString("The source could not be read.") : ParseError;
             }
             Importer->ReleaseSourceData();
-            if (Result.Succeeded() && Result.CreatedObjects.empty() && !In.ReplaceExisting)
-            {
-                Result.Error = "The importer produced no assets.";
-            }
 
             // A file holding several meshes names each File_Mesh, so the caller is told the paths that really exist.
             TVector<FString> CreatedPaths;
@@ -445,12 +441,7 @@ namespace Lumina::MCP
                 }
             }
 
-            // Popping releases the last pin, so each object dies on its own turn rather than when a
-            // neighbor's destructor drops the last reference to it.
-            while (!Result.CreatedObjects.empty())
-            {
-                Result.CreatedObjects.pop_back();
-            }
+            Result.Finish(Request);
             CImporterRegistry::DestroyImporter(Importer);
 
             if (Result.Succeeded())

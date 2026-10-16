@@ -184,11 +184,16 @@ namespace Lumina
             const float TypeFontSize  = ImGui::GetFontSize();
             const float TypeBandHeight = TypeFontSize + GTypeLabelPad;
 
-            const FStringView TypeLabel = Item->GetTypeLabel();
+            // An interned label keeps whichever spelling of the name was seen first, so its case is set here.
+            FFixedString TypeLabel(Item->GetTypeLabel().data(), Item->GetTypeLabel().size());
+            for (char& Character : TypeLabel)
+            {
+                Character = (char)std::toupper((unsigned char)Character);
+            }
             if (!TypeLabel.empty())
             {
-                const char* TypeBegin = TypeLabel.data();
-                const char* TypeEnd   = TypeLabel.data() + TypeLabel.size();
+                const char* TypeBegin = TypeLabel.c_str();
+                const char* TypeEnd   = TypeLabel.c_str() + TypeLabel.size();
                 const ImVec2 TypeSize = ImGui::CalcTextSize(TypeBegin, TypeEnd, false, TileSize);
 
                 const ImVec2 TypePos(LabelPos.x + (TileSize - Math::Min(TypeSize.x, TileSize)) * 0.5f,
@@ -434,9 +439,9 @@ namespace Lumina
             }
         }
         
-        Context.RebuildTreeFunction(this);
-
+        // Cleared first, so a refresh requested while the tree rebuilds runs again next frame.
         bDirty = false;
+        Context.RebuildTreeFunction(this);
     }
 
     void FTileViewWidget::DrawItem(FTileViewItem* ItemToDraw, const FTileViewContext& Context, ImVec2 DrawSize)

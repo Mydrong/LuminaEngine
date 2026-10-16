@@ -118,6 +118,8 @@ namespace Lumina::Filesystem
 
             FWidePath(const FWidePath&) = delete;
             FWidePath& operator=(const FWidePath&) = delete;
+            FWidePath(FWidePath&&) = delete;
+            FWidePath& operator=(FWidePath&&) = delete;
 
             void Assign(FStringView Path)
             {

@@ -3,6 +3,7 @@
 #include "World/ECS/Registry.h"
 #include "Core/Object/Cast.h"
 #include "Core/Reflection/Type/ObjectReferenceVisitor.h"
+#include "Scripting/ManagedTypeRegistry.h"
 
 
 #include "imgui.h"
@@ -109,9 +110,12 @@ namespace Lumina
     };
 
     // EDITOR_API: exported so editor plugins can derive their own tools out-of-module.
-    class EDITOR_API FEditorTool : public IEventHandler
+    // Every tool hears a script reload through OnScriptsReloaded, the one place to rebuild what it built from C# types.
+    class EDITOR_API FEditorTool : public IEventHandler, public Scripting::IScriptReloadListener
     {
     public:
+
+        void OnScriptsReloaded(const Scripting::FScriptReload& Reload) override {}
 
         friend class FEditorUI;
 
@@ -391,6 +395,9 @@ namespace Lumina
 
         /** Toggle for the interactive pass, so face and radius handles can be muted without hiding the wireframe. */
         bool bVisualizerHandlesEnabled = true;
+
+        // Draws the wireframe of every entity in the selection's trees, root down, instead of only the selection and its children.
+        bool bShowHierarchyVisualizers = false;
 
         /** Component types whose visualizer the user switched off in the Visualizations menu. */
         THashSet<const CStruct*> HiddenVisualizerTypes;

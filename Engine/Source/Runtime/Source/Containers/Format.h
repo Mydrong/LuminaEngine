@@ -50,8 +50,11 @@ namespace Lumina::Fmt
         {
         }
 
+        ~FFormatBuffer() = default;
         FFormatBuffer(const FFormatBuffer&) = delete;
         FFormatBuffer& operator=(const FFormatBuffer&) = delete;
+        FFormatBuffer(FFormatBuffer&&) = delete;
+        FFormatBuffer& operator=(FFormatBuffer&&) = delete;
 
         NODISCARD FORCEINLINE char* Data() noexcept { return Ptr; }
         NODISCARD FORCEINLINE const char* Data() const noexcept { return Ptr; }
@@ -171,6 +174,10 @@ namespace Lumina::Fmt
                 TAllocator::Deallocate(Ptr, Cap, alignof(char));
             }
         }
+        TInlineFormatBuffer(const TInlineFormatBuffer&) = delete;
+        TInlineFormatBuffer& operator=(const TInlineFormatBuffer&) = delete;
+        TInlineFormatBuffer(TInlineFormatBuffer&&) = delete;
+        TInlineFormatBuffer& operator=(TInlineFormatBuffer&&) = delete;
 
     private:
 

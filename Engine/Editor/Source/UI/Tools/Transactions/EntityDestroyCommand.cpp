@@ -1,6 +1,7 @@
 #include "EntityDestroyCommand.h"
 #include "World/ECS/Registry.h"
 
+#include "Assets/AssetTypes/Prefabs/Prefab.h"
 #include "Core/Object/Package/Package.h"
 #include "Core/Serialization/MemoryArchiver.h"
 #include "Core/Serialization/ObjectArchiver.h"
@@ -113,6 +114,12 @@ namespace Lumina
             ECS::Utils::SerializeEntity(Ar, Registry, Restored, &Links);
         }
         Links.Apply(Registry);
+
+        // A restored node carries the prefab data it had when deleted, which a later prefab update may have moved past.
+        for (const FEntry& Entry : Entries)
+        {
+            CPrefab::MarkInstanceStale(Registry, Entry.Entity);
+        }
 
         if (W->GetPackage())
         {

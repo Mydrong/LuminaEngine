@@ -1,4 +1,5 @@
 #include "UIDocumentPropertyCustomization.h"
+#include "UI/Properties/Customizations/AssetPickerFilter.h"
 
 #include "LuminaEditor.h"
 #include "Assets/AssetRegistry/AssetRegistry.h"
@@ -15,8 +16,7 @@ namespace Lumina
 {
     namespace
     {
-        // The object picker's sizes, so a document slot and an asset slot read as the same control.
-        constexpr ImVec2 GButtonSize(42, 0);
+        // The object picker's tile size, so a document slot and an asset slot read as the same control.
         constexpr ImVec2 GTileSize(64, 64);
 
         // "/Game/UI/Menu.rml" reads as "Menu" in "/Game/UI".
@@ -172,7 +172,7 @@ namespace Lumina
             const bool bSelectionFits = IsDocumentPath(FStringView(Selected.c_str(), Selected.size()));
 
             ImGui::BeginDisabled(!bSelectionFits);
-            if (ImGui::Button(LE_ICON_ARROW_LEFT_CIRCLE "##UseSelected", GButtonSize))
+            if (ImGui::Button(LE_ICON_ARROW_LEFT_CIRCLE "##UseSelected", AssetPickerFilter::kButtonSize))
             {
                 const FString NewPath(Selected.c_str(), Selected.size());
                 Assign([Ref, NewPath] { Ref->SetPath(NewPath); });
@@ -186,7 +186,7 @@ namespace Lumina
 
             ImGui::BeginDisabled(!bHasDocument);
 
-            if (ImGui::Button(LE_ICON_MAGNIFY "##Browse", GButtonSize) && EditorUI != nullptr)
+            if (ImGui::Button(LE_ICON_MAGNIFY "##Browse", AssetPickerFilter::kButtonSize) && EditorUI != nullptr)
             {
                 EditorUI->BrowseToAsset(ResolvedView);
             }
@@ -194,7 +194,7 @@ namespace Lumina
 
             ImGui::SameLine();
 
-            if (ImGui::Button(LE_ICON_CONTENT_COPY "##Copy", GButtonSize))
+            if (ImGui::Button(LE_ICON_CONTENT_COPY "##Copy", AssetPickerFilter::kButtonSize))
             {
                 ImGui::SetClipboardText(Resolved.c_str());
             }
@@ -205,7 +205,7 @@ namespace Lumina
             ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.6f, 0.2f, 0.2f, 1.0f));
             ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.7f, 0.25f, 0.25f, 1.0f));
             ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.5f, 0.15f, 0.15f, 1.0f));
-            if (ImGui::Button(LE_ICON_CLOSE_CIRCLE "##Clear", GButtonSize))
+            if (ImGui::Button(LE_ICON_CLOSE_CIRCLE "##Clear", AssetPickerFilter::kButtonSize))
             {
                 Assign([Ref] { Ref->Reset(); });
             }

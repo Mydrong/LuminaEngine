@@ -28,6 +28,8 @@ namespace Lumina
             ~FScope()                                { PopSystem(); }
             FScope(const FScope&) = delete;
             FScope& operator=(const FScope&) = delete;
+            FScope(FScope&&) = delete;
+            FScope& operator=(FScope&&) = delete;
         };
     }
 

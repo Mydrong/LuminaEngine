@@ -130,8 +130,11 @@ namespace Lumina::ECS
 
         FEventDispatcher() = default;
 
+        ~FEventDispatcher() = default;
         FEventDispatcher(const FEventDispatcher&) = delete;
         FEventDispatcher& operator = (const FEventDispatcher&) = delete;
+        FEventDispatcher(FEventDispatcher&&) = delete;
+        FEventDispatcher& operator=(FEventDispatcher&&) = delete;
 
         template<typename TEvent>
         NODISCARD TEventSink<TEvent>& Sink()

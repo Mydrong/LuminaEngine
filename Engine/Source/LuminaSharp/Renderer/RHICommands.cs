@@ -19,7 +19,7 @@ public static unsafe partial class RHI
     public static partial void CmdMemzero(FCmdListH CL, GPUPtr Dest, ulong Size);
 
     /// <summary>Inline a CPU byte range into the command stream and write it to <paramref name="Dest"/>.</summary>
-    [NativeCall("LuminaSharp_RHI_CmdWriteMemory", SuppressGCTransition = true)]
+    [NativeCall("LuminaSharp_RHI_CmdWriteMemory")]
     public static partial void CmdWriteMemory(FCmdListH CL, GPUPtr Dest, ReadOnlySpan<byte> Data);
 
     // ---- Texture commands ----

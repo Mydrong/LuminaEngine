@@ -22,6 +22,7 @@ namespace Lumina
             , CachedGUID(InGUID)
         {}
 
+        ~FSoftObjectPath() = default;
         FSoftObjectPath(const FSoftObjectPath& Other)
             : Path(Other.Path), CachedGUID(Other.CachedGUID) {}
         FSoftObjectPath(FSoftObjectPath&& Other) noexcept

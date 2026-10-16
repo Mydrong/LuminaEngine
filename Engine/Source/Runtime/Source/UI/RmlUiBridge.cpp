@@ -100,6 +100,10 @@ namespace Lumina::RmlUi
         {
             explicit FScopedDiagnosticSink(TVector<FRmlDiagnostic>* Sink) : Previous(GDiagnosticSink) { GDiagnosticSink = Sink; }
             ~FScopedDiagnosticSink() { GDiagnosticSink = Previous; }
+            FScopedDiagnosticSink(const FScopedDiagnosticSink&) = delete;
+            FScopedDiagnosticSink& operator=(const FScopedDiagnosticSink&) = delete;
+            FScopedDiagnosticSink(FScopedDiagnosticSink&&) = delete;
+            FScopedDiagnosticSink& operator=(FScopedDiagnosticSink&&) = delete;
 
             TVector<FRmlDiagnostic>* Previous;
         };
@@ -253,6 +257,10 @@ namespace Lumina::RmlUi
         {
             FEventDispatchScope()  { ++GEventDispatchDepth; }
             ~FEventDispatchScope() { --GEventDispatchDepth; }
+            FEventDispatchScope(const FEventDispatchScope&) = delete;
+            FEventDispatchScope& operator=(const FEventDispatchScope&) = delete;
+            FEventDispatchScope(FEventDispatchScope&&) = delete;
+            FEventDispatchScope& operator=(FEventDispatchScope&&) = delete;
         };
 
         // RmlUi never deletes listeners on element destruction, so bAttached guards a freed element.
@@ -412,11 +420,16 @@ namespace Lumina::RmlUi
             // Commands an editor preview fired, as "Name(args)", since it has no script to call.
             TVector<FString>          FiredCommands;
 
+            FManagedDataModel() = default;
             ~FManagedDataModel()
             {
                 Scripting::ReleaseScriptCallback(OnSet);
                 Scripting::ReleaseScriptCallback(OnEvent);
             }
+            FManagedDataModel(const FManagedDataModel&) = delete;
+            FManagedDataModel& operator=(const FManagedDataModel&) = delete;
+            FManagedDataModel(FManagedDataModel&&) = delete;
+            FManagedDataModel& operator=(FManagedDataModel&&) = delete;
         };
 
         // Coerce a double into a Variant typed per EUIVarType so views format/compare against the right type.
@@ -3099,6 +3112,10 @@ namespace Lumina::RmlUi
             {
                 Function.DestructFrame(Storage.data());
             }
+            FModelCallFrame(const FModelCallFrame&) = delete;
+            FModelCallFrame& operator=(const FModelCallFrame&) = delete;
+            FModelCallFrame(FModelCallFrame&&) = delete;
+            FModelCallFrame& operator=(FModelCallFrame&&) = delete;
 
             void* Data() { return Storage.data(); }
 

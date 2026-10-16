@@ -22,7 +22,7 @@ namespace Lumina
 
 	struct FAssetDataPtrHash
 	{
-		static size_t operator() (const TUniquePtr<FAssetData>& Asset) noexcept
+		static size_t operator() (const TSharedPtr<FAssetData>& Asset) noexcept
 		{
 			return Hash::GetHash(Asset->AssetGUID);
 		}
@@ -30,7 +30,7 @@ namespace Lumina
 
 	struct FAssetDataPtrEqual
 	{
-		static bool operator()(const TUniquePtr<FAssetData>& A, const TUniquePtr<FAssetData>& B) noexcept
+		static bool operator()(const TSharedPtr<FAssetData>& A, const TSharedPtr<FAssetData>& B) noexcept
 		{
 			return A->AssetGUID == B->AssetGUID;
 		}
@@ -46,13 +46,13 @@ namespace Lumina
 
 	struct FAssetDataGuidEqual
 	{
-		static bool operator()(const TUniquePtr<FAssetData>& Asset, const FGuid& GUID) noexcept
+		static bool operator()(const TSharedPtr<FAssetData>& Asset, const FGuid& GUID) noexcept
 		{
 			return Asset->AssetGUID == GUID;
 		}
 	};
 
-	using FAssetDataMap = THashSet<TUniquePtr<FAssetData>, FAssetDataPtrHash, FAssetDataPtrEqual>;
+	using FAssetDataMap = THashSet<TSharedPtr<FAssetData>, FAssetDataPtrHash, FAssetDataPtrEqual>;
 
 	// Lightweight identity record for a loose text asset (.rml/.rcss). Lives in a map entirely
 	// separate from FAssetData / the .lasset cook dependency graph. GUID sourced from the file's sidecar.
@@ -191,10 +191,17 @@ namespace Lumina
 		void EnsurePathIndex() const;
 
 		// Inserts under the held AssetsMutex, replacing any entry with the same path or GUID and keeping PathIndex valid.
-		void InsertAssetLocked(TUniquePtr<FAssetData>&& AssetData);
+		void InsertAssetLocked(TSharedPtr<FAssetData>&& AssetData);
+
+		// Lookups hand out entry pointers past the lock, so a dropped entry lives until the main thread's next pump.
+		void RetireLocked(const TSharedPtr<FAssetData>& Entry);
+		void RetireAllLocked();
+		void ReclaimRetired();
 
 		mutable FSharedMutex			AssetsMutex;
 		FAssetDataMap 					Assets;
+		TVector<TSharedPtr<FAssetData>>	RetiredAssets;
+		std::atomic<bool>				bReclaimQueued { false };
 		mutable THashMap<FString, FAssetData*> PathIndex;
 		mutable bool					bPathIndexValid = false;
 
@@ -236,6 +243,8 @@ namespace Lumina
 		~FScopedAssetRegistryBatch();
 		FScopedAssetRegistryBatch(const FScopedAssetRegistryBatch&) = delete;
 		FScopedAssetRegistryBatch& operator=(const FScopedAssetRegistryBatch&) = delete;
+		FScopedAssetRegistryBatch(FScopedAssetRegistryBatch&&) = delete;
+		FScopedAssetRegistryBatch& operator=(FScopedAssetRegistryBatch&&) = delete;
 	};
 
 }

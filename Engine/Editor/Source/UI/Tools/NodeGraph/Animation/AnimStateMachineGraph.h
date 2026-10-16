@@ -67,7 +67,7 @@ namespace Lumina
         bool WantsDebugLinkFlow() const override { return false; }
 
         /** Transition data behind each State -> State wire. Reconciled in ValidateGraph. */
-        PROPERTY()
+        PROPERTY(Hidden)
         TVector<TStrongObjectPtr<CAnimStateTransition>> Transitions;
 
     private:

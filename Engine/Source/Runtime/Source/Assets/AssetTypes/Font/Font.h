@@ -85,22 +85,22 @@ namespace Lumina
         bool ShapeText(const FString& Text, float HAlign, float VAlign, float LineSpacing, TVector<FShapedGlyph>& Out) const;
 
         // Source file the face was imported from; empty for in-place created assets.
-        PROPERTY()
+        PROPERTY(Hidden)
         FString SourcePath;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         FString FamilyName;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         FString StyleName;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         int32 NumGlyphs = 0;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         bool bIsScalable = false;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         bool bHasKerning = false;
 
         TVector<uint8> FontData;

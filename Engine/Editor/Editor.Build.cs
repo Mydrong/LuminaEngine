@@ -25,6 +25,9 @@ public class Editor : LuminaModuleRules
         ExcludeFromUnity.Add("MaterialNodeGraph.cpp");
         ExcludeFromUnity.Add("MaterialFunctionGraph.cpp");
 
+        // Includes Windows.h, whose GetObject and friends would rename members in every file after it.
+        ExcludeFromUnity.Add("VideoEncoder.cpp");
+
         PublicDependencyModuleNames.Add("Runtime");
 
         PrivateDependencyModuleNames.AddRange(new[]

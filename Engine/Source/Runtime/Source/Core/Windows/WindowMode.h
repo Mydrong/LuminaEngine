@@ -23,13 +23,13 @@ namespace Lumina
     {
         GENERATED_BODY()
 
-        PROPERTY()
+        PROPERTY(Hidden)
         int32 Width = 0;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         int32 Height = 0;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         int32 RefreshRate = 0;
     };
 }

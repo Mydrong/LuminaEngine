@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Linq;
 using LuminaSharp.ScriptProperties;
 using Microsoft.CodeAnalysis;
@@ -63,33 +64,85 @@ public sealed class ScriptPropertyGenerator : IIncrementalGenerator
         defaultSeverity: DiagnosticSeverity.Error,
         isEnabledByDefault: true);
 
-    // Every attribute ScriptMemberRules stores a field for, so a bad [SaveGame] type is flagged as early as a bad [Property].
-    private static readonly string[] StorageAttributes =
+    private static readonly DiagnosticDescriptor MisplacedSpecifier = new(
+        id: "LUM0105",
+        title: "Specifier does not apply here",
+        messageFormat: "'{0}' does not apply to a [{1}], as it does not to a C++ {2}(...)",
+        category: "LuminaSharp",
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
+    private static readonly DiagnosticDescriptor ConflictingSpecifiers = new(
+        id: "LUM0106",
+        title: "Specifiers conflict",
+        messageFormat: "'{0}' and '{1}' conflict, as they do in a C++ PROPERTY(...). Keep one.",
+        category: "LuminaSharp",
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
+    // The same pairs the Reflector refuses on a C++ PROPERTY(...).
+    private static readonly (string, string)[] ConflictingPairs =
     {
-        PropertyAttribute, "LuminaSharp.SerializeAttribute", "LuminaSharp.SyncAttribute", "LuminaSharp.SaveGameAttribute",
-        "LuminaSharp.BindAttribute",
+        (ScriptMemberRules.Editable, ScriptMemberRules.ReadOnly),
+        (ScriptMemberRules.Hidden, ScriptMemberRules.Editable),
+        (ScriptMemberRules.Hidden, ScriptMemberRules.ReadOnly),
     };
+
+    private static readonly string[] FunctionSpecifiers = { "Bind", "Button" };
+    private static readonly string[] FunctionOnlySpecifiers = { "Button" };
 
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
-        foreach (string Attribute in StorageAttributes)
-        {
-            IncrementalValuesProvider<Diagnostic?> Diagnostics = context.SyntaxProvider
-                .ForAttributeWithMetadataName(
-                    Attribute,
-                    static (_, _) => true,
-                    (Context, _) => ReportsFor(Context.TargetSymbol, Attribute)
-                        ? Validate(Context.TargetSymbol, Context.TargetNode, Context.SemanticModel.Compilation)
-                        : null);
+        IncrementalValuesProvider<Diagnostic?> Diagnostics = context.SyntaxProvider
+            .ForAttributeWithMetadataName(
+                PropertyAttribute,
+                static (_, _) => true,
+                static (Context, _) => ValidateSpecifiers(Context.TargetSymbol, Context.TargetNode, PropertyAttribute)
+                    ?? Validate(Context.TargetSymbol, Context.TargetNode, Context.SemanticModel.Compilation));
+        IncrementalValuesProvider<Diagnostic?> FunctionDiagnostics = context.SyntaxProvider
+            .ForAttributeWithMetadataName(
+                ScriptPropertyTypeNames.FunctionAttribute,
+                static (_, _) => true,
+                static (Context, _) => ValidateSpecifiers(Context.TargetSymbol, Context.TargetNode, ScriptPropertyTypeNames.FunctionAttribute));
 
-            context.RegisterSourceOutput(Diagnostics, static (Context, Item) =>
-            {
-                if (Item != null)
-                {
-                    Context.ReportDiagnostic(Item);
-                }
-            });
+        context.RegisterSourceOutput(Diagnostics, Report);
+        context.RegisterSourceOutput(FunctionDiagnostics, Report);
+    }
+
+    private static void Report(SourceProductionContext Context, Diagnostic? Item)
+    {
+        if (Item != null)
+        {
+            Context.ReportDiagnostic(Item);
         }
+    }
+
+    private static Diagnostic? ValidateSpecifiers(ISymbol Symbol, SyntaxNode Node, string AttributeName)
+    {
+        AttributeData? Attribute = ScriptPropertyClassifier.FindAttribute(Symbol, AttributeName);
+        if (Attribute == null)
+        {
+            return null;
+        }
+        bool bFunction = AttributeName == ScriptPropertyTypeNames.FunctionAttribute;
+        var Declared = new HashSet<string>(ScriptPropertyClassifier.BareSpecifiers(Attribute));
+        foreach ((string First, string Second) in ConflictingPairs)
+        {
+            if (Declared.Contains(First) && Declared.Contains(Second))
+            {
+                return Diagnostic.Create(ConflictingSpecifiers, Node.GetLocation(), First, Second);
+            }
+        }
+        foreach (string Specifier in Declared)
+        {
+            bool bApplies = bFunction ? FunctionSpecifiers.Contains(Specifier) : !FunctionOnlySpecifiers.Contains(Specifier);
+            if (!bApplies)
+            {
+                return Diagnostic.Create(MisplacedSpecifier, Node.GetLocation(), Specifier,
+                    bFunction ? "Function" : "Property", bFunction ? "FUNCTION" : "PROPERTY");
+            }
+        }
+        return null;
     }
 
     private static Diagnostic? Validate(ISymbol Symbol, SyntaxNode Node, Compilation Compilation)
@@ -114,7 +167,7 @@ public sealed class ScriptPropertyGenerator : IIncrementalGenerator
             return null;
         }
 
-        FScriptPropertyClassification Classification = ScriptPropertyClassifier.Classify(Field.Type);
+        FScriptPropertyClassification Classification = ScriptPropertyClassifier.ClassifyMember(Field, Field.Type);
         if (!Classification.IsSupported)
         {
             return Diagnostic.Create(UnsupportedType, Location, Field.Name, Field.Type.ToDisplayString(),
@@ -139,8 +192,9 @@ public sealed class ScriptPropertyGenerator : IIncrementalGenerator
             return null;
         }
 
-        FScriptPropertyClassification Classification = ScriptPropertyClassifier.Classify(Property.Type);
-        EScriptMemberKind Kind = Property.SetMethod != null || Classification.IsView ? EScriptMemberKind.WritableProperty : EScriptMemberKind.ReadOnlyProperty;
+        FScriptPropertyClassification Classification = ScriptPropertyClassifier.ClassifyMember(Property, Property.Type);
+        bool bNativeFilled = Classification.IsView || Classification.Access == EScriptAccess.ComponentRef;
+        EScriptMemberKind Kind = Property.SetMethod != null || bNativeFilled ? EScriptMemberKind.WritableProperty : EScriptMemberKind.ReadOnlyProperty;
         if (!ScriptPropertyClassifier.RuleFor(Property, Kind, bOwnerIsNativeObject: true).bStored)
         {
             return null;
@@ -204,19 +258,6 @@ public sealed class ScriptPropertyGenerator : IIncrementalGenerator
             if (SymbolEqualityComparer.Default.Equals(Current, Base))
             {
                 return true;
-            }
-        }
-        return false;
-    }
-
-    // One member carrying two storage attributes is reported once, by whichever comes first in the list.
-    private static bool ReportsFor(ISymbol Symbol, string Attribute)
-    {
-        foreach (string Candidate in StorageAttributes)
-        {
-            if (Symbol.GetAttributes().Any(Data => Data.AttributeClass?.ToDisplayString() == Candidate))
-            {
-                return Candidate == Attribute;
             }
         }
         return false;

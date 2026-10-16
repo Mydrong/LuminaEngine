@@ -13,6 +13,7 @@ namespace Lumina
 {
     class CEdNodeGraph;
     class CObject;
+    class CPrefab;
     class CStruct;
     class FProperty;
     class CWorld;
@@ -97,6 +98,11 @@ namespace Lumina::SessionOps
 
     // Duplicates as the target editor's own Duplicate does; call inside RunCreationTransacted.
     NODISCARD EDITOR_API ECS::FEntity DuplicateEntity(ECS::FEntity Source);
+
+    // The world editor's prefab menu actions, each its own undo step as the menus make them.
+    EDITOR_API bool ResyncPrefabInstance(ECS::FEntity InstanceRoot, FString& OutError);
+    EDITOR_API bool DetachPrefabInstance(ECS::FEntity InstanceRoot, FString& OutError);
+    EDITOR_API CPrefab* CreatePrefabFromSelection(FStringView Folder, FStringView Name, FString& OutError);
     // One component's undo step, recorded as a prefab override on a placed instance the way the inspector's edits are.
     EDITOR_API bool RunComponentTransacted(FName Label, ECS::FEntity Entity, CStruct* ComponentType,
         const TFunction<void()>& Mutate, FString& OutError);

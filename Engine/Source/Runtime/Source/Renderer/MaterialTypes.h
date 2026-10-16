@@ -121,15 +121,15 @@ namespace Lumina
     {
         GENERATED_BODY()
 
-        PROPERTY()
+        PROPERTY(Hidden)
         TStrongObjectPtr<CGrassType> GrassType;
 
         /** Index into STerrainComponent::Layers whose painted weight gates this species. */
-        PROPERTY()
+        PROPERTY(Hidden)
         uint32 LayerIndex = 0;
 
         /** Multiplies the type's own density, so one type can be reused at different coverage per layer. */
-        PROPERTY()
+        PROPERTY(Hidden)
         float DensityScale = 1.0f;
     };
 
@@ -139,14 +139,14 @@ namespace Lumina
     {
         GENERATED_BODY()
 
-        PROPERTY()
+        PROPERTY(Hidden)
         FName ParameterName;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         bool bDefaultValue = true;
 
         // Assigned by name order, so a graph edit that reorders nodes does not renumber the key.
-        PROPERTY()
+        PROPERTY(Hidden)
         uint8 BitIndex = 0;
     };
 
@@ -163,20 +163,20 @@ namespace Lumina
     {
         GENERATED_BODY()
 
-        PROPERTY()
+        PROPERTY(Hidden)
         FName ParameterName;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         EMaterialParameterType Type;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         uint16 Index;
 
         // Replayed into MaterialUniforms in PostLoad (uniform block isn't serialized).
-        PROPERTY()
+        PROPERTY(Hidden)
         float ScalarDefault = 0.0f;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         FVector4 VectorDefault = FVector4(0.0f);
     };
 }

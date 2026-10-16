@@ -81,6 +81,7 @@ namespace Lumina
 
         STerrainComponent() = default;
 
+        ~STerrainComponent() = default;
         STerrainComponent(const STerrainComponent& Other)
             : Heightmap(Other.Heightmap)
             , LayerWeights(Other.LayerWeights)
@@ -120,11 +121,11 @@ namespace Lumina
         STerrainComponent& operator=(STerrainComponent&&) noexcept = default;
 
         /** Row-major; values normalized [0, 1] scaled by MaxHeight on GPU. */
-        PROPERTY(Category = "Terrain|Data")
+        PROPERTY(Hidden, Category = "Terrain|Data")
         TVector<float> Heightmap;
 
         /** Per-layer weights, row-major uint8 [0, 255]. */
-        PROPERTY(Category = "Terrain|Data")
+        PROPERTY(Hidden, Category = "Terrain|Data")
         TVector<uint8> LayerWeights;
 
         /** Paintable layers; layer 0 is base. */

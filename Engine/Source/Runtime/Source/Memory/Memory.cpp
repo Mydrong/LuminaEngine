@@ -269,6 +269,10 @@ namespace Lumina
                     *Link = Node.Next;
                 }
             }
+            FThreadFrameArena(const FThreadFrameArena&) = delete;
+            FThreadFrameArena& operator=(const FThreadFrameArena&) = delete;
+            FThreadFrameArena(FThreadFrameArena&&) = delete;
+            FThreadFrameArena& operator=(FThreadFrameArena&&) = delete;
         };
     }
 

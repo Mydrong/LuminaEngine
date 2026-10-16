@@ -78,6 +78,6 @@ namespace Lumina::Physics
 
         static FBox3DDebugRenderer* GetDebugRenderer();
         static b3DebugDraw MakeDebugDraw();
-        static bool IsDebugDrawEnabled();
+        static bool IsDebugDrawForced();
     };
 }

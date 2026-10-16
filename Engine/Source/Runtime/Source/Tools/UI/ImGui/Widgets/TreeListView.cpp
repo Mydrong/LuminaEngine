@@ -273,6 +273,8 @@ namespace Lumina
         // Do NOT call ClearSelections, since a structural rebuild is not user intent.
         ClearTree();
 
+        // Cleared first, so a refresh requested while the tree rebuilds runs again next frame.
+        bDirty = false;
         Context.RebuildTreeFunction(*this);
 
         // Top-down, so an expanded lazy node rebuilds its children before the arrow shows open.
@@ -298,7 +300,6 @@ namespace Lumina
             }
         }
 
-        bDirty = false;
         bVisibleListDirty = true;
     }
 
@@ -718,26 +719,8 @@ namespace Lumina
 
         if (bTreeNodeClicked && !bMouseOverTrailingButton)
         {
-            const bool bShift = ImGui::GetIO().KeyShift;
-            const bool bCtrl  = ImGui::GetIO().KeyCtrl;
-
-            const bool bCanRange = bShift
-                && Context.bAllowRangeSelect
-                && SelectionAnchor >= 0
-                && SelectionAnchor != NodeIdx
-                && IsValid(FTreeNodeID{SelectionAnchor});
-
-            if (bCanRange)
-            {
-                // The anchor stays put, so dragging the shift-click around grows and shrinks one run.
-                SelectRange(SelectionAnchor, NodeIdx, Context, !bCtrl);
-            }
-            else
-            {
-                SetSelection(FTreeNodeID{NodeIdx}, Context, !bCtrl);
-                SelectionAnchor = NodeIdx;
-            }
-		}
+            ClickRow(FTreeNodeID{NodeIdx}, ImGui::GetIO().KeyShift, ImGui::GetIO().KeyCtrl, Context);
+        }
 
         if (bTreeNodeDoubleClicked && !bMouseOverTrailingButton && Context.ItemDoubleClickedFunction)
         {
@@ -864,6 +847,44 @@ namespace Lumina
         bVisibleListDirty = true;
     }
 
+    void FTreeListView::RemoveNodes(const TVector<FTreeNodeID>& Handles)
+    {
+        TVector<int32> Parents;
+        Parents.reserve(Handles.size());
+        for (FTreeNodeID Handle : Handles)
+        {
+            if (IsValid(Handle) && !Nodes[Handle.Index].bPendingRemoval)
+            {
+                Nodes[Handle.Index].bPendingRemoval = true;
+                Parents.push_back(Nodes[Handle.Index].ParentIdx);
+            }
+        }
+        if (Parents.empty())
+        {
+            return;
+        }
+
+        Algo::Sort(Parents);
+        Parents.erase(Algo::Unique(Parents), Parents.end());
+        const auto IsRemoved = [this](int32 Child) { return Nodes[Child].bPendingRemoval; };
+        for (int32 ParentIdx : Parents)
+        {
+            TVector<int32>& Siblings = ParentIdx >= 0 ? Nodes[ParentIdx].Children : Roots;
+            Siblings.erase(Algo::RemoveIf(Siblings, IsRemoved), Siblings.end());
+        }
+
+        // A handle inside another's subtree died with it, which the alive check skips.
+        for (FTreeNodeID Handle : Handles)
+        {
+            if (IsValid(Handle) && Nodes[Handle.Index].bPendingRemoval)
+            {
+                RemoveSubtree(Handle.Index);
+            }
+        }
+
+        bVisibleListDirty = true;
+    }
+
     void FTreeListView::UnlinkFromParent(int32 Idx)
     {
         const int32 ParentIdx = Nodes[Idx].ParentIdx;
@@ -910,6 +931,7 @@ namespace Lumina
         Node.bAlive = false;
         Node.bChildrenBuilt = false;
         Node.bHasLazyChildren = false;
+        Node.bPendingRemoval = false;
         FreeList.push_back(Idx);
         --AliveCount;
         ++StructureVersion;
@@ -1029,44 +1051,60 @@ namespace Lumina
         }
     }
 
-    void FTreeListView::SelectRange(int32 AnchorIdx, int32 TargetIdx, const FTreeListViewContext& Context, bool bShouldClear)
+    void FTreeListView::ClickRow(FTreeNodeID Row, bool bShift, bool bCtrl, const FTreeListViewContext& Context)
     {
-        if (CurrentRows == nullptr)
+        if (!IsValid(Row))
         {
             return;
         }
 
-        const TVector<int32>& Rows = *CurrentRows;
+        // Outside Draw there is no filtered list being iterated, so the run is taken over every displayed row.
+        if (CurrentRows == nullptr && bVisibleListDirty)
+        {
+            RebuildVisibleList();
+        }
+        const TVector<int32>& Rows = CurrentRows != nullptr ? *CurrentRows : VisibleList;
 
-        int32 AnchorRow = -1;
-        int32 TargetRow = -1;
+        const auto Target = Algo::Find(Rows, Row.Index);
+        const int32 TargetRow = Target != Rows.end() ? (int32)(Target - Rows.begin()) : -1;
+        const int32 AnchorRow = bShift && Context.bAllowRangeSelect && TargetRow >= 0 ? FindRangeAnchorRow(Rows, TargetRow) : -1;
+        if (AnchorRow < 0)
+        {
+            SetSelection(Row, Context, !bCtrl);
+            SelectionAnchor = Row.Index;
+            return;
+        }
+
+        // The anchor stays put, so a second shift-click grows or shrinks the same run.
+        SelectRange(Rows, AnchorRow, TargetRow, Context, !bCtrl);
+    }
+
+    int32 FTreeListView::FindRangeAnchorRow(const TVector<int32>& Rows, int32 TargetRow) const
+    {
+        // The last plain click, while it is still shown and still selected.
+        if (SelectionAnchor >= 0 && SelectionAnchor != Rows[TargetRow] && IsValid(FTreeNodeID{SelectionAnchor}) && Nodes[SelectionAnchor].State.bSelected)
+        {
+            if (const auto It = Algo::Find(Rows, SelectionAnchor); It != Rows.end())
+            {
+                return (int32)(It - Rows.begin());
+            }
+        }
+
+        // Otherwise the selection came from elsewhere, such as the viewport or a rebuild, and the nearest selected row stands in.
+        int32 Best = -1;
         for (int32 i = 0; i < (int32)Rows.size(); ++i)
         {
-            if (Rows[i] == AnchorIdx)
+            if (i != TargetRow && Nodes[Rows[i]].bAlive && Nodes[Rows[i]].State.bSelected
+                && (Best < 0 || Math::Abs(i - TargetRow) < Math::Abs(Best - TargetRow)))
             {
-                AnchorRow = i;
-            }
-            if (Rows[i] == TargetIdx)
-            {
-                TargetRow = i;
+                Best = i;
             }
         }
+        return Best;
+    }
 
-        // The anchor can be filtered out or collapsed away since it was clicked; then there is no run.
-        if (AnchorRow < 0 || TargetRow < 0)
-        {
-            SetSelection(FTreeNodeID{TargetIdx}, Context, bShouldClear);
-            SelectionAnchor = TargetIdx;
-            return;
-        }
-
-        if (AnchorRow > TargetRow)
-        {
-            const int32 Swap = AnchorRow;
-            AnchorRow = TargetRow;
-            TargetRow = Swap;
-        }
-
+    void FTreeListView::SelectRange(const TVector<int32>& Rows, int32 FromRow, int32 ToRow, const FTreeListViewContext& Context, bool bShouldClear)
+    {
         if (bShouldClear)
         {
             for (FNode& Node : Nodes)
@@ -1078,9 +1116,10 @@ namespace Lumina
             }
         }
 
-        // Reported through ItemSelectedFunction, where the first row replaces the selection.
+        // Walked from the anchor, so the clicked row is reported last and becomes the one the details panel shows.
         bool bFirst = bShouldClear;
-        for (int32 i = AnchorRow; i <= TargetRow; ++i)
+        const int32 Step = FromRow <= ToRow ? 1 : -1;
+        for (int32 i = FromRow; i != ToRow + Step; i += Step)
         {
             const int32 NodeIdx = Rows[i];
             if (!Nodes[NodeIdx].bAlive)

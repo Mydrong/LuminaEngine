@@ -110,42 +110,8 @@ public readonly struct EntityNetwork
 
     public uint NetId => Lumina.CNetworkLibrary.EntityToNetId(World, Entity);
 
-    // Resends replicated component fields. A [Sync] field marks itself when written.
+    // Resends replicated component fields. A [Property(Sync)] field marks itself when written.
     public void MarkDirty() => Lumina.CNetworkLibrary.MarkEntityDirty(World, Entity);
-}
-
-// Replicated from the host to every client. A client's own write stays local until the host's next value lands.
-[MeansImplicitUse(ImplicitUseKindFlags.Access | ImplicitUseKindFlags.Assign)]
-[AttributeUsage(AttributeTargets.Field | AttributeTargets.Property, AllowMultiple = false)]
-public sealed class SyncAttribute : Attribute
-{
-    public SyncAttribute(Lumina.ESyncFlags Flags = Lumina.ESyncFlags.None)
-    {
-        this.Flags = Flags;
-    }
-
-    public Lumina.ESyncFlags Flags { get; }
-
-    // Written values snap to multiples of this, so a wobble smaller than it never reaches the wire. Numbers only.
-    public double Quantize { get; set; }
-
-    // The most times a second the host sends this field. A change sooner than that waits for the next slot, and the latest value goes.
-    public float Rate { get; set; }
-
-    // For a FromOwner field, a method taking the proposed value and returning whether the host accepts it. A refused owner gets the host's value back.
-    public string? Validate { get; set; }
-}
-
-// The named method runs whenever a [Sync] field changes, on the peer that wrote it and on every peer it reaches. It takes nothing or the old and new values.
-[AttributeUsage(AttributeTargets.Field | AttributeTargets.Property, AllowMultiple = false)]
-public sealed class ChangeAttribute : Attribute
-{
-    public ChangeAttribute(string Method)
-    {
-        this.Method = Method;
-    }
-
-    public string Method { get; }
 }
 
 // Mark a void method on an CEntityScript with one of these and calling it routes the call.

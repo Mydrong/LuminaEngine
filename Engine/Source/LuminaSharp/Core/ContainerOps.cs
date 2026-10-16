@@ -4,10 +4,10 @@ namespace LuminaSharp;
 
 #pragma warning disable CS0649 // fields are populated by overlaying native memory, not managed assignment
 
-// Mirror of native Lumina::FVectorOps, C# calling only PushBack, RemoveAt and Clear.
+// Mirror of native Lumina::FVectorOps. Size is a plain read on every table, so it skips the GC transition.
 internal unsafe struct VectorOps
 {
-    public delegate* unmanaged[Cdecl]<void*, nuint> Size;
+    public delegate* unmanaged[Cdecl, SuppressGCTransition]<void*, nuint> Size;
     public delegate* unmanaged[Cdecl]<void*, void*> Data;
     public delegate* unmanaged[Cdecl]<void*, void*, void> PushBack;
     public delegate* unmanaged[Cdecl]<void*, nuint, void> RemoveAt;
@@ -16,12 +16,19 @@ internal unsafe struct VectorOps
     public delegate* unmanaged[Cdecl]<void*, nuint, void> Reserve;
     public delegate* unmanaged[Cdecl]<void*, nuint, nuint, void> Swap;
     public uint ElementSize;
+    public void* ConstructContainer;
+    public void* DestructContainer;
+    public void* ContainerContext;
+    public uint ContainerSize;
+    public uint DataOffset;
+    public uint CountOffset;
+    public uint CountDivisor;
 }
 
 // Mirror of native Lumina::FMapOps, where a C++ bool return is one byte.
 internal unsafe struct MapOps
 {
-    public delegate* unmanaged[Cdecl]<void*, nuint> Size;
+    public delegate* unmanaged[Cdecl, SuppressGCTransition]<void*, nuint> Size;
     public delegate* unmanaged[Cdecl]<void*, void*, void*, void*> Insert;
     public delegate* unmanaged[Cdecl]<void*, void*, void*> Find;
     public delegate* unmanaged[Cdecl]<void*, void*, byte> RemoveByKey;
@@ -33,6 +40,11 @@ internal unsafe struct MapOps
     public delegate* unmanaged[Cdecl]<void*, nuint, void**, void**, void> At;
     public uint KeySize;
     public uint ValueSize;
+    public void* ConstructContainer;
+    public void* DestructContainer;
+    public void* ContainerContext;
+    public uint ContainerSize;
+    public delegate* unmanaged[Cdecl, SuppressGCTransition]<void*, nuint*, void**, void**, byte> Next;
 }
 
 #pragma warning restore CS0649

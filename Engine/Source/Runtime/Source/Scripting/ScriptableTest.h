@@ -6,6 +6,8 @@
 #include "Core/Templates/Optional.h"
 #include "Core/Threading/Thread.h"
 #include "Scripting/EntityScript.h"
+#include "World/Entity/Components/ComponentRef.h"
+#include "World/Entity/Components/NameComponent.h"
 #include "World/Entity/Components/TransformComponent.h"
 #include "World/Entity/Systems/EntitySystem.h"
 #include "World/Subsystems/WorldSubsystem.h"
@@ -23,7 +25,7 @@ namespace Lumina
     public:
 
         // A native property, so a test proves one appended to a minted subclass coexists with it.
-        PROPERTY()
+        PROPERTY(Hidden)
         float NativeValue = 1.5f;
 
         FUNCTION()
@@ -64,7 +66,7 @@ namespace Lumina
         void* HookContext = nullptr;
 
         // A container property, so a duplicate test proves the copy gets this member's address rather than the object base.
-        PROPERTY()
+        PROPERTY(Hidden)
         TVector<FName> Values;
 
         int32 AttachCount = 0;
@@ -73,6 +75,24 @@ namespace Lumina
         int32 FixedUpdateCount = 0;
         int32 DetachCount = 0;
         float AccumulatedTime = 0.0f;
+    };
+
+    // One reference of each binding, recording what OnAttach already saw.
+    REFLECT()
+    class RUNTIME_API CComponentRefScriptTest : public CEntityScript
+    {
+        GENERATED_BODY()
+    public:
+
+        void OnAttach() override { bTransformAtAttach = Transform.Get() != nullptr; }
+
+        PROPERTY(Hidden, Component)
+        TComponentRef<STransformComponent> Transform;
+
+        PROPERTY(Hidden, Component = Get)
+        TComponentRef<SNameComponent> Name;
+
+        bool bTransformAtAttach = false;
     };
 
     // Opted into the parallel pass, recording the thread that ran it so a test can tell the pass fanned out.

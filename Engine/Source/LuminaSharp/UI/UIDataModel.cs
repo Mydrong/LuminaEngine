@@ -63,7 +63,7 @@ internal sealed unsafe class UIDataEventClosure : ScriptClosure
     }
 }
 
-// Binds a ViewModel's or CUIScript's [Bind] members to a named RmlUi data model, comparing them once a frame so plain assignments reach the view.
+// Binds a ViewModel's or CUIScript's Bind members to a named RmlUi data model, comparing them once a frame so plain assignments reach the view.
 public sealed unsafe class UIDataModel : IDisposable
 {
     private static readonly Dictionary<(ulong World, string Name), UIDataModel> Registry = new();
@@ -79,7 +79,8 @@ public sealed unsafe class UIDataModel : IDisposable
     private readonly int[] _listField;
 
     // What the view last received, so a frame where nothing changed pushes nothing.
-    private readonly object?[] _lastScalar;
+    private readonly double[] _lastNumber;
+    private readonly string?[] _lastText;
     private readonly long[] _lastList;
 
     private readonly Dictionary<string, int> _scalarByName = new(StringComparer.Ordinal);
@@ -101,7 +102,8 @@ public sealed unsafe class UIDataModel : IDisposable
         _shape = UIModelShape.Of(Target.GetType());
         _scalarField = new int[_shape.Scalars.Count];
         _listField = new int[_shape.Lists.Count];
-        _lastScalar = new object?[_shape.Scalars.Count];
+        _lastNumber = new double[_shape.Scalars.Count];
+        _lastText = new string?[_shape.Scalars.Count];
         _lastList = new long[_shape.Lists.Count];
 
         _native = Lumina.CUILibrary.CreateDataModel(UIWorld.FromHandle(World), Name,
@@ -178,7 +180,7 @@ public sealed unsafe class UIDataModel : IDisposable
         }
         if (_scalarByName.TryGetValue(Name, out int Scalar))
         {
-            PushScalar(Scalar, ReadScalar(Scalar));
+            SyncScalar(Scalar, bForce: true, bMarkDirty: true);
         }
         else if (_listByName.TryGetValue(Name, out int List))
         {
@@ -195,9 +197,7 @@ public sealed unsafe class UIDataModel : IDisposable
         }
         for (int Index = 0; Index < _shape.Scalars.Count; ++Index)
         {
-            object? Value = ReadScalar(Index);
-            _lastScalar[Index] = Value;
-            WriteScalar(Index, Value);
+            SyncScalar(Index, bForce: true, bMarkDirty: false);
         }
         for (int Index = 0; Index < _shape.Lists.Count; ++Index)
         {
@@ -215,11 +215,7 @@ public sealed unsafe class UIDataModel : IDisposable
         }
         for (int Index = 0; Index < _shape.Scalars.Count; ++Index)
         {
-            object? Value = ReadScalar(Index);
-            if (!Equals(Value, _lastScalar[Index]))
-            {
-                PushScalar(Index, Value);
-            }
+            SyncScalar(Index, bForce: false, bMarkDirty: true);
         }
         for (int Index = 0; Index < _shape.Lists.Count; ++Index)
         {
@@ -227,45 +223,49 @@ public sealed unsafe class UIDataModel : IDisposable
         }
     }
 
-    private object? ReadScalar(int Index)
+    // Reads one member and sends it when it differs from what the view holds, or always when forced.
+    private void SyncScalar(int Index, bool bForce, bool bMarkDirty)
     {
+        UIModelShape.FScalar Scalar = _shape.Scalars[Index];
+        int Field = _scalarField[Index];
         try
         {
-            return _shape.Scalars[Index].Get(_target);
+            if (Scalar.ReadText != null)
+            {
+                string Text = Scalar.ReadText(_target) ?? string.Empty;
+                if (!bForce && string.Equals(Text, _lastText[Index], StringComparison.Ordinal))
+                {
+                    return;
+                }
+                _lastText[Index] = Text;
+                if (Field >= 0)
+                {
+                    Lumina.CUILibrary.SetString(_native, Field, Text);
+                }
+            }
+            else
+            {
+                double Number = Scalar.ReadNumber!(_target);
+                if (!bForce && Number.Equals(_lastNumber[Index]))
+                {
+                    return;
+                }
+                _lastNumber[Index] = Number;
+                if (Field >= 0)
+                {
+                    Lumina.CUILibrary.SetNumber(_native, Field, Number);
+                }
+            }
         }
         catch (Exception Exception)
         {
             Interop.LogException(Exception);
-            return _lastScalar[Index];
-        }
-    }
-
-    private void PushScalar(int Index, object? Value)
-    {
-        _lastScalar[Index] = Value;
-        if (_scalarField[Index] < 0)
-        {
             return;
         }
-        WriteScalar(Index, Value);
-        Lumina.CUILibrary.MarkDirty(_native, _scalarField[Index]);
-    }
 
-    private void WriteScalar(int Index, object? Value)
-    {
-        int Field = _scalarField[Index];
-        if (Field < 0)
+        if (bMarkDirty && Field >= 0)
         {
-            return;
-        }
-        Lumina.EUIVarType Type = _shape.Scalars[Index].VarType;
-        if (Type == Lumina.EUIVarType.String)
-        {
-            Lumina.CUILibrary.SetString(_native, Field, Value as string ?? string.Empty);
-        }
-        else
-        {
-            Lumina.CUILibrary.SetNumber(_native, Field, ToNumber(Value, Type));
+            Lumina.CUILibrary.MarkDirty(_native, Field);
         }
     }
 
@@ -288,7 +288,7 @@ public sealed unsafe class UIDataModel : IDisposable
             return;
         }
 
-        long Signature = UIModelShape.Signature(Collection);
+        long Signature = List.Signature(Collection);
         if (!force && Signature == _lastList[Index])
         {
             return;
@@ -342,7 +342,14 @@ public sealed unsafe class UIDataModel : IDisposable
         {
             using var Scope = EnterTarget();
             Scalar.Set(_target, Value);
-            _lastScalar[Index] = Value;
+            if (Value is string Text)
+            {
+                _lastText[Index] = Text;
+            }
+            else
+            {
+                _lastNumber[Index] = Number;
+            }
         }
         catch (Exception Exception)
         {
@@ -409,12 +416,24 @@ public sealed unsafe class UIDataModel : IDisposable
             {
                 return;
             }
-            foreach (UIDataModel Model in new List<UIDataModel>(Registry.Values))
+
+            // Copied out, since a model's getters may create or dispose models mid-poll.
+            int Count = Registry.Count;
+            UIDataModel[] Models = System.Buffers.ArrayPool<UIDataModel>.Shared.Rent(Count);
+            Registry.Values.CopyTo(Models, 0);
+            try
             {
-                if (Model._world == World)
+                for (int Index = 0; Index < Count; ++Index)
                 {
-                    Model.Poll();
+                    if (Models[Index]._world == World)
+                    {
+                        Models[Index].Poll();
+                    }
                 }
+            }
+            finally
+            {
+                System.Buffers.ArrayPool<UIDataModel>.Shared.Return(Models, clearArray: true);
             }
         }
         catch (Exception Exception)
@@ -463,15 +482,6 @@ public sealed unsafe class UIDataModel : IDisposable
     }
 
     // ---- conversions ----
-
-    private static double ToNumber(object? Value, Lumina.EUIVarType Type)
-    {
-        if (Value == null)
-        {
-            return 0.0;
-        }
-        return Type == Lumina.EUIVarType.Bool ? ((bool)Value ? 1.0 : 0.0) : Convert.ToDouble(Value, CultureInfo.InvariantCulture);
-    }
 
     private static string ToCell(object? Value)
     {

@@ -288,44 +288,6 @@ namespace Lumina::Platform
         return true;
     }
 
-    bool PersistUserEnvVariable(const FString& Name, const FString& Value)
-    {
-        HKEY Key = nullptr;
-        if (RegOpenKeyExA(HKEY_CURRENT_USER, "Environment", 0, KEY_READ | KEY_WRITE, &Key) != ERROR_SUCCESS)
-        {
-            LOG_WARN("Failed to open HKCU\\Environment to persist {}", Name);
-            return false;
-        }
-
-        // So a normal launch does not churn the registry or broadcast a settings change.
-        char Existing[1024] = {};
-        DWORD ExistingSize = sizeof(Existing);
-        DWORD Type = 0;
-        if (RegQueryValueExA(Key, Name.c_str(), nullptr, &Type, reinterpret_cast<LPBYTE>(Existing), &ExistingSize) == ERROR_SUCCESS
-            && (Type == REG_SZ || Type == REG_EXPAND_SZ)
-            && Paths::PathsEqual(Existing, Value.c_str()))
-        {
-            RegCloseKey(Key);
-            return false;
-        }
-
-        const LONG WriteResult = RegSetValueExA(Key, Name.c_str(), 0, REG_SZ,
-            reinterpret_cast<const BYTE*>(Value.c_str()), static_cast<DWORD>(Value.size() + 1));
-        RegCloseKey(Key);
-
-        if (WriteResult != ERROR_SUCCESS)
-        {
-            LOG_WARN("Failed to persist environment variable {}", Name);
-            return false;
-        }
-
-        // Lets already-running shells pick up the change without a reboot.
-        SendMessageTimeoutA(HWND_BROADCAST, WM_SETTINGCHANGE, 0,
-            reinterpret_cast<LPARAM>("Environment"), SMTO_ABORTIFHUNG, 5000, nullptr);
-
-        return true;
-    }
-
     int LaunchProcess(const TCHAR* URL, const TCHAR* Params, bool bLaunchDetached)
     {
         if (!URL)
@@ -459,6 +421,96 @@ namespace Lumina::Platform
             CloseHandle((HANDLE)Process.Handle);
         }
         Process = FProcessHandle();
+    }
+
+    bool TryAcquireInstanceLock(const FString& Path, FInstanceLock& OutLock, uint32& OutOwnerId)
+    {
+        OutOwnerId = 0;
+        const FWString WidePath = StringUtils::ToWideString(Path);
+
+        // Shared for reading, which is how a second process learns who holds it.
+        const HANDLE File = CreateFileW(WidePath.c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (File == INVALID_HANDLE_VALUE)
+        {
+            if (GetLastError() != ERROR_SHARING_VIOLATION)
+            {
+                LOG_WARN("Could not create the instance lock '{}' (system error {}), so it is not enforced.", Path, GetLastError());
+                return true;
+            }
+
+            const HANDLE Reader = CreateFileW(WidePath.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+            if (Reader != INVALID_HANDLE_VALUE)
+            {
+                char Buffer[16] = {};
+                DWORD Read = 0;
+                (void)ReadFile(Reader, Buffer, sizeof(Buffer) - 1, &Read, nullptr);
+                CloseHandle(Reader);
+                OutOwnerId = (uint32)strtoul(Buffer, nullptr, 10);
+            }
+            return false;
+        }
+
+        char Buffer[16] = {};
+        const int Length = snprintf(Buffer, sizeof(Buffer), "%lu", GetCurrentProcessId());
+        DWORD Written = 0;
+        (void)WriteFile(File, Buffer, (DWORD)Length, &Written, nullptr);
+        (void)SetEndOfFile(File);
+
+        OutLock.Handle = File;
+        return true;
+    }
+
+    void ReleaseInstanceLock(FInstanceLock& Lock)
+    {
+        if (Lock.Handle != nullptr)
+        {
+            CloseHandle((HANDLE)Lock.Handle);
+            Lock.Handle = nullptr;
+        }
+    }
+
+    bool FocusProcessWindow(uint32 ProcessId)
+    {
+        struct FSearch
+        {
+            DWORD ProcessId;
+            HWND  Found;
+        };
+        FSearch Search{ ProcessId, nullptr };
+
+        // Top-level windows come in z-order, so the first visible unowned one is what the user last saw.
+        EnumWindows([](HWND Window, LPARAM Param) -> BOOL
+        {
+            FSearch& Search = *reinterpret_cast<FSearch*>(Param);
+            DWORD Owner = 0;
+            GetWindowThreadProcessId(Window, &Owner);
+            if (Owner != Search.ProcessId || !IsWindowVisible(Window) || GetWindow(Window, GW_OWNER) != nullptr)
+            {
+                return TRUE;
+            }
+            Search.Found = Window;
+            return FALSE;
+        }, reinterpret_cast<LPARAM>(&Search));
+
+        if (Search.Found == nullptr)
+        {
+            return false;
+        }
+
+        if (IsIconic(Search.Found))
+        {
+            ShowWindow(Search.Found, SW_RESTORE);
+        }
+
+        if (SetForegroundWindow(Search.Found))
+        {
+            return true;
+        }
+
+        // Windows only lets the foreground process move focus, so a refusal flashes the taskbar button instead.
+        FLASHWINFO Flash{ sizeof(FLASHWINFO), Search.Found, FLASHW_ALL | FLASHW_TIMERNOFG, 0, 0 };
+        FlashWindowEx(&Flash);
+        return false;
     }
 
     int RunProcessAndWaitCapture(const TCHAR* Executable, const TCHAR* Params, const TCHAR* WorkingDirectory, const TFunction<void(FStringView)>& LineCallback,

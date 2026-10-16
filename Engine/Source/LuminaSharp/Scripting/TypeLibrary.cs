@@ -162,7 +162,7 @@ internal sealed class TypeLibrary
 
     private static IEnumerable<string> HeldStructNames(ScriptType Type)
     {
-        if (Type.Kind == EPropertyType.Struct && Type.NativeName != null)
+        if (Type.Kind is EPropertyType.Struct or EPropertyType.ComponentRef && Type.NativeName != null)
         {
             yield return Type.NativeName;
         }
@@ -237,14 +237,17 @@ internal sealed class TypeLibrary
     public static bool IsReflectedType(Type Type) =>
         Type.IsDefined(typeof(ReflectAttribute), inherit: false) || Type.IsDefined(typeof(NativeTypeAttribute), inherit: false);
 
-    // A struct living in native memory, extending a native struct or stored as a component, joins reflection only through [Reflect].
+    // A struct living in native memory, as a root, an extension of a native struct or a component, joins reflection only through [Reflect].
     public static bool IsNativeBackedStruct(Type Type)
     {
-        return Type.IsDefined(typeof(ReflectAttribute), inherit: false) && (NativeStructBaseOf(Type) != null || IsComponentStruct(Type));
+        return Type.IsDefined(typeof(ReflectAttribute), inherit: false)
+            && (NativeStructBaseOf(Type) != null || IsComponentStruct(Type) || ImplementsSelf(Type, typeof(INativeStruct<>)));
     }
 
     // A C# struct the ECS stores per entity, which it declares as REFLECT(Component) does in C++ by implementing IComponent.
-    public static bool IsComponentStruct(Type Type)
+    public static bool IsComponentStruct(Type Type) => ImplementsSelf(Type, typeof(IComponent<>));
+
+    private static bool ImplementsSelf(Type Type, Type SelfInterface)
     {
         if (!Type.IsValueType || Type.IsDefined(typeof(NativeTypeAttribute), inherit: false))
         {
@@ -252,7 +255,7 @@ internal sealed class TypeLibrary
         }
         foreach (Type Interface in Type.GetInterfaces())
         {
-            if (Interface.IsGenericType && Interface.GetGenericTypeDefinition() == typeof(IComponent<>) && Interface.GetGenericArguments()[0] == Type)
+            if (Interface.IsGenericType && Interface.GetGenericTypeDefinition() == SelfInterface && Interface.GetGenericArguments()[0] == Type)
             {
                 return true;
             }
@@ -455,8 +458,9 @@ internal sealed class TypeLibrary
                     MemberType = MemberType.GetElementType()!;
                 }
 
-                // A get-only container is a view over storage native owns, so it is stored even with no setter.
-                Kind = Property.CanWrite || bStructView || IsNativeOwnedViewType(MemberType) ? EScriptMemberKind.WritableProperty : EScriptMemberKind.ReadOnlyProperty;
+                // A get-only container is a view over storage native owns, and a component reference is filled by native, so both are stored with no setter.
+                bool bComponentRef = Property.GetCustomAttribute<PropertyAttribute>() is { Component: not EComponentBind.None };
+                Kind = Property.CanWrite || bStructView || bComponentRef || IsNativeOwnedViewType(MemberType) ? EScriptMemberKind.WritableProperty : EScriptMemberKind.ReadOnlyProperty;
             }
             else
             {
@@ -469,13 +473,13 @@ internal sealed class TypeLibrary
                 continue;
             }
 
-            ScriptType Resolved = ResolveType(MemberType);
+            PropertyAttribute? Meta = Member.GetCustomAttribute<PropertyAttribute>();
+            ScriptType Resolved = Meta != null && Meta.Component != EComponentBind.None ? ResolveComponentRef(MemberType) : ResolveType(MemberType);
             if (Resolved.Kind == EPropertyType.None)
             {
                 continue;
             }
 
-            PropertyAttribute? Meta = Member.GetCustomAttribute<PropertyAttribute>();
             Members.Add(new ScriptProperty
             {
                 Name = Member.Name,
@@ -486,7 +490,7 @@ internal sealed class TypeLibrary
                 Aliases = GatherAliases(Member, Meta),
                 SkipHotReload = bClassSkip || Member.GetCustomAttribute<SkipHotReloadAttribute>() != null,
                 ExtraFlags = (EPropertyFlags)Rule.Flags,
-                NetRate = Member.GetCustomAttribute<SyncAttribute>()?.Rate ?? 0.0f,
+                NetRate = Meta?.Rate ?? 0.0f,
                 ExtraMeta = ExtraMetaOf(Member, Meta),
                 Get = Member is FieldInfo F ? F.GetValue : ((PropertyInfo)Member).GetValue,
             });
@@ -495,28 +499,29 @@ internal sealed class TypeLibrary
         return Members;
     }
 
-    // Only LuminaSharp's own attributes count, so a game attribute that happens to share a name changes nothing.
-    internal static FScriptMemberRule RuleFor(MemberInfo Member, EScriptMemberKind Kind, bool bOwnerIsNativeObject)
+    // A reference names the component it binds, the T of the TComponentRef<T> it is declared as.
+    private ScriptType ResolveComponentRef(Type Type)
     {
-        var Names = new HashSet<string>(StringComparer.Ordinal);
-        foreach (Attribute Attribute in Member.GetCustomAttributes(inherit: true))
-        {
-            Type AttributeType = Attribute.GetType();
-            if (AttributeType.Namespace == "LuminaSharp")
-            {
-                Names.Add(ScriptMemberRules.BareName(AttributeType.Name));
-            }
-        }
-        return ScriptMemberRules.Classify(Names.Contains, Kind, bOwnerIsNativeObject);
+        Type? Component = Type.IsGenericType && Type.GetGenericTypeDefinition() == typeof(TComponentRef<>) ? Type.GetGenericArguments()[0] : null;
+        ScriptType? Value = Component != null ? ResolveType(Component) : null;
+        return Value is { Kind: EPropertyType.Struct }
+            ? new ScriptType { Kind = EPropertyType.ComponentRef, Clr = Value.Clr, NativeName = Value.NativeName }
+            : new ScriptType { Kind = EPropertyType.None, Clr = Type };
     }
 
-    // Prior names a saved value may carry, [Alias] and the display Name that used to be the stored name.
+    internal static FScriptMemberRule RuleFor(MemberInfo Member, EScriptMemberKind Kind, bool bOwnerIsNativeObject)
+    {
+        PropertyAttribute? Property = Member.GetCustomAttribute<PropertyAttribute>(inherit: true);
+        return ScriptMemberRules.Classify(Property != null ? Property.Has : null, Kind, bOwnerIsNativeObject);
+    }
+
+    // Prior names a saved value may carry, [Alias] and the DisplayName that used to be the stored name.
     private static IReadOnlyList<string>? GatherAliases(MemberInfo Member, PropertyAttribute? Meta)
     {
         List<string>? Result = null;
-        if (!string.IsNullOrEmpty(Meta?.Name) && Meta.Name != Member.Name)
+        if (!string.IsNullOrEmpty(Meta?.DisplayName) && Meta.DisplayName != Member.Name)
         {
-            (Result ??= new List<string>()).Add(Meta.Name);
+            (Result ??= new List<string>()).Add(Meta.DisplayName);
         }
         foreach (AliasAttribute Alias in Member.GetCustomAttributes<AliasAttribute>(inherit: false))
         {
@@ -561,30 +566,31 @@ internal sealed class TypeLibrary
                 Result.Add(new(Key, Value));
             }
         }
-        AddIfSet("DisplayName", Meta?.Name);
+        AddIfSet(nameof(PropertyAttribute.DisplayName), Meta?.DisplayName);
         AddIfSet(nameof(PropertyAttribute.AssetType), Meta?.AssetType);
         AddIfSet(nameof(PropertyAttribute.Bundle), Meta?.Bundle);
         AddIfSet(nameof(PropertyAttribute.Group), Meta?.Group);
-        if (Member.GetCustomAttribute<BindAttribute>() is BindAttribute Bind)
+        if (Meta != null && Meta.Component != EComponentBind.None)
         {
-            Result.Add(new("Bind", Bind.Name ?? ""));
+            Result.Add(new(nameof(PropertyAttribute.Component), Meta.Component.ToString()));
         }
-        if (Member.GetCustomAttribute<ChangeAttribute>() is ChangeAttribute Change)
+        if (Meta == null)
         {
-            Result.Add(new("Change", Change.Method));
+            return Result.Count > 0 ? Result : null;
         }
-
-        if (Member.GetCustomAttribute<SyncAttribute>() is SyncAttribute Sync)
+        if (Meta.Has(ESpecifier.Bind))
         {
-            Result.Add(new("Sync", (Sync.Flags & Lumina.ESyncFlags.FromOwner) != 0 ? "FromOwner" : ""));
-            if (Sync.Quantize > 0.0)
+            Result.Add(new(nameof(ESpecifier.Bind), Meta.Bind ?? ""));
+        }
+        AddIfSet(nameof(PropertyAttribute.Change), Meta.Change);
+        if (Meta.Has(ESpecifier.Sync))
+        {
+            Result.Add(new(nameof(ESpecifier.Sync), (Meta.Sync & Lumina.ESyncFlags.FromOwner) != 0 ? "FromOwner" : ""));
+            if (Meta.Quantize > 0.0)
             {
-                Result.Add(new("Quantize", Sync.Quantize.ToString("R", System.Globalization.CultureInfo.InvariantCulture)));
+                Result.Add(new(nameof(PropertyAttribute.Quantize), Meta.Quantize.ToString("R", System.Globalization.CultureInfo.InvariantCulture)));
             }
-            if (Sync.Validate != null)
-            {
-                Result.Add(new("Validate", Sync.Validate));
-            }
+            AddIfSet(nameof(PropertyAttribute.Validate), Meta.Validate);
         }
         return Result.Count > 0 ? Result : null;
     }
@@ -633,20 +639,19 @@ internal sealed class TypeDescription
     private const uint NetUnreliableFlag = 1u << 10;
     private const uint NetOwnerOnlyFlag = 1u << 11;
 
-    // A [ScriptFunction], an [Rpc] method, or a method a [Sync] field names, each of which native calls through a reflected frame.
+    // A [Function], an [Rpc] method, or a method a Sync or Bind field names, each of which native calls through a reflected frame.
     private static bool IsReflectedMethod(MethodInfo Method, HashSet<string> NamedBySync)
     {
-        return Method.GetCustomAttribute<ScriptFunctionAttribute>() != null
-            || Method.GetCustomAttribute<ButtonAttribute>() != null
+        return Method.GetCustomAttribute<FunctionAttribute>() != null
             || Method.GetCustomAttribute<Rpc.RpcAttribute>() != null
             || IsUIBound(Method)
             || NamedBySync.Contains(Method.Name);
     }
 
-    // A [Bind] method, or the getter of a get-only [Bind] property, which a UI document reads as a computed value.
+    // A [Function(Bind)] method, or the getter of a get-only [Property(Bind)] property, which a UI document reads as a computed value.
     private static bool IsUIBound(MethodInfo Method)
     {
-        if (Method.GetCustomAttribute<BindAttribute>() != null || Method.GetCustomAttribute<BindCommandAttribute>() != null)
+        if (Method.GetCustomAttribute<FunctionAttribute>()?.Has(ESpecifier.Bind) == true)
         {
             return true;
         }
@@ -656,7 +661,7 @@ internal sealed class TypeDescription
         }
         PropertyInfo? Property = Method.DeclaringType.GetProperty(Method.Name.Substring(4),
             BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly);
-        return Property != null && Property.SetMethod == null && Property.GetCustomAttribute<BindAttribute>() != null
+        return Property != null && Property.SetMethod == null && Property.GetCustomAttribute<PropertyAttribute>()?.Has(ESpecifier.Bind) == true
             && !ScriptPropertyViews.IsView(Property.PropertyType);
     }
 
@@ -666,18 +671,18 @@ internal sealed class TypeDescription
         const BindingFlags Flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
         foreach (MemberInfo Member in Type.GetFields(Flags).Cast<MemberInfo>().Concat(Type.GetProperties(Flags)))
         {
-            SyncAttribute? Sync = Member.GetCustomAttribute<SyncAttribute>();
-            if (Sync == null && Member.GetCustomAttribute<BindAttribute>() == null)
+            PropertyAttribute? Property = Member.GetCustomAttribute<PropertyAttribute>();
+            if (Property == null || (!Property.Has(ESpecifier.Sync) && !Property.Has(ESpecifier.Bind)))
             {
                 continue;
             }
-            if (Sync?.Validate != null)
+            if (Property.Has(ESpecifier.Sync) && Property.Validate != null)
             {
-                Result.Add(Sync.Validate);
+                Result.Add(Property.Validate);
             }
-            if (Member.GetCustomAttribute<ChangeAttribute>() is ChangeAttribute Change)
+            if (Property.Change != null)
             {
-                Result.Add(Change.Method);
+                Result.Add(Property.Change);
             }
         }
         return Result;
@@ -686,23 +691,27 @@ internal sealed class TypeDescription
     // EFunctionFlags::UIBind, mirroring Function.h.
     private const uint UIBindFlag = 1u << 12;
 
-    // A [Button] is ordinary function metadata, which the inspector draws for any function carrying it.
+    // Button and ToolTip are ordinary function metadata, the same keys FUNCTION(Button = ..., ToolTip = ...) writes.
     private static IReadOnlyList<KeyValuePair<string, string>>? FunctionMetaOf(MethodInfo Method)
     {
-        if (Method.GetCustomAttribute<ButtonAttribute>() is not ButtonAttribute Button)
+        if (Method.GetCustomAttribute<FunctionAttribute>() is not FunctionAttribute Function)
         {
             return null;
         }
-        if (Method.GetParameters().Length != 0)
+        var Meta = new List<KeyValuePair<string, string>>();
+        if (Function.Has(ESpecifier.Button))
         {
-            Debug.LogWarning($"[Button] {Method.DeclaringType?.Name}.{Method.Name} takes parameters, so the inspector cannot call it.");
+            if (Method.GetParameters().Length != 0)
+            {
+                Debug.LogWarning($"[Function(Button)] {Method.DeclaringType?.Name}.{Method.Name} takes parameters, so the inspector cannot call it.");
+            }
+            Meta.Add(new(nameof(ESpecifier.Button), Function.Button ?? ""));
         }
-        var Meta = new List<KeyValuePair<string, string>> { new("Button", Button.Label ?? "") };
-        if (!string.IsNullOrEmpty(Button.Tooltip))
+        if (!string.IsNullOrEmpty(Function.ToolTip))
         {
-            Meta.Add(new("ToolTip", Button.Tooltip));
+            Meta.Add(new(nameof(FunctionAttribute.ToolTip), Function.ToolTip));
         }
-        return Meta;
+        return Meta.Count > 0 ? Meta : null;
     }
 
     private static uint FunctionFlagsOf(MethodInfo Method)
@@ -744,7 +753,7 @@ internal sealed class TypeDescription
 
             if (Method.IsGenericMethod)
             {
-                Debug.LogError($"[ScriptFunction] {Type.Name}.{Method.Name} is generic, which has no single call frame; it is not reflected.");
+                Debug.LogError($"[Function] {Type.Name}.{Method.Name} is generic, which has no single call frame; it is not reflected.");
                 continue;
             }
 
@@ -831,7 +840,7 @@ internal sealed class TypeDescription
         {
             if (Pair.Value > 1)
             {
-                Debug.LogError($"[ScriptFunction] {Type.Name}.{Pair.Key} is declared {Pair.Value} times. A reflected function is looked up by name from native and from the dispatcher, so an overload cannot be told apart and none of them is reflected. Give each one its own name.");
+                Debug.LogError($"[Function] {Type.Name}.{Pair.Key} is declared {Pair.Value} times. A reflected function is looked up by name from native and from the dispatcher, so an overload cannot be told apart and none of them is reflected. Give each one its own name.");
                 (Overloaded ??= new HashSet<string>(StringComparer.Ordinal)).Add(Pair.Key);
             }
         }

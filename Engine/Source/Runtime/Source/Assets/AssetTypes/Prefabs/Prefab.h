@@ -31,6 +31,16 @@ namespace Lumina
         static uint32 GetDataGeneration();
         static void   BumpDataGeneration();
 
+        // Never a revision a prefab reaches, so a copy stamped with it always reads as behind.
+        static constexpr uint32 kStaleRevision = ~0u;
+
+        // Moves on every change to Registry, so a placed copy can tell it is behind the asset.
+        NODISCARD uint32 GetRevision() const { return Revision; }
+        void MarkRegistryChanged();
+
+        // Refreshes only the placed copies behind their prefab, which an undo past a prefab update leaves.
+        static void RefreshStaleInstances(CWorld* World);
+
         /** Returns root entity of new instance (ECS::NullEntity on failure). OffsetTransform applied to root. */
         ECS::FEntity Instantiate(CWorld* TargetWorld, const FTransform& OffsetTransform = FTransform(), ECS::FEntity Parent = ECS::NullEntity);
 
@@ -77,6 +87,15 @@ namespace Lumina
          *  its prefab baseline, rewriting the instance root's ledger entries for that pair (lazy-created).
          *  When the component matches the prefab again the entries are cleared. */
         static void RecaptureComponentOverrides(ECS::FRegistry& Registry, ECS::FEntity Entity, CStruct* ComponentType);
+
+        // The override paths one node holds for ComponentType, which an undo record keeps beside the value.
+        static TVector<FName> GetComponentOverrides(ECS::FRegistry& Registry, ECS::FEntity Entity, CStruct* ComponentType);
+
+        // Puts those paths back and takes every other leaf from the prefab's current data, since the restored value may predate it.
+        static void RestoreComponentOverrides(ECS::FRegistry& Registry, ECS::FEntity Entity, CStruct* ComponentType, const TVector<FName>& Paths);
+
+        // An undo brought back part of this placement from an older image, so the next stale pass refreshes it.
+        static void MarkInstanceStale(ECS::FRegistry& Registry, ECS::FEntity Entity);
 
         /** Records that ComponentType was added to an instance node (so refresh never prunes it), or, if the
          *  prefab actually ships it, just clears any prior "removed" mark so it inherits again. */
@@ -158,19 +177,19 @@ namespace Lumina
 
         // The ledger. Public because the reflector's generated code takes offsetof on every PROPERTY;
         // nothing outside the variant paths should write these.
-        PROPERTY()
+        PROPERTY(Hidden)
         TVector<SPrefabPropertyOverride> VariantOverriddenProperties;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         TVector<SPrefabComponentRef> VariantAddedComponents;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         TVector<SPrefabComponentRef> VariantRemovedComponents;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         TVector<SPrefabVariantNode> VariantStructuralNodes;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         TVector<FName> VariantRemovedEntities;
 
     private:
@@ -181,10 +200,13 @@ namespace Lumina
 
         void RebuildStableIDLookup();
 
+        static void RefreshInstancesInWorld(CWorld* World, bool bOnlyStale);
+
         THashMap<FName, ECS::FEntity> StableIDLookup;
         uint32                        StableIDLookupGeneration = 0;
         bool                          bStableIDLookupBuilt     = false;
         uint32                        VariantResolveCount      = 0;
+        uint32                        Revision                 = 0;
 
         // Transient, since it describes this session's parent chain rather than anything on disk.
         bool                          bVariantResolveFailed    = false;

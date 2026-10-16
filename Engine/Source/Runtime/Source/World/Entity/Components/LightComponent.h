@@ -3,6 +3,7 @@
 #include "Assets/AssetTypes/Material/MaterialInterface.h"
 #include "Core/Math/Math.h"
 #include "Core/Object/ObjectHandleTyped.h"
+#include "Renderer/RenderLayers.h"
 #include "LightComponent.generated.h"
 
 namespace Lumina
@@ -31,6 +32,10 @@ namespace Lumina
         /** Roughness floor this light shades with, widening its highlight so it stops sparkling on near-mirror surfaces. */
         PROPERTY(Editable, Category = "Light", ClampMin = 0.0f, ClampMax = 1.0f)
         float MinRoughness = 0.0f;
+
+        // Lights the view of any camera whose CullMask shares one of these layers.
+        PROPERTY(Editable, Category = "Light")
+        SRenderLayerMask RenderLayers;
 
         /** When true, this light contributes to the shadow pass. */
         PROPERTY(Editable, Category = "Shadows")
@@ -90,6 +95,10 @@ namespace Lumina
         /** Roughness floor this light shades with, widening its highlight so it stops sparkling on near-mirror surfaces. */
         PROPERTY(Editable, Category = "Light", ClampMin = 0.0f, ClampMax = 1.0f)
         float MinRoughness = 0.0f;
+
+        // Lights the view of any camera whose CullMask shares one of these layers.
+        PROPERTY(Editable, Category = "Light")
+        SRenderLayerMask RenderLayers;
 
         /** When true, this light contributes to the shadow pass. */
         PROPERTY(Editable, Category = "Shadows")
@@ -158,6 +167,10 @@ namespace Lumina
 
         PROPERTY(Editable, Category = "Light", ClampMin = 0.0f, ClampMax = 1.0f)
         float MinRoughness = 0.0f;
+
+        // Lights the view of any camera whose CullMask shares one of these layers.
+        PROPERTY(Editable, Category = "Light")
+        SRenderLayerMask RenderLayers;
 
         PROPERTY(Editable, Category = "Advanced")
         bool bVolumetric = false;

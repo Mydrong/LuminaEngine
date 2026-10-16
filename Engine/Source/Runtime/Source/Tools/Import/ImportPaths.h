@@ -10,6 +10,9 @@ namespace Lumina::Import::PathReservations
     /** True when no loaded package, nothing on disk and no in-flight import already owns Path. */
     RUNTIME_API bool IsFree(FStringView Path);
 
+    // The first of Path, Path_1, Path_2 and so on nothing owns, without reserving it, for a name taken at once. Takes and returns no extension.
+    RUNTIME_API FFixedString FindFree(FStringView Path);
+
     /** Reserves Path, or Path_1, Path_2 and so on when it is taken. Empty when nothing was free. */
     RUNTIME_API FFixedString Reserve(FStringView Path);
 
@@ -29,6 +32,8 @@ namespace Lumina::Import::PathReservations
 
         FScopedReservation(const FScopedReservation&) = delete;
         FScopedReservation& operator=(const FScopedReservation&) = delete;
+        FScopedReservation(FScopedReservation&&) = delete;
+        FScopedReservation& operator=(FScopedReservation&&) = delete;
 
         const FFixedString& Get() const { return Reserved; }
         bool IsValid() const { return !Reserved.empty(); }

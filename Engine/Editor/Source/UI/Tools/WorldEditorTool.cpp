@@ -1,4 +1,5 @@
 ﻿#include <string>
+#include "Tools/Import/ImportPaths.h"
 #include "Animation/SkeletalMeshLibrary.h"
 #include "World/ECS/Registry.h"
 #include "WorldEditorTool.h"
@@ -208,32 +209,15 @@ namespace Lumina
         return bAnyInFront;
     }
 
-    // Slab ray-vs-AABB; OutT is along (possibly unnormalized) Dir. Returns true on hit in front of origin.
-    static bool RayVsAABB(const FVector3& Origin, const FVector3& Dir, const SAABB& Box, float& OutT)
+    // Distance straight down from Origin to the box's top, zero when Origin is already inside it.
+    static bool CastDownToAABB(const FVector3& Origin, const SAABB& Box, float& OutT)
     {
-        float TMin = 0.0f;
-        float TMax = FLT_MAX;
-        for (int Axis = 0; Axis < 3; ++Axis)
+        const bool bOverXZ = Origin.x >= Box.Min.x && Origin.x <= Box.Max.x && Origin.z >= Box.Min.z && Origin.z <= Box.Max.z;
+        if (!bOverXZ || Origin.y < Box.Min.y)
         {
-            if (Math::Abs(Dir[Axis]) < 1e-6f)
-            {
-                if (Origin[Axis] < Box.Min[Axis] || Origin[Axis] > Box.Max[Axis])
-                {
-                    return false;
-                }
-                continue;
-            }
-            float T1 = (Box.Min[Axis] - Origin[Axis]) / Dir[Axis];
-            float T2 = (Box.Max[Axis] - Origin[Axis]) / Dir[Axis];
-            if (T1 > T2) { std::swap(T1, T2); }
-            TMin = Math::Max(TMin, T1);
-            TMax = Math::Min(TMax, T2);
-            if (TMin > TMax)
-            {
-                return false;
-            }
+            return false;
         }
-        OutT = TMin;
+        OutT = Math::Max(0.0f, Origin.y - Box.Max.y);
         return true;
     }
 
@@ -2659,121 +2643,6 @@ namespace Lumina
         }
     }
 
-    void FWorldEditorTool::PushAddTagModal(ECS::FEntity Entity)
-    {
-        struct FTagModalState
-        {
-            char TagBuffer[256] = {0};
-            bool bTagExists = false;
-        };
-        
-        TUniquePtr<FTagModalState> State = MakeUnique<FTagModalState>();
-        
-        ToolContext->PushModal("Add Tag", ImVec2(400.0f, 180.0f), [this, Entity, State = Move(State)] () -> bool
-        {
-            bool bTagAdded = false;
-    
-            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.9f, 0.9f, 0.9f, 1.0f));
-            ImGui::TextUnformatted("Enter a tag name for this entity");
-            ImGui::PopStyleColor();
-            
-            ImGui::Spacing();
-            ImGui::Separator();
-            ImGui::Spacing();
-    
-            ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(10, 8));
-            ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 4.0f);
-            ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.15f, 0.15f, 0.16f, 1.0f));
-            ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, ImVec4(0.18f, 0.18f, 0.19f, 1.0f));
-            ImGui::PushStyleColor(ImGuiCol_FrameBgActive, ImVec4(0.2f, 0.2f, 0.21f, 1.0f));
-            
-            ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
-            
-            bool bInputEnter = ImGui::InputTextWithHint(
-                "##TagInput",
-                LE_ICON_TAG " Tag name...",
-                State->TagBuffer,
-                sizeof(State->TagBuffer),
-                ImGuiInputTextFlags_EnterReturnsTrue
-            );
-            
-            if (ImGui::IsWindowAppearing())
-            {
-                ImGui::SetKeyboardFocusHere(-1);
-            }
-            
-            ImGui::PopStyleColor(3);
-            ImGui::PopStyleVar(2);
-            
-            FString TagName(State->TagBuffer);
-            State->bTagExists = !TagName.empty() && ECS::Utils::EntityHasTag(TagName, ECS::GetWorldRegistry(*World), Entity);
-            
-            if (State->bTagExists)
-            {
-                ImGui::Spacing();
-                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.9f, 0.4f, 0.4f, 1.0f));
-                ImGui::TextUnformatted(LE_ICON_ALERT_CIRCLE " Tag already exists on this entity");
-                ImGui::PopStyleColor();
-            }
-    
-            ImGui::Spacing();
-            ImGui::Separator();
-            ImGui::Spacing();
-    
-            constexpr float buttonWidth = 100.0f;
-            float const buttonSpacing = ImGui::GetStyle().ItemSpacing.x;
-            float const totalWidth = buttonWidth * 2 + buttonSpacing;
-            float const availWidth = ImGui::GetContentRegionAvail().x;
-            ImGui::SetCursorPosX((availWidth - totalWidth) * 0.5f);
-            
-            ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(20, 8));
-            ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 4.0f);
-            
-            bool const bCanAdd = !TagName.empty() && !State->bTagExists;
-            
-            if (!bCanAdd)
-            {
-                ImGui::BeginDisabled();
-            }
-
-            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.25f, 0.55f, 0.3f, 1.0f));
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.3f, 0.65f, 0.35f, 1.0f));
-            ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.2f, 0.5f, 0.25f, 1.0f));
-            
-            if (ImGui::Button("Add", ImVec2(buttonWidth, 0)) || (bInputEnter && bCanAdd))
-            {
-                const FName TagId(TagName);
-                auto Storage = ECS::GetWorldRegistry(*World).NamedStorage<STagComponent>(TagId);
-                Storage.Emplace(Entity).Tag = TagId;
-                bTagAdded = true;
-            }
-            
-            ImGui::PopStyleColor(3);
-            
-            if (!bCanAdd)
-            {
-                ImGui::EndDisabled();
-            }
-
-            ImGui::SameLine();
-            
-            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.2f, 0.22f, 1.0f));
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.25f, 0.25f, 0.27f, 1.0f));
-            ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.3f, 0.3f, 0.32f, 1.0f));
-            
-            bool bShouldClose = false;
-            if (ImGui::Button("Cancel", ImVec2(buttonWidth, 0)))
-            {
-                bShouldClose = true;
-            }
-            
-            ImGui::PopStyleColor(3);
-            ImGui::PopStyleVar(2);
-            
-            return bTagAdded || bShouldClose;
-        });
-    }
-
     void FWorldEditorTool::PushAddComponentModal(ECS::FEntity Entity)
     {
         TUniquePtr<ImGuiTextFilter> Filter = MakeUnique<ImGuiTextFilter>();
@@ -3063,17 +2932,16 @@ namespace Lumina
                 ErrorMessage = "Folder must resolve to a virtual path under a mounted alias (e.g. /Game).";
                 return false;
             }
-            CPackage::AddPackageExt(Path);
-            Path = VFS::MakeUniqueFilePath(Path);
-
-            FFixedString SafePath = SanitizeObjectName(Path);
-            if (FindObject<CPackage>(SafePath) != nullptr)
+            // Free of loaded packages and in-flight imports as well as files, since CreatePackage refuses all three.
+            Path = Import::PathReservations::FindFree(Path);
+            if (Path.empty())
             {
-                ErrorMessage = "A package with that name is already loaded.";
+                ErrorMessage = "No free name in that folder.";
                 return false;
             }
+            CPackage::AddPackageExt(Path);
 
-            CPackage* NewPackage = CPackage::CreatePackage(SafePath);
+            CPackage* NewPackage = CPackage::CreatePackage(Path);
             if (NewPackage == nullptr)
             {
                 ErrorMessage = "Failed to create package.";
@@ -3153,14 +3021,8 @@ namespace Lumina
         }
     }
 
-    void FWorldEditorTool::PushCreatePrefabFromSelectionModal()
+    TVector<ECS::FEntity> FWorldEditorTool::GatherPrefabSelectionRoots() const
     {
-        if (World == nullptr || World->IsSimulating())
-        {
-            ImGuiX::Notifications::NotifyWarning("Cannot create a prefab while simulating.");
-            return;
-        }
-
         ECS::FRegistry& Registry = ECS::GetWorldRegistry(*World);
 
         // Drops invalid handles and prefab-instance children whose hierarchy is locked.
@@ -3171,12 +3033,6 @@ namespace Lumina
             {
                 Filtered.insert(Entity);
             }
-        }
-
-        if (Filtered.empty())
-        {
-            ImGuiX::Notifications::NotifyWarning("Select an entity in the world before creating a prefab.");
-            return;
         }
 
         // If any ancestor is also selected, the descent happens through the parent instead.
@@ -3200,6 +3056,25 @@ namespace Lumina
             }
         }
 
+        return Roots;
+    }
+
+    void FWorldEditorTool::PushCreatePrefabFromSelectionModal()
+    {
+        if (World == nullptr || World->IsSimulating())
+        {
+            ImGuiX::Notifications::NotifyWarning("Cannot create a prefab while simulating.");
+            return;
+        }
+
+        TVector<ECS::FEntity> Roots = GatherPrefabSelectionRoots();
+        if (Roots.empty())
+        {
+            ImGuiX::Notifications::NotifyWarning("Select an entity in the world before creating a prefab.");
+            return;
+        }
+
+        ECS::FRegistry& Registry = ECS::GetWorldRegistry(*World);
         FCreatePrefabRequest Req = BuildCreatePrefabRequest(Registry, std::move(Roots));
 
         ToolContext->PushModal("Create Prefab From Selection", ImVec2(560.0f, 290.0f),
@@ -3255,123 +3130,147 @@ namespace Lumina
             if (bCancel) return true;
             if (!bConfirm) return false;
 
-            if (NameBuffer.data()[0] == '\0') { ErrorMessage = "Name cannot be empty."; return false; }
-            if (DirBuffer.data()[0]  == '\0') { ErrorMessage = "Folder cannot be empty."; return false; }
-
-            ECS::FRegistry& WorkingRegistry = ECS::GetWorldRegistry(*World);
-            for (ECS::FEntity Entity : Req.Roots)
+            if (CPrefab* Prefab = CreatePrefabFromRoots(Req.Roots, Req.Pivot, FStringView(DirBuffer.c_str()), FStringView(NameBuffer.c_str()), ErrorMessage))
             {
-                if (!WorkingRegistry.IsValid(Entity))
-                {
-                    ErrorMessage = "Selection changed; cannot capture missing entities.";
-                    return false;
-                }
-            }
-
-            FFixedString Path = Paths::Combine(FStringView(DirBuffer.c_str()), FStringView(NameBuffer.c_str()));
-            Path = VFS::ResolveToVirtualPath(Path);
-            if (Path.empty() || Path.front() != '/')
-            {
-                ErrorMessage = "Folder must resolve to a virtual path under a mounted alias (e.g. /Game).";
-                return false;
-            }
-            CPackage::AddPackageExt(Path);
-            Path = VFS::MakeUniqueFilePath(Path);
-
-            FFixedString SafePath = SanitizeObjectName(Path);
-            if (FindObject<CPackage>(SafePath) != nullptr)
-            {
-                ErrorMessage = "A package with that name is already loaded.";
-                return false;
-            }
-
-            CPackage* NewPackage = CPackage::CreatePackage(SafePath);
-            if (NewPackage == nullptr) { ErrorMessage = "Failed to create package."; return false; }
-
-            const FStringView FileName = VFS::FileName(Path, true);
-            CPrefab* Prefab = NewObject<CPrefab>(NewPackage, FName(FileName));
-            if (Prefab == nullptr) { ErrorMessage = "Failed to create prefab object."; return false; }
-            Prefab->SetFlag(OF_Public);
-
-            // A scratch parent at the pivot, reparented world-preserving, then captured and restored.
-            ECS::FEntity CaptureRoot = ECS::NullEntity;
-            ECS::FEntity ScratchRoot = ECS::NullEntity;
-            TVector<ECS::FEntity> OriginalParents;
-
-            if (Req.Roots.size() == 1)
-            {
-                CaptureRoot = Req.Roots[0];
-            }
-            else
-            {
-                FTransform PivotTransform;
-                PivotTransform.SetLocation(Req.Pivot);
-                ScratchRoot = World->ConstructEntity(FName(FileName), PivotTransform);
-                if (ScratchRoot == ECS::NullEntity)
-                {
-                    ErrorMessage = "Failed to create scratch parent.";
-                    return false;
-                }
-
-                OriginalParents.reserve(Req.Roots.size());
-                for (ECS::FEntity Entity : Req.Roots)
-                {
-                    OriginalParents.push_back(WorkingRegistry.GetHierarchy().GetParent(Entity));
-                    ECS::Utils::ReparentEntity(WorkingRegistry, Entity, ScratchRoot);
-                }
-                CaptureRoot = ScratchRoot;
-            }
-
-            Prefab->CaptureFromWorld(World.Get(), CaptureRoot);
-
-            // Anchor the captured root at origin so the prefab opens centered in its editor.
-            Prefab->Registry.ForEachEntity([&](ECS::FEntity E)
-            {
-                if (Prefab->Registry.GetHierarchy().GetParent(E) != ECS::NullEntity)
-                {
-                    return;
-                }
-                if (STransformComponent* Tx = Prefab->Registry.TryGet<STransformComponent>(E))
-                {
-                    Tx->SetLocalTransform(FTransform());
-                }
-            });
-
-            // Detaches top-level entities back to their original parents and drops the scratch.
-            if (ScratchRoot != ECS::NullEntity)
-            {
-                for (size_t i = 0; i < Req.Roots.size(); ++i)
-                {
-                    if (OriginalParents[i] == ECS::NullEntity)
-                    {
-                        ECS::Utils::RemoveFromParent(WorkingRegistry, Req.Roots[i]);
-                    }
-                    else
-                    {
-                        ECS::Utils::ReparentEntity(WorkingRegistry, Req.Roots[i], OriginalParents[i]);
-                    }
-                }
-                World->DestroyEntity(ScratchRoot);
-            }
-
-            FObjectExport& Export = NewPackage->ExportTable.emplace_back();
-            Export.ObjectGUID = Prefab->GetGUID();
-            Export.ObjectName = Prefab->GetName();
-            Export.ClassName = Prefab->GetClass()->GetName();
-            Export.Offset = 0;
-            Export.Size = 0;
-            Export.Object = Prefab;
-
-            if (CPackage::SavePackage(NewPackage, Path))
-            {
-                FAssetRegistry::Get().AssetCreated(Prefab);
-                ImGuiX::Notifications::NotifySuccess("Created prefab: \"{0}\"", Path);
+                ImGuiX::Notifications::NotifySuccess("Created prefab: \"{0}\"", Prefab->GetPackage()->GetPackagePath());
                 return true;
             }
-
-            ErrorMessage = "Failed to save prefab to disk.";
             return false;
         });
+    }
+
+    CPrefab* FWorldEditorTool::CreatePrefabFromRoots(const TVector<ECS::FEntity>& Roots, const FVector3& Pivot, FStringView Folder, FStringView Name, FFixedString& OutError)
+    {
+        if (Name.empty()) { OutError = "Name cannot be empty."; return nullptr; }
+        if (Folder.empty()) { OutError = "Folder cannot be empty."; return nullptr; }
+
+        ECS::FRegistry& WorkingRegistry = ECS::GetWorldRegistry(*World);
+        for (ECS::FEntity Entity : Roots)
+        {
+            if (!WorkingRegistry.IsValid(Entity))
+            {
+                OutError = "Selection changed; cannot capture missing entities.";
+                return nullptr;
+            }
+        }
+
+        FFixedString Path = Paths::Combine(Folder, Name);
+        Path = VFS::ResolveToVirtualPath(Path);
+        if (Path.empty() || Path.front() != '/')
+        {
+            OutError = "Folder must resolve to a virtual path under a mounted alias (e.g. /Game).";
+            return nullptr;
+        }
+        // Free of loaded packages and in-flight imports as well as files, since CreatePackage refuses all three.
+        Path = Import::PathReservations::FindFree(Path);
+        if (Path.empty())
+        {
+            OutError = "No free name in that folder.";
+            return nullptr;
+        }
+        CPackage::AddPackageExt(Path);
+
+        CPackage* NewPackage = CPackage::CreatePackage(Path);
+        if (NewPackage == nullptr) { OutError = "Failed to create package."; return nullptr; }
+
+        const FStringView FileName = VFS::FileName(Path, true);
+        CPrefab* Prefab = NewObject<CPrefab>(NewPackage, FName(FileName));
+        if (Prefab == nullptr) { OutError = "Failed to create prefab object."; return nullptr; }
+        Prefab->SetFlag(OF_Public);
+
+        // A scratch parent at the pivot, reparented world-preserving, then captured and restored.
+        ECS::FEntity CaptureRoot = ECS::NullEntity;
+        ECS::FEntity ScratchRoot = ECS::NullEntity;
+        TVector<ECS::FEntity> OriginalParents;
+
+        if (Roots.size() == 1)
+        {
+            CaptureRoot = Roots[0];
+        }
+        else
+        {
+            FTransform PivotTransform;
+            PivotTransform.SetLocation(Pivot);
+            ScratchRoot = World->ConstructEntity(FName(FileName), PivotTransform);
+            if (ScratchRoot == ECS::NullEntity)
+            {
+                OutError = "Failed to create scratch parent.";
+                return nullptr;
+            }
+
+            OriginalParents.reserve(Roots.size());
+            for (ECS::FEntity Entity : Roots)
+            {
+                OriginalParents.push_back(WorkingRegistry.GetHierarchy().GetParent(Entity));
+                ECS::Utils::ReparentEntity(WorkingRegistry, Entity, ScratchRoot);
+            }
+            CaptureRoot = ScratchRoot;
+        }
+
+        Prefab->CaptureFromWorld(World.Get(), CaptureRoot);
+
+        // Anchor the captured root at origin so the prefab opens centered in its editor.
+        Prefab->Registry.ForEachEntity([&](ECS::FEntity E)
+        {
+            if (Prefab->Registry.GetHierarchy().GetParent(E) != ECS::NullEntity)
+            {
+                return;
+            }
+            if (STransformComponent* Tx = Prefab->Registry.TryGet<STransformComponent>(E))
+            {
+                Tx->SetLocalTransform(FTransform());
+            }
+        });
+
+        // Detaches top-level entities back to their original parents and drops the scratch.
+        if (ScratchRoot != ECS::NullEntity)
+        {
+            for (size_t i = 0; i < Roots.size(); ++i)
+            {
+                if (OriginalParents[i] == ECS::NullEntity)
+                {
+                    ECS::Utils::RemoveFromParent(WorkingRegistry, Roots[i]);
+                }
+                else
+                {
+                    ECS::Utils::ReparentEntity(WorkingRegistry, Roots[i], OriginalParents[i]);
+                }
+            }
+            World->DestroyEntity(ScratchRoot);
+        }
+
+        FObjectExport& Export = NewPackage->ExportTable.emplace_back();
+        Export.ObjectGUID = Prefab->GetGUID();
+        Export.ObjectName = Prefab->GetName();
+        Export.ClassName = Prefab->GetClass()->GetName();
+        Export.Offset = 0;
+        Export.Size = 0;
+        Export.Object = Prefab;
+
+        if (!CPackage::SavePackage(NewPackage, Path))
+        {
+            OutError = "Failed to save prefab to disk.";
+            return nullptr;
+        }
+        FAssetRegistry::Get().AssetCreated(Prefab);
+        return Prefab;
+    }
+
+    CPrefab* FWorldEditorTool::CreatePrefabFromSelection(FStringView Folder, FStringView Name, FFixedString& OutError)
+    {
+        if (World == nullptr || World->IsSimulating())
+        {
+            OutError = "Cannot create a prefab while simulating.";
+            return nullptr;
+        }
+        TVector<ECS::FEntity> Roots = GatherPrefabSelectionRoots();
+        if (Roots.empty())
+        {
+            OutError = "Nothing selected that a prefab can capture.";
+            return nullptr;
+        }
+        const FCreatePrefabRequest Req = BuildCreatePrefabRequest(ECS::GetWorldRegistry(*World), Move(Roots));
+        return CreatePrefabFromRoots(Req.Roots, Req.Pivot, Folder, Name, OutError);
     }
 
     void FWorldEditorTool::PushCreatePrefabModalForEntity(ECS::FEntity Entity)
@@ -3966,6 +3865,9 @@ namespace Lumina
         // An undo after a save changes the level again, so the next save must not skip it.
         MarkSceneDirty();
 
+        // A prefab update is the asset's, so stepping back past one must not leave its copies on the older data.
+        CPrefab::RefreshStaleInstances(World.Get());
+
         // The true-restore preserves handles but drops the (non-serialized) selection tags; re-stamp then rebuild the cache.
         ReapplySelectionTags();
         ResyncSelectionFromRegistry();
@@ -4228,6 +4130,12 @@ namespace Lumina
 
         if (bShouldPlay)
         {
+            // Before StartPIE, which logs the session's first lines.
+            if (GetDefault<CWorldEditorSettings>()->bClearConsoleOnPIE)
+            {
+                Logging::ClearLogQueue();
+            }
+
             bGamePreviewRunning = true;
             bGameViewMode = true; // default to a clean game view on play; toggle off to see editor/debug overlays
             PropertyTables.clear();
@@ -4655,8 +4563,12 @@ namespace Lumina
             { "Post Physics",   "Runs once physics results are in, which is where gameplay reads them back." },
             { "Frame End",      "Runs last each frame, before the world is handed to the renderer." },
             { "Paused",         "Runs instead of the gameplay stages while the world is not simulating, which is how systems keep working in the editor." },
+            { "No Update",      "Asks for no stage, so it only runs its startup and teardown, and whatever those set going." },
         };
-        static_assert(std::size(kSystemStages) == (size_t)EUpdateStage::Max, "One description per update stage.");
+        static_assert(std::size(kSystemStages) == (size_t)EUpdateStage::Max + 1, "One description per update stage, then the systems in none.");
+
+        // Not a real stage, so a system that ticks nowhere still gets a row to be seen and turned off from.
+        constexpr uint8 kNoUpdateStage = (uint8)EUpdateStage::Max;
 
         // How long the panel trusts its list of system classes, since gathering it configures every one of them.
         constexpr double kSystemListRefreshSeconds = 1.0;
@@ -4800,7 +4712,7 @@ namespace Lumina
         if (ImGui::BeginChild("##SystemsList", ImVec2(0.0f, -DetailHeight), ImGuiChildFlags_None))
         {
             bool bAnyRow = false;
-            for (uint8 Stage = 0; Stage < (uint8)EUpdateStage::Max; ++Stage)
+            for (uint8 Stage = 0; Stage <= kNoUpdateStage; ++Stage)
             {
                 // Scheduled systems in the order they run, then this stage's turned-off systems, which have no slot.
                 struct FStageRow
@@ -4823,7 +4735,7 @@ namespace Lumina
                 const size_t FirstUnscheduled = Rows.size();
                 for (const CWorld::FSystemInfo& Info : CachedSystemInfos)
                 {
-                    const bool bInStage = Algo::Contains(Info.Stages, (EUpdateStage)Stage);
+                    const bool bInStage = Stage == kNoUpdateStage ? Info.Stages.empty() : Algo::Contains(Info.Stages, (EUpdateStage)Stage);
                     const bool bScheduled = Algo::AnyOf(Rows, [&Info](const FStageRow& Row) { return Row.Info == &Info; });
                     if (bInStage && !bScheduled && ImGuiX::PassSearchFilter(SystemsFilter, FriendlySystemName(Info.Name.ToString()).c_str()))
                     {
@@ -4850,11 +4762,11 @@ namespace Lumina
                 const bool bOpen = ImGui::CollapsingHeader(HeaderLabel.c_str(), ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_AllowOverlap);
                 ImGui::PopStyleColor(3);
                 ImGui::PopStyleVar();
-                ImGuiX::TextTooltip("{}", bStageRunning || Stage == (uint8)EUpdateStage::Paused
+                ImGuiX::TextTooltip("{}", bStageRunning || Stage == (uint8)EUpdateStage::Paused || Stage == kNoUpdateStage
                     ? FString(kSystemStages[Stage].Description)
                     : Format("{} Nothing runs here until the world simulates.", kSystemStages[Stage].Description));
 
-                const FString Count = bStageRunning || Stage == (uint8)EUpdateStage::Paused
+                const FString Count = bStageRunning || Stage == (uint8)EUpdateStage::Paused || Stage == kNoUpdateStage
                     ? Format("{}", Rows.size())
                     : Format("{}  {} play only", Rows.size(), LE_ICON_PLAY);
                 ImGui::SameLine(HeaderRight - ImGui::CalcTextSize(Count.c_str()).x - ImGui::GetStyle().FramePadding.x * 2.0f);
@@ -5096,234 +5008,6 @@ namespace Lumina
         }
 
         AcceptContentBrowserPrefabPayload(ECS::NullEntity, /*bAttachToTarget*/ false);
-    }
-
-    void FWorldEditorTool::DrawDetailsHeaderExtraButtons(ECS::FEntity Entity)
-    {
-        // Add-Tag button, sits alongside the shared Add-Component button (inside the green style scope).
-        const float ActionDim = ImGui::GetFrameHeight();
-        if (ImGui::Button(LE_ICON_TAG, ImVec2(ActionDim, ActionDim)))
-        {
-            PushAddTagModal(Entity);
-        }
-        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
-        {
-            ImGui::SetTooltip("Add Tag");
-        }
-    }
-
-    void FWorldEditorTool::DrawDetailsExtraSections(ECS::FEntity Entity)
-    {
-        bool bHasTags = false;
-        for (Lumina::ECS::FSparseSet* StoragePtr : ECS::GetWorldRegistry(*World).GetActiveStorages())
-        {
-            const Lumina::ECS::FComponentTypeID Name = StoragePtr->GetTypeInfo().TypeID;
-            Lumina::ECS::FSparseSet& Storage = *StoragePtr;
-            if (Name == ECS::GetComponentTypeID<STagComponent>() && Storage.Contains(Entity))
-            {
-                bHasTags = true;
-                break;
-            }
-        }
-
-        if (bHasTags)
-        {
-            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.7f, 0.7f, 0.7f, 1.0f));
-            ImGui::AlignTextToFramePadding();
-            ImGui::TextUnformatted(LE_ICON_PUZZLE " Tags");
-            ImGui::PopStyleColor();
-
-            ImGui::Spacing();
-            ImGui::Separator();
-            ImGui::Spacing();
-
-            DrawTagList(Entity);
-        }
-    }
-
-    void FWorldEditorTool::DrawEntityActionButtons(ECS::FEntity Entity)
-    {
-        constexpr float ButtonHeight = 32.0f;
-        const float AvailWidth = ImGui::GetContentRegionAvail().x;
-        const float ButtonWidth = (AvailWidth - ImGui::GetStyle().ItemSpacing.x) * 0.5f;
-
-        ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 6.0f);
-
-        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.25f, 0.55f, 0.3f, 1.0f));
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.3f, 0.65f, 0.35f, 1.0f));
-        ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.2f, 0.5f, 0.25f, 1.0f));
-
-        if (ImGui::Button(LE_ICON_PLUS " Add Component", ImVec2(ButtonWidth, ButtonHeight)))
-        {
-            PushAddComponentModal(Entity);
-        }
-        if (ImGui::IsItemHovered())
-        {
-            ImGui::SetTooltip("Add a new component to this entity");
-        }
-
-        ImGui::SameLine();
-
-        if (ImGui::Button(LE_ICON_TAG " Add Tag", ImVec2(ButtonWidth, ButtonHeight)))
-        {
-            PushAddTagModal(Entity);
-        }
-        if (ImGui::IsItemHovered())
-        {
-            ImGui::SetTooltip("Add a runtime tag to this entity to use with runtime views.");
-        }
-
-        ImGui::PopStyleColor(3);
-
-        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.6f, 0.2f, 0.2f, 1.0f));
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.7f, 0.25f, 0.25f, 1.0f));
-        ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.55f, 0.18f, 0.18f, 1.0f));
-
-        if (ImGui::Button(LE_ICON_TRASH_CAN " Destroy", ImVec2(AvailWidth, ButtonHeight)))
-        {
-            if (Dialogs::Confirmation("Confirm Deletion", "Are you sure you want to delete entity \"{0}\"?\n""\nThis action cannot be undone.", (uint32)Entity))
-            {
-                EntityDestroyRequests.push(Entity);
-            }
-        }
-        if (ImGui::IsItemHovered())
-        {
-            ImGui::SetTooltip("Permanently delete this entity");
-        }
-
-        ImGui::PopStyleColor(3);
-        ImGui::PopStyleVar();
-    }
-
-    void FWorldEditorTool::DrawTagList(ECS::FEntity Entity)
-    {
-
-        TFixedVector<FName, 4> Tags;
-        for (Lumina::ECS::FSparseSet* StoragePtr : ECS::GetWorldRegistry(*World).GetActiveStorages())
-        {
-            const Lumina::ECS::FComponentTypeID Name = StoragePtr->GetTypeInfo().TypeID;
-            Lumina::ECS::FSparseSet& Storage = *StoragePtr;
-            if (Name == ECS::GetComponentTypeID<STagComponent>())
-            {
-                if (Storage.Contains(Entity))
-                {
-                    STagComponent* ComponentPtr = static_cast<STagComponent*>(Storage.GetRaw(Entity));
-                    Tags.push_back(ComponentPtr->Tag);
-                }
-            }
-        }
-        
-        if (Tags.empty())
-        {
-            return;
-        }
-        
-        ImGui::PushID("TagList");
-        
-        ImVec2 CursorPos = ImGui::GetCursorScreenPos();
-        ImVec2 HeaderSize = ImVec2(ImGui::GetContentRegionAvail().x, 32.0f);
-        
-        ImDrawList* DrawList = ImGui::GetWindowDrawList();
-        DrawList->AddRectFilled(CursorPos, ImVec2(CursorPos.x + HeaderSize.x, CursorPos.y + HeaderSize.y), IM_COL32(25, 25, 30, 255), 6.0f);
-        
-        DrawList->AddRect(CursorPos, ImVec2(CursorPos.x + HeaderSize.x, CursorPos.y + HeaderSize.y), IM_COL32(45, 45, 52, 255), 6.0f, 1.0f, 0);
-        
-        ImVec2 IconPos = CursorPos;
-        IconPos.x += 12.0f;
-        IconPos.y += (HeaderSize.y - ImGui::GetTextLineHeight()) * 0.5f;
-        DrawList->AddText(IconPos, IM_COL32(150, 170, 200, 255), LE_ICON_TAG);
-        
-        ImVec2 TitlePos = IconPos;
-        TitlePos.x += 24.0f;
-        DrawList->AddText(TitlePos, IM_COL32(220, 220, 230, 255), "Tags");
-        
-        char CountBuf[16];
-        snprintf(CountBuf, sizeof(CountBuf), "%zu", Tags.size());
-        ImVec2 CountPos = TitlePos;
-        CountPos.x += ImGui::CalcTextSize("Tags").x + 8.0f;
-        CountPos.y -= 1.0f;
-        
-        ImVec2 CountBadgeSize = ImGui::CalcTextSize(CountBuf);
-        CountBadgeSize.x += 10.0f;
-        CountBadgeSize.y += 2.0f;
-        
-        DrawList->AddRectFilled(CountPos, 
-            ImVec2(CountPos.x + CountBadgeSize.x, CountPos.y + CountBadgeSize.y),
-            IM_COL32(60, 80, 120, 180), 3.0f);
-        DrawList->AddText(ImVec2(CountPos.x + 5.0f, CountPos.y + 1.0f), 
-            IM_COL32(180, 200, 240, 255), CountBuf);
-        
-        ImGui::SetCursorScreenPos(ImVec2(CursorPos.x, CursorPos.y + HeaderSize.y + 4.0f));
-        
-        ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 12.0f);
-        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(8.0f, 4.0f));
-        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(6.0f, 6.0f));
-        
-        float AvailWidth = ImGui::GetContentRegionAvail().x;
-        float CurrentX = 0.0f;
-        
-        FName TagToRemove;
-        
-        for (const FName& Tag : Tags)
-        {
-            ImGui::PushID(Tag.c_str());
-            
-            const char* TagStr = Tag.c_str();
-            ImVec2 TagSize = ImGui::CalcTextSize(TagStr);
-            float ChipWidth = TagSize.x + 52.0f;
-            
-            if (CurrentX + ChipWidth > AvailWidth && CurrentX > 0.0f)
-            {
-                CurrentX = 0.0f;
-            }
-            else if (CurrentX > 0.0f)
-            {
-                ImGui::SameLine();
-            }
-            
-            ImVec2 ChipPos = ImGui::GetCursorScreenPos();
-            ImVec2 ChipSize = ImVec2(ChipWidth, TagSize.y + 10.0f);
-            
-            bool bHovered = ImGui::IsMouseHoveringRect(ChipPos, 
-                ImVec2(ChipPos.x + ChipSize.x, ChipPos.y + ChipSize.y));
-            
-            ImU32 ChipBg = bHovered ? IM_COL32(55, 65, 85, 255) : IM_COL32(45, 55, 75, 255);
-            ImU32 ChipBorder = bHovered ? IM_COL32(80, 100, 140, 255) : IM_COL32(65, 80, 115, 255);
-            
-            DrawList->AddRectFilled(ChipPos, ImVec2(ChipPos.x + ChipSize.x, ChipPos.y + ChipSize.y), ChipBg, 12.0f);
-            DrawList->AddRect(ChipPos, ImVec2(ChipPos.x + ChipSize.x, ChipPos.y + ChipSize.y), ChipBorder, 12.0f, 1.0f, 0);
-            
-            DrawList->AddText(ImVec2(ChipPos.x + 10.0f, ChipPos.y + 5.0f), IM_COL32(130, 160, 210, 255), LE_ICON_TAG);
-            
-            DrawList->AddText(ImVec2(ChipPos.x + 28.0f, ChipPos.y + 5.0f), IM_COL32(200, 210, 230, 255), TagStr);
-            
-            ImVec2 ClosePos = ImVec2(ChipPos.x + ChipSize.x - 20.0f, ChipPos.y + 5.0f);
-            bool bCloseHovered = ImGui::IsMouseHoveringRect(ImVec2(ClosePos.x - 4.0f, ClosePos.y - 4.0f), ImVec2(ClosePos.x + 12.0f, ClosePos.y + 12.0f));
-            
-            ImU32 CloseColor = bCloseHovered ? IM_COL32(240, 100, 100, 255) : IM_COL32(150, 150, 160, 255);
-            DrawList->AddText(ClosePos, CloseColor, LE_ICON_CLOSE);
-            
-            ImGui::InvisibleButton("##chip", ChipSize);
-            
-            if (bCloseHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
-            {
-                TagToRemove = Tag;
-            }
-            
-            CurrentX += ChipWidth + ImGui::GetStyle().ItemSpacing.x;
-            
-            ImGui::PopID();
-        }
-        
-        ImGui::PopStyleVar(3);
-        
-        if (!TagToRemove.IsNone())
-        {
-            ECS::GetWorldRegistry(*World).NamedStorage<STagComponent>(TagToRemove).RemoveEntity(Entity);
-        }
-        
-        ImGui::Spacing();
-        ImGui::PopID();
     }
 
     bool FWorldEditorTool::IsUnsavedDocument()
@@ -5649,7 +5333,6 @@ namespace Lumina
         BeginTransformTransaction(TransactionTargets);
 
         bool bAnyMoved = false;
-        const FVector3 Down(0.0f, -1.0f, 0.0f);
 
         for (ECS::FEntity Entity : Targets)
         {
@@ -5661,7 +5344,7 @@ namespace Lumina
             for (const FCandidate& C : Candidates)
             {
                 float T;
-                if (RayVsAABB(Origin, Down, C.Box, T) && T < BestT)
+                if (CastDownToAABB(Origin, C.Box, T) && T < BestT)
                 {
                     BestT = T;
                 }
@@ -5671,7 +5354,7 @@ namespace Lumina
             float NewY;
             if (BestT < FLT_MAX)
             {
-                NewY = (Origin + Down * BestT).y;
+                NewY = Origin.y - BestT;
             }
             else
             {

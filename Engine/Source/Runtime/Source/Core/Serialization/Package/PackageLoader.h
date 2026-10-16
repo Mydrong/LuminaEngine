@@ -26,6 +26,8 @@ namespace Lumina
 
         FPackageFileBytes(const FPackageFileBytes&) = delete;
         FPackageFileBytes& operator=(const FPackageFileBytes&) = delete;
+        FPackageFileBytes(FPackageFileBytes&&) = delete;
+        FPackageFileBytes& operator=(FPackageFileBytes&&) = delete;
 
         void* Data = nullptr;
         int64 Size = 0;

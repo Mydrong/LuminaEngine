@@ -23,8 +23,11 @@ namespace Lumina
             Ring.Initialize(RingCapacity);
         }
 
+        ~TConcurrentQueue() = default;
         TConcurrentQueue(const TConcurrentQueue&) = delete;
         TConcurrentQueue& operator=(const TConcurrentQueue&) = delete;
+        TConcurrentQueue(TConcurrentQueue&&) = delete;
+        TConcurrentQueue& operator=(TConcurrentQueue&&) = delete;
 
         void Enqueue(const T& Item) { EnqueueInternal(Item); }
         void Enqueue(T&& Item) { EnqueueInternal(Move(Item)); }

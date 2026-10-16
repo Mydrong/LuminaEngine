@@ -156,11 +156,11 @@ namespace Lumina
         GENERATED_BODY()
 
         /** Field on the graph's parameter struct this asset reference is read from. */
-        PROPERTY()
+        PROPERTY(Hidden)
         FName Name;
 
         /** Asset kind the consuming node expects. */
-        PROPERTY()
+        PROPERTY(Hidden)
         EAnimObjectParamType Type = EAnimObjectParamType::Animation;
     };
 
@@ -427,22 +427,22 @@ namespace Lumina
         FInstancedStruct ParameterStruct;
 
         /** Animation clips referenced by SampleAnim opcodes, indexed by clip index. */
-        PROPERTY()
+        PROPERTY(Hidden)
         TVector<TStrongObjectPtr<CAnimation>> Clips;
 
         /** Blend spaces referenced by SampleBlendSpace opcodes, indexed by blend-space index. */
-        PROPERTY()
+        PROPERTY(Hidden)
         TVector<TStrongObjectPtr<CBlendSpace>> BlendSpaces;
 
         /** Script- and editor-tweakable parameters that drive the graph. */
         TVector<FAnimGraphParameter> Parameters;
 
         /** Object-valued inputs; the runtime fills these so nodes can swap which asset they sample. */
-        PROPERTY()
+        PROPERTY(Hidden)
         TVector<SAnimGraphObjectParameter> ObjectParameters;
 
         /** Assets referenced by LoadObjectConst, so a static pin still flows through an object register. */
-        PROPERTY()
+        PROPERTY(Hidden)
         TVector<TStrongObjectPtr<CObject>> ObjectConstants;
 
         /** Offsets into the blackboard struct, parallel to Parameters / ObjectParameters. Transient. */

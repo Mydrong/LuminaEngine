@@ -25,6 +25,8 @@ namespace Lumina
         FPhysicsRagdollHandle() = default;
         FPhysicsRagdollHandle(const FPhysicsRagdollHandle&) = delete;
         FPhysicsRagdollHandle& operator=(const FPhysicsRagdollHandle&) = delete;
+        FPhysicsRagdollHandle(FPhysicsRagdollHandle&&) = delete;
+        FPhysicsRagdollHandle& operator=(FPhysicsRagdollHandle&&) = delete;
 
         ~FPhysicsRagdollHandle()
         {

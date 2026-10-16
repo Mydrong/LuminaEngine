@@ -121,16 +121,27 @@ namespace LuminaSharp
         var spanParams = new List<(int Index, string Name, string Elem)>();
         var sigParams = new List<string>();
 
-        // Instance methods pass the containing type's Handle first, typed as that member is declared.
+        // Instance methods pass the containing type's Handle first, or for a value struct the pinned address of this.
+        string? selfPin = null;
         if (!method.IsStatic)
         {
             string? handleTypeFq = FindHandleType(type, fq);
-            if (handleTypeFq == null)
+            if (handleTypeFq != null)
+            {
+                nativeTypes.Add(handleTypeFq);
+                callArgs.Add("Handle");
+            }
+            else if (type.TypeKind == TypeKind.Struct && !type.IsReadOnly && type.IsUnmanagedType)
+            {
+                string selfFq = type.ToDisplayString(fq);
+                nativeTypes.Add(selfFq + "*");
+                callArgs.Add("__self");
+                selfPin = "fixed (" + selfFq + "* __self = &this)";
+            }
+            else
             {
                 return null;
             }
-            nativeTypes.Add(handleTypeFq);
-            callArgs.Add("Handle");
         }
 
         for (int i = 0; i < method.Parameters.Length; i++)
@@ -171,15 +182,15 @@ namespace LuminaSharp
                 case Kind.String:
                     nativeTypes.Add("byte*");
                     nativeTypes.Add("int");
-                    callArgs.Add($"__enc{i}.Pointer");
-                    callArgs.Add($"__enc{i}.Length");
+                    callArgs.Add($"__enc{i}");
+                    callArgs.Add($"__len{i}");
                     stringParams.Add((i, name));
                     break;
                 case Kind.SoftPath:
                     nativeTypes.Add("byte*");
                     nativeTypes.Add("int");
-                    callArgs.Add($"__enc{i}.Pointer");
-                    callArgs.Add($"__enc{i}.Length");
+                    callArgs.Add($"__enc{i}");
+                    callArgs.Add($"__len{i}");
                     stringParams.Add((i, name + ".GetPath()"));
                     break;
                 case Kind.Bool:
@@ -218,15 +229,20 @@ namespace LuminaSharp
             retCs = "void";
             nativeTypes.Add("void");
         }
+        else if (ComponentRefOf(method.ReturnType) is INamedTypeSymbol componentRet)
+        {
+            retCs = method.ReturnType.ToDisplayString(fq);
+            nativeRefReturn = true;
+            // A component tracks its owner like a registry fetch, so a kept reference never reads a moved slot.
+            handleReturnBuild = retCs + ".FromPointer(__p)";
+            nativeTypes.Add("global::System.IntPtr");
+        }
         else if (StructHandleOf(method.ReturnType) is INamedTypeSymbol handleRet)
         {
             string handleFq = handleRet.ToDisplayString(fq);
             retCs = method.ReturnType.ToDisplayString(fq);
             nativeRefReturn = true;
-            // A component tracks its owner like a registry fetch, so a kept handle never reads a moved slot.
-            handleReturnBuild = IsComponentHandle(handleRet)
-                ? "global::LuminaSharp.NativeStructs.FromComponentPointer<" + handleFq + ">(__p)"
-                : "global::LuminaSharp.NativeStructs.FromAddressOrNull<" + handleFq + ">(__p)";
+            handleReturnBuild = "global::LuminaSharp.NativeStructs.FromAddressOrNull<" + handleFq + ">(__p)";
             if (method.ReturnType.OriginalDefinition.SpecialType != SpecialType.System_Nullable_T)
             {
                 handleReturnBuild += ".GetValueOrDefault()";
@@ -284,9 +300,14 @@ namespace LuminaSharp
             }
         }
 
-        string callConv = suppressGCTransition ? "Cdecl, SuppressGCTransition" : "Cdecl";
-        string delegateType = $"delegate* unmanaged[{callConv}]<{string.Join(", ", nativeTypes)}>";
-        string field = $"__nc_{method.Name}";
+        // A direct P/Invoke the JIT inlines, where a stored function pointer costs an indirect call per crossing.
+        string field = $"__pi_{method.Name}";
+        string bound = $"__ok_{method.Name}";
+        var externParams = new List<string>();
+        for (int i = 0; i < nativeTypes.Count - 1; ++i)
+        {
+            externParams.Add(nativeTypes[i] + " __a" + i);
+        }
         string coreArgs = string.Join(", ", callArgs);
         string staticMod = method.IsStatic ? " static" : string.Empty;
         string acc = Accessibility(method.DeclaredAccessibility);
@@ -297,14 +318,28 @@ namespace LuminaSharp
         string statCount = "if (global::LuminaSharp.InteropStats.Enabled) { ++global::LuminaSharp.InteropStats.Hits[" + statField + "]; }\n";
         sb.Append("        private static readonly int ").Append(statField).Append(" = global::LuminaSharp.InteropStats.Register(\"")
           .Append(type.Name).Append('.').Append(method.Name).Append("\");\n");
-        sb.Append("        private static readonly ").Append(delegateType).Append(' ').Append(field).Append(" =\n");
-        sb.Append("            (").Append(delegateType).Append(")global::LuminaSharp.NativeBindings.Resolve(\"")
+        sb.Append("        [global::System.Runtime.InteropServices.DllImport(\"").Append(module).Append("\", EntryPoint = \"").Append(entry)
+          .Append("\", ExactSpelling = true, CallingConvention = global::System.Runtime.InteropServices.CallingConvention.Cdecl)]\n");
+        if (suppressGCTransition)
+        {
+            sb.Append("        [global::System.Runtime.InteropServices.SuppressGCTransition]\n");
+        }
+        sb.Append("        private static extern ").Append(nativeTypes[nativeTypes.Count - 1]).Append(' ').Append(field)
+          .Append('(').Append(string.Join(", ", externParams)).Append(");\n");
+        // Read once and folded by the JIT, so the drift check costs nothing per call.
+        sb.Append("        private static readonly bool ").Append(bound).Append(" = global::LuminaSharp.NativeBindings.Bind(\"")
           .Append(module).Append("\", \"").Append(entry).Append("\", ").Append(SignatureSum(nativeTypes))
           .Append(");\n");
         // Every scratch buffer below is written before it is read, so zeroing it would be wasted work on each call.
         if (stringParams.Count > 0 || stringReturn || arrayReturn)
         {
             sb.Append("        [global::System.Runtime.CompilerServices.SkipLocalsInit]\n");
+        }
+        // Only a wrapper the caller inlines costs what a bare P/Invoke does. Anything but a stack scratch buffer fits.
+        bool bTrivialShape = stringParams.Count == 0 && spanParams.Count == 0 && selfPin == null && !stringReturn && !arrayReturn && !nativeRefReturn;
+        if (stringParams.Count == 0 && !stringReturn && !arrayReturn)
+        {
+            sb.Append("        [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]\n");
         }
         sb.Append("        ").Append(sig).Append('\n');
 
@@ -412,25 +447,14 @@ namespace LuminaSharp
         }
 
         bool hasStrings = stringParams.Count > 0;
-        bool hasSpans = spanParams.Count > 0;
+        bool hasPins = spanParams.Count > 0 || selfPin != null;
 
-        // A binding dropped at resolve stays null, so a call fails naming the export instead of jumping to zero.
-        string unboundThrow = "throw global::LuminaSharp.NativeBindings.Unbound(\"" + entry + "\")";
-        string unboundGuard = "if (" + field + " == null) { " + unboundThrow + "; }\n";
+        // A binding refused at bind time fails naming the export. The throw lives in a helper, since one inline here blocks inlining.
+        string unboundGuard = "if (!" + bound + ") { global::LuminaSharp.NativeBindings.ThrowUnbound(\"" + entry + "\"); }\n";
 
-        // Trivial shape (no marshalling fixups, plain return): expression body / one-liner.
-        if (!hasStrings && !hasSpans && !stringReturn && !arrayReturn && !nativeRefReturn)
+        if (bTrivialShape)
         {
-            if (method.ReturnsVoid)
-            {
-                sb.Append("        {\n").Append(Pad(12)).Append(statCount).Append(Pad(12)).Append(unboundGuard).Append(CoreBody(12)).Append("        }\n");
-            }
-            else
-            {
-                sb.Append("        {\n").Append(Pad(12)).Append(statCount)
-                  .Append(Pad(12)).Append("return ").Append(field).Append(" != null ? ").Append(wrap($"{field}({coreArgs})"))
-                  .Append(" : ").Append(unboundThrow).Append(";\n        }\n");
-            }
+            sb.Append("        {\n").Append(Pad(12)).Append(statCount).Append(Pad(12)).Append(unboundGuard).Append(CoreBody(12)).Append("        }\n");
         }
         else
         {
@@ -442,9 +466,9 @@ namespace LuminaSharp
             // String args: encode UTF-8 into stack scratch (allocation-free when it fits), free in finally.
             foreach ((int idx, string name) in stringParams)
             {
-                sb.Append(Pad(indent)).Append("global::System.Span<byte> __sb").Append(idx).Append(" = stackalloc byte[").Append(Utf8ScratchBytes).Append("];\n");
-                sb.Append(Pad(indent)).Append("global::LuminaSharp.Interop.FInteropString __enc").Append(idx)
-                  .Append(" = new(").Append(name).Append(", __sb").Append(idx).Append(");\n");
+                sb.Append(Pad(indent)).Append("byte* __sb").Append(idx).Append(" = stackalloc byte[").Append(Utf8ScratchBytes).Append("];\n");
+                sb.Append(Pad(indent)).Append("byte* __enc").Append(idx).Append(" = global::LuminaSharp.Interop.ToUtf8(").Append(name)
+                  .Append(", __sb").Append(idx).Append(", ").Append(Utf8ScratchBytes).Append(", out int __len").Append(idx).Append(");\n");
             }
 
             if (hasStrings)
@@ -453,13 +477,17 @@ namespace LuminaSharp
                 indent += 4;
             }
 
-            // Span args: stacked `fixed` pins wrapping the call.
+            // This and the span args, as stacked `fixed` pins wrapping the call.
+            if (selfPin != null)
+            {
+                sb.Append(Pad(indent)).Append(selfPin).Append('\n');
+            }
             foreach ((int idx, string name, string elem) in spanParams)
             {
                 sb.Append(Pad(indent)).Append("fixed (").Append(elem).Append("* __sp").Append(idx)
                   .Append(" = ").Append(name).Append(")\n");
             }
-            if (hasSpans)
+            if (hasPins)
             {
                 sb.Append(Pad(indent)).Append("{\n");
                 sb.Append(CoreBody(indent + 4));
@@ -476,7 +504,7 @@ namespace LuminaSharp
                 sb.Append(Pad(indent)).Append("}\n").Append(Pad(indent)).Append("finally\n").Append(Pad(indent)).Append("{\n");
                 foreach ((int idx, string _) in stringParams)
                 {
-                    sb.Append(Pad(indent + 4)).Append("__enc").Append(idx).Append(".Free();\n");
+                    sb.Append(Pad(indent + 4)).Append("global::LuminaSharp.Interop.FreeUtf8(__enc").Append(idx).Append(", __sb").Append(idx).Append(");\n");
                 }
                 sb.Append(Pad(indent)).Append("}\n");
             }
@@ -596,7 +624,11 @@ namespace LuminaSharp
         return null;
     }
 
-    private static bool IsComponentHandle(INamedTypeSymbol type) => ImplementsLuminaInterface(type, "IComponent");
+    private static INamedTypeSymbol? ComponentRefOf(ITypeSymbol type)
+    {
+        return type is INamedTypeSymbol { IsGenericType: true } named && named.Name == "TComponentRef"
+            && named.ContainingNamespace?.ToDisplayString() == "LuminaSharp" ? named : null;
+    }
 
     private static bool ImplementsLuminaInterface(INamedTypeSymbol type, string name)
     {

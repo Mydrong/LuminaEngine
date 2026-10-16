@@ -431,6 +431,41 @@ namespace Lumina
         TVector<STagCount> Tags;
     };
 
+    REFLECT()
+    struct MCPEDITOR_API SSystemListing
+    {
+        GENERATED_BODY()
+
+        PROPERTY()
+        FString Name;
+
+        PROPERTY()
+        bool bEnabled = true;
+
+        /** EUpdateStage values the system ticks in, empty for one that only starts and tears down. */
+        PROPERTY()
+        TVector<int32> Stages;
+    };
+
+    REFLECT()
+    struct MCPEDITOR_API SListSystemsParams
+    {
+        GENERATED_BODY()
+
+        // Only systems whose name contains this. Empty lists them all.
+        PROPERTY()
+        FString Contains;
+    };
+
+    REFLECT()
+    struct MCPEDITOR_API SListSystemsResult
+    {
+        GENERATED_BODY()
+
+        PROPERTY()
+        TVector<SSystemListing> Systems;
+    };
+
     namespace MCP
     {
         void RegisterSceneTools(FStringView Owner);

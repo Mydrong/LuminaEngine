@@ -175,6 +175,10 @@ namespace Lumina::Containers
         NODISCARD FORCEINLINE const T* data() const noexcept { return Data; }
 
         NODISCARD FORCEINLINE size_t size() const noexcept { return Count; }
+
+        // C# reads the buffer and count in place, and an inline buffer base moves them off offset zero.
+        static uint32 GetDataOffsetForInterop() noexcept { return static_cast<uint32>(offsetof(TVector, Data)); }
+        static uint32 GetCountOffsetForInterop() noexcept { return static_cast<uint32>(offsetof(TVector, Count)); }
         NODISCARD FORCEINLINE size_t capacity() const noexcept { return Cap; }
         NODISCARD FORCEINLINE bool empty() const noexcept { return Count == 0; }
         NODISCARD FORCEINLINE size_t size_bytes() const noexcept { return static_cast<size_t>(Count) * sizeof(T); }

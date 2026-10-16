@@ -140,3 +140,10 @@
 // Events per list per frame an emitter can raise for its sub-emitters; extras are dropped.
 #define PARTICLE_EVENT_CAPACITY         1024u
 #define PARTICLE_EVENT_LISTS            3u
+
+// Render layer bits, Default for anything that never chose a mask and Foreground for first-person geometry drawn over the world.
+#define RENDER_LAYER_DEFAULT_MASK       1u
+#define RENDER_LAYER_FOREGROUND_MASK    0x80000000u
+
+// Set in an instance's LODAndThinning when its layers are anything but Default, so only those instances load their mask.
+#define INSTANCE_CUSTOM_LAYERS_BIT      0x100u

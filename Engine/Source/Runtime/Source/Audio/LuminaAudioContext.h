@@ -25,6 +25,10 @@ namespace Lumina
 
 		FLuminaAudioContext();
 		~FLuminaAudioContext() override;
+		FLuminaAudioContext(const FLuminaAudioContext&) = delete;
+		FLuminaAudioContext& operator=(const FLuminaAudioContext&) = delete;
+		FLuminaAudioContext(FLuminaAudioContext&&) = delete;
+		FLuminaAudioContext& operator=(FLuminaAudioContext&&) = delete;
 
 		void Update() override;
 

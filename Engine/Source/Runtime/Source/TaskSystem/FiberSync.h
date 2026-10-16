@@ -15,8 +15,11 @@ namespace Lumina
     {
     public:
         FFiberMutex() = default;
+        ~FFiberMutex() = default;
         FFiberMutex(const FFiberMutex&)            = delete;
         FFiberMutex& operator=(const FFiberMutex&) = delete;
+        FFiberMutex(FFiberMutex&&) = delete;
+        FFiberMutex& operator=(FFiberMutex&&) = delete;
 
         RUNTIME_API void Lock();
         RUNTIME_API bool TryLock();
@@ -35,8 +38,11 @@ namespace Lumina
     {
     public:
         FFiberSharedMutex() = default;
+        ~FFiberSharedMutex() = default;
         FFiberSharedMutex(const FFiberSharedMutex&)            = delete;
         FFiberSharedMutex& operator=(const FFiberSharedMutex&) = delete;
+        FFiberSharedMutex(FFiberSharedMutex&&) = delete;
+        FFiberSharedMutex& operator=(FFiberSharedMutex&&) = delete;
 
         RUNTIME_API void Lock();          // exclusive
         RUNTIME_API bool TryLock();
@@ -61,8 +67,11 @@ namespace Lumina
     {
     public:
         explicit FFiberSemaphore(int32 InitialCount = 0) : Count(InitialCount) {}
+        ~FFiberSemaphore() = default;
         FFiberSemaphore(const FFiberSemaphore&)            = delete;
         FFiberSemaphore& operator=(const FFiberSemaphore&) = delete;
+        FFiberSemaphore(FFiberSemaphore&&) = delete;
+        FFiberSemaphore& operator=(FFiberSemaphore&&) = delete;
 
         RUNTIME_API void Acquire();
         RUNTIME_API bool TryAcquire();
@@ -81,8 +90,11 @@ namespace Lumina
     {
     public:
         FFiberConditionVariable() = default;
+        ~FFiberConditionVariable() = default;
         FFiberConditionVariable(const FFiberConditionVariable&)            = delete;
         FFiberConditionVariable& operator=(const FFiberConditionVariable&) = delete;
+        FFiberConditionVariable(FFiberConditionVariable&&) = delete;
+        FFiberConditionVariable& operator=(FFiberConditionVariable&&) = delete;
 
         RUNTIME_API void Wait(FFiberMutex& Mutex);
         RUNTIME_API void NotifyOne();
@@ -111,6 +123,8 @@ namespace Lumina
         ~FFiberScopeLock() { Mutex->Unlock(); }
         FFiberScopeLock(const FFiberScopeLock&)            = delete;
         FFiberScopeLock& operator=(const FFiberScopeLock&) = delete;
+        FFiberScopeLock(FFiberScopeLock&&) = delete;
+        FFiberScopeLock& operator=(FFiberScopeLock&&) = delete;
     private:
         FFiberMutex* Mutex;
     };
@@ -122,6 +136,8 @@ namespace Lumina
         ~FFiberReadScopeLock() { Mutex->UnlockShared(); }
         FFiberReadScopeLock(const FFiberReadScopeLock&)            = delete;
         FFiberReadScopeLock& operator=(const FFiberReadScopeLock&) = delete;
+        FFiberReadScopeLock(FFiberReadScopeLock&&) = delete;
+        FFiberReadScopeLock& operator=(FFiberReadScopeLock&&) = delete;
     private:
         FFiberSharedMutex* Mutex;
     };
@@ -133,6 +149,8 @@ namespace Lumina
         ~FFiberWriteScopeLock() { Mutex->Unlock(); }
         FFiberWriteScopeLock(const FFiberWriteScopeLock&)            = delete;
         FFiberWriteScopeLock& operator=(const FFiberWriteScopeLock&) = delete;
+        FFiberWriteScopeLock(FFiberWriteScopeLock&&) = delete;
+        FFiberWriteScopeLock& operator=(FFiberWriteScopeLock&&) = delete;
     private:
         FFiberSharedMutex* Mutex;
     };

@@ -220,6 +220,10 @@ namespace Lumina
             {
                 LOG_ERROR("[Import] Overwrote '{}' in memory but could not save it.", Existing->GetName());
             }
+            else
+            {
+                FAssetRegistry::Get().AssetSaved(Existing.Get());
+            }
 
             // An open animation editor holds pointers into the clip that was just replaced.
             AssetEvents::BroadcastAssetDataChanged(Existing.Get());
@@ -232,6 +236,12 @@ namespace Lumina
         class FUniquePathAllocator
         {
         public:
+
+            // The import already reserved its destination, so that one name is this run's to use.
+            explicit FUniquePathAllocator(FStringView OwnedDestination)
+                : Owned(OwnedDestination.data(), OwnedDestination.size())
+            {
+            }
 
             FFixedString Claim(const FFixedString& Desired)
             {
@@ -256,13 +266,24 @@ namespace Lumina
 
         private:
 
+            // A file nothing has loaded and another import's reservation hold a name too, or this run would write over them.
             bool IsFree(const FFixedString& Path) const
             {
-                return Claimed.find(Path) == Claimed.end() && FindObject<CPackage>(Path) == nullptr;
+                if (Claimed.find(Path) != Claimed.end())
+                {
+                    return false;
+                }
+                return Path == Owned ? FindObject<CPackage>(Path) == nullptr : Import::PathReservations::IsFree(Path);
             }
 
+            FFixedString           Owned;
             THashSet<FFixedString> Claimed;
         };
+
+        void AppendCreateFailure(FImportResult& OutResult, FStringView Path)
+        {
+            OutResult.Error += (OutResult.Error.empty() ? "Could not create " : ", ") + FString(Path.data(), Path.size());
+        }
 
         size_t CountMaterialSlots(const FMeshResource& Resource)
         {
@@ -1292,15 +1313,16 @@ namespace Lumina
             DestinationDir = Request.DestinationPath.substr(0, LastSlashPos + 1);
             BaseName       = Request.DestinationPath.substr(LastSlashPos + 1, FFixedString::npos);
         }
-        if (const size_t DotPos = BaseName.find_last_of('.'); DotPos != FFixedString::npos)
+        // A reimport names its package file, and any other dot belongs to the name the destination reserved.
+        if (VFS::HasExtension(BaseName, ".lasset"))
         {
-            BaseName = BaseName.substr(0, DotPos);
+            BaseName = BaseName.substr(0, BaseName.size() - FStringView(".lasset").size());
         }
 
         FFixedString TexturesDir  = DestinationDir; TexturesDir.append("Textures/");
         FFixedString MaterialsDir = DestinationDir; MaterialsDir.append("Materials/");
 
-        FUniquePathAllocator Paths;
+        FUniquePathAllocator Paths(Request.DestinationPath);
         auto DesiredPath = [&](FStringView Suffix) -> FFixedString
         {
             FFixedString Path = DestinationDir;
@@ -1308,7 +1330,11 @@ namespace Lumina
             if (!Suffix.empty())
             {
                 Path.append("_");
-                Path.append(Suffix.data(), Suffix.length());
+                // Clip and skeleton names come from the source file, where a separator would open a folder.
+                for (char Character : Suffix)
+                {
+                    Path.push_back(FStringView("\\/:*?\"<>|").find(Character) == FStringView::npos ? Character : '_');
+                }
             }
             return Path;
         };
@@ -1357,6 +1383,11 @@ namespace Lumina
             const FFixedString SkeletonPath = bMultipleSkeletons ? BuildPath(SkeletonRes->Name.ToString()) : BuildPath("Skeleton");
 
             CSkeleton* NewSkeleton = CFactory::CreateNewOf<CSkeleton>(SkeletonPath);
+            if (NewSkeleton == nullptr)
+            {
+                AppendCreateFailure(OutResult, SkeletonPath);
+                continue;
+            }
             NewSkeleton->SetFlag(OF_NeedsPostLoad);
             NewSkeleton->SkeletonResource = Move(SkeletonRes);
 
@@ -1416,7 +1447,7 @@ namespace Lumina
                 CSkeletalMesh* NewSkeletalMesh = CFactory::CreateNewOf<CSkeletalMesh>(MeshPath);
 
                 CSkeleton* MeshSkeleton = bBoundToTargetSkeleton ? TargetSkeleton.Get() : PrimarySkeleton.Get();
-                if (MeshSkeleton != nullptr)
+                if (NewSkeletalMesh != nullptr && MeshSkeleton != nullptr)
                 {
                     NewSkeletalMesh->Skeleton = MeshSkeleton;
                     NewSkeletalMesh->SkeletonJointIndicesAddress = MeshSkeleton;
@@ -1430,6 +1461,11 @@ namespace Lumina
                 NewMesh = NewSkeletalMesh;
             }
 
+            if (NewMesh == nullptr)
+            {
+                AppendCreateFailure(OutResult, MeshPath);
+                continue;
+            }
             NewMesh->SetFlag(OF_NeedsPostLoad);
             NewMesh->Materials.clear();
             NewMesh->Materials.resize(CountMaterialSlots(*MeshResource));
@@ -1465,7 +1501,13 @@ namespace Lumina
                 continue;
             }
 
-            CAnimation* NewAnimation = CFactory::CreateNewOf<CAnimation>(BuildPath(AnimSuffix));
+            const FFixedString AnimationPath = BuildPath(AnimSuffix);
+            CAnimation* NewAnimation = CFactory::CreateNewOf<CAnimation>(AnimationPath);
+            if (NewAnimation == nullptr)
+            {
+                AppendCreateFailure(OutResult, AnimationPath);
+                continue;
+            }
             NewAnimation->SetFlag(OF_NeedsPostLoad);
             NewAnimation->AnimationResource = Move(Clip);
             NewAnimation->Skeleton          = AnimSkeleton;
@@ -1767,7 +1809,8 @@ namespace Lumina
             }
             else
             {
-                LOG_ERROR("[Import] failed to save {}; asset will not be registered", Package->GetPackagePath());
+                OutResult.Error += (OutResult.Error.empty() ? "Could not save " : ", ") + FString(Package->GetPackagePath().c_str());
+                OutResult.UnsavedPackages.push_back(Package);
             }
 
             // Saved means the file now owns the name, and a failure should free it for the next attempt.

@@ -15,7 +15,7 @@ public partial class CEntityScript
     // The native object owns both values and sets them once at attach, so the first real read is kept.
     private FEntity CachedEntity = FEntity.Null;
     private CWorld? CachedWorld;
-    private STransformComponent? CachedTransform;
+    private TComponentRef<STransformComponent> CachedTransform;
 
     public FEntity Entity
     {
@@ -49,18 +49,16 @@ public partial class CEntityScript
         }
     }
 
-    // A registry view follows its pool across relocation, so it is kept until the component itself is gone.
-    public STransformComponent Transform
+    // The reference follows its pool across relocation, so it is fetched again only once the component itself is gone.
+    public ref STransformComponent Transform
     {
         get
         {
-            if (CachedTransform is { IsValid: true } Kept)
+            if (!CachedTransform.IsValid)
             {
-                return Kept;
+                CachedTransform = World.TryGetComponent<STransformComponent>(Entity).GetValueOrDefault();
             }
-            STransformComponent Fetched = World.GetComponent<STransformComponent>(Entity);
-            CachedTransform = Fetched;
-            return Fetched;
+            return ref CachedTransform.Get();
         }
     }
 
@@ -97,7 +95,7 @@ public partial class CEntityScript
     {
         CachedEntity = FEntity.Null;
         CachedWorld = null;
-        CachedTransform = null;
+        CachedTransform = default;
     }
 
     // Feeds the script's SInputAction and SInputAxis bindings before its own OnAction runs.
@@ -122,9 +120,9 @@ public partial class CEntityScript
     private static bool FeedsInputBindings(TypeLibrary Library, System.Type ScriptType) => Library.Describe(ScriptType).HasInputBindings;
 
     // Add (idempotently) and return this entity's SInputComponent so it can receive input. Call in OnReady.
-    protected SInputComponent EnableInput()
+    protected ref SInputComponent EnableInput()
     {
-        return World.GetOrEmplaceComponent<SInputComponent>(Entity);
+        return ref World.GetOrEmplaceComponent<SInputComponent>(Entity);
     }
 
     // Remove this entity's SInputComponent, stopping OnInput and the input queries.

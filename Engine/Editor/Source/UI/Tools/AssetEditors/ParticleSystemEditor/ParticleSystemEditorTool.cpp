@@ -25,6 +25,7 @@
 #include "World/Entity/Components/ParticleSystemComponent.h"
 #include "World/Entity/Components/TransformComponent.h"
 #include "Containers/StringFormat.h"
+#include "Tools/UI/ImGui/ImGuiDragDrop.h"
 
 namespace Lumina
 {
@@ -212,8 +213,8 @@ namespace Lumina
             "An explosion is typically a flash, smoke, sparks and debris as four emitters. Use the "
             "checkbox to mute one while tuning the others.");
         DrawHelpTextRow("Emitter Assets",
-            "Add Emitter Asset shares a Particle Emitter asset, marked with a link, so edits to it reach every "
-            "system using it. Right-click an emitter's header to save it as an asset, make a shared one local, "
+            "Add Emitter Asset, or dropping one from the content browser onto the emitter list, shares a Particle "
+            "Emitter asset, marked with a link, so edits to it reach every system using it. Right-click an emitter's header to save it as an asset, make a shared one local, "
             "or open the asset on its own.");
         DrawHelpTextRow("Stack",
             "Each emitter is built from a Spawn stack (runs once per particle) and an Update stack "
@@ -390,6 +391,12 @@ namespace Lumina
 
         ImGui::EndChild();
 
+        if (!IsEmitterAsset() && ImGui::BeginDragDropTarget())
+        {
+            AddSharedEmitter(DragDrop::AcceptAsset<CParticleEmitter>());
+            ImGui::EndDragDropTarget();
+        }
+
         if (PendingRemoveEmitter != nullptr)
         {
             if (SelectedObject == (CObject*)PendingRemoveEmitter)
@@ -451,7 +458,15 @@ namespace Lumina
             }
         }, Width);
 
-        CParticleEmitter* Shared = Picked != nullptr ? Cast<CParticleEmitter>(LoadObject<CObject>(FGuid::FromString(FStringView(Picked->Key.c_str(), Picked->Key.size())))) : nullptr;
+        if (Picked != nullptr)
+        {
+            AddSharedEmitter(Cast<CParticleEmitter>(LoadObject<CObject>(FGuid::FromString(FStringView(Picked->Key.c_str(), Picked->Key.size())))));
+        }
+    }
+
+    void FParticleSystemEditorTool::AddSharedEmitter(CParticleEmitter* Shared)
+    {
+        CParticleSystem* PS = GetSystem();
         if (Shared != nullptr)
         {
             PS->Emitters.push_back(Shared);

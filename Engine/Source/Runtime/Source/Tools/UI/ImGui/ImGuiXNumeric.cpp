@@ -288,7 +288,9 @@ namespace Lumina::ImGuiX
             if (Commit)
             {
                 Changed = ApplyInput(Edit->Buffer, DataType, Data, Format);
-                if (Changed && (Min != nullptr || Max != nullptr))
+                // Either side alone clamps, but a pair with no range is unclamped as ImGui's drag reads it, or every typed value commits as zero.
+                const bool bNoRange = Min != nullptr && Max != nullptr && ImGui::DataTypeCompare(DataType, Min, Max) >= 0;
+                if (Changed && (Min != nullptr || Max != nullptr) && !bNoRange)
                 {
                     ImGui::DataTypeClamp(DataType, Data, Min, Max);
                 }

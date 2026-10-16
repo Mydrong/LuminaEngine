@@ -1,43 +1,50 @@
 using System;
 using System.Collections.Generic;
+using System.Runtime.CompilerServices;
 using LuminaSharp;
 
 namespace Lumina;
 
 public unsafe partial class CWorld
 {
-    // A handle tracked through the component's pool, so one kept in a field stays valid when the pool moves.
-    public T? TryGetComponent<T>(FEntity Entity) where T : struct, IComponent<T>
+    // Null when there is none, like FRegistry::TryGet, and tracked through the pool so one kept in a field stays valid when the pool moves.
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public TComponentRef<T>? TryGetComponent<T>(FEntity Entity) where T : struct, IComponent<T>
     {
-        IntPtr Ops = ComponentOps<T>.Token;
         uint* Epoch = null;
-        IntPtr Pointer = Native.GetComponentTracked(WorldHandle, Entity.Id, Ops, &Epoch);
-        return Pointer == IntPtr.Zero ? null : NativeStructs.FromRef<T>(new NativeRef(Pointer, WorldHandle, Entity.Id, Ops, Epoch));
+        ulong World = WorldHandle;
+        IntPtr Pointer = Native.GetComponentTracked(World, Entity.Id, ComponentOps<T>.Token, &Epoch);
+        return Pointer == IntPtr.Zero ? null : new TComponentRef<T>(Pointer, World, Entity.Id, Epoch);
     }
 
-    public bool TryGetComponent<T>(FEntity Entity, out T Component) where T : struct, IComponent<T>
+    // In place like FRegistry::Get, so the ref is only good until the next structural change to this type.
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public ref T GetComponent<T>(FEntity Entity) where T : struct, IComponent<T>
     {
-        T? Found = TryGetComponent<T>(Entity);
-        Component = Found.GetValueOrDefault();
-        return Found.HasValue;
+        IntPtr Pointer = Native.GetComponent(WorldHandle, Entity.Id, ComponentOps<T>.Token);
+        if (Pointer == IntPtr.Zero)
+        {
+            ThrowMissingComponent(Entity, T.NativeName);
+        }
+        return ref Unsafe.AsRef<T>((void*)Pointer);
     }
 
-    public T GetComponent<T>(FEntity Entity) where T : struct, IComponent<T>
+    [System.Diagnostics.CodeAnalysis.DoesNotReturn]
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void ThrowMissingComponent(FEntity Entity, string Component)
     {
-        return TryGetComponent<T>(Entity) ?? throw new InvalidOperationException($"Entity {Entity.Id} has no {T.NativeName}.");
+        throw new InvalidOperationException($"Entity {Entity.Id} has no {Component}.");
     }
 
-    // A tag has no storage to view, so its handle comes back empty.
-    public T GetOrEmplaceComponent<T>(FEntity Entity) where T : struct, IComponent<T>
+    // A tag has no storage, so its ref is null and only good for discarding.
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public ref T GetOrEmplaceComponent<T>(FEntity Entity) where T : struct, IComponent<T>
     {
-        Native.EmplaceComponent(WorldHandle, Entity.Id, ComponentOps<T>.Token);
-        return TryGetComponent<T>(Entity) ?? default;
+        IntPtr Pointer = Native.EmplaceComponent(WorldHandle, Entity.Id, ComponentOps<T>.Token);
+        return ref Pointer == IntPtr.Zero ? ref Unsafe.NullRef<T>() : ref Unsafe.AsRef<T>((void*)Pointer);
     }
 
-    // The pointer is invalid after pool relocation, component removal, or world destruction.
-    public IntPtr TryGetComponentPointer<T>(FEntity Entity) where T : struct, IComponent<T>
-        => Native.GetComponent(WorldHandle, Entity.Id, ComponentOps<T>.Token);
-
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool HasComponent<T>(FEntity Entity) where T : struct, IComponent<T>
     {
         return Native.HasComponent(WorldHandle, Entity.Id, ComponentOps<T>.Token) != 0;
@@ -91,11 +98,24 @@ public unsafe partial class CWorld
     }
 
     private static TSubclassOf<CEntityScript> ClassOf<T>() where T : CEntityScript => NativeClass<T>.Of.AsBase<CEntityScript>();
-    private static TSubclassOf<CEntityScript> ScriptClassOf<T>() where T : class
+    private static TSubclassOf<CEntityScript> ScriptClassOf<T>() where T : class => ScriptClass<T>.Of;
+
+    // The class per script type, kept like NativeClass<T> so a miss resolves again once the class is minted.
+    private static class ScriptClass<T> where T : class
     {
-        return typeof(CEntityScript).IsAssignableFrom(typeof(T))
-            ? TSubclassOf<CEntityScript>.FromName(NativeTypeName.Of(typeof(T)))
-            : default;
+        private static TSubclassOf<CEntityScript> Resolved;
+
+        public static TSubclassOf<CEntityScript> Of
+        {
+            get
+            {
+                if (!Resolved.IsValid && typeof(CEntityScript).IsAssignableFrom(typeof(T)))
+                {
+                    Resolved = TSubclassOf<CEntityScript>.FromName(NativeTypeName.Of<T>());
+                }
+                return Resolved;
+            }
+        }
     }
 
     public T? GetScript<T>(FEntity Entity) where T : class
@@ -194,6 +214,22 @@ public unsafe partial class CWorld
 
     public View<T1, T2, T3, T4> View<T1, T2, T3, T4>(Exclude Filter = default)
         where T1 : struct, IComponent<T1> where T2 : struct, IComponent<T2> where T3 : struct, IComponent<T3> where T4 : struct, IComponent<T4>
+        => new(WorldHandle, Filter);
+
+    public View<T1, T2, T3, T4, T5> View<T1, T2, T3, T4, T5>(Exclude Filter = default)
+        where T1 : struct, IComponent<T1> where T2 : struct, IComponent<T2> where T3 : struct, IComponent<T3> where T4 : struct, IComponent<T4> where T5 : struct, IComponent<T5>
+        => new(WorldHandle, Filter);
+
+    public View<T1, T2, T3, T4, T5, T6> View<T1, T2, T3, T4, T5, T6>(Exclude Filter = default)
+        where T1 : struct, IComponent<T1> where T2 : struct, IComponent<T2> where T3 : struct, IComponent<T3> where T4 : struct, IComponent<T4> where T5 : struct, IComponent<T5> where T6 : struct, IComponent<T6>
+        => new(WorldHandle, Filter);
+
+    public View<T1, T2, T3, T4, T5, T6, T7> View<T1, T2, T3, T4, T5, T6, T7>(Exclude Filter = default)
+        where T1 : struct, IComponent<T1> where T2 : struct, IComponent<T2> where T3 : struct, IComponent<T3> where T4 : struct, IComponent<T4> where T5 : struct, IComponent<T5> where T6 : struct, IComponent<T6> where T7 : struct, IComponent<T7>
+        => new(WorldHandle, Filter);
+
+    public View<T1, T2, T3, T4, T5, T6, T7, T8> View<T1, T2, T3, T4, T5, T6, T7, T8>(Exclude Filter = default)
+        where T1 : struct, IComponent<T1> where T2 : struct, IComponent<T2> where T3 : struct, IComponent<T3> where T4 : struct, IComponent<T4> where T5 : struct, IComponent<T5> where T6 : struct, IComponent<T6> where T7 : struct, IComponent<T7> where T8 : struct, IComponent<T8>
         => new(WorldHandle, Filter);
 }
 

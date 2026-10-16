@@ -18,57 +18,57 @@ namespace Lumina
 
     public:
 
-        PROPERTY()
+        PROPERTY(Hidden)
         EWindowMode WindowMode = EWindowMode::Windowed;
 
         // Zero means the monitor's own resolution.
-        PROPERTY()
+        PROPERTY(Hidden)
         int32 ResolutionWidth = 0;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         int32 ResolutionHeight = 0;
 
         // Read only in exclusive fullscreen, where zero picks the highest rate the resolution offers.
-        PROPERTY()
+        PROPERTY(Hidden)
         int32 RefreshRate = 0;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         bool bVSync = false;
 
         // Zero is unlimited.
-        PROPERTY()
+        PROPERTY(Hidden)
         int32 FrameRateLimit = 0;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         EQualityLevel ViewDistanceQuality = EQualityLevel::Default;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         EQualityLevel ShadowQuality = EQualityLevel::Default;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         EQualityLevel EffectsQuality = EQualityLevel::Default;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         EQualityLevel PostProcessQuality = EQualityLevel::Default;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         EQualityLevel TextureQuality = EQualityLevel::Default;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         EQualityLevel AntiAliasingQuality = EQualityLevel::Default;
 
         // Off leaves upscaling to the project's renderer settings, which is where a new player starts.
-        PROPERTY()
+        PROPERTY(Hidden)
         bool bOverrideUpscaling = false;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         EUpscaler Upscaler = EUpscaler::None;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         EUpscalerMode UpscalerMode = EUpscalerMode::Custom;
 
         // Read while UpscalerMode is Custom, from 25 to 100.
-        PROPERTY()
+        PROPERTY(Hidden)
         float ScreenPercentage = 100.0f;
 
         // Loaded on first use, so every caller sees what is on disk without asking.

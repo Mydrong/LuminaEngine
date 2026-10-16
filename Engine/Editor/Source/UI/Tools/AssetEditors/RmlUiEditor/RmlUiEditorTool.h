@@ -28,6 +28,13 @@ namespace Lumina
     {
     public:
 
+        // A reload can add or rename model members, so the preview picks the new model up on its next poll.
+        void OnScriptsReloaded(const Scripting::FScriptReload& Reload) override
+        {
+            FAssetEditorTool::OnScriptsReloaded(Reload);
+            bScriptsReloaded = true;
+        }
+
         LUMINA_EDITOR_TOOL(FRmlUiEditorTool)
 
         FRmlUiEditorTool(IEditorToolContext* Context, FStringView VirtualPath);
@@ -195,7 +202,7 @@ namespace Lumina
 
         // Commands the preview fired, newest last, since an editor preview has no script to run them.
         TVector<FString>                   FiredCommands;
-        int32                              SeenScriptGeneration = -1;
+        bool                               bScriptsReloaded = false;
         std::string                 LastSyncedText;     // matches disk + last preview reload
         bool                        bBufferDirty = false;
         bool                        bAutoReload = true;

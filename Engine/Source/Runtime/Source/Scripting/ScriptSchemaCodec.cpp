@@ -115,7 +115,7 @@ namespace Lumina::Scripting
             if (R.U8()) { Meta.Set("ClampMin", NumberToString(R.F64())); }
             if (R.U8()) { Meta.Set("ClampMax", NumberToString(R.F64())); }
             if (R.U8()) { Meta.Set("Color", FString()); }
-            // [Serialize] rather than [Property]; the field gets storage and saving but no inspector row.
+            // A [Property(Hidden)], which is stored and saved but gets no inspector row.
             if (R.U8()) { Meta.Set("ScriptHidden", FString()); }
 
             // Written by a newer managed side; an older buffer simply has no bytes left in this record.
@@ -127,7 +127,7 @@ namespace Lumina::Scripting
                 Meta.Set("Rate", NumberToString(NetRate));
             }
 
-            // The rest of a [Sync] declaration, under the same keys PROPERTY(Sync = ...) writes for C++.
+            // The rest of a [Property(Sync)] declaration, under the same keys PROPERTY(Sync = ...) writes for C++.
             const int32 Extra = R.P < Scope.RecordEnd ? R.I32() : 0;
             for (int32 i = 0; i < Extra && !R.bError && R.P < Scope.RecordEnd; ++i)
             {
@@ -155,6 +155,7 @@ namespace Lumina::Scripting
                     break;
                 }
                 case EPropertyTypeFlags::Struct:
+                case EPropertyTypeFlags::ComponentRef:
                 {
                     Type->NativeName = FName(R.Str().c_str());
                     break;

@@ -36,7 +36,8 @@ namespace Lumina
             const float ScaleXY = Math::Max(Math::Length(FVector3(WorldMatrix[0])), Math::Length(FVector3(WorldMatrix[1])));
             const float Radius  = 0.5f * Math::Length(WidgetComponent.WorldSize) * Math::Max(1.0f, ScaleXY);
 
-            Runtime.bVisible = !bCullWidgets || WidgetFrustum.IntersectsSphere(Center, Radius);
+            Runtime.bVisible = Frame.ViewLayers.Draws(WidgetComponent.RenderLayers)
+                            && (!bCullWidgets || WidgetFrustum.IntersectsSphere(Center, Radius));
 
             if (!Runtime.bVisible || Runtime.ResourceID < 0)
             {
@@ -72,7 +73,7 @@ namespace Lumina
 
         TextView.ForEach([&](ECS::FEntity Entity, STextComponent& TextComponent)
         {
-            if (TextComponent.Text.empty())
+            if (TextComponent.Text.empty() || !Frame.ViewLayers.Draws(TextComponent.RenderLayers))
             {
                 return;
             }
@@ -232,7 +233,7 @@ namespace Lumina
         SpriteView.ForEach([&](ECS::FEntity Entity, const SSprite3DComponent& Sprite)
         {
             CTexture* Texture = Sprite.Texture.Get();
-            if (Texture == nullptr || Texture->GetResourceID() < 0 || Texture->GetNumMips() == 0)
+            if (Texture == nullptr || Texture->GetResourceID() < 0 || Texture->GetNumMips() == 0 || !Frame.ViewLayers.Draws(Sprite.RenderLayers))
             {
                 return;
             }
@@ -635,6 +636,11 @@ namespace Lumina
 
         DecalView.ForEach([&](ECS::FEntity Entity, SDecalComponent& Decal)
         {
+            if (!Frame.ViewLayers.Draws(Decal.RenderLayers))
+            {
+                return;
+            }
+
             const float LifetimeFade = DecalLifetimeFade(Decal, WorldTime);
             if (LifetimeFade <= 0.0f)
             {

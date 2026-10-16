@@ -43,6 +43,7 @@
 #include <World/Entity/Systems/CameraSystem.h>
 #include "Config/EngineSettings.h"
 #include "Input/Key.h"
+#include "Renderer/RenderLayers.h"
 #include "implot.h"
 #include "LuminaEditor.h"
 #include "Assets/AssetRegistry/AssetRegistry.h"
@@ -618,6 +619,11 @@ namespace Lumina
            return FKeyPropertyCustomization::MakeInstance();
         });
 
+        PropertyCustomizationRegistry->RegisterPropertyCustomization(SRenderLayerMask::StaticStruct()->GetName(), []
+        {
+           return FRenderLayerMaskPropertyCustomization::MakeInstance();
+        });
+
         PropertyCustomizationRegistry->RegisterPropertyCustomization(SInputActionHandle::StaticStruct()->GetName(), []
         {
            return FInputActionHandlePropertyCustomization::MakeInstance();
@@ -709,6 +715,7 @@ namespace Lumina
 
         // Shutting down is not the user closing their tabs; see bTearingDownTools.
         bTearingDownTools = true;
+        ModalManager.Dismiss();
 
         while (!EditorTools.empty())
         {

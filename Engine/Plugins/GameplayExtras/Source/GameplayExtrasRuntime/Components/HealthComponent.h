@@ -16,18 +16,18 @@ namespace Lumina
         GENERATED_BODY()
 
         /** Who caused the change, or null for regeneration and script changes with no source. */
-        PROPERTY()
+        PROPERTY(Hidden)
         ECS::FEntity Instigator = ECS::NullEntity;
 
         /** Signed change actually applied after clamping, negative for damage. */
-        PROPERTY()
+        PROPERTY(Hidden)
         float Delta = 0.0f;
 
         /** Health after the change. */
-        PROPERTY()
+        PROPERTY(Hidden)
         float Health = 0.0f;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         float MaxHealth = 0.0f;
     };
 
@@ -77,11 +77,11 @@ namespace Lumina
         float RegenDelay = 3.0f;
 
         /** Fires on every change, damage and healing alike. */
-        PROPERTY()
+        PROPERTY(Hidden)
         TScriptDelegate<SHealthChangedEvent> OnHealthChanged;
 
         /** Fires once when health reaches zero. */
-        PROPERTY()
+        PROPERTY(Hidden)
         TScriptDelegate<SHealthChangedEvent> OnDied;
 
         /** True once health has reached zero, until Revive. */

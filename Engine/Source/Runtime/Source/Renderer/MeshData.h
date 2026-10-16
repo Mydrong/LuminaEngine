@@ -675,7 +675,7 @@ namespace Lumina
         FORCEINLINE size_t GetNumSurfaces() const { return GeometrySurfaces.size(); }
         FORCEINLINE size_t GetNumVertices() const { return Positions.size(); }
         FORCEINLINE size_t GetNumIndices()  const { return Indices.size(); }
-        FORCEINLINE NODISCARD bool IsSkinnedMesh() const { return bSkinnedMesh; }
+        NODISCARD FORCEINLINE bool IsSkinnedMesh() const { return bSkinnedMesh; }
 
         // Synthetic interleaved vertex size; only meshopt fetch/overdraw analysis needs it.
         FORCEINLINE size_t GetVertexTypeSize() const

@@ -87,6 +87,7 @@ void EnumRemoveFlags(Enum& Flags, Enum FlagsToRemove)
         InstancedStruct,
         Map,
         Entity,
+        ComponentRef,
     };
 
     // The flags the Reflector sets, at the bits the runtime's EPropertyFlags.inl gives them.

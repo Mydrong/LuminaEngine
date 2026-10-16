@@ -15,6 +15,8 @@ namespace Lumina::ECS
 
         FCommandBus(const FCommandBus&) = delete;
         FCommandBus& operator = (const FCommandBus&) = delete;
+        FCommandBus(FCommandBus&&) = delete;
+        FCommandBus& operator=(FCommandBus&&) = delete;
 
         // The handle is usable as a command target at once and becomes live at the next flush.
         NODISCARD FEntity Create();
@@ -103,6 +105,8 @@ namespace Lumina::ECS
             ~FDeferScope() { SetThreadDeferring(bPrevious); }
             FDeferScope(const FDeferScope&) = delete;
             FDeferScope& operator = (const FDeferScope&) = delete;
+            FDeferScope(FDeferScope&&) = delete;
+            FDeferScope& operator=(FDeferScope&&) = delete;
 
             bool bPrevious;
         };

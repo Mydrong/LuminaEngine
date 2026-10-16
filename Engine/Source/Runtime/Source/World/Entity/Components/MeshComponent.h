@@ -4,6 +4,7 @@
 #include "Core/Math/AABB.h"
 #include "Core/Object/ObjectHandleTyped.h"
 #include "Renderer/CustomPrimitiveData.h"
+#include "Renderer/RenderLayers.h"
 #include "Containers/Vector.h"
 #include "World/Scene/RenderScene/SceneRenderTypes.h"
 #include "Lumina.h"
@@ -84,6 +85,10 @@ namespace Lumina
         PROPERTY(Editable, Category = "Rendering")
         SCustomPrimitiveData CustomPrimitiveData{};
 
+        // Drawn by any camera whose CullMask shares one of these layers.
+        PROPERTY(Editable, Category = "Rendering")
+        SRenderLayerMask RenderLayers;
+
         // Compared against the live mesh field so a direct assignment self-heals after one frame.
         const void*     CachedMeshKey = nullptr;
 
@@ -93,40 +98,19 @@ namespace Lumina
         /**
          * Staleness token of the resolve entry this component last copied from
          * (FMeshResolveCache::GetEntryState).
-         *
-         * This used to be a stamp of the cache's GLOBAL epoch, which made every invalidation scene-wide:
-         * one mesh finishing its GPU upload bumped the epoch, so every mesh component in the world failed
-         * its gate, re-resolved, and got marked dirty -- and the render scene then re-bound and re-uploaded
-         * every primitive. Comparing the entry's own token instead means the components that re-resolve are
-         * exactly the ones drawing the mesh that changed.
-         *
-         * MESH_RESOLVE_STATE_STALE never matches a live entry, so a fresh component always resolves.
          */
         uint32  CachedEntryState = MESH_RESOLVE_STATE_STALE;
 
-        // Hash of the override list this component last RESOLVED with. Compared against the live array
-        // every frame, so a material change is detected from its effect rather than from a notification.
-        // Belt and braces on purpose: the editor's PostEditChange, SetMaterialAtSlot and MarkRenderStateDirty
-        // all signal correctly, but a direct write from C++ or C# signals nothing, and a retained renderer
-        // bakes the material into a GPU record that is only rewritten when something reports a change.
-        // 0 is the never-resolved sentinel.
+        // Hash of the override list this component last resolved with.
         uint32  CachedMaterialHash = 0;
 
-        // FMeshResolveCache::GetEpoch() at the last resolve. The epoch is the editor's "nuke every resolve"
-        // signal (AssetEditorTool bumps it on any mesh/material edit). Components that own a cache entry get
-        // it for free -- ApplyPendingInvalidations marks every entry stale -- but a component resolving
-        // OUTSIDE the cache has no entry to mark, so it compares this itself. 0 never matches a live epoch.
+        // FMeshResolveCache::GetEpoch() at the last resolve.
         uint32  CachedResolveEpoch = 0;
 
         FUNCTION()
         void SetMaterialAtSlot(CMaterialInterface* Material, uint32 Slot)
         {
-            // Grow to cover Slot, then assign. The previous form tested `size() < Slot` and otherwise
-            // indexed directly, so the common case of slot 0 on a component with no overrides yet
-            // (0 < 0 is false) wrote through MaterialOverrides[0] on an EMPTY vector. Nothing sizes
-            // this array -- not SetStaticMesh, not construction -- so that was an out-of-bounds write
-            // on the first call for any component. push_back was also wrong for Slot > size, landing
-            // the material at whatever index happened to be next rather than the one asked for.
+            // Grow to cover Slot, then assign.
             if (MaterialOverrides.size() <= Slot)
             {
                 MaterialOverrides.resize(Slot + 1);

@@ -98,17 +98,17 @@ namespace Lumina::Memory
 
     // rpmalloc global stats; MUST be exported (each module links its own rpmalloc, an inline body
     // would query the caller's empty instance). Return 0 unless built with ENABLE_STATISTICS.
-    RUNTIME_API NODISCARD size_t GetCurrentMappedMemory();
-    RUNTIME_API NODISCARD size_t GetPeakMappedMemory();
-    RUNTIME_API NODISCARD size_t GetCachedMemory();
-    RUNTIME_API NODISCARD size_t GetCurrentHugeAllocMemory();
-    RUNTIME_API NODISCARD size_t GetPeakHugeAllocMemory();
-    RUNTIME_API NODISCARD size_t GetTotalMappedMemory();
-    RUNTIME_API NODISCARD size_t GetTotalUnmappedMemory();
+    NODISCARD RUNTIME_API size_t GetCurrentMappedMemory();
+    NODISCARD RUNTIME_API size_t GetPeakMappedMemory();
+    NODISCARD RUNTIME_API size_t GetCachedMemory();
+    NODISCARD RUNTIME_API size_t GetCurrentHugeAllocMemory();
+    NODISCARD RUNTIME_API size_t GetPeakHugeAllocMemory();
+    NODISCARD RUNTIME_API size_t GetTotalMappedMemory();
+    NODISCARD RUNTIME_API size_t GetTotalUnmappedMemory();
 
     // Exact bytes the OS has committed to the allocator, unlike the mapped figure which keeps decommitted holes.
-    RUNTIME_API NODISCARD size_t GetCommittedMemory();
-    RUNTIME_API NODISCARD bool UsesHugePages();
+    NODISCARD RUNTIME_API size_t GetCommittedMemory();
+    NODISCARD RUNTIME_API bool UsesHugePages();
 
     // Writes the allocator's per-thread, per-size-class statistics as text, for diffing two points in a session.
     RUNTIME_API bool DumpAllocatorStatistics(const char* Path);
@@ -119,24 +119,24 @@ namespace Lumina::Memory
     // A worker about to sleep trims its own cache here when a trim was requested since it last did.
     RUNTIME_API void TrimThreadCacheIfRequested();
     
-    RUNTIME_API LUMINA_ALLOCATION LUMINA_RESTRICT_RETURN NODISCARD void* Malloc(size_t Size, size_t Alignment = DEFAULT_ALIGNMENT) LUMINA_ALLOC_SIZE(1);
+    NODISCARD RUNTIME_API LUMINA_ALLOCATION LUMINA_RESTRICT_RETURN void* Malloc(size_t Size, size_t Alignment = DEFAULT_ALIGNMENT) LUMINA_ALLOC_SIZE(1);
 
     // No restrict here, since a reallocation is allowed to hand back the pointer it was given.
-    RUNTIME_API LUMINA_ALLOCATION NODISCARD void* Realloc(void* Memory, size_t NewSize, size_t OriginalAlignment = DEFAULT_ALIGNMENT) LUMINA_ALLOC_SIZE(2);
+    NODISCARD RUNTIME_API LUMINA_ALLOCATION void* Realloc(void* Memory, size_t NewSize, size_t OriginalAlignment = DEFAULT_ALIGNMENT) LUMINA_ALLOC_SIZE(2);
 
     // Bytes the allocator actually reserved, which is the requested size rounded up to a size class.
-    RUNTIME_API NODISCARD size_t GetAllocationSize(void* Memory);
+    NODISCARD RUNTIME_API size_t GetAllocationSize(void* Memory);
 
     // Claims the slack GetAllocationSize reports, so a growing buffer can skip the copy when it fits.
-    RUNTIME_API NODISCARD bool TryExpandInPlace(void* Memory, size_t NewSize);
+    NODISCARD RUNTIME_API bool TryExpandInPlace(void* Memory, size_t NewSize);
 
     RUNTIME_API void Free(void*& Memory);
 
     // The calling thread's scratch arena, reachable without Allocator.h, which the containers cannot include.
-    RUNTIME_API LUMINA_ALLOCATION LUMINA_RESTRICT_RETURN NODISCARD void* ScratchAllocate(size_t Size, size_t Alignment) LUMINA_ALLOC_SIZE(1);
+    NODISCARD RUNTIME_API LUMINA_ALLOCATION LUMINA_RESTRICT_RETURN void* ScratchAllocate(size_t Size, size_t Alignment) LUMINA_ALLOC_SIZE(1);
 
     // The calling thread's frame arena, reset once per frame rather than per FMemMark scope.
-    RUNTIME_API NODISCARD void* FrameAllocate(size_t Size, size_t Alignment);
+    NODISCARD RUNTIME_API void* FrameAllocate(size_t Size, size_t Alignment);
 
     template<typename T, typename ... ConstructorParams>
     requires std::is_constructible_v<T, ConstructorParams...> && (!std::is_array_v<T>)

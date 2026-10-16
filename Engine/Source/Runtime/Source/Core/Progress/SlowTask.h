@@ -25,6 +25,8 @@ namespace Lumina
 
         FScopedSlowTask(const FScopedSlowTask&) = delete;
         FScopedSlowTask& operator=(const FScopedSlowTask&) = delete;
+        FScopedSlowTask(FScopedSlowTask&&) = delete;
+        FScopedSlowTask& operator=(FScopedSlowTask&&) = delete;
 
         /** Advance progress by ExpectedWork and optionally replace the displayed message. Thread-safe. */
         void EnterProgressFrame(float ExpectedWork = 1.0f, FStringView Message = {});

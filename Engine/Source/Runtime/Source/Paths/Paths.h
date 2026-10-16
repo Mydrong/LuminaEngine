@@ -40,6 +40,9 @@ namespace Lumina::Paths
     // True for a prebuilt engine from LuminaBuild Package, which ships without sources or a toolchain.
     RUNTIME_API bool IsInstalledBuild();
 
+    // The engine root's LuminaBuild script for this host, or empty for an installed build, which has no toolchain.
+    RUNTIME_API FString GetBuildToolScript();
+
     // Written beside Engine/Resources by the packager, so its presence is what marks an installed build.
     inline constexpr const char* InstalledBuildMarker = "Engine/InstalledBuild.json";
 

@@ -22,23 +22,23 @@ namespace Lumina
     {
         GENERATED_BODY()
 
-        PROPERTY()
+        PROPERTY(Hidden)
         FName ParameterName;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         EMaterialParameterType Type = EMaterialParameterType::Scalar;
 
         // A disabled override keeps its value but shows the parent's instead.
-        PROPERTY()
+        PROPERTY(Hidden)
         bool bEnabled = true;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         float Scalar = 0.0f;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         FVector4 Vector = FVector4(0.0f);
 
-        PROPERTY()
+        PROPERTY(Hidden)
         TStrongObjectPtr<CTexture> Texture;
     };
 
@@ -48,10 +48,10 @@ namespace Lumina
     {
         GENERATED_BODY()
 
-        PROPERTY()
+        PROPERTY(Hidden)
         FName ParameterName;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         bool bValue = false;
     };
 
@@ -142,11 +142,11 @@ namespace Lumina
         PROPERTY(Editable, Category = "Material|Shading")
         EMaterialShadingModel ShadingModelOverride = EMaterialShadingModel::Lit;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         TVector<SMaterialParameterOverride> Overrides;
 
         // Switches this level diverges on, inherited down the chain like a parameter override.
-        PROPERTY()
+        PROPERTY(Hidden)
         TVector<SMaterialStaticSwitchOverride> StaticSwitchOverrides;
 
     private:

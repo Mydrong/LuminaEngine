@@ -116,28 +116,28 @@ internal static class Serializer
         using var Frame = new Record(Writer, ERecord.Meta);
 
         WriteString(Writer, Meta?.Category ?? "");
-        WriteString(Writer, Meta?.Tooltip ?? "");
+        WriteString(Writer, Meta?.ToolTip ?? "");
         WriteString(Writer, Meta?.Units ?? "");
 
-        bool bHasMin = Meta?.HasMin ?? false;
+        bool bHasMin = Meta?.HasClampMin ?? false;
         Writer.Write((byte)(bHasMin ? 1 : 0));
         if (bHasMin)
         {
-            Writer.Write((double)Meta!.Min);
+            Writer.Write((double)Meta!.ClampMin);
         }
 
-        bool bHasMax = Meta?.HasMax ?? false;
+        bool bHasMax = Meta?.HasClampMax ?? false;
         Writer.Write((byte)(bHasMax ? 1 : 0));
         if (bHasMax)
         {
-            Writer.Write((double)Meta!.Max);
+            Writer.Write((double)Meta!.ClampMax);
         }
 
-        Writer.Write((byte)((Meta?.Color ?? false) ? 1 : 0));
+        Writer.Write((byte)((Meta?.Has(ESpecifier.ColorPicker) ?? false) ? 1 : 0));
         Writer.Write((byte)(bHidden ? 1 : 0));
 
         // Appended, which the Meta record's length prefix makes safe against an older native reader.
-        Writer.Write((uint)(Meta?.Flags ?? EPropertyFlags.None) | (uint)ExtraFlags | (uint)ParamFlags);
+        Writer.Write((uint)ExtraFlags | (uint)ParamFlags);
         Writer.Write((double)NetRate);
 
         Writer.Write(ExtraMeta?.Count ?? 0);
@@ -168,6 +168,7 @@ internal static class Serializer
                 break;
             }
             case EPropertyType.Struct:
+            case EPropertyType.ComponentRef:
             {
                 WriteString(Writer, Type.NativeName ?? "");
                 break;

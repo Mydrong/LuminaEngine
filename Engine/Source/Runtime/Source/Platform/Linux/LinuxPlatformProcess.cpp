@@ -11,6 +11,7 @@
 #include <malloc.h>
 #include <sched.h>
 #include <spawn.h>
+#include <sys/file.h>
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
@@ -377,19 +378,13 @@ namespace Lumina::Platform
                 if (errno != EINTR)
                 {
                     Watchdog.RequestStop();
-                    if (Watchdog.Joinable())
-                    {
-                        Watchdog.Join();
-                    }
+                    Watchdog.Join();
                     return -1;
                 }
             }
 
             Watchdog.RequestStop();
-            if (Watchdog.Joinable())
-            {
-                Watchdog.Join();
-            }
+            Watchdog.Join();
             if (bTimedOut.load())
             {
                 return ProcessTimedOutExitCode;
@@ -688,20 +683,6 @@ namespace Lumina::Platform
         return false;
     }
 
-    bool PersistUserEnvVariable(const FString& Name, const FString& Value)
-    {
-        static bool bWarned = false;
-
-        if (!bWarned)
-        {
-            bWarned = true;
-            LOG_WARN("Cannot persist {}={} : there is no user environment store on this platform. "
-                     "Add it to your shell profile to make it permanent.", Name, Value);
-        }
-
-        return false;
-    }
-
 
 
     FProcessHandle SpawnProcess(const TCHAR* Executable, const TCHAR* Params, const TCHAR* WorkingDirectory)
@@ -773,6 +754,51 @@ namespace Lumina::Platform
     void CloseProcess(FProcessHandle& Process)
     {
         Process = FProcessHandle();
+    }
+
+    bool TryAcquireInstanceLock(const FString& Path, FInstanceLock& OutLock, uint32& OutOwnerId)
+    {
+        OutOwnerId = 0;
+
+        const int Descriptor = ::open(Path.c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0644);
+        if (Descriptor < 0)
+        {
+            LOG_WARN("Could not create the instance lock '{}' ({}), so it is not enforced.", Path, strerror(errno));
+            return true;
+        }
+
+        if (::flock(Descriptor, LOCK_EX | LOCK_NB) != 0)
+        {
+            const bool bHeldElsewhere = errno == EWOULDBLOCK;
+            char Buffer[16] = {};
+            (void)::read(Descriptor, Buffer, sizeof(Buffer) - 1);
+            ::close(Descriptor);
+            OutOwnerId = (uint32)strtoul(Buffer, nullptr, 10);
+            return !bHeldElsewhere;
+        }
+
+        char Buffer[16] = {};
+        const int Length = snprintf(Buffer, sizeof(Buffer), "%d", (int)::getpid());
+        (void)::ftruncate(Descriptor, 0);
+        (void)::pwrite(Descriptor, Buffer, (size_t)Length, 0);
+
+        // Offset by one so descriptor 0 still reads as held.
+        OutLock.Handle = reinterpret_cast<void*>(static_cast<intptr_t>(Descriptor) + 1);
+        return true;
+    }
+
+    void ReleaseInstanceLock(FInstanceLock& Lock)
+    {
+        if (Lock.Handle != nullptr)
+        {
+            ::close(static_cast<int>(reinterpret_cast<intptr_t>(Lock.Handle) - 1));
+            Lock.Handle = nullptr;
+        }
+    }
+
+    bool FocusProcessWindow(uint32 /*ProcessId*/)
+    {
+        return false;
     }
 
     int LaunchProcess(const TCHAR* URL, const TCHAR* Params, bool bLaunchDetached)

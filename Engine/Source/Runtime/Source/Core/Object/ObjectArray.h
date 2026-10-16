@@ -27,6 +27,7 @@ namespace Lumina
         TAtomic<int32> StrongRefCount{0};
 
         FCObjectEntry(FCObjectEntry&&) = delete;
+        ~FCObjectEntry() = default;
         FCObjectEntry(const FCObjectEntry&) = delete;
         FCObjectEntry& operator=(FCObjectEntry&&) = delete;
         FCObjectEntry& operator=(const FCObjectEntry&) = delete;

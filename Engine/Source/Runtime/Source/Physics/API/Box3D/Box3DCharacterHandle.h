@@ -65,6 +65,8 @@ namespace Lumina
         FPhysicsCharacterHandle() = default;
         FPhysicsCharacterHandle(const FPhysicsCharacterHandle&) = delete;
         FPhysicsCharacterHandle& operator=(const FPhysicsCharacterHandle&) = delete;
+        FPhysicsCharacterHandle(FPhysicsCharacterHandle&&) = delete;
+        FPhysicsCharacterHandle& operator=(FPhysicsCharacterHandle&&) = delete;
 
         ~FPhysicsCharacterHandle()
         {

@@ -47,26 +47,28 @@ namespace Lumina
         return Pending;
     }
 
-    // Thread local, so two threads constructing at once never read each other's object.
-    static thread_local const FConstructCObjectParams* GConstructing = nullptr;
+    namespace Object::Internal
+    {
+        // The currently constructing context of a CObject.
+        static thread_local const FConstructCObjectParams* GConstructing = nullptr;
+    }
 
     FScopedObjectConstruction::FScopedObjectConstruction(const FConstructCObjectParams& Params)
-        : Previous(GConstructing)
+        : Previous(Object::Internal::GConstructing)
     {
-        GConstructing = &Params;
+        Object::Internal::GConstructing = &Params;
     }
 
     FScopedObjectConstruction::~FScopedObjectConstruction()
     {
-        GConstructing = Previous;
+        Object::Internal::GConstructing = Previous;
     }
 
     const FConstructCObjectParams* FScopedObjectConstruction::Current()
     {
-        return GConstructing;
+        return Object::Internal::GConstructing;
     }
 
-    // Identity lands here rather than after the constructor, so a constructor body can read GetClass and GetName.
     CObjectBase::CObjectBase()
         : ObjectFlags()
         , InternalIndex(Constants::kIndexNone)
@@ -372,7 +374,7 @@ namespace Lumina
 
             for (CClass* NewClass : NewClasses)
             {
-                NewClass->GetDefaultObject();
+                (void)NewClass->GetDefaultObject();
             }
         }
     }

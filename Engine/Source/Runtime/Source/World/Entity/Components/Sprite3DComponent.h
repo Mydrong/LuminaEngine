@@ -3,6 +3,7 @@
 #include "Core/Math/Math.h"
 #include "Core/Object/ObjectHandleTyped.h"
 #include "Core/Object/ObjectMacros.h"
+#include "Renderer/RenderLayers.h"
 #include "Sprite3DComponent.generated.h"
 
 namespace Lumina
@@ -93,6 +94,10 @@ namespace Lumina
 
         PROPERTY(Editable, Category = "Rendering")
         bool bDoubleSided = true;
+
+        // Drawn by any camera whose CullMask shares one of these layers.
+        PROPERTY(Editable, Category = "Rendering")
+        SRenderLayerMask RenderLayers;
 
         /** Higher draws later; ties break back to front. */
         PROPERTY(Editable, Category = "Rendering")

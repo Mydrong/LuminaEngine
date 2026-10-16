@@ -34,6 +34,10 @@ namespace Lumina
 
         PROPERTY(ReadOnly, Category = "Prefab")
         bool bIsRoot = false;
+
+        // The source's revision this copy last took, so an undo that restores older data is caught and refreshed.
+        PROPERTY(Hidden)
+        uint32 AppliedRevision = 0;
     };
 
     /** One overridden leaf on an instance: a single property addressed by a delimiter-joined path
@@ -43,13 +47,13 @@ namespace Lumina
     {
         GENERATED_BODY()
 
-        PROPERTY()
+        PROPERTY(Hidden)
         FName EntityStableID;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         FName ComponentType;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         FName PropertyPath;
     };
 
@@ -59,10 +63,10 @@ namespace Lumina
     {
         GENERATED_BODY()
 
-        PROPERTY()
+        PROPERTY(Hidden)
         FName EntityStableID;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         FName ComponentType;
     };
 
@@ -73,20 +77,20 @@ namespace Lumina
     {
         GENERATED_BODY()
 
-        PROPERTY()
+        PROPERTY(Hidden)
         FName StableID;
 
         /** None means the variant's root. */
-        PROPERTY()
+        PROPERTY(Hidden)
         FName ParentStableID;
 
         /** The parent prefab has no node with this StableID; the variant introduces it. */
-        PROPERTY()
+        PROPERTY(Hidden)
         bool bAdded = false;
     };
 
     /** The override ledger. Lives on the instance ROOT only and tracks the whole subtree's divergence
-     *  from the source prefab, keyed by node StableID. Bare PROPERTY() => serialized with the world but
+     *  from the source prefab, keyed by node StableID. PROPERTY(Hidden) => serialized with the world but
      *  never rendered in the details panel (FProperty::IsVisible() is false without Editable/ReadOnly);
      *  HideInComponentList keeps it out of the Add-Component picker. Created lazily on first divergence. */
     REFLECT(Component, HideInComponentList, HideInDetails)
@@ -95,19 +99,19 @@ namespace Lumina
         GENERATED_BODY()
 
         /** Leaves the instance has diverged on; prefab updates skip these. */
-        PROPERTY()
+        PROPERTY(Hidden)
         TVector<SPrefabPropertyOverride> PropertyOverrides;
 
         /** Components the instance added; a refresh must never prune them. */
-        PROPERTY()
+        PROPERTY(Hidden)
         TVector<SPrefabComponentRef> AddedComponents;
 
         /** Inherited components the instance deleted; a refresh must never re-add them. */
-        PROPERTY()
+        PROPERTY(Hidden)
         TVector<SPrefabComponentRef> RemovedComponents;
 
         // Inherited nodes the instance deleted, which a refresh must never respawn.
-        PROPERTY()
+        PROPERTY(Hidden)
         TVector<FName> RemovedEntities;
     };
 }

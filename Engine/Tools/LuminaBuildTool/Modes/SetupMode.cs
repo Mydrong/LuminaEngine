@@ -8,7 +8,7 @@ using LuminaBuildTool.Platform;
 
 namespace LuminaBuildTool.Modes;
 
-/// <summary>First-time setup, fetching the dependency bundle, persisting LUMINA_DIR, configuring git hooks.</summary>
+/// <summary>First-time setup, fetching the dependency bundle, configuring git hooks, registering file icons.</summary>
 public static class SetupMode
 {
     private const string ReleaseUrl =
@@ -80,11 +80,7 @@ public static class SetupMode
         Log.Info("Engine root: {0}", Directories.EngineRoot);
 
         Log.Info(string.Empty);
-        Log.Info("[1/3] Environment");
-        PersistEngineDirectory(Directories.EngineRoot);
-
-        Log.Info(string.Empty);
-        Log.Info("[2/3] External dependencies");
+        Log.Info("[1/3] External dependencies");
 
         BuildPlatform HostPlatform = BuildPlatformRegistry.HostPlatform;
         DependencyBundle? Bundle = Bundles.FirstOrDefault(B => B.Platform == HostPlatform);
@@ -119,8 +115,12 @@ public static class SetupMode
         }
 
         Log.Info(string.Empty);
-        Log.Info("[3/3] Git hooks");
+        Log.Info("[2/3] Git hooks");
         ConfigureGitHooks(Directories.EngineRoot);
+
+        Log.Info(string.Empty);
+        Log.Info("[3/3] File types");
+        FileTypeRegistration.Register(Directories.EngineRoot);
 
         Log.Info(string.Empty);
         Log.Info("Setup complete. Next: run {0}, or build and run directly with", RunMode.HostScriptName("GenerateProjectFiles"));
@@ -326,38 +326,6 @@ public static class SetupMode
         Log.Error("  actual:   {0}", Actual);
 
         return false;
-    }
-
-    /// <summary>Persists LUMINA_DIR and verifies it took; setx fails quietly on a locked or roaming profile.</summary>
-    private static void PersistEngineDirectory(string EngineRoot)
-    {
-        Environment.SetEnvironmentVariable("LUMINA_DIR", EngineRoot);
-
-        if (!OperatingSystem.IsWindows())
-        {
-            Log.Info("Set LUMINA_DIR for this process. Add it to your shell profile to make it permanent.");
-            return;
-        }
-
-        try
-        {
-            Environment.SetEnvironmentVariable("LUMINA_DIR", EngineRoot, EnvironmentVariableTarget.User);
-
-            string? Persisted = Environment.GetEnvironmentVariable("LUMINA_DIR", EnvironmentVariableTarget.User);
-
-            if (Persisted is null || !PathUtils.Normalize(Persisted).Equals(PathUtils.Normalize(EngineRoot), StringComparison.OrdinalIgnoreCase))
-            {
-                Log.Warning("LUMINA_DIR did not persist to the user environment; it is set for this session only.");
-                return;
-            }
-
-            Log.Info("LUMINA_DIR persisted as {0}", Persisted);
-            Log.Info("Already-running editors and IDEs keep the old value until they restart.");
-        }
-        catch (Exception Ex) when (Ex is System.Security.SecurityException or UnauthorizedAccessException)
-        {
-            Log.Warning("Could not persist LUMINA_DIR: {0}", Ex.Message);
-        }
     }
 
     private static void ConfigureGitHooks(string EngineRoot)

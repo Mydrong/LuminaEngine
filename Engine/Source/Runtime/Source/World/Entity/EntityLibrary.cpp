@@ -24,8 +24,7 @@ namespace Lumina
             return NAME_None;
         }
 
-        const STagComponent* Component = World->TryGetComponent<STagComponent>(Entity);
-        return Component != nullptr ? Component->Tag : NAME_None;
+        return ECS::Utils::GetEntityTag(ECS::GetWorldRegistry(*World), Entity);
     }
 
     ECS::FEntity CEntityLibrary::GetFirstChild(CWorld* World, ECS::FEntity Entity)

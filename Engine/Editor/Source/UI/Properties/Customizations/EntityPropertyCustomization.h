@@ -23,6 +23,11 @@ namespace Lumina
         // Cancels an in-flight eyedropper pick if this picker is torn down mid-pick
         // (e.g. the details panel rebuilds), so the viewport doesn't stay in pick mode.
         ~FEntityPropertyCustomization() override;
+        FEntityPropertyCustomization() = default;
+        FEntityPropertyCustomization(const FEntityPropertyCustomization&) = delete;
+        FEntityPropertyCustomization& operator=(const FEntityPropertyCustomization&) = delete;
+        FEntityPropertyCustomization(FEntityPropertyCustomization&&) = delete;
+        FEntityPropertyCustomization& operator=(FEntityPropertyCustomization&&) = delete;
 
         EPropertyChangeOp DrawProperty(const TSharedPtr<FPropertyHandle>& Property, const FPropertyDrawArgs& Args) override;
         void UpdatePropertyValue(const TSharedPtr<FPropertyHandle>& Property) override;

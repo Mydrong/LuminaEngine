@@ -57,6 +57,10 @@ namespace Lumina
     public:
         FBufferReader(void* InData, int64 InSize, bool bFreeAfterClose);
         ~FBufferReader() override;
+        FBufferReader(const FBufferReader&) = delete;
+        FBufferReader& operator=(const FBufferReader&) = delete;
+        FBufferReader(FBufferReader&&) = delete;
+        FBufferReader& operator=(FBufferReader&&) = delete;
         
         
         int64 Tell() final;

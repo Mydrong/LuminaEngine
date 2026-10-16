@@ -1139,6 +1139,9 @@ namespace Lumina
 
             ImGui::Checkbox("Interactive Handles", &bVisualizerHandlesEnabled);
             ImGui::SetItemTooltip("Face, radius and cone handles you can drag in the viewport.");
+
+            ImGui::Checkbox("Show All in Hierarchy", &bShowHierarchyVisualizers);
+            ImGui::SetItemTooltip("Draws every visualizer in the selected entity's tree, from its root down, not only the selection.");
             ImGui::Separator();
 
             for (auto&& [Struct, Visualizer] : CComponentVisualizerRegistry::Get().GetVisualizers())
@@ -1163,14 +1166,15 @@ namespace Lumina
 
         if (ImGui::BeginMenu("Physics"))
         {
-            if (const bool* bValue = FConsoleRegistry::Get().TryGetAs<bool>("Physics.Debug.Draw"))
+            // This viewport's world only, so a prefab preview's toggle never shows up in the level or in Play.
+            Physics::IPhysicsScene* PhysicsScene = HasWorld() ? World->GetPhysicsScene() : nullptr;
+            bool bDrawCollision = PhysicsScene != nullptr && PhysicsScene->IsDebugDrawEnabled();
+            ImGui::BeginDisabled(PhysicsScene == nullptr);
+            if (ImGui::MenuItem("Toggle Collision", nullptr, &bDrawCollision))
             {
-                bool bProxy = *bValue;
-                if (ImGui::MenuItem("Toggle Collision", nullptr, &bProxy))
-                {
-                    FConsoleRegistry::Get().SetAs("Physics.Debug.Draw", bProxy);
-                }
+                PhysicsScene->SetDebugDrawEnabled(bDrawCollision);
             }
+            ImGui::EndDisabled();
             ImGui::EndMenu();
         }
 

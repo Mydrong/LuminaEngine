@@ -311,6 +311,9 @@ namespace Lumina
     {
         FEditorTool::SetupWorldForTool();
 
+        // A prefab is edited in its authored pose, so animation preview starts off and the toolbar turns it on.
+        World->SetAnimatesWhilePaused(false);
+
         DirectionalLightEntity = World->ConstructEntity("PreviewLight");
         World->EmplaceComponent<FHideInSceneOutliner>(DirectionalLightEntity);
         World->EmplaceComponent<SDirectionalLightComponent>(DirectionalLightEntity);
@@ -502,7 +505,7 @@ namespace Lumina
         Prefab->CapturePreCommitState();
 
         // Replacing the registry frees what an open details panel points at, so the generation moves too.
-        CPrefab::BumpDataGeneration();
+        Prefab->MarkRegistryChanged();
         Prefab->Registry = ECS::FRegistry{};
         THashMap<ECS::FEntity, ECS::FEntity> SrcToDst;
         // Instance tracking belongs to a placed copy; captured into the asset it would spawn as an instance.
@@ -1445,6 +1448,10 @@ namespace Lumina
         {
             ImGui::Checkbox("World Grid", &bWorldGridEnabled);
             ImGui::Checkbox("Component Visualizers", &bShowComponentVisualizers);
+            ImGui::BeginDisabled(!bShowComponentVisualizers);
+            ImGui::Checkbox("Visualizers in Whole Hierarchy", &bShowHierarchyVisualizers);
+            ImGui::SetItemTooltip("Draws every visualizer in the selected entity's tree, from its root down, not only the selection.");
+            ImGui::EndDisabled();
 
             if (ImGui::Checkbox("Studio Lighting", &bStudioLighting))
             {

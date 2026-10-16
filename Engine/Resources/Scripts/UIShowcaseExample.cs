@@ -9,15 +9,15 @@ namespace Lumina.Examples;
 [Reflect]
 public sealed class UIShowcaseExample : CEntityScript
 {
-    [Property(Tooltip = "Showcase document to load.")]
+    [Property(ToolTip = "Showcase document to load.")]
     public string Document = "/Engine/Resources/Content/UI/Examples/Showcase.rml";
 
-    // A plain data class; its [Bind] properties become the {{ member.* }} columns of the data-for list.
+    // A plain data class; its [Property(Bind)] properties become the {{ member.* }} columns of the data-for list.
     private sealed class PartyMember
     {
-        [Bind] public string Name { get; set; }
-        [Bind] public string Role { get; set; }
-        [Bind] public int Health { get; set; }
+        [Property(Bind)] public string Name { get; set; }
+        [Property(Bind)] public string Role { get; set; }
+        [Property(Bind)] public int Health { get; set; }
 
         public PartyMember(string Name, string Role, int Health)
         {
@@ -56,14 +56,14 @@ public sealed class UIShowcaseExample : CEntityScript
             new PartyMember("Cyl", "heavy", 64),
         };
 
-        [Bind] public string Title { get => _Title; set => Set(ref _Title, value); }
-        [Bind] public string Clock { get => _Clock; set => Set(ref _Clock, value); }
-        [Bind] public string Status { get => _Status; set => Set(ref _Status, value); }
-        [Bind] public int Score { get => _Score; set => Set(ref _Score, value); }
-        [Bind] public float Ratio { get => _Ratio; set => Set(ref _Ratio, value); }
+        [Property(Bind)] public string Title { get => _Title; set => Set(ref _Title, value); }
+        [Property(Bind)] public string Clock { get => _Clock; set => Set(ref _Clock, value); }
+        [Property(Bind)] public string Status { get => _Status; set => Set(ref _Status, value); }
+        [Property(Bind)] public int Score { get => _Score; set => Set(ref _Score, value); }
+        [Property(Bind)] public float Ratio { get => _Ratio; set => Set(ref _Ratio, value); }
 
         // Alerted and Status are derived here rather than in RCSS, which has no conditional operators.
-        [Bind] public int Health
+        [Property(Bind)] public int Health
         {
             get => _Health;
             set
@@ -74,37 +74,37 @@ public sealed class UIShowcaseExample : CEntityScript
             }
         }
 
-        [Bind] public bool Alerted { get => _Alerted; set => Set(ref _Alerted, value); }
+        [Property(Bind)] public bool Alerted { get => _Alerted; set => Set(ref _Alerted, value); }
 
         // Get-only, so it is display-only and has to be re-pushed by hand whenever the list changes.
-        [Bind] public int MemberCount => _Members.Count;
+        [Property(Bind)] public int MemberCount => _Members.Count;
 
-        // Everything below HAS a setter, which is the only thing that makes a [Bind] two-way.
-        [Bind] public string PlayerName { get => _PlayerName; set { Set(ref _PlayerName, value); Debug.Log($"[Showcase] PlayerName -> {value}"); } }
-        [Bind] public string Passphrase { get => _Passphrase; set => Set(ref _Passphrase, value); }
-        [Bind] public int Volume { get => _Volume; set { Set(ref _Volume, value); Debug.Log($"[Showcase] Volume -> {value}"); } }
-        [Bind] public string Quality { get => _Quality; set { Set(ref _Quality, value); Debug.Log($"[Showcase] Quality -> {value}"); } }
-        [Bind] public bool Fullscreen { get => _Fullscreen; set { Set(ref _Fullscreen, value); Debug.Log($"[Showcase] Fullscreen -> {value}"); } }
-        [Bind] public bool VSync { get => _VSync; set { Set(ref _VSync, value); Debug.Log($"[Showcase] VSync -> {value}"); } }
-        [Bind] public string Difficulty { get => _Difficulty; set { Set(ref _Difficulty, value); Debug.Log($"[Showcase] Difficulty -> {value}"); } }
-        [Bind] public string Notes { get => _Notes; set => Set(ref _Notes, value); }
+        // Everything below has a setter, and a setter is the only thing that makes a Bind two-way.
+        [Property(Bind)] public string PlayerName { get => _PlayerName; set { Set(ref _PlayerName, value); Debug.Log($"[Showcase] PlayerName -> {value}"); } }
+        [Property(Bind)] public string Passphrase { get => _Passphrase; set => Set(ref _Passphrase, value); }
+        [Property(Bind)] public int Volume { get => _Volume; set { Set(ref _Volume, value); Debug.Log($"[Showcase] Volume -> {value}"); } }
+        [Property(Bind)] public string Quality { get => _Quality; set { Set(ref _Quality, value); Debug.Log($"[Showcase] Quality -> {value}"); } }
+        [Property(Bind)] public bool Fullscreen { get => _Fullscreen; set { Set(ref _Fullscreen, value); Debug.Log($"[Showcase] Fullscreen -> {value}"); } }
+        [Property(Bind)] public bool VSync { get => _VSync; set { Set(ref _VSync, value); Debug.Log($"[Showcase] VSync -> {value}"); } }
+        [Property(Bind)] public string Difficulty { get => _Difficulty; set { Set(ref _Difficulty, value); Debug.Log($"[Showcase] Difficulty -> {value}"); } }
+        [Property(Bind)] public string Notes { get => _Notes; set => Set(ref _Notes, value); }
 
         // A list crosses as a one-way snapshot of strings, so mutations must be followed by NotifyChanged.
-        [Bind] public IReadOnlyList<PartyMember> Members => _Members;
+        [Property(Bind)] public IReadOnlyList<PartyMember> Members => _Members;
 
-        [BindCommand]
+        [Function(Bind)]
         public void Damage(int Amount)
         {
             Health -= Amount;
         }
 
-        [BindCommand]
+        [Function(Bind)]
         public void Heal()
         {
             Health = 100;
         }
 
-        [BindCommand]
+        [Function(Bind)]
         public void AddMember()
         {
             if (_Members.Count >= RosterNames.Length)
@@ -116,7 +116,7 @@ public sealed class UIShowcaseExample : CEntityScript
             PushMembers();
         }
 
-        [BindCommand]
+        [Function(Bind)]
         public void RemoveMember()
         {
             if (_Members.Count == 0)
@@ -128,7 +128,7 @@ public sealed class UIShowcaseExample : CEntityScript
         }
 
         // Called from RML as ApplyPreset('low'): arguments cross as strings and convert to the parameter type.
-        [BindCommand]
+        [Function(Bind)]
         public void ApplyPreset(string Preset)
         {
             Debug.Log($"[Showcase] preset -> {Preset}");
@@ -140,7 +140,7 @@ public sealed class UIShowcaseExample : CEntityScript
             }
         }
 
-        [BindCommand]
+        [Function(Bind)]
         public void Reset()
         {
             PlayerName = "Commander";

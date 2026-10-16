@@ -19,6 +19,8 @@
 #include "Core/Reflection/Type/Properties/EnumProperty.h"
 #include "Core/Reflection/Type/Properties/OptionalProperty.h"
 #include "Core/Reflection/Type/Properties/InstancedStructProperty.h"
+#include "Core/Reflection/Type/Properties/ComponentRefProperty.h"
+#include "World/Entity/Components/ComponentRef.h"
 #include "Core/Reflection/Type/Properties/ObjectProperty.h"
 #include "Core/Reflection/Type/Properties/SoftObjectProperty.h"
 #include "Core/Reflection/Type/Properties/StringProperty.h"
@@ -128,7 +130,7 @@ namespace Lumina
             }
         }
 
-        // The author's [Property(Flags)] set, added to rather than replacing what the property's kind decided.
+        // The flags the author's [Property] specifiers set, added to rather than replacing what the property's kind decided.
         void ApplyDeclaredFlags(FProperty* Property, uint32 Flags)
         {
             if (Flags != 0)
@@ -187,6 +189,11 @@ namespace Lumina
         FProperty* MakeStruct(const FPropertyOwner& Owner, const FName& Name, uint32 Offset, CStruct* Resolved)
         {
             return MakeResolved<FStructProperty>(Owner, Name, Offset, EPropertyTypeFlags::Struct, Resolved);
+        }
+
+        FProperty* MakeComponentRef(const FPropertyOwner& Owner, const FName& Name, uint32 Offset, CStruct* Component)
+        {
+            return MakeResolved<FComponentRefProperty>(Owner, Name, Offset, EPropertyTypeFlags::ComponentRef, Component);
         }
 
         FProperty* MakeInstanced(const FPropertyOwner& Owner, const FName& Name, uint32 Offset, CStruct* MetaBase)
@@ -363,6 +370,10 @@ namespace Lumina
             };
             Ops.ContainerContext = Desc;
             Ops.ContainerSize = sizeof(FScriptDynamicArray);
+            // The storage counts bytes, so dividing by the element size is what turns it into elements.
+            Ops.DataOffset = static_cast<uint32>(offsetof(FScriptDynamicArray, Bytes)) + TVector<uint8>::GetDataOffsetForInterop();
+            Ops.CountOffset = static_cast<uint32>(offsetof(FScriptDynamicArray, Bytes)) + TVector<uint8>::GetCountOffsetForInterop();
+            Ops.CountDivisor = ElementSize > 0 ? ElementSize : 1;
         }
 
         // ---- Script dynamic optional (a heap payload, so an engaged optional is a non-null pointer) ----
@@ -564,6 +575,12 @@ namespace Lumina
             if (OutValue) { *OutValue = nullptr; }
         }
 
+        bool MapNext(void* InMap, SIZE_T* Cursor, const void** OutKey, void** OutValue)
+        {
+            MapAt(InMap, (*Cursor)++, OutKey, OutValue);
+            return *OutKey != nullptr;
+        }
+
         void MapConstructKey(void* InMap, void* Dst)
         {
             const FScriptDynamicMap* Map = static_cast<const FScriptDynamicMap*>(InMap);
@@ -603,6 +620,7 @@ namespace Lumina
             };
             Ops.ContainerContext = Desc;
             Ops.ContainerSize = sizeof(FScriptDynamicMap);
+            Ops.Next = &MapNext;
         }
     }
 
@@ -661,6 +679,21 @@ namespace Lumina
             return true;
         }
 
+        // A reference is as wide as the handle that tracks the component, whatever the component's own size.
+        bool ResolveComponentRefLayout(const FScriptExportType& Type, const FName& DiagName, FKindLayout& Out)
+        {
+            CStruct* Struct = FindObject<CStruct>(Type.NativeName);
+            if (Struct == nullptr || Struct->GetComponentOps() == nullptr)
+            {
+                LOG_WARN("Script property '{}' dropped: '{}' is not a component.", DiagName.ToString(), Type.NativeName.ToString());
+                return false;
+            }
+            Out.Type  = Struct;
+            Out.Size  = sizeof(FComponentRef);
+            Out.Align = alignof(FComponentRef);
+            return true;
+        }
+
         // The base is what the instanced-struct property takes as its meta-base, and any struct deriving it is a candidate.
         bool ResolveInstancedLayout(const FScriptExportType& Type, const FName& DiagName, FKindLayout& Out)
         {
@@ -701,6 +734,11 @@ namespace Lumina
             return Struct != nullptr ? MakeStruct(Owner, Name, Offset, static_cast<CStruct*>(Struct)) : nullptr;
         }
 
+        FProperty* CreateComponentRefProperty(const FPropertyOwner& Owner, const FName& Name, uint32 Offset, const FScriptExportType&, CField* Component)
+        {
+            return Component != nullptr ? MakeComponentRef(Owner, Name, Offset, static_cast<CStruct*>(Component)) : nullptr;
+        }
+
         FProperty* CreateInstancedProperty(const FPropertyOwner& Owner, const FName& Name, uint32 Offset, const FScriptExportType&, CField* Base)
         {
             return MakeInstanced(Owner, Name, Offset, static_cast<CStruct*>(Base));
@@ -728,6 +766,7 @@ namespace Lumina
                 Entries[(size_t)EPropertyTypeFlags::Enum]            = { &ResolveEnumLayout, &CreateEnumProperty };
                 Entries[(size_t)EPropertyTypeFlags::Struct]          = { &ResolveStructLayout, &CreateStructProperty };
                 Entries[(size_t)EPropertyTypeFlags::InstancedStruct] = { &ResolveInstancedLayout, &CreateInstancedProperty };
+                Entries[(size_t)EPropertyTypeFlags::ComponentRef]    = { &ResolveComponentRefLayout, &CreateComponentRefProperty };
                 return Entries;
             }();
 

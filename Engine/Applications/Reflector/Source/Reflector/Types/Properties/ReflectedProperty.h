@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <vector>
 #include "Reflector/Types/PropertyFlags.h"
 #include "Reflector/Types/StructReflectItem.h"
@@ -40,6 +41,11 @@ namespace Lumina
 
         // Names the two contradicting specifiers and which to drop. Runs after GenerateMetadata, where the cursor is still at hand.
         bool FindConflictingSpecifiers(std::string& OutMessage) const;
+
+        // Editable unless the author asked for ReadOnly or Hidden, the same default a C# [Property] has.
+        void ApplyDefaultVisibility();
+
+        bool HasSpecifier(std::string_view Key) const;
 
         // One FPropertyDesc row, whose type the runtime's trait derives from the member itself.
         void EmitDescriptor(Reflection::FCodeWriter& Writer) const;

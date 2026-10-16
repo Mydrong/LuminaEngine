@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -16,36 +17,36 @@ internal enum ETestFrameChannel : byte
 }
 
 // Stands in for a script type, so a native test can drive the real dispatcher over a minted frame.
-internal sealed class FrameMarshalTarget
+internal sealed class FrameMarshalTarget : NativeObject
 {
-    [ScriptFunction]
+    [Function]
     public void MarshalOut(int In, out int Out)
     {
         Out = In * 2;
     }
 
-    [ScriptFunction]
+    [Function]
     public void MarshalRef(ref int Value)
     {
         Value += 5;
     }
 
     // A string parameter, which used to have no generated invoker and fell to the boxing reflection path.
-    [ScriptFunction]
+    [Function]
     public void MarshalText(string In, out int Length)
     {
         Length = In == null ? -1 : In.Length;
     }
 
     // An opaque struct wrapper, which stays on the reflection path and is read through a view over the slot.
-    [ScriptFunction]
+    [Function]
     public void MarshalStructView(Lumina.SAnimGraphBoneMaskBone Bone, out float Weight)
     {
         Weight = Bone.Ref.IsNull ? -1.0f : Bone.Weight;
     }
 
     // An async body that yields once, so the token is observably running before the tick completes it.
-    [ScriptFunction]
+    [Function]
     public async System.Threading.Tasks.Task MarshalAsync(int Value)
     {
         AsyncGate = new System.Threading.Tasks.TaskCompletionSource();
@@ -57,7 +58,7 @@ internal sealed class FrameMarshalTarget
     internal static int AsyncSeen;
 
     // A delegate and an instanced struct name the slot they view, which the frame binder used to refuse.
-    [ScriptFunction]
+    [Function]
     public void MarshalSlotViews(ScriptDelegate Event, Lumina.FInstancedStruct Instanced, out int Seen)
     {
         Seen = (Event.IsValid ? 1 : 0) | (Instanced.IsBound ? 2 : 0);
@@ -107,17 +108,17 @@ internal sealed class FrameMarshalTarget
 // Kept off FrameMarshalTarget so the overload refusal cannot cost the dispatcher tests their own methods.
 internal sealed class OverloadedFunctionTarget
 {
-    [ScriptFunction]
+    [Function]
     public void Ambiguous(int Value)
     {
     }
 
-    [ScriptFunction]
+    [Function]
     public void Ambiguous(float Value)
     {
     }
 
-    [ScriptFunction]
+    [Function]
     public void Unambiguous()
     {
     }
@@ -502,7 +503,7 @@ internal static unsafe class InteropTestHooks
         return ScriptInvokerRegistry.Find(typeof(FrameMarshalTarget), Name) != 0 ? 1 : 0;
     }
 
-    // How many functions survive describing a type whose [ScriptFunction] names are not all distinct.
+    // How many functions survive describing a type whose [Function] names are not all distinct.
     [ManagedExport]
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
     public static int Test_DescribedFunctionCount(byte* OutAmbiguousDescribed)
@@ -907,8 +908,133 @@ internal static unsafe class InteropTestHooks
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
     public static void Test_WriteStaticMeshComponent(IntPtr Component)
     {
-        SStaticMeshComponent View = new(Component);
+        ref SStaticMeshComponent View = ref Unsafe.AsRef<SStaticMeshComponent>((void*)Component);
         View.StaticMesh = null!;
         View.bCastShadow = false;
+    }
+
+    // Failure bits, four per form, for a root, an extension and a component compiled together the way the editor compiles them.
+    [ManagedExport]
+    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
+    public static int Test_CompileScriptStructForms()
+    {
+        const string Source = """
+            using Lumina;
+            using LuminaSharp;
+            [Reflect]
+            public partial struct RootProbeData : INativeStruct<RootProbeData>
+            {
+                [Property] public float MoveSpeed = 2f;
+                public RootProbeData() { }
+            }
+            [Reflect]
+            public partial struct RowProbeData : IExtends<SDataTableRowBase>
+            {
+                [Property] public int Count;
+            }
+            [Reflect]
+            public partial struct ComponentProbeData : IComponent<ComponentProbeData>
+            {
+                [Property] public float Health;
+            }
+            """;
+        FScriptImage? Image = ScriptCompiler.Compile("StructFormProbe", new[] { ("StructFormProbe.cs", Source) });
+        if (Image is not { } Compiled)
+        {
+            return -1;
+        }
+
+        var Context = new ScriptLoadContext("StructFormProbe");
+        try
+        {
+            Type[] Types = Context.LoadScriptAssembly("StructFormProbe", Compiled).GetTypes();
+            var Registered = new TypeLibrary(Types).ScriptStructTypes.ToList();
+            int Failures = Registered.Count == 3 ? 0 : 1 << 12;
+            (string Name, string Base, bool bHandle)[] Forms =
+            {
+                ("RootProbeData", "", true),
+                ("RowProbeData", "SDataTableRowBase", true),
+                ("ComponentProbeData", "", false),
+            };
+            for (int i = 0; i < Forms.Length; ++i)
+            {
+                Type? Form = Types.FirstOrDefault(Candidate => Candidate.Name == Forms[i].Name);
+                if (Form == null)
+                {
+                    Failures |= 0xF << (i * 4);
+                    continue;
+                }
+                if (!TypeLibrary.IsNativeBackedStruct(Form))
+                {
+                    Failures |= 1 << (i * 4);
+                }
+                if (Registered.Count(Pair => Pair.Key == Forms[i].Name && Pair.Value.NativeBase == Forms[i].Base) != 1)
+                {
+                    Failures |= 2 << (i * 4);
+                }
+                bool bOneHandle = Form.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic) is [{ FieldType: var Only }] && Only == typeof(NativeRef);
+                int SelfHandles = Form.GetInterfaces().Count(Interface => Interface.IsGenericType && Interface.GetGenericTypeDefinition() == typeof(INativeStruct<>) && Interface.GetGenericArguments()[0] == Form);
+                if (bOneHandle != Forms[i].bHandle || SelfHandles != (Forms[i].bHandle ? 1 : 0))
+                {
+                    Failures |= 4 << (i * 4);
+                }
+                if (Form.GetProperty("NativeName", BindingFlags.Public | BindingFlags.Static)?.GetValue(null) as string != Forms[i].Name)
+                {
+                    Failures |= 8 << (i * 4);
+                }
+            }
+            return Failures;
+        }
+        catch (Exception Error)
+        {
+            Native.Log(ELogLevel.Error, "StructFormProbe threw " + Error);
+            return -2;
+        }
+        finally
+        {
+            Context.Unload();
+        }
+    }
+
+    // Failure bits for Get and TryGet on an instanced struct holding an SInteropOpaqueStruct, and on an unbound one.
+    [ManagedExport]
+    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
+    public static int Test_InstancedStructGetTryGet(IntPtr Address, float NewValue)
+    {
+        var Instanced = new Lumina.FInstancedStruct(Address);
+        int Failures = 0;
+        if (Instanced.TryGet<Lumina.SInteropOpaqueStruct>() is not { IsValid: true })
+        {
+            Failures |= 1;
+        }
+        Instanced.Get<Lumina.SInteropOpaqueStruct>().Value = NewValue / 2;
+        Instanced.TryGet<Lumina.SInteropOpaqueStruct>()?.Value = NewValue;
+        if (Instanced.TryGet<Lumina.SDataTableRowBase>() != null)
+        {
+            Failures |= 2;
+        }
+        if (!Throws(() => Instanced.Get<Lumina.SDataTableRowBase>()))
+        {
+            Failures |= 4;
+        }
+        var Unbound = new Lumina.FInstancedStruct(0);
+        if (Unbound.TryGet<Lumina.SInteropOpaqueStruct>() != null || !Throws(() => Unbound.Get<Lumina.SInteropOpaqueStruct>()))
+        {
+            Failures |= 8;
+        }
+        return Failures;
+
+        static bool Throws(Action Call)
+        {
+            try
+            {
+                Call();
+                return false;
+            }
+            catch (InvalidOperationException)
+            {
+                return true;
+            }
+        }
     }
 }

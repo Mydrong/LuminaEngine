@@ -9,8 +9,6 @@
 #define DECLARE_CLASS(TNamespace, TClass, TBaseClass, TPackage, TAPI) \
 private: \
     friend struct LUMINA_TYPE_INFO(TClass); \
-    TNamespace::TClass& operator=(TNamespace::TClass&&); \
-    TNamespace::TClass& operator=(const TNamespace::TClass&); \
     TAPI static Lumina::CClass* CreateStaticClass(); \
 public: \
     using ThisClass = TNamespace::TClass; \

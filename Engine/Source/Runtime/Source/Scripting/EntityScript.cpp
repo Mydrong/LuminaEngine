@@ -11,6 +11,9 @@
 #include "Core/Object/ObjectIterator.h"
 #include "Core/Reflection/Type/Function.h"
 #include "Core/Reflection/Type/LuminaTypes.h"
+#include "Core/Reflection/Type/Properties/ComponentRefProperty.h"
+#include "World/Entity/Components/Component.h"
+#include "World/Entity/Components/ComponentRef.h"
 #include "Core/Reflection/PropertySnapshot.h"
 #include "Core/Serialization/NetArchive.h"
 #include "Networking/INetworkRuntime.h"
@@ -153,6 +156,37 @@ namespace Lumina
         bReady       = Original->bReady;
         bFaulted     = Original->bFaulted;
         UIScripts::Replace(Original, this);
+
+        // A reload can add a reference the original never had, and OnAttach does not run again to bind it.
+        BindComponentRefs();
+    }
+
+    void CEntityScript::BindComponentRefs()
+    {
+        if (OwningWorld == nullptr || OwningEntity == ECS::NullEntity)
+        {
+            return;
+        }
+
+        for (FProperty* Property : GetClass()->GetProperties())
+        {
+            if (Property->GetType() != EPropertyTypeFlags::ComponentRef || !Property->HasMetadata("Component"))
+            {
+                continue;
+            }
+
+            const CStruct* Component = static_cast<const FComponentRefProperty*>(Property)->GetComponentStruct();
+            const FComponentOps* Ops = Component != nullptr ? Component->GetComponentOps() : nullptr;
+            if (Ops == nullptr)
+            {
+                LOG_WARN("{}.{} names {}, which is not a component, so it is left unbound.", GetClass()->GetName().c_str(),
+                    Property->GetPropertyName().c_str(), Component != nullptr ? Component->GetName().c_str() : "nothing");
+                continue;
+            }
+
+            const bool bAdd = Property->GetMetadata("Component") != "Get";
+            Property->GetValuePtr<FComponentRef>(this)->Bind(*OwningWorld, OwningEntity, *Ops, bAdd);
+        }
     }
 
     void CEntityScript::MarkFaulted()
@@ -182,6 +216,10 @@ namespace Lumina
                 --GRpcDepth;
                 GRpcCaller = OuterCaller;
             }
+            FReceiveScope(const FReceiveScope&) = delete;
+            FReceiveScope& operator=(const FReceiveScope&) = delete;
+            FReceiveScope(FReceiveScope&&) = delete;
+            FReceiveScope& operator=(FReceiveScope&&) = delete;
 
             uint32 OuterCaller;
         };
@@ -228,6 +266,10 @@ namespace Lumina
             {
                 Function.DestructFrame(Data());
             }
+            FCallFrame(const FCallFrame&) = delete;
+            FCallFrame& operator=(const FCallFrame&) = delete;
+            FCallFrame(FCallFrame&&) = delete;
+            FCallFrame& operator=(FCallFrame&&) = delete;
 
             void* Data() { return Storage.data(); }
 
@@ -249,6 +291,10 @@ namespace Lumina
             {
                 Field.DestructValue(Data());
             }
+            FValueBuffer(const FValueBuffer&) = delete;
+            FValueBuffer& operator=(const FValueBuffer&) = delete;
+            FValueBuffer(FValueBuffer&&) = delete;
+            FValueBuffer& operator=(FValueBuffer&&) = delete;
 
             void* Data() { return Storage.data(); }
 
@@ -791,6 +837,7 @@ namespace Lumina
             {
                 const TUniquePtr<FArchive> Reader = Held.Data.MakeReader();
                 ScriptClass->SerializeProperties(*Reader, Script);
+                Held.ApplyEntityRemap(ScriptClass, Script);
             }
             return Script;
         }
@@ -1469,6 +1516,7 @@ namespace Lumina
             // By the first tick every sibling script added the same frame exists, so OnReady can reference them.
             {
                 LUMINA_PROFILE_SECTION_NAMED(Script->GetClass()->GetName().c_str());
+                Script->BindComponentRefs();
                 Script->OnAttach();
             }
             return Script;
@@ -1551,6 +1599,7 @@ namespace Lumina
                         }
                         {
                             LUMINA_PROFILE_SECTION_NAMED(Script->GetClass()->GetName().c_str());
+                            Script->BindComponentRefs();
                             Script->OnAttach();
                         }
                         bUserCodeRan = true;
@@ -2163,6 +2212,52 @@ namespace Lumina
             return Restored;
         }
 
+        namespace
+        {
+            // A class the reload removed builds nothing new, so its live scripts become held values that copies, undo and saves carry until it returns.
+            void HoldSupersededScripts(ECS::FRegistry& Registry)
+            {
+                TVector<TStrongObjectPtr<CEntityScript>> Released;
+                for (ECS::FEntity Entity : Registry.View<SEntityScriptComponent>())
+                {
+                    SEntityScriptComponent& Component = Registry.Get<SEntityScriptComponent>(Entity);
+                    Component.Scripts.erase(Algo::RemoveIf(Component.Scripts, [&](TStrongObjectPtr<CEntityScript>& Script)
+                    {
+                        CClass* Class = Script.Get() != nullptr ? Script->GetClass() : nullptr;
+                        if (Class == nullptr || !Class->IsSuperseded())
+                        {
+                            return false;
+                        }
+                        SHeldValue& Held = Component.Pending.emplace_back();
+                        Held.TypeName = Class->GetName();
+                        Held.Data.Capture(*Class, Script.Get());
+                        Released.push_back(Move(Script));
+                        return true;
+                    }), Component.Scripts.end());
+                }
+                if (Released.empty())
+                {
+                    return;
+                }
+
+                // Its managed type is gone, so no OnDetach can run, and only the native side is torn down.
+                NoteStructureChange();
+                for (TStrongObjectPtr<CEntityScript>& Script : Released)
+                {
+                    UIScripts::Close(Script.Get());
+                }
+                LOG_WARN("SEntityScriptComponent: {} script(s) of a removed class are held until it comes back.", Released.size());
+            }
+
+            void RestoreHeldValues(ECS::FRegistry& Registry)
+            {
+                HoldSupersededScripts(Registry);
+                MissingComponents::HoldOrphaned(Registry);
+                MissingComponents::Restore(Registry);
+                ResolvePendingScripts(Registry);
+            }
+        }
+
         void NotifyScriptsReloaded(EScriptReloadReason Reason, int32 Generation)
         {
             if (GWorldManager == nullptr)
@@ -2170,14 +2265,20 @@ namespace Lumina
                 return;
             }
 
+            // A prefab loaded before its script class keeps that script held, and every spawn would copy it held.
+            for (TObjectIterator<CPrefab> It; It; ++It)
+            {
+                CPrefab* Prefab = *It;
+                RestoreHeldValues(Prefab->Registry);
+                RestoreHeldValues(Prefab->VariantDelta);
+            }
+
             GWorldManager->ForEachWorld([&](CWorld& World)
             {
                 ECS::FRegistry& Registry = ECS::GetWorldRegistry(World);
 
                 // Anything held back by a failed or late load comes in first, so it sees this reload too.
-                MissingComponents::HoldOrphaned(Registry);
-                MissingComponents::Restore(Registry);
-                ResolvePendingScripts(Registry);
+                RestoreHeldValues(Registry);
 
                 TVector<ECS::FEntity> Entities;
                 auto View = Registry.View<SEntityScriptComponent>();

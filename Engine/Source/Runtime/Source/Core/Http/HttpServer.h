@@ -36,6 +36,8 @@ namespace Lumina::Http
 
         FServer(const FServer&) = delete;
         FServer& operator=(const FServer&) = delete;
+        FServer(FServer&&) = delete;
+        FServer& operator=(FServer&&) = delete;
 
         bool Start(const FServerParams& Params, FRequestHandler Handler);
 

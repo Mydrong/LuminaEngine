@@ -222,7 +222,7 @@ namespace Lumina
         RUNTIME_API static CPackage* FindPackageByPath(FStringView Path);
 
         /** Atomic in-memory and on-disk rename, crash-safe by write-then-remove, false on collision or IO error. */
-        RUNTIME_API NODISCARD static bool RenamePackage(FStringView OldPath, FStringView NewPath);
+        NODISCARD RUNTIME_API static bool RenamePackage(FStringView OldPath, FStringView NewPath);
 
         /** Update in-memory identity when a parent dir was renamed externally; file name unchanged, no disk I/O. */
         RUNTIME_API static void OnPackageMovedExternally(FStringView OldPath, FStringView NewPath);
@@ -237,11 +237,11 @@ namespace Lumina
         RUNTIME_API static bool SavePackage(CPackage* Package, FStringView Path);
 
         /** Saves to compressed bytes for the cooker, stripping EditorOnly properties and thumbnails. */
-        RUNTIME_API NODISCARD static bool SavePackageForCook(CPackage* Package, TVector<uint8>& OutCompressed,
+        NODISCARD RUNTIME_API static bool SavePackageForCook(CPackage* Package, TVector<uint8>& OutCompressed,
                                                              const TFunction<bool(const CObject*)>& ExcludeExport = {});
 
         // Cooks a single-export package from its file bytes without loading it, and is false when only a load and save can (bulk data, older version, several exports).
-        RUNTIME_API NODISCARD static bool StripPackageForCook(FStringView Path, TVector<uint8>& OutCompressed);
+        NODISCARD RUNTIME_API static bool StripPackageForCook(FStringView Path, TVector<uint8>& OutCompressed);
 
         /** Where a package's bulk region sits in its file, file-absolute, with the refs inside exports relative to it. */
         struct FBulkRegion
@@ -256,18 +256,18 @@ namespace Lumina
         RUNTIME_API static bool ReadPackageFile(FStringView Path, TVector<uint8>& OutBinary, FBulkRegion* OutBulkRegion = nullptr);
 
         /** One ranged read of a bulk payload, uncached so the caller owns the bytes, and safe from a worker thread. */
-        RUNTIME_API NODISCARD bool ReadBulkData(const FBulkDataRef& Ref, TVector<uint8>& OutBytes, uint32 ExpectedGeneration = 0) const;
+        NODISCARD RUNTIME_API bool ReadBulkData(const FBulkDataRef& Ref, TVector<uint8>& OutBytes, uint32 ExpectedGeneration = 0) const;
 
         /** Bumped by every save, so a caller holding refs it captured earlier can tell they went stale. */
-        RUNTIME_API NODISCARD uint32 GetBulkGeneration() const;
+        NODISCARD RUNTIME_API uint32 GetBulkGeneration() const;
 
-        RUNTIME_API NODISCARD const FBulkRegion& GetBulkRegion() const { return BulkRegion; }
+        NODISCARD RUNTIME_API const FBulkRegion& GetBulkRegion() const { return BulkRegion; }
 
         /** Reports a payload that could not be read back, which makes SavePackage refuse rather than write it empty. */
         RUNTIME_API void FlagUnresolvedBulkData() { bBulkDataUnresolved = true; }
 
         /** True while a save copies this bulk region across verbatim, where a PreSave that reads payloads back costs the whole saving. */
-        RUNTIME_API NODISCARD bool IsBulkPassthrough() const { return bBulkPassthrough; }
+        NODISCARD RUNTIME_API bool IsBulkPassthrough() const { return bBulkPassthrough; }
 
         void CreateLoader(const TVector<uint8>& FileBinary);
 
@@ -287,22 +287,22 @@ namespace Lumina
         RUNTIME_API CObject* LoadObject(const FGuid& GUID);
         RUNTIME_API CObject* LoadObjectByName(const FName& Name);
 
-        RUNTIME_API NODISCARD bool FullyLoad();
+        NODISCARD RUNTIME_API bool FullyLoad();
 
         RUNTIME_API CObject* FindObjectInPackage(const FName& Name);
         
-        RUNTIME_API NODISCARD CObject* IndexToObject(const FObjectPackageIndex& Index);
+        NODISCARD RUNTIME_API CObject* IndexToObject(const FObjectPackageIndex& Index);
 
 #if USING(WITH_EDITOR)
         /** Editor-only thumbnail data; not present in non-editor builds. */
-        RUNTIME_API NODISCARD FPackageThumbnail* GetPackageThumbnail();
+        NODISCARD RUNTIME_API FPackageThumbnail* GetPackageThumbnail();
 #endif
 
-        RUNTIME_API NODISCARD FFixedString GetPackagePath() const;
+        NODISCARD RUNTIME_API FFixedString GetPackagePath() const;
         
         RUNTIME_API void MarkDirty() { if (!IsTransientPackage()) { bDirty = true; ++EditGeneration; } }
         RUNTIME_API void ClearDirty() { bDirty = false; }
-        RUNTIME_API NODISCARD bool IsDirty() const { return bDirty; }
+        NODISCARD RUNTIME_API bool IsDirty() const { return bDirty; }
 
         // Bumped by every MarkDirty, so an editor can tell an edit happened even while the package stays dirty.
         NODISCARD uint32 GetEditGeneration() const { return EditGeneration; }

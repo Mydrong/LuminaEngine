@@ -35,14 +35,14 @@ namespace Lumina
         ECS::FEntity FindPlaced(CWorld* World, ECS::FEntity Arrival, const THashSet<ECS::FEntity>& Arrived)
         {
             ECS::FRegistry& Registry = ECS::GetWorldRegistry(*World);
-            const STagComponent* Tag = Registry.TryGet<STagComponent>(Arrival);
-            if (Tag == nullptr || Tag->Tag.IsNone())
+            const FName Tag = ECS::Utils::GetEntityTag(Registry, Arrival);
+            if (Tag.IsNone())
             {
                 return ECS::NullEntity;
             }
 
             TVector<ECS::FEntity> Tagged;
-            World->GetEntitiesByTag(Tag->Tag, Tagged);
+            World->GetEntitiesByTag(Tag, Tagged);
             for (ECS::FEntity Candidate : Tagged)
             {
                 if (!Arrived.contains(Candidate) && Registry.HasAll<SPersistentComponent>(Candidate))
@@ -163,12 +163,6 @@ namespace Lumina
         for (const auto& [Staged, Entity] : Arrived)
         {
             ArrivedSet.insert(Entity);
-            // Copied out, since setting the tag removes the component it was read from first.
-            if (const STagComponent* Tag = Registry.TryGet<STagComponent>(Entity))
-            {
-                const FName Name = Tag->Tag;
-                ECS::Utils::SetEntityTag(Registry, Entity, Name);
-            }
             Registry.EmplaceOrReplace<FNeedsTransformUpdate>(Entity);
         }
 
@@ -178,6 +172,7 @@ namespace Lumina
             ECS::Utils::RemapEntityReferences(Carried.Script.Get(), Arrived, /*bClearUnmapped*/ true);
             Carried.Script->SetOwner(Entity, To);
             Registry.GetOrEmplace<SEntityScriptComponent>(Entity).Scripts.push_back(Carried.Script);
+            Carried.Script->BindComponentRefs();
         }
         EntityScripts::NoteStructureChange();
 

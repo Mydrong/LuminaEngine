@@ -8,7 +8,7 @@
 // Memory.h transitively re-includes String.h (via Assert.h), which the reflector rejects as a cycle.
 namespace Lumina::Memory
 {
-    RUNTIME_API NODISCARD void* Malloc(size_t Size, size_t Alignment);
+    NODISCARD RUNTIME_API void* Malloc(size_t Size, size_t Alignment);
     RUNTIME_API void Free(void*& Memory);
 }
 

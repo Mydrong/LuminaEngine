@@ -74,6 +74,11 @@ namespace Lumina
                 if (CCtx != nullptr) { ZSTD_freeCCtx(CCtx); }
                 if (DCtx != nullptr) { ZSTD_freeDCtx(DCtx); }
             }
+            FZstdContexts() = default;
+            FZstdContexts(const FZstdContexts&) = delete;
+            FZstdContexts& operator=(const FZstdContexts&) = delete;
+            FZstdContexts(FZstdContexts&&) = delete;
+            FZstdContexts& operator=(FZstdContexts&&) = delete;
 
             ZSTD_CCtx* Compress()
             {
@@ -447,14 +452,14 @@ namespace Lumina
         FConditionVariable                GClaimSignal;
         THashMap<const CObject*, uint64>  GClaimOwners;
 
-        enum class EClaimResult : uint8
+        enum class ELoadClaim : uint8
         {
             Owned,       // this thread must load it
             AlreadyDone, // someone finished it while we waited
             Reentrant,   // this thread is already loading it, so the partial object is the answer
         };
 
-        EClaimResult ClaimObjectForLoad(CObject* Object)
+        ELoadClaim ClaimObjectForLoad(CObject* Object)
         {
             const uint64 ThisThread = (uint64)Threading::GetThreadID();
 
@@ -463,7 +468,7 @@ namespace Lumina
             {
                 if (!Object->HasAnyFlag(OF_NeedsLoad))
                 {
-                    return EClaimResult::AlreadyDone;
+                    return ELoadClaim::AlreadyDone;
                 }
 
                 const auto It = GClaimOwners.find(Object);
@@ -471,12 +476,12 @@ namespace Lumina
                 {
                     GClaimOwners.emplace(Object, ThisThread);
                     Object->SetFlag(OF_Loading);
-                    return EClaimResult::Owned;
+                    return ELoadClaim::Owned;
                 }
 
                 if (It->second == ThisThread)
                 {
-                    return EClaimResult::Reentrant;
+                    return ELoadClaim::Reentrant;
                 }
 
                 GClaimSignal.Wait(Lock);
@@ -1776,8 +1781,8 @@ namespace Lumina
 
         // Whoever claims it reads it; a second thread waits here rather than racing the same export, and
         // this thread re-entering its own load takes the partial object so a reference cycle resolves.
-        const EClaimResult Claim = ClaimObjectForLoad(Object);
-        if (Claim != EClaimResult::Owned)
+        const ELoadClaim Claim = ClaimObjectForLoad(Object);
+        if (Claim != ELoadClaim::Owned)
         {
             return;
         }
@@ -1786,7 +1791,12 @@ namespace Lumina
         struct FClaimScope
         {
             CObject* Object;
+            explicit FClaimScope(CObject* InObject) : Object(InObject) {}
             ~FClaimScope() { ReleaseObjectLoad(Object); }
+            FClaimScope(const FClaimScope&) = delete;
+            FClaimScope& operator=(const FClaimScope&) = delete;
+            FClaimScope(FClaimScope&&) = delete;
+            FClaimScope& operator=(FClaimScope&&) = delete;
         } ClaimScope{ Object };
 
         int32 FoundLoaderIndex = FObjectPackageIndex(Object->LoaderIndex).GetArrayIndex();

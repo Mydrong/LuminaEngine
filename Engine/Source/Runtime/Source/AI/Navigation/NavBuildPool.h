@@ -21,6 +21,8 @@ namespace Lumina
 
         FNavBuildPool(const FNavBuildPool&) = delete;
         FNavBuildPool& operator=(const FNavBuildPool&) = delete;
+        FNavBuildPool(FNavBuildPool&&) = delete;
+        FNavBuildPool& operator=(FNavBuildPool&&) = delete;
 
         void Enqueue(TMoveOnlyFunction<void()>&& Job);
 

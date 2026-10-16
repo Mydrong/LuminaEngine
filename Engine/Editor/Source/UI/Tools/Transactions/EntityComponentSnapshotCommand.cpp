@@ -34,7 +34,7 @@ namespace Lumina
             Ops = FindComponentOps(ComponentType->GetName().c_str());
         }
 
-        Capture(Before);
+        Capture(Before, OverridesBefore);
 
         PresentBefore.assign(Entities.size(), 0u);
         if (CWorld* W = World.Get(); W != nullptr && Ops != nullptr)
@@ -49,7 +49,8 @@ namespace Lumina
 
     void FEntityComponentSnapshotCommand::Finalize()
     {
-        Capture(After);
+        TVector<TVector<FName>> Unused;
+        Capture(After, Unused);
 
         CWorld* W = World.Get();
         if (W == nullptr || Ops == nullptr)
@@ -82,13 +83,20 @@ namespace Lumina
                 CPrefab::RecaptureComponentOverrides(Registry, Entity, ComponentType);
             }
         }
+
+        OverridesAfter.clear();
+        for (ECS::FEntity Entity : Entities)
+        {
+            OverridesAfter.push_back(CPrefab::GetComponentOverrides(Registry, Entity, ComponentType));
+        }
     }
 
-    void FEntityComponentSnapshotCommand::Capture(TVector<uint8>& Out) const
+    void FEntityComponentSnapshotCommand::Capture(TVector<uint8>& Out, TVector<TVector<FName>>& OutOverrides) const
     {
         LUMINA_PROFILE_SCOPE();
 
         Out.clear();
+        OutOverrides.clear();
 
         CWorld* W = World.Get();
         if (W == nullptr || ComponentType == nullptr || Ops == nullptr)
@@ -103,6 +111,7 @@ namespace Lumina
 
         for (ECS::FEntity Entity : Entities)
         {
+            OutOverrides.push_back(Registry.IsValid(Entity) ? CPrefab::GetComponentOverrides(Registry, Entity, ComponentType) : TVector<FName>());
             const bool bPresent = Registry.IsValid(Entity) && Ops->Has(Registry, Entity) != 0;
 
             int32 Size = AbsentComponent;
@@ -131,7 +140,7 @@ namespace Lumina
         }
     }
 
-    void FEntityComponentSnapshotCommand::Restore(const TVector<uint8>& In) const
+    void FEntityComponentSnapshotCommand::Restore(const TVector<uint8>& In, const TVector<TVector<FName>>& Overrides) const
     {
         LUMINA_PROFILE_SCOPE();
 
@@ -149,8 +158,9 @@ namespace Lumina
         // Same reason FEntityTransformCommand re-tags, a restored local transform needs a resolve.
         const bool bTransformRestored = (ComponentType == STransformComponent::StaticStruct());
 
-        for (ECS::FEntity Entity : Entities)
+        for (SIZE_T Index = 0; Index < Entities.size(); ++Index)
         {
+            const ECS::FEntity Entity = Entities[Index];
             int32 Size = AbsentComponent;
             Ar << Size;
 
@@ -183,8 +193,10 @@ namespace Lumina
                         Registry.EmplaceOrReplace<FNeedsTransformUpdate>(Entity);
                     }
 
-                    // An undo back to the prefab value leaves zero divergent leaves, clearing the override.
-                    CPrefab::RecaptureComponentOverrides(Registry, Entity, ComponentType);
+                    if (Index < Overrides.size())
+                    {
+                        CPrefab::RestoreComponentOverrides(Registry, Entity, ComponentType, Overrides[Index]);
+                    }
                 }
             }
 
@@ -198,6 +210,6 @@ namespace Lumina
         }
     }
 
-    void FEntityComponentSnapshotCommand::Undo() { Restore(Before); }
-    void FEntityComponentSnapshotCommand::Redo() { Restore(After); }
+    void FEntityComponentSnapshotCommand::Undo() { Restore(Before, OverridesBefore); }
+    void FEntityComponentSnapshotCommand::Redo() { Restore(After, OverridesAfter); }
 }

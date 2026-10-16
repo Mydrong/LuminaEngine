@@ -7,8 +7,10 @@
 #include "Core/Object/InstancedStruct.h"
 #include "Core/Object/ObjectHandleTyped.h"
 #include "Core/Object/SoftObjectPtr.h"
+#include "World/Entity/Components/ComponentRef.h"
 #include "Properties/ArrayProperty.h"
 #include "Properties/ClassProperty.h"
+#include "Properties/ComponentRefProperty.h"
 #include "Properties/DelegateProperty.h"
 #include "Properties/EnumProperty.h"
 #include "Properties/InstancedStructProperty.h"
@@ -90,6 +92,7 @@ namespace Lumina
                 AddSized<FSubStructProperty,       void*>                    (EPropertyTypeFlags::SubStruct);
                 AddSized<FDelegateProperty,        FScriptDelegate>          (EPropertyTypeFlags::Delegate);
                 AddSized<FInstancedStructProperty, FInstancedStruct>         (EPropertyTypeFlags::InstancedStruct);
+                AddSized<FComponentRefProperty,    FComponentRef>            (EPropertyTypeFlags::ComponentRef);
 
                 // These are as wide as what they resolve to, which is only known at registration.
                 Add<FStructProperty>  (EPropertyTypeFlags::Struct);

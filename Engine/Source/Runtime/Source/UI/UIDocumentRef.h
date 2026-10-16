@@ -19,7 +19,7 @@ namespace Lumina
         FString Path;
 
         // Stable identity as GUID text, which the picker maintains.
-        PROPERTY()
+        PROPERTY(Hidden)
         FString Guid;
 
         SUIDocumentRef() = default;

@@ -47,6 +47,8 @@ namespace Lumina::Logging
 
         FLogBuffer(const FLogBuffer&) = delete;
         FLogBuffer& operator=(const FLogBuffer&) = delete;
+        FLogBuffer(FLogBuffer&&) = delete;
+        FLogBuffer& operator=(FLogBuffer&&) = delete;
 
         NODISCARD const char* Data() const noexcept { return Storage; }
         NODISCARD uint32 Size() const noexcept { return Length; }

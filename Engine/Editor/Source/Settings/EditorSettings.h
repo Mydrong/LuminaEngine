@@ -38,6 +38,10 @@ namespace Lumina
         /** Display scale of the selected-camera preview overlay in the viewport (drag its corner to resize). */
         PROPERTY(Editable, Category = "Viewport", ClampMin = 0.25f, ClampMax = 1.5f)
         float CameraPreviewScale = 0.6f;
+
+        /** Empty the console each time play in editor starts, so it shows only that session's output. */
+        PROPERTY(Editable, Category = "Play")
+        bool bClearConsoleOnPIE = false;
     };
 
     // Transform-gizmo snapping defaults for the prefab editor (kept distinct from the world editor).
@@ -155,7 +159,7 @@ namespace Lumina
         bool bRestoreOpenTabs = true;
 
         /** Open tabs, oldest first. Maintained by the editor; not meant to be hand-edited. */
-        PROPERTY()
+        PROPERTY(Hidden)
         TVector<FString> OpenTabs;
     };
 

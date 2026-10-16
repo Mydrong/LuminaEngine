@@ -80,6 +80,7 @@ namespace Lumina
     public:
 
         FAssetManager();
+        ~FAssetManager() = default;
         LE_NO_COPYMOVE(FAssetManager);
 
         static FAssetManager& Get();

@@ -57,6 +57,17 @@ namespace Lumina
                  + A4((int32)sizeof(dtOffMeshConnection)  * H->offMeshConCount);
         }
 
+        // Detour frees a tile's data itself, so a blob is copied into its allocator before it is handed over.
+        uint8* CopyForDetour(const TVector<uint8>& Blob)
+        {
+            uint8* Owned = (uint8*)dtAlloc((int)Blob.size(), DT_ALLOC_PERM);
+            if (Owned != nullptr)
+            {
+                memcpy(Owned, Blob.data(), Blob.size());
+            }
+            return Owned;
+        }
+
         // addTile only checks magic and version, and neither changes when the ref width or the block
         // alignment does, so a stale blob would otherwise be read at the wrong offsets.
         bool ValidateTileBlob(const TVector<uint8>& Blob, int32 TileX, int32 TileY)
@@ -319,13 +330,12 @@ namespace Lumina
             }
 
             const size_t Size = Tile.Blob.size();
-            uint8* Owned = (uint8*)dtAlloc((int)Size, DT_ALLOC_PERM);
+            uint8* Owned = CopyForDetour(Tile.Blob);
             if (!Owned)
             {
                 ++Rejected;
                 continue;
             }
-            memcpy(Owned, Tile.Blob.data(), Size);
 
             dtTileRef Ref = 0;
             const dtStatus Status = NavMesh->addTile(Owned, (int)Size, DT_TILE_FREE_DATA, 0, &Ref);
@@ -945,12 +955,8 @@ namespace Lumina
             {
                 continue;
             }
-            if (!ValidateTileBlob(*Blob, Swaps[i].X, Swaps[i].Y) || (Owned[i] = (uint8*)dtAlloc((int)Blob->size(), DT_ALLOC_PERM)) == nullptr)
-            {
-                Accepted[i] = 0;
-                continue;
-            }
-            memcpy(Owned[i], Blob->data(), Blob->size());
+            Owned[i] = ValidateTileBlob(*Blob, Swaps[i].X, Swaps[i].Y) ? CopyForDetour(*Blob) : nullptr;
+            Accepted[i] = Owned[i] != nullptr;
         }
 
         int32 Landed = 0;
@@ -985,12 +991,11 @@ namespace Lumina
         {
             return false;
         }
-        uint8* Owned = (uint8*)dtAlloc((int)Blob.size(), DT_ALLOC_PERM);
+        uint8* Owned = CopyForDetour(Blob);
         if (Owned == nullptr)
         {
             return false;
         }
-        memcpy(Owned, Blob.data(), Blob.size());
 #else
         uint8* Owned = nullptr;
 #endif

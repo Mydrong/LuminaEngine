@@ -227,6 +227,18 @@ namespace Lumina
         FVector4 ComponentHeader = FVector4(0.175f, 0.190f, 0.235f, 1.00f);
     };
 
+    // Names for the render layers that drawables pick from and cameras filter by, persisted with the project's renderer settings.
+    REFLECT(MinimalAPI, ConfigFile = "/Config/RendererSettings.json", DisplayName = "Render Layers", Category = "Engine")
+    class CRenderLayerSettings : public CDeveloperSettings
+    {
+        GENERATED_BODY()
+    public:
+
+        // Entry N names layer N, read through SRenderLayerMask::GetLayerName. The last layer is always Foreground.
+        PROPERTY(Editable, Category = "Layers")
+        TVector<FName> LayerNames = { FName("Default") };
+    };
+
     REFLECT()
     enum class ESMAAQuality : uint8
     {

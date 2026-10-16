@@ -114,6 +114,10 @@ namespace Lumina
 
             // The union member is destroyed by DestroyValue, never by this.
             ~TInlineBlock() {}
+            TInlineBlock(const TInlineBlock&) = delete;
+            TInlineBlock& operator=(const TInlineBlock&) = delete;
+            TInlineBlock(TInlineBlock&&) = delete;
+            TInlineBlock& operator=(TInlineBlock&&) = delete;
 
             static void ManageBlock(FControlBlock* Base, EControlAction Action)
             {
@@ -179,6 +183,8 @@ namespace Lumina
 
             FAtomicSlotGuard(const FAtomicSlotGuard&) = delete;
             FAtomicSlotGuard& operator=(const FAtomicSlotGuard&) = delete;
+            FAtomicSlotGuard(FAtomicSlotGuard&&) = delete;
+            FAtomicSlotGuard& operator=(FAtomicSlotGuard&&) = delete;
         };
     }
 
@@ -484,8 +490,11 @@ namespace Lumina
     protected:
 
         constexpr TSharedFromThis() noexcept = default;
+        // A copy or a move is a new object no TSharedPtr owns yet, so the weak self never travels with it.
         TSharedFromThis(const TSharedFromThis&) noexcept {}
         TSharedFromThis& operator=(const TSharedFromThis&) noexcept { return *this; }
+        TSharedFromThis(TSharedFromThis&&) noexcept {}
+        TSharedFromThis& operator=(TSharedFromThis&&) noexcept { return *this; }
         ~TSharedFromThis() = default;
 
     private:

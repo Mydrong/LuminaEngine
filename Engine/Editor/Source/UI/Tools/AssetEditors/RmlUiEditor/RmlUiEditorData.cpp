@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <string>
-#include "Scripting/DotNet/DotNetHost.h"
 #include "Core/Object/Class.h"
 #include "Core/Object/Object.h"
 #include "UI/UIScript.h"
@@ -252,7 +251,7 @@ namespace Lumina
             }
         }
         UIBinding::EnumerateModelClasses(AvailableModels);
-        SeenScriptGeneration = DotNet::IsInitialized() ? DotNet::GetScriptGeneration() : -1;
+        bScriptsReloaded = false;
     }
 
     void FRmlUiEditorTool::ApplyBindingMarkers()
@@ -289,9 +288,7 @@ namespace Lumina
             FiredCommands.erase(FiredCommands.begin(), FiredCommands.begin() + (FiredCommands.size() - kMaxPreviewCommands));
         }
 
-        // A script reload can add or rename members, so the preview picks the new model up on its own.
-        const int32 Generation = DotNet::IsInitialized() ? DotNet::GetScriptGeneration() : -1;
-        if (Generation != SeenScriptGeneration)
+        if (bScriptsReloaded)
         {
             ReloadDocument();
         }

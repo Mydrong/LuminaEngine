@@ -956,13 +956,6 @@ namespace Lumina::MCP
                     else
                     {
                         Storage.RemoveEntity(Entity);
-
-                        // The single-tag path also records its tag in the unnamed storage, which would otherwise outlive it.
-                        const STagComponent* Unnamed = Registry.TryGet<STagComponent>(Entity);
-                        if (Unnamed != nullptr && Unnamed->Tag == Tag)
-                        {
-                            Registry.Remove<STagComponent>(Entity);
-                        }
                     }
                     ++Out.Changed;
                 }
@@ -1058,6 +1051,42 @@ namespace Lumina::MCP
             return Agent::FToolResult::Ok(Lumina::Format("{} tag(s).", Out.Tags.size()));
         }
 
+        void RegisterListSystems(FStringView Owner)
+        {
+            Agent::FToolRegistry::Get().Register<SListSystemsParams, SListSystemsResult>(
+                Owner, "world.list_systems",
+                "List the entity systems the world editor's Systems panel shows, C++ and C# alike, with the stages each ticks in.",
+                Agent::EToolEffect::ReadOnly, Agent::EToolThread::GameThread,
+                [](const SListSystemsParams& In, SListSystemsResult& Out)
+                {
+                    FString Error;
+                    CWorld* World = SessionOps::GetSceneWorld(Error);
+                    if (World == nullptr)
+                    {
+                        return Agent::FToolResult::Error(Error);
+                    }
+
+                    TVector<CWorld::FSystemInfo> Infos;
+                    World->GetAllSystems(Infos);
+                    for (const CWorld::FSystemInfo& Info : Infos)
+                    {
+                        const FString Name(Info.Name.ToString().c_str());
+                        if (!ContainsTextFold(FStringView(Name), In.Contains))
+                        {
+                            continue;
+                        }
+                        SSystemListing& Listing = Out.Systems.emplace_back();
+                        Listing.Name = Name;
+                        Listing.bEnabled = Info.bEnabled;
+                        for (EUpdateStage Stage : Info.Stages)
+                        {
+                            Listing.Stages.push_back((int32)Stage);
+                        }
+                    }
+                    return Agent::FToolResult::Ok(Lumina::Format("{} system(s).", Out.Systems.size()));
+                });
+        }
+
         void RegisterTagTools(FStringView Owner)
         {
             Agent::FToolRegistry::Get().Register<SEntityTagParams, SEntityTagResult>(
@@ -1088,6 +1117,7 @@ namespace Lumina::MCP
 
     void RegisterSceneTools(FStringView Owner)
     {
+        RegisterListSystems(Owner);
         RegisterTagTools(Owner);
         RegisterListComponentTypes(Owner);
         RegisterListEntities(Owner);

@@ -41,6 +41,12 @@ public static unsafe class NativeBindings
         return Resolve(Module, EntryPoint, 0);
     }
 
+    // What a generated P/Invoke checks before its first call, so a missing or drifted export fails by name.
+    public static bool Bind(string Module, string EntryPoint, int ExpectedSignature)
+    {
+        return Resolve(Module, EntryPoint, ExpectedSignature) != null;
+    }
+
     public static void* Resolve(string Module, string EntryPoint, int ExpectedSignature)
     {
         IntPtr Handle = Host.ModuleHandle(Module);
@@ -83,6 +89,13 @@ public static unsafe class NativeBindings
             $"NativeBindings: export '{EntryPoint}' takes {Declared} bytes of arguments natively but the managed "
             + $"binding declares {Expected}. The two sides have drifted, so the binding is dropped.");
         return false;
+    }
+
+    [System.Diagnostics.CodeAnalysis.DoesNotReturn]
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    public static void ThrowUnbound(string EntryPoint)
+    {
+        throw Unbound(EntryPoint);
     }
 
     // What a call through a dropped or missing binding raises, naming the export rather than faulting at address zero.

@@ -331,6 +331,10 @@ namespace Lumina
             Result.Errors   = Compiler.GetErrors();
             Result.Stats    = Compiler.GetStats();
             Result.bSuccess = false;
+            if (!Target.bPermutation)
+            {
+                Material->SetCompileFailed(true);
+            }
             return false;
         }
 
@@ -575,6 +579,10 @@ namespace Lumina
             {
                 // Half a permutation draws one surface out of two shader sets; keep the whole fallback.
                 Material->ClearPermutation(Target.Key);
+            }
+            else
+            {
+                Material->SetCompileFailed(true);
             }
             Result.Stats    = Compiler.GetStats();
             Result.bSuccess = false;

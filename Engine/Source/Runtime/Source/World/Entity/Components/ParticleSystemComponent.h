@@ -2,6 +2,7 @@
 
 #include "Assets/AssetTypes/ParticleSystem/ParticleSystem.h"
 #include "Core/Object/ObjectHandleTyped.h"
+#include "Renderer/RenderLayers.h"
 #include "Renderer/RenderResource.h"
 #include "ParticleSystemComponent.generated.h"
 
@@ -27,6 +28,7 @@ namespace Lumina
         SParticleSystemComponent() = default;
         
         
+        ~SParticleSystemComponent() = default;
         SParticleSystemComponent(const SParticleSystemComponent& Other)
             : ParticleSystem(Other.ParticleSystem)
             , EmitterOffset(Other.EmitterOffset)
@@ -36,6 +38,7 @@ namespace Lumina
             , bBurstOnSpawn(Other.bBurstOnSpawn)
             , ParameterOverrides(Other.ParameterOverrides)
             , MaterialOverrides(Other.MaterialOverrides)
+            , RenderLayers(Other.RenderLayers)
         {
         }
 
@@ -51,6 +54,7 @@ namespace Lumina
                 bBurstOnSpawn       = Other.bBurstOnSpawn;
                 ParameterOverrides  = Other.ParameterOverrides;
                 MaterialOverrides   = Other.MaterialOverrides;
+                RenderLayers        = Other.RenderLayers;
                 // Transient activation intents never carry across a copy; the render scene
                 // allocates fresh GPU/sim state keyed by the new entity.
                 bForceBurst         = false;
@@ -88,12 +92,16 @@ namespace Lumina
 
         // Per-instance overrides for asset-declared parameters; only diverging entries live here, reads
         // fall back to the asset.
-        PROPERTY()
+        PROPERTY(Hidden)
         TVector<SParticleParameter> ParameterOverrides;
 
         /** Per-emitter sprite material overrides applied on top of the asset's, indexed by emitter. */
         PROPERTY(Editable, Category = "Particle System")
         TVector<TStrongObjectPtr<CMaterialInterface>> MaterialOverrides;
+
+        // Drawn by any camera whose CullMask shares one of these layers. A hidden system keeps simulating.
+        PROPERTY(Editable, Category = "Rendering")
+        SRenderLayerMask RenderLayers;
 
         /** This component's material for EmitterIndex, falling back to the one the asset authored. */
         FUNCTION()

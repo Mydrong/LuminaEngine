@@ -26,7 +26,7 @@ namespace Lumina
         CFont* GetDefaultFont() const { return DefaultFont.Get(); }
 
         /** Default engine font (Lexend), MSDF-baked at startup. */
-        PROPERTY(NoSerialize)
+        PROPERTY(Hidden, NoSerialize)
         TStrongObjectPtr<CFont> DefaultFont;
     };
 }

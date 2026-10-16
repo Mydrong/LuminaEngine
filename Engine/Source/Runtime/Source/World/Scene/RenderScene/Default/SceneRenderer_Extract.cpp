@@ -83,7 +83,7 @@ namespace Lumina
         }
     }
 
-    void FDefaultSceneRenderer::Extract(const FViewVolume& ViewVolume, const SPostProcessSettings* PostProcess)
+    void FDefaultSceneRenderer::Extract(const FViewVolume& ViewVolume, const SPostProcessSettings* PostProcess, const FViewLayerSettings& Layers)
     {
         LUMINA_PROFILE_SCOPE();
         LUMINA_MEMORY_SCOPE("Render Scene");
@@ -100,6 +100,7 @@ namespace Lumina
         Frame.bExtractedThisFrame  = false;
         Frame.CachedWorldDeltaTime = (float)World->GetWorldDeltaTime();
         Frame.ViewVolume           = ViewVolume;
+        Frame.ViewLayers           = Layers;
 
         // PostProcess is a stack temporary in CWorld::Extract, so value-copy it.
         if (PostProcess != nullptr)
@@ -202,6 +203,7 @@ namespace Lumina
         SceneGlobalData.CullData.bHasDirectional        = 0u;
         SceneGlobalData.CullData.bFrustumCull           = FrameSettings.bFrustumCull;
         SceneGlobalData.CullData.bOcclusionCull         = FrameSettings.bOcclusionCull;
+        SceneGlobalData.CullData.CameraLayerMask        = Layers.CullMask;
 
         // Copied, not aliased, since freezing the cull replaces these and leaves the render camera.
         SceneGlobalData.CullData.CullCameraPosition     = SceneGlobalData.CameraData.Location;
@@ -683,6 +685,8 @@ namespace Lumina
         // The bounds build reads the retained slots this sync rewrites.
         JoinInstanceBlockBounds();
 
+        ScenePrimitives.SetForegroundView(ExtractFrame->ViewVolume, ExtractFrame->ViewLayers);
+
         MovedTransformScratch.clear();
         ECS::Utils::DrainMovedTransforms(Registry, MovedTransformConsumer, MovedTransformScratch);
         ScenePrimitives.Sync(*World, TSpan<const ECS::FEntity>(MovedTransformScratch.data(), MovedTransformScratch.size()));
@@ -705,6 +709,7 @@ namespace Lumina
 
         Out.DirtySlots.clear();
         Out.DirtyStaticSlots.clear();
+        Out.DeactivatedSlots.clear();
 
         const uint32 DeviceCapacity = RetainedDeviceCapacity.load(std::memory_order_acquire);
         // Growth keeps the device contents, so only a device holding nothing valid needs everything again.
@@ -779,6 +784,18 @@ namespace Lumina
             }
         }
 
+        // A full re-send already carries the cleared bits.
+        if (!Out.bFull)
+        {
+            for (uint32 Slot : ScenePrimitives.GetDeactivatedSlots())
+            {
+                if (Slot < SlotCount)
+                {
+                    Out.DeactivatedSlots.push_back(Slot);
+                }
+            }
+        }
+
         // Interned; a full instance re-send also re-sends these, since a replaced device buffer loses them.
         Out.SurfaceDescCount        = ScenePrimitives.GetSurfaceDescCount();
         Out.bSurfaceDescsChanged    = ScenePrimitives.AreSurfaceDescsDirty() || Out.bFull || Out.bFullStatic;
@@ -818,6 +835,29 @@ namespace Lumina
             }
 
             return Component.CachedEntryState == Cache.GetEntryState(Component.ResolveHandle);
+        }
+
+        // The whole parent chain, since a mid-chain instance taking a new parent invalidates only itself.
+        uint64 MaterialDependencyBits(const FDynamicMeshRenderData& Data)
+        {
+            constexpr uint32 MaxChainDepth = 16;
+            uint64 Bits = 0;
+            for (const FResolvedSurface& Surface : Data.Surfaces)
+            {
+                if (!IsValid(Surface.SourceMaterial))
+                {
+                    continue;
+                }
+                Bits |= FMeshResolveCache::DependencyBit(Surface.SourceMaterial->GetMaterial());
+
+                const CMaterialInterface* Link = Surface.SourceMaterial;
+                for (uint32 Depth = 0; IsValid(Link) && Depth < MaxChainDepth; ++Depth)
+                {
+                    Bits |= FMeshResolveCache::DependencyBit(Link);
+                    Link = Link->GetParentMaterial();
+                }
+            }
+            return Bits;
         }
 
         template <typename TComponent>
@@ -953,38 +993,50 @@ namespace Lumina
     {
         LUMINA_PROFILE_SCOPE();
 
-        // Recompiles, destroys and epoch bumps all move the generation, so the stale sweep waits for it.
-        const uint32 Generation = FMeshResolveCache::GetPendingGeneration();
-        const bool   bSweep     = Generation != LastDynamicResolveGeneration;
+        // Any resolve work at all, which only a mesh still waiting on a compiling material needs to hear about.
+        const uint32 Generation   = FMeshResolveCache::GetPendingGeneration();
+        const bool   bWorkPending = Generation != LastDynamicResolveGeneration;
         LastDynamicResolveGeneration = Generation;
 
         const uint32 Epoch = FMeshResolveCache::GetEpoch();
 
+        // Only meshes reading a changed material are examined, so streaming in unrelated content sweeps nothing.
+        const uint64 Invalidated = DynamicMaterialInvalidations.exchange(0, std::memory_order_acquire);
+
         auto Storage = Registry.GetStorage<SDynamicMeshComponent>();
         const uint32 Count = (uint32)Storage.GetDenseSize();
 
+        // Dynamic meshes own no cache entry, so an override write is detected from the component alone.
+        auto NeedsResolve = [&](const SDynamicMeshComponent& Component)
+        {
+            return (Component.ResolvedMaterialBits & Invalidated) != 0
+                || Epoch != Component.CachedResolveEpoch
+                || (Component.bResolvedMaterialsPending && bWorkPending)
+                || HashOverrides(Component) != Component.CachedMaterialHash
+                || Component.LoadRenderDataVersion() != Component.ResolvedRenderDataVersion;
+        };
+
+        // A streamed world holds tens of thousands of these, nearly all current, so the test fans out and only the hits run serially.
+        DynamicResolveFlags.resize(Count);
+        Task::ParallelForOrSerial(Count, 4096, [&](const Task::FParallelRange& Range)
+        {
+            for (uint32 i = Range.Start; i < Range.End; ++i)
+            {
+                DynamicResolveFlags[i] = !Storage.GetDenseData()[i].IsTombstone() && NeedsResolve(PackedPayloadAt(Storage, i));
+            }
+        }, 1024);
+
         for (uint32 i = 0; i < Count; ++i)
         {
+            if (!DynamicResolveFlags[i])
+            {
+                continue;
+            }
+
             const ECS::FEntity Entity = Storage.GetDenseData()[i];
-            if (Entity.IsTombstone())
-            {
-                continue;
-            }
-
             SDynamicMeshComponent& Component = PackedPayloadAt(Storage, i);
-
-            // Dynamic meshes own no cache entry, so an override write is detected from the component alone.
             const uint32 OverrideHash = HashOverrides(Component);
-            const uint32 DataVersion  = Component.LoadRenderDataVersion();
-
-            if (!bSweep
-                && OverrideHash == Component.CachedMaterialHash
-                && DataVersion == Component.ResolvedRenderDataVersion)
-            {
-                continue;
-            }
-
-            Component.ResolvedRenderDataVersion = DataVersion;
+            Component.ResolvedRenderDataVersion = Component.LoadRenderDataVersion();
 
             const TSharedPtr<FDynamicMeshRenderData> Data = Component.LoadRenderData();
             if (!Data)
@@ -1007,12 +1059,16 @@ namespace Lumina
                 && !bShaderStale
                 && Data->bAllMaterialsReady)
             {
+                Component.ResolvedMaterialBits      = MaterialDependencyBits(*Data);
+                Component.bResolvedMaterialsPending = false;
                 continue;
             }
 
             Component.RefreshResolvedMaterials();
-            Component.CachedMaterialHash  = OverrideHash;
-            Component.CachedResolveEpoch  = Epoch;
+            Component.CachedMaterialHash        = OverrideHash;
+            Component.CachedResolveEpoch        = Epoch;
+            Component.ResolvedMaterialBits      = MaterialDependencyBits(*Data);
+            Component.bResolvedMaterialsPending = !Data->bAllMaterialsReady;
 
             Tracker.Mark(Entity, EPrimitiveSource::DynamicMesh, EPrimitiveDirty::Data);
         }
@@ -1024,19 +1080,12 @@ namespace Lumina
     void FDefaultSceneRenderer::ValidateNoStaleResolves(ECS::FRegistry& Registry)
     {
 #if USING(WITH_EDITOR)
-        // Anything still stale after the re-resolve pass is a gate that did not fire.
-        const uint32 Generation = FMeshResolveCache::GetPendingGeneration();
-        if (Generation == LastStaleValidationGeneration)
-        {
-            return;
-        }
-        LastStaleValidationGeneration = Generation;
-
-        uint32 StaleSurfaces = 0;
-        uint32 StaleEntities = 0;
-
+        // Anything still stale after the re-resolve pass is a gate that did not fire, checked a slice a frame so a big world never spikes.
+        constexpr uint32 SliceSize = 256;
         auto Storage = Registry.GetStorage<SDynamicMeshComponent>();
-        for (uint32 i = 0, Count = (uint32)Storage.GetDenseSize(); i < Count; ++i)
+        const uint32 Count = (uint32)Storage.GetDenseSize();
+        const uint32 SliceEnd = Math::Min(Count, StaleValidationCursor + SliceSize);
+        for (uint32 i = StaleValidationCursor; i < SliceEnd; ++i)
         {
             if (Storage.GetDenseData()[i].IsTombstone())
             {
@@ -1055,17 +1104,26 @@ namespace Lumina
                 Stale += MeshResolve::IsSurfaceStale(Surface) ? 1u : 0u;
             }
 
-            StaleSurfaces += Stale;
-            StaleEntities += (Stale > 0) ? 1u : 0u;
+            StaleValidationSurfaces += Stale;
+            StaleValidationEntities += (Stale > 0) ? 1u : 0u;
         }
 
-        if (StaleSurfaces > 0)
+        StaleValidationCursor = SliceEnd;
+        if (SliceEnd < Count)
+        {
+            return;
+        }
+        StaleValidationCursor = 0;
+
+        if (StaleValidationSurfaces > 0)
         {
             LOG_WARN("MeshResolve: {} surface(s) across {} dynamic mesh entities are still resolved against "
-                     "superseded shaders after a full resolve pass. Something recompiled that the resolve "
+                     "superseded shaders after a resolve pass. Something recompiled that the resolve "
                      "gate cannot see -- those entities are drawing last build's shader.",
-                     StaleSurfaces, StaleEntities);
+                     StaleValidationSurfaces, StaleValidationEntities);
         }
+        StaleValidationSurfaces = 0;
+        StaleValidationEntities = 0;
 #else
         (void)Registry;
 #endif
@@ -1361,6 +1419,13 @@ namespace Lumina
         // One command per pipeline batch, not per primitive; the merge emits exactly this many.
         DrawCommands.reserve(ScenePrimitives.GetBatches().Num());
 
+        // Every bound skinned index fits before the gather, so the workers write in place instead of deferring.
+        TVector<FSkinnedFrameData>& SkinnedData = Frame.Geometry.SkinnedFrameData;
+        if ((uint32)SkinnedData.size() < ScenePrimitives.GetSkinnedIndexExtent())
+        {
+            SkinnedData.resize(ScenePrimitives.GetSkinnedIndexExtent());
+        }
+
         const uint32 NumThreads = GTaskSystem->GetNumTaskThreads();
 
         TVector<FThreadLocalDrawData>& ThreadLocal = ThreadLocalStorage;
@@ -1651,6 +1716,7 @@ namespace Lumina
                 }
                 Item.bEmit               = Component.bEmit;
                 Item.bBurstOnSpawn       = Component.bBurstOnSpawn;
+                Item.bOnDrawnLayer       = Frame.ViewLayers.Draws(Component.RenderLayers);
                 Item.bForceBurst         = bForceBurst;
                 Item.bForceReset         = bForceReset;
                 Item.MeshletHeaderSlot   = Emitter->RenderMode == EParticleRenderMode::Mesh ? ResidentMeshletHeaderSlot(Emitter->Mesh.Get()) : 0u;
@@ -2226,6 +2292,7 @@ namespace Lumina
         Out.MeshletTotalCount       = In.MeshletTotalCount;
         Out.SkinnedVertexBase       = In.SkinnedVertexBase;
         Out.BoneOffset              = In.BoneOffset;
+        Out.RetainedSlot            = In.RetainedSlot;
     }
 
     struct FSkinnedFrameDataTarget
@@ -2256,7 +2323,8 @@ namespace Lumina
         {
             const FSurfaceBinding& Binding = Bindings[s];
             const uint32 InstanceSlot = Binding.InstanceSlot;
-            if (Binding.SurfaceDescIndex >= NumSurfaceDescs || InstanceSlot >= Target.RetainedSlots)
+            const uint32 SkinnedIndex = Binding.SkinnedIndex;
+            if (Binding.SurfaceDescIndex >= NumSurfaceDescs || InstanceSlot >= Target.RetainedSlots || SkinnedIndex == kNoSkinnedIndex)
             {
                 continue;
             }
@@ -2277,16 +2345,17 @@ namespace Lumina
             // Seeded to the sentinel so a rejected slot keeps no slice rather than last frame's base.
             Data.SkinnedVertexBase       = kNoPreSkinBase;
             Data.BoneOffset              = BoneArenaBase;
+            Data.RetainedSlot            = InstanceSlot;
 
-            // Slots are disjoint across primitives, and the array only grows in the merge, after every emit.
-            if (InstanceSlot < Target.Num)
+            // Indices are disjoint across primitives, and the array only grows in the merge, after every emit.
+            if (SkinnedIndex < Target.Num)
             {
-                PublishSkinnedFrameData(Target.Data[InstanceSlot], Data);
-                Local.SkinnedSlots.push_back(InstanceSlot);
+                PublishSkinnedFrameData(Target.Data[SkinnedIndex], Data);
+                Local.SkinnedIndices.push_back(SkinnedIndex);
             }
             else
             {
-                Local.DeferredSlots.push_back({ InstanceSlot, Data });
+                Local.DeferredSlots.push_back({ SkinnedIndex, Data });
             }
         }
     }
@@ -2303,6 +2372,10 @@ namespace Lumina
 
         // Dense, since the range indexes skeletal primitives rather than the whole table.
         const uint32* RESTRICT Skeletal = SkeletalPrimitiveIndices;
+
+        // A skeleton on a layer no view draws is never skinned.
+        const bool   bOtherViews  = !Frame.Views.CaptureViews.empty() || Frame.ReflectionProbes.BakingProbe >= 0;
+        const uint32 DrawnLayers  = Frame.ViewLayers.CullMask | (bOtherViews ? RenderLayers::kAllMask : 0u);
 
         // Claimed from the shared cursor a batch at a time, since every worker bumping it per primitive fights over one line.
         constexpr uint32 AcceptBatch = 64;
@@ -2331,6 +2404,10 @@ namespace Lumina
             if (Prim.Surfaces == nullptr || Prim.SurfaceCount == 0u || Prim.BoneCount == 0u)
             {
                 return;   // parked awaiting resolve or a skeleton; the sync pass retries it
+            }
+            if ((Prim.RenderLayers & DrawnLayers) == 0u)
+            {
+                return;
             }
 
             // A superset of what the emit pass accepts; anything it rejects just leaves an unused hole.
@@ -2771,17 +2848,17 @@ namespace Lumina
             LUMINA_PROFILE_SECTION("Publish Skinned Frame Data");
 
             TVector<FSkinnedFrameData>& SkinnedData = Frame.Geometry.SkinnedFrameData;
-            TVector<uint32>&            SkinnedSlots = Frame.Geometry.SkinnedSlots;
+            TVector<uint32>&            SkinnedIndices = Frame.Geometry.SkinnedIndices;
 
-            SkinnedSlots.clear();
+            SkinnedIndices.clear();
 
-            // Indexed by retained slot; grown, never cleared, and only as long as the highest skinned slot.
+            // Indexed by skinned index, so it is only as long as the most skinned instances ever bound at once.
             uint32 SkinnedExtent = (uint32)SkinnedData.size();
             for (uint32 t = 0; t < NumThreads; ++t)
             {
                 for (const FDeferredSkinnedSlot& Deferred : ThreadLocal[t].DeferredSlots)
                 {
-                    SkinnedExtent = Math::Max(SkinnedExtent, Deferred.InstanceSlot + 1u);
+                    SkinnedExtent = Math::Max(SkinnedExtent, Deferred.SkinnedIndex + 1u);
                 }
             }
             if ((uint32)SkinnedData.size() < SkinnedExtent)
@@ -2797,11 +2874,11 @@ namespace Lumina
                     continue;
                 }
 
-                SkinnedSlots.insert(SkinnedSlots.end(), Local.SkinnedSlots.begin(), Local.SkinnedSlots.end());
+                SkinnedIndices.insert(SkinnedIndices.end(), Local.SkinnedIndices.begin(), Local.SkinnedIndices.end());
                 for (const FDeferredSkinnedSlot& Deferred : Local.DeferredSlots)
                 {
-                    PublishSkinnedFrameData(SkinnedData[Deferred.InstanceSlot], Deferred.Data);
-                    SkinnedSlots.push_back(Deferred.InstanceSlot);
+                    PublishSkinnedFrameData(SkinnedData[Deferred.SkinnedIndex], Deferred.Data);
+                    SkinnedIndices.push_back(Deferred.SkinnedIndex);
                 }
             }
         }
@@ -3006,7 +3083,7 @@ namespace Lumina
         for (ECS::FEntity Entity : PointView)
         {
             const SPointLightComponent& Light = PointView.Get<SPointLightComponent>(Entity);
-            if (!Light.bCastShadows || Light.Intensity <= 0.0f)
+            if (!Light.bCastShadows || Light.Intensity <= 0.0f || !Frame.ViewLayers.Draws(Light.RenderLayers))
             {
                 continue;
             }
@@ -3024,7 +3101,7 @@ namespace Lumina
         for (ECS::FEntity Entity : SpotView)
         {
             const SSpotLightComponent& Light    = SpotView.Get<SSpotLightComponent>(Entity);
-            if (!Light.bCastShadows || Light.Intensity <= 0.0f)
+            if (!Light.bCastShadows || Light.Intensity <= 0.0f || !Frame.ViewLayers.Draws(Light.RenderLayers))
             {
                 continue;
             }
@@ -3094,7 +3171,7 @@ namespace Lumina
     void FDefaultSceneRenderer::ProcessPointLight(const SPointLightComponent& PointLight, const STransformComponent& TransformComponent, FLightBatch& Batch, TAtomic<uint32>& LightCount)
     {
         // A switched-off light adds nothing to the image, so it should not take a slot or a cluster test either.
-        if (PointLight.Intensity <= 0.0f)
+        if (PointLight.Intensity <= 0.0f || !ExtractFrame->ViewLayers.Draws(PointLight.RenderLayers))
         {
             return;
         }
@@ -3179,7 +3256,7 @@ namespace Lumina
 
     void FDefaultSceneRenderer::ProcessSpotLight(const SSpotLightComponent& SpotLight, const STransformComponent& TransformComponent, FLightBatch& Batch, TAtomic<uint32>& LightCount)
     {
-        if (SpotLight.Intensity <= 0.0f)
+        if (SpotLight.Intensity <= 0.0f || !ExtractFrame->ViewLayers.Draws(SpotLight.RenderLayers))
         {
             return;
         }
@@ -3271,7 +3348,7 @@ namespace Lumina
 
     void FDefaultSceneRenderer::ProcessAreaLight(const SAreaLightComponent& AreaLight, const STransformComponent& TransformComponent, FLightBatch& Batch, TAtomic<uint32>& LightCount)
     {
-        if (AreaLight.Intensity <= 0.0f)
+        if (AreaLight.Intensity <= 0.0f || !ExtractFrame->ViewLayers.Draws(AreaLight.RenderLayers))
         {
             return;
         }
@@ -3659,6 +3736,11 @@ namespace Lumina
         const float ShadowTolerance   = ShadowLODTexels();
         const float ShadowAtlasTexels = (float)ShadowAtlas.GetConfig().AtlasResolution;
 
+        // The camera and its shadows draw what the camera draws, and the other views skip a remapped Foreground layer, which only lines up from the camera.
+        const FViewLayerSettings& Layers = Frame.ViewLayers;
+        const uint32 OtherViewLayers = Layers.IsForegroundActive() ? ~RenderLayers::kForegroundMask : RenderLayers::kAllMask;
+        uint32 PushLayers = Layers.CullMask;
+
         auto PushView = [&](const FMatrix4& ViewProjection, const FVector3& Origin, uint32 Flags, float LODErrorScale,
                             uint32 CascadeIndex = Constants::kIndexNoneU32, float MinBoundsDiameter = 0.0f)
         {
@@ -3676,6 +3758,7 @@ namespace Lumina
             View.CascadeIndex       = CascadeIndex;
             View.MinBoundsDiameter  = MinBoundsDiameter;
             View.LODErrorScale      = LODErrorScale;
+            View.LayerMask          = PushLayers;
             CullViews.push_back(View);
 
             return ViewIndex;
@@ -3835,6 +3918,7 @@ namespace Lumina
                      MakeLODErrorScale(ShadowData.ViewProjection[0], SpotTexels, ShadowTolerance));
         }
 
+        PushLayers = OtherViewLayers;
         for (FFrameData::FCaptureViewData& Capture : Frame.Views.CaptureViews)
         {
             const FMatrix4 CaptureVP = Capture.ViewVolume.GetProjectionMatrix() * Capture.ViewVolume.GetViewMatrix();

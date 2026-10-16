@@ -3,6 +3,7 @@
 #include "World/ECS/Registry.h"
 
 #include "Containers/Vector.h"
+#include "Renderer/RenderLayers.h"
 #include "Renderer/ViewVolume.h"
 #include "World/Entity/Components/PostProcessSettings.h"
 
@@ -21,6 +22,7 @@ namespace Lumina
         FViewVolume                     ViewVolume;
         SPostProcessSettings            PostProcess;
         TVector<CMaterialInterface*>    PostProcessMaterials;
+        FViewLayerSettings              Layers;
         bool                            bHasView = false;
         bool                            bHasPostProcess = false;
     };

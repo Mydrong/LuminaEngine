@@ -1,6 +1,5 @@
 ﻿#include "Core/Threading/Thread.h"
 #include "EditorPCH.h"
-#include "Core/CoreEditorDelegates.h"
 #include "Factory.h"
 
 #include "Assets/AssetRegistry/AssetRegistry.h"
@@ -9,6 +8,7 @@
 #include "FileSystem/FileSystem.h"
 #include "Paths/Paths.h"
 #include "TaskSystem/TaskSystem.h"
+#include "TaskSystem/ThreadedCallback.h"
 #include "Tools/Import/ImportHelpers.h"
 #include "Log/Log.h"
 
@@ -53,49 +53,87 @@ namespace Lumina
         CFactoryRegistry::Get().RegistryFactory(this);
     }
     
+    namespace
+    {
+        // Every new asset starts as the one public export of a fresh package, which is discarded again when nothing comes of it.
+        template<typename TMake>
+        CObject* CreateInNewPackage(FStringView Path, TMake&& Make)
+        {
+            CPackage* Package = CPackage::CreatePackage(Path);
+            if (Package == nullptr)
+            {
+                return nullptr;
+            }
+
+            CObject* New = Make(FName(VFS::FileName(Path, true)), Package);
+            if (New == nullptr)
+            {
+                CFactory::DiscardNewPackage(Package);
+                return nullptr;
+            }
+
+            Package->ExportTable.emplace_back(New);
+            New->SetFlag(OF_Public);
+            return New;
+        }
+    }
+
     CObject* CFactory::TryCreateNew(FStringView Path)
     {
-        FFixedString SafePath = SanitizeObjectName(Path);
-        CPackage* Package = CPackage::CreatePackage(SafePath);
-        if (Package == nullptr)
-        {
-            return nullptr;
-        }
-        
-        FStringView FileName = VFS::FileName(Path, true);
-
-        CObject* New = CreateNew(FileName, Package);
-        if (New == nullptr)
-        {
-            return nullptr;
-        }
-        
-        Package->ExportTable.emplace_back(New);
-        
-        New->SetFlag(OF_Public);
-
-        return New;
+        return CreateInNewPackage(Path, [this](const FName& Name, CPackage* Package) { return CreateNew(Name, Package); });
     }
 
     CObject* CFactory::CreateNewOf(CClass* Class, FStringView Path)
     {
-        FFixedString SafePath = SanitizeObjectName(Path);
-        CPackage* Package = CPackage::CreatePackage(SafePath);
-        if (Package == nullptr)
-        {
-            return nullptr;
-        }
-
-        FStringView FileName = VFS::FileName(Path, true);
-
-        CObject* New = NewObject(Class, Package, FileName, FGuid::New(), OF_Public);
-        Package->ExportTable.emplace_back(New);
-        
-        return New;
+        return CreateInNewPackage(Path, [Class](const FName& Name, CPackage* Package) { return NewObject(Class, Package, Name, FGuid::New(), OF_Public); });
     }
 
-    bool CFactory::ShowCreationDialogue(CFactory* Factory, FStringView Path)
+    TStrongObjectPtr<CObject> CFactory::CreateAsset(CFactory* Factory, CClass* Class, FStringView Path, FString& OutError)
     {
+        // Held through the save, since a fresh object nothing holds dies at the first transient strong reference.
+        TStrongObjectPtr<CObject> Asset(Factory->GetAssetClass() == Class ? Factory->TryCreateNew(Path) : CreateNewOf(Class, Path));
+        if (!Asset)
+        {
+            OutError = "it could not be created";
+            return {};
+        }
+
+        CPackage* Package = Asset->GetPackage();
+        if (!CPackage::SavePackage(Package, Path))
+        {
+            OutError = "it could not be saved";
+            Asset.Reset();
+            DiscardNewPackage(Package);
+            return {};
+        }
+
+        FAssetRegistry::Get().AssetCreated(Asset.Get());
+        return Asset;
+    }
+
+    void CFactory::DiscardNew(CObject* Asset)
+    {
+        CPackage* Package = Asset->GetPackage();
+        Asset->ConditionalBeginDestroy();
+        DiscardNewPackage(Package);
+    }
+
+    void CFactory::DiscardNewPackage(CPackage* Package)
+    {
+        if (Package == nullptr || Package->IsTransientPackage() || Package->HasAnyFlag(OF_MarkedDestroy))
+        {
+            return;
+        }
+
+        Package->ClearDirty();
+        Package->SetFlag(OF_MarkedDestroy);
+        // The root set holds the only strong reference, so unrooting is what destroys it.
+        Package->RemoveFromRoot();
+    }
+
+    bool CFactory::ShowCreationDialogue(CFactory* Factory, FStringView Path, bool& bOutCreating)
+    {
+        bOutCreating = false;
         bool bShouldClose = false;
         if (Factory->DrawCreationDialogue(Path, bShouldClose))
         {
@@ -103,24 +141,24 @@ namespace Lumina
             FFixedString OwnedPath(Path.data(), Path.size());
             Task::AsyncTask(1, 1, [Factory, OwnedPath = Move(OwnedPath)](uint32, uint32, uint32)
             {
-                CObject* NewAsset = Factory->TryCreateNew(OwnedPath);
-                if (NewAsset == nullptr)
-                {
-                    return;
-                }
+                FString Error;
+                const bool bCreated = CreateAsset(Factory, Factory->GetAssetClass(), OwnedPath, Error).IsValid();
 
-                CPackage* Package = NewAsset->GetPackage();
-                if (CPackage::SavePackage(Package, OwnedPath))
+                // Reported only once the task knows, since the dialog closed before the asset existed.
+                MainThread::Enqueue([bCreated, OwnedPath, Error = Move(Error)]
                 {
-                    FAssetRegistry::Get().AssetCreated(NewAsset);
-                    FCoreEditorDelegates::OnAssetCreated.Broadcast(NewAsset);
-                }
-                else
-                {
-                    LOG_ERROR("Factory: failed to save {}; asset will not be registered", OwnedPath);
-                }
+                    if (bCreated)
+                    {
+                        ImGuiX::Notifications::NotifySuccess("Successfully Created: \"{0}\"", OwnedPath);
+                    }
+                    else
+                    {
+                        ImGuiX::Notifications::NotifyError("Failed to create \"{0}\": {1}", OwnedPath, Error);
+                    }
+                });
             });
 
+            bOutCreating = true;
             return true;
         }
 

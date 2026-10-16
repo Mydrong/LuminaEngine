@@ -105,15 +105,10 @@ public sealed class BuildDirectories
 
     public string ThirdPartyPath(string RelativePath) => PathUtils.Combine(ThirdPartyDirectory, RelativePath);
 
-    /// <summary>Locates the engine root, an explicit override, then LUMINA_DIR, then a walk up from this exe.</summary>
+    /// <summary>Locates the engine root, an explicit override, then a walk up from this tool or the working directory.</summary>
     public static BuildDirectories Discover(string? EngineRootOverride, string? ProjectRootOverride)
     {
         string? Root = EngineRootOverride;
-
-        if (string.IsNullOrEmpty(Root))
-        {
-            Root = Environment.GetEnvironmentVariable("LUMINA_DIR");
-        }
 
         if (string.IsNullOrEmpty(Root))
         {
@@ -124,8 +119,7 @@ public sealed class BuildDirectories
         if (string.IsNullOrEmpty(Root))
         {
             throw new BuildException(
-                "Could not locate the Lumina engine root. Pass -EngineRoot=<path>, set LUMINA_DIR, "
-                + "or run the tool from inside an engine tree.");
+                "Could not locate the Lumina engine root. Pass -EngineRoot=<path> or run the tool from inside an engine tree.");
         }
 
         Root = PathUtils.Normalize(Root);
@@ -134,10 +128,16 @@ public sealed class BuildDirectories
         {
             throw new BuildException(
                 $"'{Root}' does not contain Engine/Source/Runtime, so it is not an engine root. "
-                + "Fix LUMINA_DIR or pass -EngineRoot=<path>.");
+                + "Pass -EngineRoot=<path>.");
         }
 
         string? Project = string.IsNullOrEmpty(ProjectRootOverride) ? null : PathUtils.Normalize(ProjectRootOverride);
+
+        // A project's .lproject names it as well as its directory does, which is what Explorer hands a verb.
+        if (Project is not null && File.Exists(Project) && Project.EndsWith(".lproject", StringComparison.OrdinalIgnoreCase))
+        {
+            Project = PathUtils.Normalize(Path.GetDirectoryName(Project)!);
+        }
 
         if (Project is not null && !System.IO.Directory.Exists(Project))
         {

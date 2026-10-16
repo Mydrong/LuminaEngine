@@ -68,6 +68,7 @@ namespace Lumina
         void OnAssetLoadFinished() override;
         void DrawToolMenu(const FUpdateContext& UpdateContext) override;
         void DrawMaterialGraph();
+        void DrawCompileErrorBanner();
         void DrawMaterialProperties();
         void DrawShaderStats();
 

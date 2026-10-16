@@ -73,7 +73,8 @@ TEST(StructuredArchive, StructWithNestedArrayKeepsEveryFieldInItsOwnNode)
     }
     EXPECT_EQ(Node["Bindings"][0]["Key"].value("Key", std::string()), "D");
     EXPECT_FLOAT_EQ(Node["Bindings"][1].value("Scale", 0.0f), -1.0f);
-    EXPECT_EQ(Node["Bindings"][2].value("Channel", std::string()), "Y");
+    // An enum is written through FName, which keeps whichever spelling of the name was interned first.
+    EXPECT_STRCASEEQ(Node["Bindings"][2].value("Channel", std::string()).c_str(), "Y");
 
     SInputAction Loaded;
     FJsonStructuredArchive::LoadStruct(Node, SInputAction::StaticStruct(), &Loaded);

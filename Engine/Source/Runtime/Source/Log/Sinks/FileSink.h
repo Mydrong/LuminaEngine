@@ -14,6 +14,10 @@ namespace Lumina
 
         FFileSink(const FString& InBasePath, uint64 InMaxFileBytes, uint32 InMaxFiles);
         ~FFileSink() override;
+        FFileSink(const FFileSink&) = delete;
+        FFileSink& operator=(const FFileSink&) = delete;
+        FFileSink(FFileSink&&) = delete;
+        FFileSink& operator=(FFileSink&&) = delete;
 
         NODISCARD bool IsOpen() const { return Handle != nullptr; }
         NODISCARD const FString& GetBasePath() const { return BasePath; }

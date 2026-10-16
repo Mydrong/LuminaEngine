@@ -45,6 +45,8 @@ namespace Lumina::Containers
 
         TFunctionRef(const TFunctionRef&) noexcept = default;
         TFunctionRef& operator=(const TFunctionRef&) noexcept = default;
+        TFunctionRef(TFunctionRef&&) noexcept = default;
+        TFunctionRef& operator=(TFunctionRef&&) noexcept = default;
         ~TFunctionRef() = default;
 
         TRet operator()(TArgs... Args) const

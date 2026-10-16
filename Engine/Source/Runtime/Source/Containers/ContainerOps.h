@@ -42,6 +42,10 @@ namespace Lumina
         void   (*DestructContainer)(void* Vector, const void* Context);
         const void* ContainerContext;
         uint32 ContainerSize;
+        // Where the buffer pointer and the stored count sit, and what the count is divided by to give elements.
+        uint32 DataOffset;
+        uint32 CountOffset;
+        uint32 CountDivisor;
     };
 
     // Ops for a specific vector-like CONTAINER type, not just its element type. TFixedVector<T, N> reflects as
@@ -67,6 +71,9 @@ namespace Lumina
             [](void* V, const void*) { Memory::DestroyAt(static_cast<TContainer*>(V)); },
             nullptr,
             static_cast<uint32>(sizeof(TContainer)),
+            TContainer::GetDataOffsetForInterop(),
+            TContainer::GetCountOffsetForInterop(),
+            1,
         };
         return &Ops;
     }
@@ -106,6 +113,8 @@ namespace Lumina
         void   (*DestructContainer)(void* Map, const void* Context);
         const void* ContainerContext;
         uint32 ContainerSize;
+        // The next pair from an opaque Cursor that starts at zero, false at the end. O(1) amortized where At is O(index).
+        bool   (*Next)(void* Map, SIZE_T* Cursor, const void** OutKey, void** OutValue);
     };
 
     // The map counterpart of GetVectorOpsFor: keyed on the container type so a TFixedHashMap<K, V, N>, which
@@ -172,6 +181,17 @@ namespace Lumina
             [](void* M, const void*) { Memory::DestroyAt(static_cast<MapT*>(M)); },
             nullptr,
             static_cast<uint32>(sizeof(MapT)),
+            [](void* M, SIZE_T* Cursor, const void** OutKey, void** OutValue) -> bool
+            {
+                auto* Pair = static_cast<MapT*>(M)->FindNextOccupied(*Cursor);
+                if (Pair == nullptr)
+                {
+                    return false;
+                }
+                *OutKey = &Pair->first;
+                *OutValue = &Pair->second;
+                return true;
+            },
         };
         return &Ops;
     }

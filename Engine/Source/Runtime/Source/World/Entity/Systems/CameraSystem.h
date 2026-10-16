@@ -15,22 +15,22 @@ namespace Lumina
     {
         GENERATED_BODY()
 
-        PROPERTY()
+        PROPERTY(Hidden)
         FVector3 LocationAmplitude = FVector3(0.0f);  // max local-space positional offset per axis (world units)
 
-        PROPERTY()
+        PROPERTY(Hidden)
         FVector3 RotationAmplitude = FVector3(0.0f);  // max rotation per axis in degrees (X pitch, Y yaw, Z roll)
 
-        PROPERTY()
+        PROPERTY(Hidden)
         float    Frequency         = 10.0f;           // oscillation rate (Hz)
 
-        PROPERTY()
+        PROPERTY(Hidden)
         float    Duration          = 0.5f;            // seconds; <= 0 loops until explicitly stopped
 
-        PROPERTY()
+        PROPERTY(Hidden)
         float    BlendInTime       = 0.05f;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         float    BlendOutTime      = 0.2f;
     };
 

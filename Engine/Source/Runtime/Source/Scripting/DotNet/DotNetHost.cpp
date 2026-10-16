@@ -19,6 +19,7 @@
 #include "Core/Plugin/PluginManager.h"
 #include "FileSystem/FileSystem.h"
 #include "Log/Log.h"
+#include "Core/Profiler/GameplayProfiler.h"
 #include "Paths/Paths.h"
 #include "Platform/Process/PlatformProcess.h"
 #include "Platform/Time/PlatformTime.h"
@@ -107,6 +108,10 @@ namespace Lumina::DotNet
         struct FExporterTable
         {
             void (CORECLR_DELEGATE_CALLTYPE* Log)(int32 Level, const char* Utf8, int32 Len);
+
+            // Read in place by managed code, so a log below the threshold never crosses or formats.
+            const std::atomic<uint8>* LogThreshold;
+            const std::atomic<bool>*  ScriptScopesActive;
         };
 
         struct FBootstrapArgs
@@ -201,14 +206,7 @@ namespace Lumina::DotNet
         // Native function the managed side calls to write into the engine log.
         void CORECLR_DELEGATE_CALLTYPE Export_Log(int32 Level, const char* Utf8, int32 Len)
         {
-            const FString Msg(Utf8, (size_t)Len);
-            switch (Level)
-            {
-            case 0:  LOG_TRACE("[C#] {}", Msg.c_str()); break;
-            case 2:  LOG_WARN ("[C#] {}", Msg.c_str()); break;
-            case 3:  LOG_ERROR("[C#] {}", Msg.c_str()); break;
-            default: LOG_INFO ("[C#] {}", Msg.c_str()); break;
-            }
+            Logging::Log(static_cast<ELogLevel>(Level), "[C#] {}", FStringView(Utf8, (size_t)Len));
         }
 
         const char* RuntimeRid()
@@ -241,7 +239,7 @@ namespace Lumina::DotNet
         #endif
         }
 
-        // Managed maps its P/Invoke library name to this module, where the thunks are exported.
+        // Managed resolves every native call from this module by export name, so it is handed over at bootstrap.
         void* GetThunkModuleHandle()
         {
         #if defined(_WIN32)
@@ -390,8 +388,9 @@ namespace Lumina::DotNet
         Params.dotnet_root = HostDotNetRoot.Get();
 
         hostfxr_handle Ctx = nullptr;
+        // A runtime cannot unload, so a second start in one process gets a positive "already initialized" success code.
         int rc = Init(HostBootstrapCfg.Get(), &Params, &Ctx);
-        if (rc != 0 || Ctx == nullptr)
+        if (rc < 0 || Ctx == nullptr)
         {
             LOG_ERROR("C# scripting disabled: hostfxr_initialize_for_runtime_config failed (0x{:x}).", (uint32)rc);
             if (Ctx)
@@ -425,6 +424,8 @@ namespace Lumina::DotNet
 
         // Bootstrap registers every engine export by name rather than handing native a pointer table.
         GExports.Log = &Export_Log;
+        GExports.LogThreshold = &Logging::GLevelThreshold;
+        GExports.ScriptScopesActive = FGameplayProfiler::Get().GetScriptScopesActive();
 
         FBootstrapArgs Args{};
         Args.AbiVersion = GAbiVersion;
@@ -569,7 +570,6 @@ namespace Lumina::DotNet
             // Loading the emitted DLL would resurrect every deleted class, so the marker identifies and deletes it.
             if (Bucket.Sources.empty() && !Unit.DiskDir.empty() && !Unit.AssemblyPath.empty())
             {
-                std::error_code Ec;
                 const FString Marker = CompiledMarkerPath(Unit.AssemblyPath);
                 if (Filesystem::Exists(Marker))
                 {
@@ -731,6 +731,7 @@ namespace Lumina::DotNet
         EntityScripts::NotifyScriptsReloaded(
             PreviousGeneration == 0 ? EScriptReloadReason::InitialLoad : EScriptReloadReason::Requested,
             GCachedGeneration);
+        Scripting::FManagedTypeRegistry::Get().BroadcastReload(GCachedGeneration, Definitions);
 
         // Idempotent and editor-only, so an absent project self-heals on any reload.
         if (bEditorFollowups)
@@ -1109,7 +1110,7 @@ namespace Lumina::DotNet
     }
 }
 
-// Validates the managed P/Invoke path, which the generated property thunks also use.
+// Validates the managed function-pointer path, which the generated property thunks also use.
 LUMINA_DOTNET_EXPORT(int, NativeSelfTest)(int A, int B)
 {
     return A + B;

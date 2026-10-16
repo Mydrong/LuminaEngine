@@ -44,8 +44,11 @@ namespace Lumina
         static FGPUProfiler& Get();
 
         FGPUProfiler() = default;
+        ~FGPUProfiler() = default;
         FGPUProfiler(const FGPUProfiler&) = delete;
         FGPUProfiler& operator = (const FGPUProfiler&) = delete;
+        FGPUProfiler(FGPUProfiler&&) = delete;
+        FGPUProfiler& operator=(FGPUProfiler&&) = delete;
 
         NODISCARD bool IsEnabled() const;
         void SetEnabled(bool bEnabled);

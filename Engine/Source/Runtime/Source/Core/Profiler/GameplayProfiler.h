@@ -54,6 +54,9 @@ namespace Lumina
         bool IsEnabled() const { return bEnabled.load(std::memory_order_relaxed); }
         void SetEnabled(bool bInEnabled);
 
+        // Whether a script sample would be recorded here or by Tracy, read in place by C# so an unrecorded one never crosses.
+        const std::atomic<bool>* GetScriptScopesActive() const { return &bScriptScopesActive; }
+
         // Roll Current -> Latest at the game-thread frame boundary. Cheap no-ops when disabled.
         void BeginFrame();
         void EndFrame();
@@ -68,6 +71,7 @@ namespace Lumina
     private:
 
         std::atomic<bool>                       bEnabled { false };
+        std::atomic<bool>                       bScriptScopesActive { false };
         FMutex                              Mutex;            // guards Current/IndexOf/Latest/histories
         THashMap<uint64, int32>                 IndexOf;          // hash -> index into Current.Entries
         FGameplayProfileFrame                   Current;
@@ -87,6 +91,8 @@ namespace Lumina
 
         FGameplayProfileScopeRAII(const FGameplayProfileScopeRAII&) = delete;
         FGameplayProfileScopeRAII& operator=(const FGameplayProfileScopeRAII&) = delete;
+        FGameplayProfileScopeRAII(FGameplayProfileScopeRAII&&) = delete;
+        FGameplayProfileScopeRAII& operator=(FGameplayProfileScopeRAII&&) = delete;
     };
 }
 

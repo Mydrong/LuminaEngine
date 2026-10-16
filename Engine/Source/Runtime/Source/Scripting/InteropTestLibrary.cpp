@@ -1,6 +1,7 @@
 ﻿#include "RuntimePCH.h"
 
 #include "InteropTestLibrary.h"
+#include "Scripting/DotNet/DotNetExport.h"
 
 namespace Lumina
 {
@@ -69,14 +70,15 @@ namespace Lumina
         return A + B;
     }
 
-    int32 CInteropTestLibrary::BenchMeasureName(const FName& Name)
+    int32 CInteropTestLibrary::BenchMeasureString(const FString& Text)
     {
-        return (int32)Name.length();
+        return (int32)Text.length();
     }
 
-    FName CInteropTestLibrary::BenchGetName()
+    // Returned by reference, so the benchmark prices the crossing and not a native allocation per call.
+    const FString& CInteropTestLibrary::BenchGetString()
     {
-        static const FName Name("InteropBenchmarkName");
+        static const FString Name("InteropBenchmarkName");
         return Name;
     }
 
@@ -120,4 +122,35 @@ namespace Lumina
     {
         return Opaque.Value + (float)Opaque.Label.length();
     }
+}
+
+// The same trivial calls for NativeCall and P/Invoke alike, so a benchmark row differs only in how managed code got here.
+LUMINA_DOTNET_EXPORT(Lumina::int32, InteropBench_NoOp)()
+{
+    return 0;
+}
+
+LUMINA_DOTNET_EXPORT(Lumina::FVector3, InteropBench_AddVectors)(Lumina::FVector3 A, Lumina::FVector3 B)
+{
+    return A + B;
+}
+
+LUMINA_DOTNET_EXPORT(Lumina::int32, InteropBench_CountedUtf8)(const char* Text, Lumina::int32 Length)
+{
+    return Length > 0 ? Text[0] : 0;
+}
+
+LUMINA_DOTNET_EXPORT(Lumina::int32, InteropBench_TerminatedUtf8)(const char* Text)
+{
+    return Text != nullptr ? Text[0] : 0;
+}
+
+LUMINA_DOTNET_EXPORT(Lumina::int32, InteropBench_TerminatedUtf16)(const char16_t* Text)
+{
+    return Text != nullptr ? Text[0] : 0;
+}
+
+LUMINA_DOTNET_EXPORT(const char*, InteropBench_StaticUtf8)()
+{
+    return "InteropBenchmarkName";
 }

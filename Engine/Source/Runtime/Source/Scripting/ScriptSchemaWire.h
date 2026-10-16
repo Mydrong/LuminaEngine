@@ -21,6 +21,6 @@ namespace Lumina::Scripting
         Field = 0,      ///< one [Property] member: name, aliases, metadata, type, default
         Meta,           ///< the editor-facing hints on a field, which is the bag that grows most
         Type,           ///< one FScriptExportType node, recursive
-        Function,       ///< one [ScriptFunction]: its name, its parameters as fields, and its return index
+        Function,       ///< one [Function]: its name, its parameters as fields, and its return index
     };
 }

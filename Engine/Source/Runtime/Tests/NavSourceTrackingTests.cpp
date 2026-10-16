@@ -153,6 +153,36 @@ TEST(NavSourceTracking, ADestroyedColliderReopensTheGround)
     World.Stop();
 }
 
+// A streamed world can unload every source at once, and the sweep then rebuilds an empty order.
+TEST(NavSourceTracking, TheSweepSurvivesEverySourceUnloading)
+{
+    NavTest::FNavWorld World;
+    World.Create(64.0f);
+    World.Start();
+    ASSERT_TRUE(World.WaitReady());
+    for (int32 i = 0; i < 4; ++i)
+    {
+        World.Tick();
+    }
+
+    TVector<ECS::FEntity> Sources;
+    for (ECS::FEntity Entity : World.Registry().View<SBoxColliderComponent>())
+    {
+        Sources.push_back(Entity);
+    }
+    ASSERT_FALSE(Sources.empty());
+    for (ECS::FEntity Entity : Sources)
+    {
+        World.Registry().Destroy(Entity);
+    }
+
+    for (int32 i = 0; i < 8; ++i)
+    {
+        World.Tick();
+    }
+    World.Stop();
+}
+
 TEST(NavSourceTracking, AColliderWrittenInPlaceIsFoundByTheSweep)
 {
     NavTest::FNavWorld World;

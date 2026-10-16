@@ -256,6 +256,10 @@ namespace Lumina
         RHI::FCmdListH CL;
         FScopedGPUMarker(RHI::FCmdListH InCL, const char* Name) : CL(InCL) { RHI::CmdBeginMarker(CL, Name); }
         ~FScopedGPUMarker() { RHI::CmdEndMarker(CL); }
+        FScopedGPUMarker(const FScopedGPUMarker&) = delete;
+        FScopedGPUMarker& operator=(const FScopedGPUMarker&) = delete;
+        FScopedGPUMarker(FScopedGPUMarker&&) = delete;
+        FScopedGPUMarker& operator=(FScopedGPUMarker&&) = delete;
     };
     #define SCENE_MARKER_CONCAT_INNER(A, B) A##B
     #define SCENE_MARKER_CONCAT(A, B) SCENE_MARKER_CONCAT_INNER(A, B)

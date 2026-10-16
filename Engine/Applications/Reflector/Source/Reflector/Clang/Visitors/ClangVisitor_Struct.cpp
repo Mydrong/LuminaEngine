@@ -26,6 +26,7 @@
 #include "Reflector/Types/Properties/ReflectedStructProperty.h"
 #include "Reflector/Types/Properties/ReflectedInstancedStructProperty.h"
 #include "Reflector/Types/Properties/ReflectedSubStructProperty.h"
+#include "Reflector/Types/Properties/ReflectedComponentRefProperty.h"
 
 namespace Lumina::Reflection::Visitor
 {
@@ -532,6 +533,25 @@ namespace Lumina::Reflection::Visitor
 			ParamFieldInfo->Name = FieldInfo.Name;
 
 			NewProperty = CreateProperty<FReflectedSubStructProperty>(ParamFieldInfo.value());
+		}
+		break;
+		case EPropertyTypeFlags::ComponentRef:
+		{
+			// TComponentRef<T> links against the component T it binds.
+			const CXType ArgType = clang_Type_getTemplateArgumentAsType(FieldInfo.Type, 0);
+			std::optional<FFieldInfo> ParamFieldInfo;
+			if (ArgType.kind != CXType_Invalid)
+			{
+				ParamFieldInfo = CreateSubFieldInfo(Context, ArgType, FieldInfo);
+			}
+			if (!ParamFieldInfo.has_value())
+			{
+				return false;
+			}
+
+			ParamFieldInfo->Name = FieldInfo.Name;
+
+			NewProperty = CreateProperty<FReflectedComponentRefProperty>(ParamFieldInfo.value());
 		}
 		break;
 		case EPropertyTypeFlags::InstancedStruct:
@@ -1055,6 +1075,7 @@ namespace Lumina::Reflection::Visitor
 		{
 			LRT_ERROR(Cursor, EDiagId::ConflictingSpecifiers, "%s", ConflictMessage.c_str());
 		}
+		NewProperty->ApplyDefaultVisibility();
 
 		std::string Comment = GetCursorComment(Cursor);
 		if (!Comment.empty())

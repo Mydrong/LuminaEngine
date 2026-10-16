@@ -254,6 +254,9 @@ namespace Lumina
         // Property table over the importer being configured; rebuilt when the dialogue opens.
         TUniquePtr<FPropertyTable> ImportSettingsTable;
 
+        // An import or reimport settings dialog, torn down however it closes.
+        struct FImportDialogState;
+
         // Files still waiting on an options window. Drained one at a time by ProcessNextImport.
         TVector<FFixedString> PendingImports;
         bool bImportWindowOpen = false;
@@ -297,6 +300,7 @@ namespace Lumina
             size_t                          WatchRootLen = 0;
         };
         TVector<FContentWatcher>    Watchers;
+        TAtomic<bool>               bDiskListingChanged{false};
         
         FTreeListView               DirectoryListView;
         FTreeListViewContext        DirectoryContext;

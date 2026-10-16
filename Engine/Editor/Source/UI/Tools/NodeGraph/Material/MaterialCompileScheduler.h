@@ -18,6 +18,8 @@ namespace Lumina
 
         FMaterialCompileScheduler(const FMaterialCompileScheduler&) = delete;
         FMaterialCompileScheduler& operator=(const FMaterialCompileScheduler&) = delete;
+        FMaterialCompileScheduler(FMaterialCompileScheduler&&) = delete;
+        FMaterialCompileScheduler& operator=(FMaterialCompileScheduler&&) = delete;
 
         void Tick();
 

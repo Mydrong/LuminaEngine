@@ -10,6 +10,7 @@
 #include "Core/Reflection/Type/LuminaTypes.h"
 #include "Core/Math/Math.h"
 #include "Input/Key.h"
+#include "Tools/UI/ImGui/ImGuiX.h"
 #include "Tools/UI/ImGui/Widgets/TreeListView.h"
 #include "UI/Properties/NamePicker.h"
 #include "Tools/UI/ImGui/ImGuiXNumeric.h"
@@ -397,6 +398,41 @@ namespace Lumina
     private:
 
         int64 CachedValue = 0;
+        FPropertyEditSession EditSession;
+    };
+
+    // A component reference is bound at attach rather than authored, so it shows what it names and whether it is bound.
+    class FComponentRefPropertyCustomization : public IPropertyTypeCustomization
+    {
+    public:
+
+        static TSharedPtr<FComponentRefPropertyCustomization> MakeInstance()
+        {
+            return MakeShared<FComponentRefPropertyCustomization>();
+        }
+
+        EPropertyChangeOp DrawProperty(const TSharedPtr<FPropertyHandle>& Property, const FPropertyDrawArgs& Args) override;
+        void UpdatePropertyValue(const TSharedPtr<FPropertyHandle>& Property) override {}
+        void HandleExternalUpdate(const TSharedPtr<FPropertyHandle>& Property) override {}
+    };
+
+    // A checkbox per named render layer, read from CRenderLayerSettings.
+    class FRenderLayerMaskPropertyCustomization : public IPropertyTypeCustomization
+    {
+    public:
+
+        static TSharedPtr<FRenderLayerMaskPropertyCustomization> MakeInstance()
+        {
+            return MakeShared<FRenderLayerMaskPropertyCustomization>();
+        }
+
+        EPropertyChangeOp DrawProperty(const TSharedPtr<FPropertyHandle>& Property, const FPropertyDrawArgs& Args) override;
+        void UpdatePropertyValue(const TSharedPtr<FPropertyHandle>& Property) override;
+        void HandleExternalUpdate(const TSharedPtr<FPropertyHandle>& Property) override;
+
+    private:
+
+        uint32 CachedBits = 0;
         FPropertyEditSession EditSession;
     };
 

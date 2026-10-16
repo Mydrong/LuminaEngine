@@ -6,7 +6,7 @@ rem First-time setup is Setup.bat. Source files themselves are discovered at bui
 rem is only needed to refresh what the IDE shows.
 
 cd /d "%~dp0"
-set "LUMINA_DIR=%CD%"
+set "ENGINE_DIR=%CD%"
 
 where dotnet >nul 2>&1
 if errorlevel 1 (
@@ -20,13 +20,13 @@ rem old Visual Studio. SKIP_PREREQ_CHECKS=1 silences it.
 if not defined SKIP_PREREQ_CHECKS (
     where powershell.exe >nul 2>&1
     if not errorlevel 1 (
-        powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%LUMINA_DIR%\BuildScripts\CheckPrerequisites.ps1" -NonBlocking
+        powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%ENGINE_DIR%\BuildScripts\CheckPrerequisites.ps1" -NonBlocking
     )
 )
 
 rem Extra arguments pass straight through, for example -Tracy=off. Persistent defaults live in
 rem Engine\Build\BuildConfiguration.json.
-call "%LUMINA_DIR%\LuminaBuild.bat" GenerateProjectFiles %*
+call "%ENGINE_DIR%\LuminaBuild.bat" GenerateProjectFiles %*
 if errorlevel 1 (
     echo.
     echo Project generation failed.

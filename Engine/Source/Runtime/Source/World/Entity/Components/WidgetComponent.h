@@ -6,6 +6,7 @@
 #include "Core/Templates/LuminaTemplate.h"
 #include "UI/UIDocumentRef.h"
 #include "Renderer/RHITexture.h"
+#include "Renderer/RenderLayers.h"
 #include "WidgetComponent.generated.h"
 
 namespace Rml
@@ -85,6 +86,10 @@ namespace Lumina
         /** RGBA tint multiplied with the widget color. */
         PROPERTY(Editable, Color, Category = "Widget")
         FVector4 Tint = FVector4(1.0f);
+
+        // Drawn by any camera whose CullMask shares one of these layers.
+        PROPERTY(Editable, Category = "Rendering")
+        SRenderLayerMask RenderLayers;
 
         FWidgetRuntime Runtime;
     };

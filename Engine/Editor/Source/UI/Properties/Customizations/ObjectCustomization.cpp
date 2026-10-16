@@ -26,8 +26,6 @@
 
 namespace Lumina
 {
-    static constexpr ImVec2 GButtonSize(42, 0);
-
     EPropertyChangeOp FCObjectPropertyCustomization::DrawProperty(const TSharedPtr<FPropertyHandle>& Property, const FPropertyDrawArgs& Args)
     {
         FObjectProperty* ObjectProperty = static_cast<FObjectProperty*>(Property->Property);
@@ -214,7 +212,7 @@ namespace Lumina
             }
 
             ImGui::BeginDisabled(!bSelectionFits);
-            if (ImGui::Button(LE_ICON_ARROW_LEFT_CIRCLE "##UseSelected", GButtonSize))
+            if (ImGui::Button(LE_ICON_ARROW_LEFT_CIRCLE "##UseSelected", AssetPickerFilter::kButtonSize))
             {
                 if (CObject* Loaded = LoadObject<CObject>(BrowserSelection->AssetGUID))
                 {
@@ -233,7 +231,7 @@ namespace Lumina
             ImGui::BeginDisabled(Object == nullptr);
 
             // Reveal in the Content Browser, the inverse of the button above.
-            if (ImGui::Button(LE_ICON_MAGNIFY "##Browse", GButtonSize))
+            if (ImGui::Button(LE_ICON_MAGNIFY "##Browse", AssetPickerFilter::kButtonSize))
             {
                 if (HardObject && HardObject->GetPackage() && EditorUI != nullptr)
                 {
@@ -245,7 +243,7 @@ namespace Lumina
 
             ImGui::SameLine();
 
-            if (ImGui::Button(LE_ICON_CONTENT_COPY "##Copy", GButtonSize))
+            if (ImGui::Button(LE_ICON_CONTENT_COPY "##Copy", AssetPickerFilter::kButtonSize))
             {
                 ImGui::SetClipboardText(HardObject->GetName().c_str());
             }
@@ -256,7 +254,7 @@ namespace Lumina
             ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.7f, 0.25f, 0.25f, 1.0f));
             ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.5f, 0.15f, 0.15f, 1.0f));
 
-            if (ImGui::Button(LE_ICON_CLOSE_CIRCLE "##Clear", GButtonSize))
+            if (ImGui::Button(LE_ICON_CLOSE_CIRCLE "##Clear", AssetPickerFilter::kButtonSize))
             {
                 Object.Reset();
                 bWasChanged = true;

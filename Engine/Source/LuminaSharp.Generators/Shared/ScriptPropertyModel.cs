@@ -27,6 +27,12 @@ internal static class ScriptPropertyClassifier
     /// <see cref="FScriptPropertyClassification.Rejection"/> explaining what to write instead.</summary>
     public static FScriptPropertyClassification Classify(ITypeSymbol Type)
     {
+        if (IsComponent(Type))
+        {
+            return FScriptPropertyClassification.Reject(
+                $"'{Display(Type)}' is a component, which lives in its entity's storage rather than in a field. "
+                + $"Hold a TComponentRef<{Display(Type)}> marked [Property(Component = ...)].");
+        }
         if (Type.TypeKind == TypeKind.Enum)
         {
             return HasMirrorAttribute(Type) || IsReflected(Type)
@@ -90,7 +96,7 @@ internal static class ScriptPropertyClassifier
             && Maybe.OriginalDefinition.SpecialType == SpecialType.System_Nullable_T)
         {
             return FScriptPropertyClassification.Reject(
-                $"'{Display(Type)}' crosses as a native TOptional, which is bound for a [ScriptFunction] "
+                $"'{Display(Type)}' crosses as a native TOptional, which is bound for a [Function] "
                 + "parameter or return but not yet for a [Property].");
         }
 
@@ -141,6 +147,46 @@ internal static class ScriptPropertyClassifier
             : FScriptPropertyClassification.Of(bMarshalled ? EScriptAccess.MarshalledStruct : EScriptAccess.Blittable);
     }
 
+    // A [Property(Component = ...)] member is a reference to the owner's component rather than a value of that type.
+    public static FScriptPropertyClassification ClassifyMember(ISymbol Member, ITypeSymbol Type)
+    {
+        if (!BindsComponent(Member))
+        {
+            return Classify(Type);
+        }
+        bool bComponentRef = Type is INamedTypeSymbol { IsGenericType: true } Named
+            && Named.OriginalDefinition.ToDisplayString() == ScriptPropertyTypeNames.ComponentRef
+            && IsComponent(Named.TypeArguments[0]);
+        return bComponentRef
+            ? FScriptPropertyClassification.Of(EScriptAccess.ComponentRef)
+            : FScriptPropertyClassification.Reject($"'{Display(Type)}' is not a TComponentRef<T> of a component, and Component binds a reference to one of the entity's components.");
+    }
+
+    public static bool IsComponent(ITypeSymbol Type)
+    {
+        return Type.TypeKind == TypeKind.Struct
+            && Type.AllInterfaces.Any(Interface => Interface.OriginalDefinition.ToDisplayString() == ScriptPropertyTypeNames.Component);
+    }
+
+    private static bool BindsComponent(ISymbol Member)
+    {
+        foreach (AttributeData Attribute in Member.GetAttributes())
+        {
+            if (Attribute.AttributeClass?.ToDisplayString() != ScriptPropertyTypeNames.PropertyAttribute)
+            {
+                continue;
+            }
+            foreach (KeyValuePair<string, TypedConstant> Argument in Attribute.NamedArguments)
+            {
+                if (Argument.Key == "Component" && Argument.Value.Value is int Bind && Bind != 0)
+                {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
     // A primitive is its bytes everywhere, and a mirror's size is checked against native at startup.
     private static bool IsEngineMirror(ITypeSymbol Type)
     {
@@ -188,11 +234,11 @@ internal static class ScriptPropertyClassifier
             }
             bAnyField = true;
 
-            if (!HasPropertyOrSerialize(Field))
+            if (!IsStoredStructField(Field))
             {
                 return $"'{Display(Type)}' is a struct declared in script, so every one of its fields is part "
-                     + $"of the value native stores, but '{Field.Name}' is marked neither [Property] nor "
-                     + "[Serialize]. Native would leave it out of the layout while C# still reads it, so the "
+                     + $"of the value native stores, but '{Field.Name}' has no [Property]. "
+                     + "Native would leave it out of the layout while C# still reads it, so the "
                      + "accessor would run off the end of the storage. Mark it, or move it out of the struct.";
             }
 
@@ -222,23 +268,73 @@ internal static class ScriptPropertyClassifier
         return null;
     }
 
-    private static bool HasPropertyOrSerialize(IFieldSymbol Field)
+    private static bool IsStoredStructField(IFieldSymbol Field)
     {
         return RuleFor(Field, EScriptMemberKind.Field, bOwnerIsNativeObject: false).bStored;
     }
 
-    // ScriptMemberRules over a Roslyn symbol, reading only LuminaSharp's own attributes, as TypeLibrary.RuleFor does by reflection.
+    // ScriptMemberRules over a Roslyn symbol, as TypeLibrary.RuleFor does by reflection.
     public static FScriptMemberRule RuleFor(ISymbol Member, EScriptMemberKind Kind, bool bOwnerIsNativeObject)
     {
-        var Names = new HashSet<string>();
-        foreach (AttributeData Attribute in Member.GetAttributes())
+        HashSet<string>? Specifiers = SpecifiersOf(Member, ScriptPropertyTypeNames.PropertyAttribute);
+        return ScriptMemberRules.Classify(Specifiers != null ? Specifiers.Contains : null, Kind, bOwnerIsNativeObject);
+    }
+
+    // The bare specifiers and named arguments of one LuminaSharp attribute, or null when the member does not carry it.
+    public static HashSet<string>? SpecifiersOf(ISymbol Member, string AttributeName)
+    {
+        AttributeData? Attribute = FindAttribute(Member, AttributeName);
+        if (Attribute == null)
         {
-            if (Attribute.AttributeClass is { } Class && Class.ContainingNamespace?.ToDisplayString() == "LuminaSharp")
+            return null;
+        }
+        var Names = new HashSet<string>(BareSpecifiers(Attribute));
+        foreach (KeyValuePair<string, TypedConstant> Named in Attribute.NamedArguments)
+        {
+            Names.Add(Named.Key);
+        }
+        return Names;
+    }
+
+    public static IEnumerable<string> BareSpecifiers(AttributeData Attribute)
+    {
+        foreach (TypedConstant Argument in Attribute.ConstructorArguments)
+        {
+            IEnumerable<TypedConstant> Values = Argument.Kind == TypedConstantKind.Array ? Argument.Values : new[] { Argument };
+            foreach (TypedConstant Value in Values)
             {
-                Names.Add(ScriptMemberRules.BareName(Class.Name));
+                if (EnumMemberName(Value) is { } Name)
+                {
+                    yield return Name;
+                }
             }
         }
-        return ScriptMemberRules.Classify(Names.Contains, Kind, bOwnerIsNativeObject);
+    }
+
+    public static AttributeData? FindAttribute(ISymbol Member, string AttributeName)
+    {
+        return Member.GetAttributes().FirstOrDefault(Data => Data.AttributeClass?.ToDisplayString() == AttributeName);
+    }
+
+    public static object? NamedArgument(AttributeData Attribute, string Key)
+    {
+        foreach (KeyValuePair<string, TypedConstant> Named in Attribute.NamedArguments)
+        {
+            if (Named.Key == Key)
+            {
+                return Named.Value.Value;
+            }
+        }
+        return null;
+    }
+
+    private static string? EnumMemberName(TypedConstant Value)
+    {
+        if (Value.Type is not INamedTypeSymbol { TypeKind: TypeKind.Enum } Enum || Value.Value == null)
+        {
+            return null;
+        }
+        return Enum.GetMembers().OfType<IFieldSymbol>().FirstOrDefault(Field => Field.HasConstantValue && Equals(Field.ConstantValue, Value.Value))?.Name;
     }
 
     private static FScriptPropertyClassification ClassifyList(EScriptAccess Access, ITypeSymbol Element)
@@ -426,6 +522,9 @@ internal enum EScriptAccess
 
     // A struct declared in script holding a string, so its native layout differs from its managed one and each field crosses on its own.
     MarshalledStruct,
+
+    // A reference to the owner entity's component, bound before OnAttach and read as the handle that tracks it.
+    ComponentRef,
 }
 
 /// <summary>The result of <see cref="ScriptPropertyClassifier.Classify"/>: the access shape plus whatever type
@@ -490,6 +589,8 @@ internal static class ScriptPropertyTypeNames
 {
     public const string NativeObject = "LuminaSharp.NativeObject";
     public const string NativeStruct = "LuminaSharp.INativeStruct";
+    public const string Component = "LuminaSharp.IComponent<TSelf>";
+    public const string ComponentRef = "LuminaSharp.TComponentRef<T>";
     public const string SoftObjectReference = "LuminaSharp.ISoftObjectReference";
     public const string InputBinding = "LuminaSharp.SInputBinding";
 
@@ -499,7 +600,7 @@ internal static class ScriptPropertyTypeNames
     public const string ReflectAttribute = "LuminaSharp.ReflectAttribute";
 
     public const string PropertyAttribute = "LuminaSharp.PropertyAttribute";
-    public const string SerializeAttribute = "LuminaSharp.SerializeAttribute";
+    public const string FunctionAttribute = "LuminaSharp.FunctionAttribute";
 
     public const string FString = "Lumina.FString";
     public const string TVector = "Lumina.TVector<T>";

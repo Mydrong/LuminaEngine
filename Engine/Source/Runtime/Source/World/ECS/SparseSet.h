@@ -65,6 +65,8 @@ namespace Lumina::ECS
 
         FSparseSet(const FSparseSet&) = delete;
         FSparseSet& operator = (const FSparseSet&) = delete;
+        FSparseSet(FSparseSet&&) = delete;
+        FSparseSet& operator=(FSparseSet&&) = delete;
 
 
         //~ Queries

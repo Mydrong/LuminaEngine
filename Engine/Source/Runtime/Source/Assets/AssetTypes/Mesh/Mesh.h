@@ -99,7 +99,7 @@ namespace Lumina
         PROPERTY(Editable, NoResize, NoReorder, Category = "Materials")
         TVector<TStrongObjectPtr<CMaterialInterface>> Materials;
 
-        PROPERTY(Category = "AABB")
+        PROPERTY(Hidden, Category = "AABB")
         SAABB BoundingBox;
 
         // Multiplies this mesh's LOD errors, so 2 switches twice as far away and 0.5 lets card foliage coarsen sooner.
@@ -115,7 +115,7 @@ namespace Lumina
         /** File this mesh was last imported from, so "Reimport From File..." can open on it. Empty for
          *  procedurally generated meshes and for assets imported before this was recorded. Matches the
          *  SourcePath that CTexture / CFont / CAudioStream already keep. */
-        PROPERTY()
+        PROPERTY(Hidden)
         FString SourcePath;
         
     private:

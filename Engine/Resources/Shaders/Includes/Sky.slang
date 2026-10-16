@@ -31,9 +31,9 @@ struct FEnvironmentParams
 static const float kSunBaseAngle  = radians(0.53);
 static const float kMoonBaseAngle = radians(0.50);
 
-// Earth-like coefficients in m^-1.
+// Earth-like coefficients in m^-1, Mie from Bruneton 2017 since the older 2.1e-5 is a hazy day with a 30 degree halo.
 static const float3 kRayleighCoeff = float3(5.8e-6, 13.5e-6, 33.1e-6);
-static const float  kMieCoeff      = 2.1e-5;
+static const float  kMieCoeff      = 3.996e-6;
 static const float3 kOzoneCoeff    = float3(0.65e-6, 1.881e-6, 0.085e-6);
 static const float  kAtmosphereR   = 6420e3;
 static const float  kPlanetR       = 6360e3;

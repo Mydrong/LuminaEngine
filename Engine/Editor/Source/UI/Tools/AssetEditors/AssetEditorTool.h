@@ -78,6 +78,10 @@ namespace Lumina
 
 
         ~FAssetEditorTool() override;
+        FAssetEditorTool(const FAssetEditorTool&) = delete;
+        FAssetEditorTool& operator=(const FAssetEditorTool&) = delete;
+        FAssetEditorTool(FAssetEditorTool&&) = delete;
+        FAssetEditorTool& operator=(FAssetEditorTool&&) = delete;
 
         void OnInitialize() override;
         void Deinitialize(const FUpdateContext& UpdateContext) override;

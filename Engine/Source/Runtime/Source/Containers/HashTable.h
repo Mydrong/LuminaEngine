@@ -430,6 +430,10 @@ namespace Private
 
             FMapSlot() noexcept {}
             ~FMapSlot() noexcept {}
+            FMapSlot(const FMapSlot&) = delete;
+            FMapSlot& operator=(const FMapSlot&) = delete;
+            FMapSlot(FMapSlot&&) = delete;
+            FMapSlot& operator=(FMapSlot&&) = delete;
         };
 
         using slot_type   = FMapSlot;
@@ -728,6 +732,19 @@ namespace Private
 
         NODISCARD FORCEINLINE size_t size() const noexcept { return Size; }
         NODISCARD FORCEINLINE size_t capacity() const noexcept { return Capacity; }
+
+        // The first element at or after slot Cursor, leaving Cursor past it, so a walk resumes across calls and survives a rehash.
+        NODISCARD value_type* FindNextOccupied(size_t& Cursor) noexcept
+        {
+            for (; Cursor < Capacity; ++Cursor)
+            {
+                if (HashTableInternal::IsFull(Ctrl[Cursor]))
+                {
+                    return &TPolicy::Element(Slots[Cursor++]);
+                }
+            }
+            return nullptr;
+        }
         NODISCARD FORCEINLINE bool empty() const noexcept { return Size == 0; }
         NODISCARD static constexpr size_t max_size() noexcept { return ~static_cast<size_t>(0) / 2; }
 

@@ -92,6 +92,11 @@ namespace Lumina
                 Result().~T();
             }
         }
+        TTaskPromise() = default;
+        TTaskPromise(const TTaskPromise&) = delete;
+        TTaskPromise& operator=(const TTaskPromise&) = delete;
+        TTaskPromise(TTaskPromise&&) = delete;
+        TTaskPromise& operator=(TTaskPromise&&) = delete;
     };
 
     template<>

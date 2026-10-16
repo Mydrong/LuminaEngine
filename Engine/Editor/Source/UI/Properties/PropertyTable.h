@@ -6,6 +6,7 @@
 #include "Core/Reflection/PropertyChangedEvent.h"
 #include "Core/Reflection/PropertyCustomization/PropertyCustomization.h"
 #include "Memory/SmartPtr.h"
+#include "Scripting/ManagedTypeRegistry.h"
 #include "imgui.h"
 
 namespace Lumina
@@ -256,8 +257,19 @@ namespace Lumina
 
         void DrawTruncationRow(float Offset, int HiddenCount);
 
+        int32 GetElementCount() const;
+        TUniquePtr<FPropertyRow> CreateElementRow(int32 Index);
+
+        // Children hold rows for elements [WindowBegin, WindowBegin + Children.size()), so a million-element array keeps only what is on screen.
+        void SetWindow(int32 Begin, int32 End);
+        void CoverElements(int32 Begin, int32 End);
+
         TVector<TFunction<void()>>  PendingMutations;
         bool                        bShowAllElements = false;
+        int32                       WindowBegin = 0;
+        int32                       LastVisibleBegin = 0;
+        int32                       LastVisibleEnd = 0;
+        float                       ElementRowHeight = -1.0f;
     };
 
     // Editor row for THashMap<K,V> / a C# Dictionary: an Add/Clear header with one FMapEntryRow per entry.
@@ -297,6 +309,10 @@ namespace Lumina
 
         FMapEntryRow(FMapPropertyRow* InMapRow, int64 InIndex, const FPropertyChangedEventCallbacks& InCallbacks);
         ~FMapEntryRow() override;
+        FMapEntryRow(const FMapEntryRow&) = delete;
+        FMapEntryRow& operator=(const FMapEntryRow&) = delete;
+        FMapEntryRow(FMapEntryRow&&) = delete;
+        FMapEntryRow& operator=(FMapEntryRow&&) = delete;
         void Update() override;
         void DrawHeader(float Offset, const FPropertyDrawArgs& Args) override;
         void DrawEditor(const FPropertyDrawArgs& Args) override;
@@ -420,9 +436,12 @@ namespace Lumina
         FName Category;
     };
     
-    class EDITOR_API FPropertyTable
+    // A script reload rebinds it onto a reinstanced object and drops its rows, since they point into the layouts the reload rebuilt.
+    class EDITOR_API FPropertyTable : public Scripting::IScriptReloadListener
     {
     public:
+
+        void OnScriptsReloaded(const Scripting::FScriptReload& Reload) override;
 
         FPropertyTable() = default;
         ~FPropertyTable() = default;
@@ -505,11 +524,12 @@ namespace Lumina
         void ApplyFilterState();
 
     private:
-        
+
+        // Points the table at an object without touching its rows, which the caller rebuilds or drops.
+        void Bind(void* InObject, CStruct* StructType, void* InDefaultObject);
+
         bool                                                bDirty = true;
 
-        // A C# reload rebuilds a minted class's property block, so rows built against the old one must go.
-        int32                                               BuiltScriptGeneration = -1;
         TSharedPtr<IPropertyTypeCustomization>              Customization;
         TSharedPtr<FPropertyHandle>                         PropertyHandle;
         CStruct*                                            Struct = nullptr;

@@ -13,6 +13,10 @@ namespace Lumina
 
         FENetTransport();
         ~FENetTransport() override;
+        FENetTransport(const FENetTransport&) = delete;
+        FENetTransport& operator=(const FENetTransport&) = delete;
+        FENetTransport(FENetTransport&&) = delete;
+        FENetTransport& operator=(FENetTransport&&) = delete;
 
         ENetworkBackend GetBackend() const override { return ENetworkBackend::ENet; }
 

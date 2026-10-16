@@ -16,10 +16,10 @@ namespace Lumina
     {
         GENERATED_BODY()
 
-        PROPERTY()
+        PROPERTY(Hidden)
         FName PinName;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         float Value = 0.0f;
     };
 
@@ -48,7 +48,7 @@ namespace Lumina
         void  SetValuePinDefault(const CAnimGraphPin* Pin, float Value);
 
         /** Persisted inline defaults for value pins, keyed by pin name. */
-        PROPERTY()
+        PROPERTY(Hidden)
         TVector<SAnimGraphPinDefault> PinDefaults;
 
     protected:

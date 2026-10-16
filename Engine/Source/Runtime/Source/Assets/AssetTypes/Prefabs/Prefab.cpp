@@ -17,6 +17,7 @@
 #include "World/Entity/Components/NameComponent.h"
 #include "World/Entity/Components/PhysicsComponent.h"
 #include "World/Entity/Components/TransformComponent.h"
+#include "World/Entity/Components/TagComponent.h"
 #include "World/Entity/Components/Component.h"
 #include "World/Entity/EntityUtils.h"
 #include "World/World.h"
@@ -278,6 +279,108 @@ namespace Lumina
             return nullptr;
         }
 
+        // A nested instance root begins a placement of its own, so neither it nor anything below it is this instance's node.
+        template<typename TFunc>
+        void ForEachOwnInstanceNode(ECS::FRegistry& Registry, ECS::FEntity InstanceRoot, TFunc&& Func)
+        {
+            const ECS::FHierarchy& Hierarchy = Registry.GetHierarchy();
+            TVector<ECS::FEntity> Pending;
+            auto PushChildren = [&](ECS::FEntity Parent)
+            {
+                for (ECS::FEntity Child = Hierarchy.GetLastChild(Parent); !Child.IsNull(); Child = Hierarchy.GetPrevSibling(Child))
+                {
+                    const SPrefabInstanceComponent* Inst = Registry.TryGet<SPrefabInstanceComponent>(Child);
+                    if (Inst == nullptr || !Inst->bIsRoot)
+                    {
+                        Pending.push_back(Child);
+                    }
+                }
+            };
+            PushChildren(InstanceRoot);
+            while (!Pending.empty())
+            {
+                const ECS::FEntity Current = Pending.back();
+                Pending.pop_back();
+                Func(Current);
+                PushChildren(Current);
+            }
+        }
+
+        // Captures before nested placements were told apart saved repeated ids, and a derived id is the same on every load.
+        void RemintRepeatedStableIDs(ECS::FRegistry& Registry, const CPrefab& Prefab)
+        {
+            THashMap<FName, int32> Seen;
+            int32 Reminted = 0;
+            Registry.View<SPrefabComponent>().ForEach([&](ECS::FEntity, SPrefabComponent& Node)
+            {
+                if (Node.StableID.IsNone())
+                {
+                    return;
+                }
+                const int32 Repeat = Seen[Node.StableID]++;
+                if (Repeat > 0)
+                {
+                    Node.StableID = FName(Format("{}_{}", Node.StableID.c_str(), Repeat));
+                    ++Reminted;
+                }
+            });
+            if (Reminted > 0)
+            {
+                LOG_WARN("Prefab '{}' repeated {} node id(s); they were given their own, so resave it to keep them.", Prefab.GetName().c_str(), Reminted);
+            }
+        }
+
+        // A prefab value moved into one instance's ids, so leaves taken from it land remapped and overridden leaves keep their own handles.
+        class FRemappedPrefabValue
+        {
+        public:
+
+            FRemappedPrefabValue(CStruct* InStruct, const void* Source, const THashMap<ECS::FEntity, ECS::FEntity>& Map)
+                : Struct(InStruct)
+                , Value(Memory::Malloc(InStruct->GetSize(), InStruct->GetAlignment()))
+            {
+                Struct->InitializeStruct(Value);
+                Struct->CopyStruct(Value, Source);
+                ECS::Utils::RemapEntityReferences(Struct, Value, Map, /*bClearUnmapped*/ true);
+            }
+
+            ~FRemappedPrefabValue()
+            {
+                Struct->DestroyStruct(Value);
+                Memory::Free(Value);
+            }
+
+            LE_NO_COPYMOVE(FRemappedPrefabValue);
+
+            void* Get() const { return Value; }
+
+        private:
+
+            CStruct* Struct;
+            void* Value;
+        };
+
+        // The prefab's entities keyed to one placement's own nodes, so a prefab value can be read in that placement's ids.
+        THashMap<ECS::FEntity, ECS::FEntity> MapPrefabOntoInstance(CPrefab& Prefab, ECS::FRegistry& Registry, ECS::FEntity Root)
+        {
+            THashMap<ECS::FEntity, ECS::FEntity> Map;
+            auto Add = [&](ECS::FEntity Entity)
+            {
+                const SPrefabInstanceComponent* Inst = Registry.TryGet<SPrefabInstanceComponent>(Entity);
+                if (Inst == nullptr || Inst->SourcePrefab.Get() != &Prefab)
+                {
+                    return;
+                }
+                if (const ECS::FEntity PrefabEntity = Prefab.FindEntityByStableID(Inst->StableID); PrefabEntity != ECS::NullEntity)
+                {
+                    Map[PrefabEntity] = Entity;
+                }
+            };
+            Add(Root);
+            ForEachOwnInstanceNode(Registry, Root, Add);
+            return Map;
+        }
+
         // Otherwise freshly spawned entities render at a stale position for one frame.
         void MarkSubtreeTransformsDirty(ECS::FRegistry& Registry, ECS::FEntity Root)
         {
@@ -302,6 +405,13 @@ namespace Lumina
     uint32 CPrefab::GetDataGeneration()
     {
         return GDataGeneration;
+    }
+
+    void CPrefab::MarkRegistryChanged()
+    {
+        // Drawn from the process-wide generation, so a prefab freed and loaded again never repeats a revision a copy was stamped with.
+        BumpDataGeneration();
+        Revision = GetDataGeneration();
     }
 
     void CPrefab::BumpDataGeneration()
@@ -337,6 +447,12 @@ namespace Lumina
         }
 
         ECS::Utils::SerializeRegistry(Ar, bVariantPayload ? VariantDelta : Registry);
+
+        if (Ar.IsReading())
+        {
+            RemintRepeatedStableIDs(bVariantPayload ? VariantDelta : Registry, *this);
+            MarkRegistryChanged();
+        }
     }
 
     void CPrefab::PostLoad()
@@ -408,6 +524,14 @@ namespace Lumina
 
                 ECS::FEntity DestE = It->second;
                 void* SrcCompPtr = SrcSet.GetRaw(SrcE);
+
+                // Each tag has its own storage, and copied by type alone every tag of an entity would land in one unnamed slot.
+                if (ID == ECS::GetComponentTypeID<STagComponent>())
+                {
+                    const STagComponent& Tag = *static_cast<const STagComponent*>(SrcCompPtr);
+                    Dest.NamedStorage<STagComponent>(Tag.Tag).EmplaceOrReplace(DestE, Tag);
+                    continue;
+                }
 
                 Ops->EmplaceCopy(Dest, DestE, SrcCompPtr);
             }
@@ -521,6 +645,7 @@ namespace Lumina
                 Instance.SourcePrefab = this;
                 Instance.StableID = StableID;
                 Instance.bIsRoot = (DestE == WorldRoot);
+                Instance.AppliedRevision = Revision;
             }
 
             // Rescue any extra parentless entities so the spawn has a single hierarchical root.
@@ -623,7 +748,7 @@ namespace Lumina
         // Index instance entities by StableID.
         THashMap<FName, ECS::FEntity> InstanceByStableID;
         InstanceByStableID[RootInstance->StableID] = InstanceRoot;
-        WorldRegistry.GetHierarchy().ForEachDescendant(InstanceRoot, [&](ECS::FEntity Descendant)
+        ForEachOwnInstanceNode(WorldRegistry, InstanceRoot, [&](ECS::FEntity Descendant)
         {
             if (const SPrefabInstanceComponent* Inst = WorldRegistry.TryGet<SPrefabInstanceComponent>(Descendant))
             {
@@ -815,16 +940,20 @@ namespace Lumina
         // This subsumes the old root-only case and keeps gizmo edits, which bypass the property hook.
         const uint32 TransformID = ECS::GetComponentTypeID<STransformComponent>();
         const uint32 NameID = ECS::GetComponentTypeID<SNameComponent>();
+        const uint32 TagID = ECS::GetComponentTypeID<STagComponent>();
         const uint32 ScriptComponentID = ECS::GetComponentTypeID<SEntityScriptComponent>();
 
         // EmplaceOrReplace raises OnUpdate rather than OnDestroy, so a script's OnDetach is skipped.
-        auto EmplaceFromPrefab = [&](uint32 ID, const FComponentOps* Ops, ECS::FEntity WorldE, void* SrcCompPtr)
+        auto EmplaceFromPrefab = [&](uint32 ID, CStruct* Struct, const FComponentOps* Ops, ECS::FEntity WorldE, void* SrcCompPtr)
         {
             if (ID == ScriptComponentID)
             {
                 EntityScripts::DetachAll(WorldRegistry, WorldE);
             }
             Ops->EmplaceCopy(WorldRegistry, WorldE, SrcCompPtr);
+
+            // Every handle in it came from the prefab, which never points outside itself.
+            ECS::Utils::RemapEntityReferences(Struct, Ops->Get(WorldRegistry, WorldE), PrefabToInstance, /*bClearUnmapped*/ true);
         };
 
         // Copy/replace components prefab -> instance honoring overrides, then prune ones the prefab dropped.
@@ -860,8 +989,6 @@ namespace Lumina
             }
             const bool bNodeHasLedger = (NodeOverrides != nullptr) || (NodeRemoved != nullptr);
 
-            bool bEntityHasOverrides = false;
-
             // Track the prefab's storages for this entity so we can drop ones the prefab no longer has.
             THashSet<uint32> PrefabComponentIDs;
             PrefabComponentIDs.reserve(8);
@@ -879,6 +1006,14 @@ namespace Lumina
 
                 const FComponentOps* Ops = CompStruct->GetComponentOps();
                 void* SrcCompPtr = PrefabStorage.GetRaw(PrefabE);
+
+                // Tags carry no ledger, so the prefab's are added and one the instance gave itself is kept.
+                if (ID == TagID)
+                {
+                    const STagComponent& Tag = *static_cast<const STagComponent*>(SrcCompPtr);
+                    WorldRegistry.NamedStorage<STagComponent>(Tag.Tag).EmplaceOrReplace(WorldE, Tag);
+                    continue;
+                }
 
                 // A spawned entity left with no transform would crash the hierarchy-mirror reparent.
                 if (ID == TransformID)
@@ -917,7 +1052,7 @@ namespace Lumina
                 if (!bNodeHasLedger)
                 {
                     PrefabComponentIDs.insert(ID);
-                    EmplaceFromPrefab(ID, Ops, WorldE, SrcCompPtr);
+                    EmplaceFromPrefab(ID, CompStruct, Ops, WorldE, SrcCompPtr);
                     continue;
                 }
 
@@ -951,22 +1086,22 @@ namespace Lumina
 
                 if (ID == ScriptComponentID && CompOverrides != nullptr && DstCompPtr != nullptr)
                 {
+                    const FRemappedPrefabValue Inherited(CompStruct, SrcCompPtr, PrefabToInstance);
                     const auto PreviousScripts = PreCommitScripts.find(NodeID);
-                    ApplyInheritedScriptLeaves(WorldRegistry, WorldE, *static_cast<const SEntityScriptComponent*>(SrcCompPtr), *CompOverrides,
+                    ApplyInheritedScriptLeaves(WorldRegistry, WorldE, *static_cast<const SEntityScriptComponent*>(Inherited.Get()), *CompOverrides,
                         PreviousScripts != PreCommitScripts.end() ? &PreviousScripts->second : nullptr);
-                    bEntityHasOverrides = true;
                     continue;
                 }
 
                 // Otherwise replace wholesale, which also adds a missing inherited component.
                 if (CompOverrides != nullptr && DstCompPtr != nullptr)
                 {
-                    PrefabOverride::ApplyInheritedLeaves(CompStruct, DstCompPtr, SrcCompPtr, *CompOverrides);
-                    bEntityHasOverrides = true;
+                    const FRemappedPrefabValue Inherited(CompStruct, SrcCompPtr, PrefabToInstance);
+                    PrefabOverride::ApplyInheritedLeaves(CompStruct, DstCompPtr, Inherited.Get(), *CompOverrides);
                 }
                 else
                 {
-                    EmplaceFromPrefab(ID, Ops, WorldE, SrcCompPtr);
+                    EmplaceFromPrefab(ID, CompStruct, Ops, WorldE, SrcCompPtr);
                 }
             }
 
@@ -979,6 +1114,7 @@ namespace Lumina
                 if (IsNonReplicatedStorage(ID))    continue;
                 if (IsRuntimeOnlyComponent(ID))    continue;
                 if (ID == TransformID)             continue;
+                if (ID == TagID)                   continue;
                 if (PrefabComponentIDs.find(ID) != PrefabComponentIDs.end()) continue;
                 if (!WorldStorage.Contains(WorldE)) continue;
 
@@ -1003,9 +1139,6 @@ namespace Lumina
                     Storage->RemoveEntity(WorldE);
                 }
             }
-
-            // Prefab-authored handles never escape the prefab, so inherited handles resolve either way.
-            ECS::Utils::RemapEntityReferences(WorldRegistry, WorldE, PrefabToInstance, /*bClearUnmapped*/ !bEntityHasOverrides);
         });
 
         // Replacing releases the SourcePrefab strong ref, and that transient zero can free the prefab mid-refresh.
@@ -1079,28 +1212,41 @@ namespace Lumina
             }
         }
 
+        WorldRegistry.Get<SPrefabInstanceComponent>(InstanceRoot).AppliedRevision = Revision;
+
         // Newly added entities + reparented ones need their world matrices recomputed.
         MarkSubtreeTransformsDirty(WorldRegistry, InstanceRoot);
     }
 
+    void CPrefab::RefreshStaleInstances(CWorld* World)
+    {
+        RefreshInstancesInWorld(World, /*bOnlyStale*/ true);
+    }
+
     void CPrefab::RefreshAllInstancesInWorld(CWorld* World)
+    {
+        if (World != nullptr)
+        {
+            // InitializeWorld culls the pending set pre-swap, but other paths reach this without that step.
+            CullOrphanedInstances(ECS::GetWorldRegistry(*World));
+        }
+        RefreshInstancesInWorld(World, /*bOnlyStale*/ false);
+    }
+
+    void CPrefab::RefreshInstancesInWorld(CWorld* World, bool bOnlyStale)
     {
         if (World == nullptr)
         {
             return;
         }
 
+        // Gathered first, since a refresh adds and destroys instance entities.
         ECS::FRegistry& WorldRegistry = ECS::GetWorldRegistry(*World);
-
-        // InitializeWorld culls the pending set pre-swap, but other paths reach this without that step.
-        CullOrphanedInstances(WorldRegistry);
-
         TVector<ECS::FEntity> Roots;
-        Roots.reserve(32);
-
         WorldRegistry.View<SPrefabInstanceComponent>().ForEach([&](ECS::FEntity E, const SPrefabInstanceComponent& Inst)
         {
-            if (Inst.bIsRoot && Inst.SourcePrefab != nullptr)
+            const CPrefab* Source = Inst.SourcePrefab.Get();
+            if (Inst.bIsRoot && Source != nullptr && (!bOnlyStale || Inst.AppliedRevision != Source->GetRevision()))
             {
                 Roots.push_back(E);
             }
@@ -1108,12 +1254,10 @@ namespace Lumina
 
         for (ECS::FEntity Root : Roots)
         {
-            SPrefabInstanceComponent* Inst = WorldRegistry.TryGet<SPrefabInstanceComponent>(Root);
-            if (Inst == nullptr || Inst->SourcePrefab == nullptr)
+            if (const SPrefabInstanceComponent* Inst = WorldRegistry.TryGet<SPrefabInstanceComponent>(Root); Inst != nullptr && Inst->SourcePrefab != nullptr)
             {
-                continue;
+                Inst->SourcePrefab->RefreshInstance(World, Root);
             }
-            Inst->SourcePrefab->RefreshInstance(World, Root);
         }
     }
 
@@ -1253,10 +1397,10 @@ namespace Lumina
         TVector<ECS::FEntity> ToStrip;
         ToStrip.reserve(16);
         ToStrip.push_back(InstanceRoot);
-        WorldRegistry.GetHierarchy().ForEachDescendant(InstanceRoot, [&](ECS::FEntity Desc)
+        ForEachOwnInstanceNode(WorldRegistry, InstanceRoot, [&](ECS::FEntity Desc)
         {
             const SPrefabInstanceComponent* Inst = WorldRegistry.TryGet<SPrefabInstanceComponent>(Desc);
-            if (Inst != nullptr && !Inst->bIsRoot && Inst->SourcePrefab.Get() == Source)
+            if (Inst != nullptr && Inst->SourcePrefab.Get() == Source)
             {
                 ToStrip.push_back(Desc);
             }
@@ -1304,12 +1448,28 @@ namespace Lumina
         });
 
         // CopyRegistry remaps hierarchy and handle fields, and skips nested instance tracking.
-        BumpDataGeneration();
+        MarkRegistryChanged();
         Registry = ECS::FRegistry{};
         THashMap<ECS::FEntity, ECS::FEntity> Map;
         CopyRegistry(WorldRegistry, Registry, Map, &EntitiesToCapture, &ShouldSkipInstanceComponent);
 
+        // Only this prefab's own placed nodes keep their ids, since a nested placement's ids repeat once per copy.
+        THashMap<ECS::FEntity, FName> PlacedIDs;
+        if (const SPrefabInstanceComponent* RootInst = WorldRegistry.TryGet<SPrefabInstanceComponent>(RootEntity);
+            RootInst != nullptr && RootInst->bIsRoot && RootInst->SourcePrefab.Get() == this)
+        {
+            PlacedIDs.emplace(RootEntity, RootInst->StableID);
+            ForEachOwnInstanceNode(WorldRegistry, RootEntity, [&](ECS::FEntity E)
+            {
+                if (const SPrefabInstanceComponent* Inst = WorldRegistry.TryGet<SPrefabInstanceComponent>(E); Inst != nullptr && Inst->SourcePrefab.Get() == this)
+                {
+                    PlacedIDs.emplace(E, Inst->StableID);
+                }
+            });
+        }
+
         // Reuses an existing instance tag when present, so RefreshInstance can match placed counterparts.
+        THashSet<FName> UsedIDs;
         for (ECS::FEntity SrcE : EntitiesToCapture)
         {
             auto It = Map.find(SrcE);
@@ -1319,17 +1479,18 @@ namespace Lumina
             }
 
             FName StableID;
-            if (const SPrefabInstanceComponent* Inst = WorldRegistry.TryGet<SPrefabInstanceComponent>(SrcE))
+            if (auto Placed = PlacedIDs.find(SrcE); Placed != PlacedIDs.end())
             {
-                StableID = Inst->StableID;
+                StableID = Placed->second;
             }
             if (StableID.IsNone() && SrcE == RootEntity)
             {
                 StableID = PreviousRootID;
             }
-            if (StableID.IsNone())
+            if (StableID.IsNone() || !UsedIDs.insert(StableID).second)
             {
                 StableID = GenerateStableID();
+                UsedIDs.insert(StableID);
             }
             Registry.EmplaceOrReplace<SPrefabComponent>(It->second).StableID = StableID;
 
@@ -1340,13 +1501,10 @@ namespace Lumina
                 Instance.SourcePrefab = this;
                 Instance.StableID     = StableID;
                 Instance.bIsRoot      = (SrcE == RootEntity);
-            }
-        }
 
-        // The source now is the prefab, so leaves it had overridden are no longer divergent.
-        if (bAdoptSourceAsInstance)
-        {
-            WorldRegistry.Remove<SPrefabOverrideComponent>(RootEntity);
+                // The source now is the prefab, so leaves it had overridden are no longer divergent, nested placements included.
+                WorldRegistry.Remove<SPrefabOverrideComponent>(SrcE);
+            }
         }
 
         if (CPackage* Package = GetPackage())
@@ -1522,7 +1680,7 @@ namespace Lumina
 
         bVariantResolveFailed = false;
 
-        BumpDataGeneration();
+        MarkRegistryChanged();
         ++VariantResolveCount;
 
         Registry = ECS::FRegistry{};
@@ -2085,69 +2243,142 @@ namespace Lumina
         return ECS::NullEntity;
     }
 
+    namespace
+    {
+        // One instance node's component, its prefab baseline and the root whose ledger records it.
+        struct FOverrideTarget
+        {
+            ECS::FEntity Root = ECS::NullEntity;
+            CPrefab*     Source = nullptr;
+            CStruct*     ComponentType = nullptr;
+            FName        NodeID;
+            void*        InstancePtr = nullptr;
+            void*        PrefabPtr = nullptr;
+        };
+
+        bool ResolveOverrideTarget(ECS::FRegistry& Registry, ECS::FEntity Entity, CStruct* ComponentType, FOverrideTarget& Out)
+        {
+            if (ComponentType == nullptr || IsInstanceTrackingStruct(ComponentType) || !Registry.IsValid(Entity))
+            {
+                return false;
+            }
+
+            // A script field edit names the script's class, but the override belongs to the component holding the script.
+            Out.ComponentType = AsScriptClass(ComponentType) != nullptr ? SEntityScriptComponent::StaticStruct() : ComponentType;
+
+            const SPrefabInstanceComponent* Inst = Registry.TryGet<SPrefabInstanceComponent>(Entity);
+            Out.Source = Inst != nullptr ? Inst->SourcePrefab.Get() : nullptr;
+            Out.Root = Out.Source != nullptr ? CPrefab::FindInstanceRoot(Registry, Entity) : ECS::NullEntity;
+            if (Out.Root == ECS::NullEntity)
+            {
+                return false;
+            }
+
+            Out.NodeID = Inst->StableID;
+            Out.InstancePtr = FindReflectedComponentPtr(Registry, Entity, Out.ComponentType);
+
+            // Null when the component is instance-added, which has no per-leaf tracking.
+            Out.PrefabPtr = Out.Source->ResolvePrefabComponentPtr(Out.NodeID, Out.ComponentType);
+            return true;
+        }
+
+        void SetLedgerPaths(ECS::FRegistry& Registry, const FOverrideTarget& Target, const TVector<FName>& Paths)
+        {
+            SPrefabOverrideComponent& Ledger = Registry.GetOrEmplace<SPrefabOverrideComponent>(Target.Root);
+            const FName CompName = Target.ComponentType->GetName();
+            auto& Recs = Ledger.PropertyOverrides;
+            Recs.erase(Algo::RemoveIf(Recs, [&](const SPrefabPropertyOverride& O)
+            {
+                return O.EntityStableID == Target.NodeID && O.ComponentType == CompName;
+            }), Recs.end());
+
+            for (const FName& Path : Paths)
+            {
+                Recs.push_back({ Target.NodeID, CompName, Path });
+            }
+        }
+    }
+
     void CPrefab::RecaptureComponentOverrides(ECS::FRegistry& Registry, ECS::FEntity Entity, CStruct* ComponentType)
     {
-        if (ComponentType == nullptr || IsInstanceTrackingStruct(ComponentType) || !Registry.IsValid(Entity))
+        FOverrideTarget Target;
+        if (!ResolveOverrideTarget(Registry, Entity, ComponentType, Target))
         {
             return;
         }
-
-        // A script field edit names the script's class, but the override belongs to the component holding the script.
-        if (AsScriptClass(ComponentType) != nullptr)
-        {
-            ComponentType = SEntityScriptComponent::StaticStruct();
-        }
-
-        const SPrefabInstanceComponent* Inst = Registry.TryGet<SPrefabInstanceComponent>(Entity);
-        if (Inst == nullptr || Inst->SourcePrefab == nullptr)
-        {
-            return;
-        }
-
-        const ECS::FEntity Root = FindInstanceRoot(Registry, Entity);
-        if (Root == ECS::NullEntity)
-        {
-            return;
-        }
-
-        const FName NodeID = Inst->StableID;
-        const FName CompName = ComponentType->GetName();
-
-        // Live instance component value.
-        void* InstPtr = FindReflectedComponentPtr(Registry, Entity, ComponentType);
-
-        // Prefab baseline value (null when the component is instance-added => no per-leaf tracking).
-        void* PrefPtr = Inst->SourcePrefab->ResolvePrefabComponentPtr(NodeID, ComponentType);
 
         TVector<FName> NewPaths;
-        if (InstPtr != nullptr && PrefPtr != nullptr)
+        if (Target.InstancePtr != nullptr && Target.PrefabPtr != nullptr)
         {
-            if (ComponentType == SEntityScriptComponent::StaticStruct())
+            // Handles are compared in the instance's ids, or an inherited one reads as edited and a world one can pass for inherited.
+            const FRemappedPrefabValue Baseline(Target.ComponentType, Target.PrefabPtr, MapPrefabOntoInstance(*Target.Source, Registry, Target.Root));
+            if (Target.ComponentType == SEntityScriptComponent::StaticStruct())
             {
-                CollectScriptOverrides(*static_cast<const SEntityScriptComponent*>(InstPtr), *static_cast<const SEntityScriptComponent*>(PrefPtr), NewPaths);
+                CollectScriptOverrides(*static_cast<const SEntityScriptComponent*>(Target.InstancePtr), *static_cast<const SEntityScriptComponent*>(Baseline.Get()), NewPaths);
             }
             else
             {
-                PrefabOverride::CollectOverriddenLeaves(ComponentType, InstPtr, PrefPtr, NewPaths);
+                PrefabOverride::CollectOverriddenLeaves(Target.ComponentType, Target.InstancePtr, Baseline.Get(), NewPaths);
             }
         }
 
-        SPrefabOverrideComponent& Ledger = Registry.GetOrEmplace<SPrefabOverrideComponent>(Root);
+        SetLedgerPaths(Registry, Target, NewPaths);
+    }
 
-        // Replace this (node, component) pair's records with the freshly computed set.
-        auto& Recs = Ledger.PropertyOverrides;
-        Recs.erase(Algo::RemoveIf(Recs, [&](const SPrefabPropertyOverride& O)
+    TVector<FName> CPrefab::GetComponentOverrides(ECS::FRegistry& Registry, ECS::FEntity Entity, CStruct* ComponentType)
+    {
+        TVector<FName> Paths;
+        FOverrideTarget Target;
+        if (ResolveOverrideTarget(Registry, Entity, ComponentType, Target))
         {
-            return O.EntityStableID == NodeID && O.ComponentType == CompName;
-        }), Recs.end());
+            if (const SPrefabOverrideComponent* Ledger = Registry.TryGet<SPrefabOverrideComponent>(Target.Root))
+            {
+                for (const SPrefabPropertyOverride& Override : Ledger->PropertyOverrides)
+                {
+                    if (Override.EntityStableID == Target.NodeID && Override.ComponentType == Target.ComponentType->GetName())
+                    {
+                        Paths.push_back(Override.PropertyPath);
+                    }
+                }
+            }
+        }
+        return Paths;
+    }
 
-        for (const FName& Path : NewPaths)
+    void CPrefab::RestoreComponentOverrides(ECS::FRegistry& Registry, ECS::FEntity Entity, CStruct* ComponentType, const TVector<FName>& Paths)
+    {
+        FOverrideTarget Target;
+        if (!ResolveOverrideTarget(Registry, Entity, ComponentType, Target))
         {
-            SPrefabPropertyOverride Rec;
-            Rec.EntityStableID = NodeID;
-            Rec.ComponentType  = CompName;
-            Rec.PropertyPath   = Path;
-            Recs.push_back(Rec);
+            return;
+        }
+
+        SetLedgerPaths(Registry, Target, Paths);
+        if (Target.InstancePtr == nullptr || Target.PrefabPtr == nullptr)
+        {
+            return;
+        }
+
+        // The restored value may predate a prefab edit, so every leaf it did not override takes the prefab's current one.
+        THashSet<FName> Overridden;
+        Overridden.insert(Paths.begin(), Paths.end());
+        const FRemappedPrefabValue Inherited(Target.ComponentType, Target.PrefabPtr, MapPrefabOntoInstance(*Target.Source, Registry, Target.Root));
+        if (Target.ComponentType == SEntityScriptComponent::StaticStruct())
+        {
+            ApplyInheritedScriptLeaves(Registry, Entity, *static_cast<const SEntityScriptComponent*>(Inherited.Get()), Overridden, nullptr);
+        }
+        else
+        {
+            PrefabOverride::ApplyInheritedLeaves(Target.ComponentType, Target.InstancePtr, Inherited.Get(), Overridden);
+        }
+    }
+
+    void CPrefab::MarkInstanceStale(ECS::FRegistry& Registry, ECS::FEntity Entity)
+    {
+        const ECS::FEntity Root = FindInstanceRoot(Registry, Entity);
+        if (Root != ECS::NullEntity)
+        {
+            Registry.Get<SPrefabInstanceComponent>(Root).AppliedRevision = kStaleRevision;
         }
     }
 

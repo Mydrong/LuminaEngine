@@ -56,58 +56,58 @@ namespace Lumina::Physics
     {
         GENERATED_BODY()
 
-        PROPERTY()
+        PROPERTY(Hidden)
         EPhysicsConstraintType  Type        = EPhysicsConstraintType::Point;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         ECS::FEntity            BodyA       = ECS::NullEntity;            // ECS::NullEntity => world anchor (parent).
 
-        PROPERTY()
+        PROPERTY(Hidden)
         ECS::FEntity            BodyB       = ECS::NullEntity;            // The constrained (child) body.
 
-        PROPERTY()
+        PROPERTY(Hidden)
         FVector3                Anchor      = FVector3(0.0f);        // World pivot (Point/Hinge/Slider/Cone).
 
-        PROPERTY()
+        PROPERTY(Hidden)
         FVector3                Axis        = FVector3(0.0f, 1.0f, 0.0f); // Hinge/Cone axis or Slider direction (world).
 
-        PROPERTY()
+        PROPERTY(Hidden)
         FVector3                AnchorB     = FVector3(0.0f);        // Distance: second attach point (Anchor is the first).
 
-        PROPERTY()
+        PROPERTY(Hidden)
         float                   MinLimit    = 0.0f;                  // Hinge angle (rad) / Slider pos (m) / Distance min.
 
-        PROPERTY()
+        PROPERTY(Hidden)
         float                   MaxLimit    = 0.0f;                  // Hinge angle (rad) / Slider pos (m) / Distance max.
 
-        PROPERTY()
+        PROPERTY(Hidden)
         float                   HalfConeAngle = 0.0f;               // Cone half-angle (rad).
 
-        PROPERTY()
+        PROPERTY(Hidden)
         bool                    bHasLimits  = false;                 // When false, the joint is unlimited on its free axis.
 
-        PROPERTY()
+        PROPERTY(Hidden)
         float                   LimitFrequency = 0.0f;               // Soft-limit spring (0 = hard limit).
 
-        PROPERTY()
+        PROPERTY(Hidden)
         float                   LimitDamping   = 0.0f;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         float                   MaxFriction    = 0.0f;               // Hinge friction torque (N m) / Slider friction force (N).
 
-        PROPERTY()
+        PROPERTY(Hidden)
         float                   MotorFrequency = 0.0f;               // Position-motor spring (0 = stiff default).
 
-        PROPERTY()
+        PROPERTY(Hidden)
         float                   MotorDamping   = 0.0f;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         float                   MotorForceLimit  = 0.0f;             // Slider motor max force (N), 0 = unlimited.
 
-        PROPERTY()
+        PROPERTY(Hidden)
         float                   MotorTorqueLimit = 0.0f;             // Hinge motor max torque (N m), 0 = unlimited.
 
-        PROPERTY()
+        PROPERTY(Hidden)
         float                   BreakForce  = 0.0f;                  // Disable the joint when applied force exceeds this (N). 0 = unbreakable.
 
     };
@@ -173,6 +173,11 @@ namespace Lumina::Physics
     public:
 
         virtual ~IPhysicsScene() { }
+        IPhysicsScene() = default;
+        IPhysicsScene(const IPhysicsScene&) = delete;
+        IPhysicsScene& operator=(const IPhysicsScene&) = delete;
+        IPhysicsScene(IPhysicsScene&&) = delete;
+        IPhysicsScene& operator=(IPhysicsScene&&) = delete;
         virtual void PreUpdate() = 0;
         virtual void Update(double DeltaTime) = 0;
 
@@ -181,6 +186,10 @@ namespace Lumina::Physics
 
         // Runs around every fixed character step, after input is latched, so netcode can record or replace it.
         void SetCharacterStepHook(TFunction<void(float, bool)> Hook) { CharacterStepHook = Move(Hook); }
+
+        // Collision drawing for this scene alone, so one editor viewport's toggle never reaches another world.
+        void SetDebugDrawEnabled(bool bEnabled) { bDebugDraw = bEnabled; }
+        bool IsDebugDrawEnabled() const { return bDebugDraw; }
 
         virtual bool GetCharacterNetState(ECS::FEntity Entity, FCharacterNetState& Out) const { return false; }
         virtual bool SetCharacterNetState(ECS::FEntity Entity, const FCharacterNetState& State) { return false; }
@@ -337,5 +346,6 @@ namespace Lumina::Physics
 
         TFunction<void(float)> PreStepCallback;
         TFunction<void(float, bool)> CharacterStepHook;
+        bool bDebugDraw = false;
     };
 }

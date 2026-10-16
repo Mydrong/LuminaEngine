@@ -49,6 +49,8 @@ namespace Lumina::SceneOps
 
         FPropertyEditScope(const FPropertyEditScope&) = delete;
         FPropertyEditScope& operator = (const FPropertyEditScope&) = delete;
+        FPropertyEditScope(FPropertyEditScope&&) = delete;
+        FPropertyEditScope& operator=(FPropertyEditScope&&) = delete;
 
     private:
 

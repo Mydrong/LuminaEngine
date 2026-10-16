@@ -14,7 +14,6 @@
 set -uo pipefail
 
 LuminaRoot="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-export LUMINA_DIR="$LuminaRoot"
 
 # dotnet-install.sh drops .NET in $HOME/.dotnet and persists nothing, so a new shell loses it and
 # every script here fails claiming the SDK is missing when it is sitting right there.

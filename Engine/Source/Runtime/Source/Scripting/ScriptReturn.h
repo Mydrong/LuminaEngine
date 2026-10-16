@@ -8,6 +8,22 @@ namespace Lumina::Scripting
     // Keeps a result too big for the managed caller's scratch, so it copies the bytes rather than calling again.
     RUNTIME_API void StashCallOverflow(const void* CallerScratch, const void* Data, size_t Bytes);
 
+    // A string result for the managed caller, copied into its scratch with any excess stashed, returning the full byte length.
+    template<typename TString>
+    int ReturnStringToCaller(const TString& String, char* Buffer, int Capacity)
+    {
+        const int Length = static_cast<int>(String.size());
+        if (Buffer != nullptr && Capacity > 0)
+        {
+            Memory::Memcpy(Buffer, String.data(), static_cast<size_t>(Length < Capacity ? Length : Capacity));
+        }
+        if (Buffer != nullptr && Length > Capacity)
+        {
+            StashCallOverflow(Buffer, String.data(), static_cast<size_t>(Length));
+        }
+        return Length;
+    }
+
     template<size_t Size>
     struct TScriptReturnBits;
 

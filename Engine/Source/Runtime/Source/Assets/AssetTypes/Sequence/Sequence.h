@@ -229,17 +229,17 @@ namespace Lumina
     {
         GENERATED_BODY()
 
-        PROPERTY()
+        PROPERTY(Hidden)
         FName Name;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         FString Payload;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         float Time = 0.0f;
 
         // Entity the event track is bound to, or the null entity for a sequence-wide track.
-        PROPERTY()
+        PROPERTY(Hidden)
         ECS::FEntity Target = ECS::NullEntity;
     };
 

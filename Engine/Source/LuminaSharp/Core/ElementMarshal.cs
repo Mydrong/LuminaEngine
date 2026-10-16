@@ -197,6 +197,7 @@ internal static class ElementKind<T>
 public static unsafe class ElementMarshal
 {
     /// <summary>The element at <paramref name="Address"/>.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static T Read<T>(nint Address)
     {
         switch (ElementKind<T>.Kind)
@@ -252,6 +253,7 @@ public static unsafe class ElementMarshal
     }
 
     // The token is an ops table for a container view and the FProperty for an optional, resolved once at bind.
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static T Read<T>(nint Address, nint Token)
     {
         switch (ElementKind<T>.Kind)
@@ -269,6 +271,7 @@ public static unsafe class ElementMarshal
         }
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static void Write<T>(nint Address, nint Token, T Value)
     {
         switch (ElementKind<T>.Kind)
@@ -300,6 +303,7 @@ public static unsafe class ElementMarshal
     }
 
     // Overwrites the element at Address, doing whatever its kind needs to keep the native side consistent.
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static void Write<T>(nint Address, T Value)
     {
         switch (ElementKind<T>.Kind)

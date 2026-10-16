@@ -1,4 +1,5 @@
 #include "AssetIdPropertyCustomization.h"
+#include "UI/Properties/Customizations/AssetPickerFilter.h"
 
 #include "LuminaEditor.h"
 #include "Assets/AssetManager/AssetManager.h"
@@ -12,12 +13,6 @@ namespace Lumina
 {
     namespace
     {
-        // The object picker's size, so an id slot and an asset slot read as the same control.
-        constexpr ImVec2 GButtonSize(42, 0);
-
-        const ImVec4 GMutedText(0.6f, 0.6f, 0.6f, 1.0f);
-        const ImVec4 GEmptyText(1.0f, 0.19f, 0.19f, 1.0f);
-
         // The id an asset has, or an invalid one when its class is in no group or not the one the field wants.
         SAssetId IdOf(const FAssetData* Data, FName RequiredGroup)
         {
@@ -78,7 +73,7 @@ namespace Lumina
                               : bMissing ? FString(LE_ICON_ALERT " ") + Describe(*Id)
                               :            Describe(*Id);
         ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
-        ImGui::PushStyleColor(ImGuiCol_Text, bHasId && !bMissing ? GMutedText : GEmptyText);
+        ImGui::PushStyleColor(ImGuiCol_Text, bHasId && !bMissing ? AssetPickerFilter::kMutedText : AssetPickerFilter::kEmptyText);
         const bool bOpen = ImGui::BeginCombo("##Pick", Preview.c_str(), ImGuiComboFlags_HeightLarge | ImGuiComboFlags_PopupAlignLeft);
         ImGui::PopStyleColor();
 
@@ -170,7 +165,7 @@ namespace Lumina
         // Outside any disabled block, since this is most useful exactly when the slot is empty.
         const SAssetId Selected = IdOf(EditorUI != nullptr ? EditorUI->GetContentBrowserSelectedAsset() : nullptr, RequiredGroup);
         ImGui::BeginDisabled(!Selected.IsValid());
-        if (ImGui::Button(LE_ICON_ARROW_LEFT_CIRCLE "##UseSelected", GButtonSize))
+        if (ImGui::Button(LE_ICON_ARROW_LEFT_CIRCLE "##UseSelected", AssetPickerFilter::kButtonSize))
         {
             Assign(Selected);
         }
@@ -179,7 +174,7 @@ namespace Lumina
 
         ImGui::SameLine();
         ImGui::BeginDisabled(Data == nullptr);
-        if (ImGui::Button(LE_ICON_MAGNIFY "##Browse", GButtonSize) && EditorUI != nullptr && Data != nullptr)
+        if (ImGui::Button(LE_ICON_MAGNIFY "##Browse", AssetPickerFilter::kButtonSize) && EditorUI != nullptr && Data != nullptr)
         {
             EditorUI->BrowseToAsset(FStringView(Data->Path.c_str(), Data->Path.size()));
         }
@@ -191,7 +186,7 @@ namespace Lumina
         ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.6f, 0.2f, 0.2f, 1.0f));
         ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.7f, 0.25f, 0.25f, 1.0f));
         ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.5f, 0.15f, 0.15f, 1.0f));
-        if (ImGui::Button(LE_ICON_CLOSE_CIRCLE "##Clear", GButtonSize))
+        if (ImGui::Button(LE_ICON_CLOSE_CIRCLE "##Clear", AssetPickerFilter::kButtonSize))
         {
             Assign({});
         }

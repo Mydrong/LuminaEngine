@@ -12,6 +12,7 @@
 #include "Core/Threading/Thread.h"
 #include "Memory/Memory.h"
 #include "Platform/GenericPlatform.h"
+#include "Renderer/RenderLayers.h"
 #include "World/Scene/RenderScene/MeshDrawCommand.h"
 #include "World/Scene/RenderScene/MeshResolveCache.h"
 #include "World/Scene/RenderScene/SceneRenderTypes.h"
@@ -143,6 +144,7 @@ namespace Lumina
         void AddBatchRefs(uint32 BatchIndex, bool bSkinned, uint32 Count);
 
         void ReleaseBatchRef(uint32 BatchIndex, bool bSkinned);
+        void ReleaseBatchRefs(uint32 BatchIndex, bool bSkinned, uint32 Count);
 
         uint32          Num() const { return (uint32)Batches.size(); }
         FBatch&         Get(uint32 Index) { return Batches[Index]; }
@@ -187,6 +189,9 @@ namespace Lumina
         // proto -- a field missed there reads as garbage rather than zero, and a junk float here becomes a
         // junk mip request (or a NaN that poisons the max downstream).
         float           TexelFactor = 0.0f;
+
+        // Into the skinned frame data, held by a skinned primitive's binding and kNoSkinnedIndex otherwise.
+        uint32          SkinnedIndex = kNoSkinnedIndex;
     };
 
     struct FScenePrimitive
@@ -213,6 +218,7 @@ namespace Lumina
         float                               BoundsScale = 1.0f;
 
         int32                               ForcedLODIndex = -1;
+        uint32                              RenderLayers = RenderLayers::kDefaultMask;
         EInstanceFlags                      BaseFlags = EInstanceFlags::None;
         EPrimitiveSource                    Source = EPrimitiveSource::StaticMesh;
         bool                                bCastShadow = true;
@@ -245,6 +251,7 @@ namespace Lumina
     public:
 
         FScenePrimitiveSet() = default;
+        ~FScenePrimitiveSet() = default;
         LE_NO_COPYMOVE(FScenePrimitiveSet);
 
         // Drains the dirty channel and applies it. O(changed), except on a requested full rescan.
@@ -253,6 +260,9 @@ namespace Lumina
 
         // Drops every primitive and re-arms a full rescan. World teardown / scene rebuild.
         void Reset(ECS::FRegistry* Registry);
+
+        // Remaps Foreground-layer instances for this camera, or draws them in place when it has no foreground. Call before Sync.
+        void SetForegroundView(const FViewVolume& View, const FViewLayerSettings& Layers);
 
         uint32                              Num() const { return (uint32)Primitives.size(); }
         const FScenePrimitive*              GetPrimitives() const { return Primitives.data(); }
@@ -284,6 +294,7 @@ namespace Lumina
         const FTransform3x4*        GetRetainedTransforms() const { return RetainedTransforms.data(); }
         const FInstanceStatic*      GetRetainedStatic() const     { return RetainedStatic.data(); }
         uint32                      GetRetainedSlotCount() const  { return (uint32)RetainedCullEntries.size(); }
+        uint32                      GetSkinnedIndexExtent() const { return SkinnedIndexExtent; }
 
         /** What a GPU scatter needs to write retained instances for one grass species. */
         struct FGrassSpeciesBinding
@@ -345,7 +356,8 @@ namespace Lumina
 
         const TVector<uint32>&      GetDirtyInstanceSlots() const { return DirtyInstanceSlots; }
         const TVector<uint32>&      GetDirtyStaticSlots() const   { return DirtyStaticSlots; }
-        void                        ClearDirtyInstanceSlots()     { DirtyInstanceSlots.clear(); DirtyStaticSlots.clear(); }
+        const TVector<uint32>&      GetDeactivatedSlots() const   { return DeactivatedSlots; }
+        void                        ClearDirtyInstanceSlots()     { DirtyInstanceSlots.clear(); DirtyStaticSlots.clear(); DeactivatedSlots.clear(); }
         // True after a reset or when most slots changed at once, so the whole array is re-sent.
         bool                        NeedsFullInstanceUpload() const { return bFullInstanceUpload; }
         // The partial paths send only the dirty slots, so re-sending all of them pays once nearly every slot changed.
@@ -382,7 +394,8 @@ namespace Lumina
         void    BindSurfaces(uint32 Index);
         void    ReleaseBindings(uint32 Index);
         // The half of the two above that only needs the span, so foliage instances share it.
-        uint32  AppendBindingSpan(const FBindingMemo& Memo, bool bSkinned);
+        // Foliage passes false for bAssignSkinnedIndex, since only a skinned primitive is gathered for frame data.
+        uint32  AppendBindingSpan(const FBindingMemo& Memo, bool bSkinned, bool bAssignSkinnedIndex);
         void    ReleaseBindingSpan(uint32 Base, uint32 Count);
 
         const FBindingMemo* EnsureBindingMemo(uint32 ResolveHandle, uint32 Generation,
@@ -397,7 +410,17 @@ namespace Lumina
 
         void    RefreshInstanceTransform(uint32 Index, TVector<uint32>* DirtySink = nullptr);
 
+        bool        IsRemappedForeground(const FScenePrimitive& Prim) const { return bForegroundActive && (Prim.RenderLayers & RenderLayers::kForegroundMask) != 0u; }
+        FMatrix4    InstanceTransformOf(const FScenePrimitive& Prim) const;
+        FVector4    InstanceSphereOf(uint32 Index) const;
+        void        TrackForeground(uint32 Index);
+
         uint32  AllocateInstanceSlot();
+
+        TVector<uint32>                     SkinnedIndexFreeList;
+        uint32                              SkinnedIndexExtent = 0;
+        uint32  AllocateSkinnedIndex();
+        void    FreeSkinnedIndex(uint32 Index);
         void    FreeInstanceSlot(uint32 Slot);
         void    MarkInstanceDirty(uint32 Slot);
         void    MarkStaticDirty(uint32 Slot);
@@ -452,6 +475,14 @@ namespace Lumina
         TVector<FSurfaceBinding>            Bindings;
         uint32                              DeadBindings = 0;
         void                                CompactBindings();
+
+        // Dead spans a removed foliage entity left whole, as (base, count), handed to the next fresh bind that fits.
+        TVector<FUIntVector2>               BindingFreeRanges;
+        uint32                              FreeRangeBindings = 0;
+        uint32                              TakeBindingRange(uint32 Count);
+
+        // Dead space waiting in a free range is reused rather than wasted, unless it outgrows what is live.
+        bool                                ShouldCompactBindings() const;
 
         FSceneBatchRegistry                 Batches;
 
@@ -527,6 +558,9 @@ namespace Lumina
         THashMap<ECS::FEntity, FFoliageEntityState> FoliageByEntity;
 
         void    ReleaseFoliageInstance(FFoliageInstanceRef& Ref);
+        // Removed foliage of one sync, released together so a streaming burst spreads over workers.
+        TVector<FFoliageEntityState>        PendingFoliageReleases;
+        void    FlushFoliageReleases();
         void    RefreshFoliageInstance(const FFoliageInstanceRef& Ref, const FFoliageTypeResolve& Type,
                                        const FFoliageBakedInstance& Instance, uint32 EntityID, bool bHidden);
         // Flips the active bit of instances a game hid or showed since the last frame, leaving the bake alone.
@@ -542,6 +576,24 @@ namespace Lumina
 
         // Memo per type for one SyncFoliage call; parallel to FoliageTypeScratch.
         TVector<const FBindingMemo*>        FoliageMemoScratch;
+
+        // Instance slot per new binding in one BindFreshFoliage call, so the parallel fill reads what was handed out.
+        TVector<uint32>                     FoliageSlotScratch;
+
+        // One per block of instances in FlushFoliageReleases, so the gather runs on workers.
+        struct FFoliageReleaseBlock
+        {
+            uint32                  State       = 0;
+            uint32                  Begin       = 0;
+            uint32                  End         = 0;
+            uint32                  NumBindings = 0;
+            uint32                  FirstBase   = 0;
+            uint32                  EndBase     = 0;
+            uint32                  SlotOffset  = 0;
+            bool                    bContiguous = true;
+            TVector<FUIntVector3>   Runs;
+        };
+        TVector<FFoliageReleaseBlock>       FoliageReleaseBlocks;
 
         // Instances one SyncFoliage call refreshes, and the dirty surfaces each produced when that ran in parallel.
         TVector<uint32>                     FoliageRefreshScratch;
@@ -610,12 +662,19 @@ namespace Lumina
         // Folds the per-worker lists back into DirtyInstanceSlots, or gives up and re-sends everything.
         void MergeParallelDirtySlots();
 
+        FMatrix4                            ForegroundTransform = FMatrix4(1.0f);
+        float                               ForegroundRadiusScale = 1.0f;
+        bool                                bForegroundActive = false;
+        // Few enough that a camera move refreshes every one of them.
+        TVector<uint64>                     ForegroundKeys;
+
         TVector<FInstanceCullEntry>         RetainedCullEntries;
         TVector<FTransform3x4>              RetainedTransforms;
         TVector<FInstanceStatic>            RetainedStatic;
 
         TVector<uint32>                     InstanceFreeSlots;
         TVector<uint32>                     DirtyInstanceSlots;   // cull entry + transform
+        TVector<uint32>                     DeactivatedSlots;     // freed, so only the active bit changes
 
         // One past the highest bone ever handed out. The arena's size, and it only grows.
         TVector<uint32>                     DirtyStaticSlots;     // static payload
@@ -637,7 +696,9 @@ namespace Lumina
 
         // Per retained slot, x the first word and y the word count.
         TVector<FUIntVector2>               SlotMeshletVisibility;
-        THashMap<uint32, TVector<uint32>>   MeshletVisibilityFreeLists;
+        // Indexed by word count, since a streaming burst frees a range per foliage slot and a hash per free showed.
+        TVector<TVector<uint32>>            MeshletVisibilityFreeLists;
+        void                                FreeMeshletVisibilityRange(uint32 Base, uint32 Words);
         uint32                              MeshletVisibilityExtent = 1;
         TVector<uint32>                     MeshletVisibilityScratch;
 

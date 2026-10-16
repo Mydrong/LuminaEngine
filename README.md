@@ -241,8 +241,8 @@ threshold, which is how to see the rejection dialog on hardware that passes.
    It downloads one prebuilt dependency bundle
    (`External-Win64.zip`, ~192 MB), verifies it against a SHA-256 hash pinned in this
    repo (once the maintainer records it, see
-   [`DEPENDENCIES.md`](DEPENDENCIES.md)), persists the `LUMINA_DIR` environment
-   variable, configures git hooks, and generates `Lumina.sln`.
+   [`DEPENDENCIES.md`](DEPENDENCIES.md)), configures git hooks, registers the
+   `.lproject` file type, and generates `Lumina.sln`.
 
    The bundle contains the .NET 10 runtime (C# scripting), LLVM/Clang 19
    (reflection codegen), the Slang shader compiler, RenderDoc, and Tracy. Each
@@ -293,8 +293,7 @@ takes the same arguments.
 
    It checks the prerequisites above, downloads one prebuilt dependency bundle
    (`External-Linux64.tar.gz`, ~186 MB), verifies it against a SHA-256 hash
-   pinned in this repo, configures git hooks, and offers to add `LUMINA_DIR` to
-   your shell profile.
+   pinned in this repo, and configures git hooks.
 
    The bundle contains the .NET 10 runtime (C# scripting), LLVM/Clang 19
    (reflection codegen), the Slang shader compiler, RenderDoc, and Tracy. Each
@@ -464,13 +463,10 @@ Regenerating prints the resolved feature set, e.g.
 out on Discord.
 
 > [!NOTE]
-> Standalone game projects locate the engine through `LUMINA_DIR`. `Setup.bat`
-> persists it via `setx`; `Setup.sh` offers to add it to your shell profile,
-> since Linux has no equivalent user environment store. To set it manually:
-> ```bash
-> setx LUMINA_DIR "C:\path\to\lumina"          # Windows
-> export LUMINA_DIR="/path/to/lumina"          # Linux, in your shell profile
-> ```
+> No environment variable is needed. Every engine checkout records itself the first
+> time any `LuminaBuild` command runs there, and a project can name its engine with
+> Switch Engine (right-click the `.lproject`, or `LuminaBuild SwitchEngine <file>`).
+> A project that names none uses whichever engine opens it.
 
 > [!CAUTION]
 > After pulling or merging, delete `Binaries/` and `Intermediates/`, then run

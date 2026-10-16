@@ -3,8 +3,6 @@
 #include "ECSReferenceProvider.h"
 
 #include "Registry.h"
-#include "World/World.h"
-#include "World/WorldManager.h"
 
 namespace Lumina
 {
@@ -36,23 +34,5 @@ namespace Lumina
                 }
             }
         }
-    }
-
-    void FECSObjectReferenceProvider::Register()
-    {
-        static FECSObjectReferenceProvider Instance;
-        FObjectReferenceProviders::Register(&Instance);
-    }
-
-    void FECSObjectReferenceProvider::VisitObjectReferences(FObjectReferenceVisitor::FSlotFunc Func)
-    {
-        if (GWorldManager != nullptr)
-        {
-            GWorldManager->ForEachWorld([&](CWorld& World)
-            {
-                VisitRegistryObjectReferences(ECS::GetWorldRegistry(World), Func);
-            });
-        }
-
     }
 }

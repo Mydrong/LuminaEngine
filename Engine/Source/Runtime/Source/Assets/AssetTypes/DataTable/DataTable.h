@@ -58,48 +58,48 @@ namespace Lumina
          *  Stored as a name rather than a struct reference: a CStruct is a reflection object created
          *  at module init, not a serializable asset, so a pointer to one cannot be written to a
          *  package. Read it through GetRowStruct(), which resolves and caches. */
-        PROPERTY()
+        PROPERTY(Hidden)
         FName RowStructName;
 
-        PROPERTY()
+        PROPERTY(Hidden)
         TVector<SDataTableRow> Rows;
 
         /** The resolved row type, or null if unset or its module is not loaded. */
-        RUNTIME_API NODISCARD CStruct* GetRowStruct() const;
+        NODISCARD RUNTIME_API CStruct* GetRowStruct() const;
 
         /** Points the table at a new row type. Drops every existing row: their fields belong to the
          *  old struct, and reinterpreting those bytes as a different layout is not a conversion. */
         RUNTIME_API void SetRowStruct(CStruct* InStruct);
 
         FUNCTION()
-        RUNTIME_API NODISCARD int32 GetRowCount() const { return (int32)Rows.size(); }
+        NODISCARD RUNTIME_API int32 GetRowCount() const { return (int32)Rows.size(); }
 
         /** Index of RowName, or Constants::kIndexNone. Linear: tables are authored small and read by name rarely
          *  enough that an index would cost more to keep coherent than it saves. */
         FUNCTION()
-        RUNTIME_API NODISCARD int32 FindRowIndex(const FName& RowName) const;
+        NODISCARD RUNTIME_API int32 FindRowIndex(const FName& RowName) const;
 
         FUNCTION()
-        RUNTIME_API NODISCARD bool HasRow(const FName& RowName) const { return FindRowIndex(RowName) != Constants::kIndexNone; }
+        NODISCARD RUNTIME_API bool HasRow(const FName& RowName) const { return FindRowIndex(RowName) != Constants::kIndexNone; }
 
         /** Row name at Index, or None when out of range. Lets a caller walk a table without the row memory. */
         FUNCTION()
-        RUNTIME_API NODISCARD FName GetRowNameAt(int32 Index) const;
+        NODISCARD RUNTIME_API FName GetRowNameAt(int32 Index) const;
 
         /** Byte size of one row instance, 0 without a resolved row type. Guards a value-type read. */
         FUNCTION()
-        RUNTIME_API NODISCARD int32 GetRowStructSize() const;
+        NODISCARD RUNTIME_API int32 GetRowStructSize() const;
 
         /** Row memory as RowStruct, or null when the name is unknown. */
         FUNCTION(ScriptInternal)
-        RUNTIME_API NODISCARD const void* FindRow(const FName& RowName) const;
+        NODISCARD RUNTIME_API const void* FindRow(const FName& RowName) const;
 
         // Row memory at Index, or null when out of range or the row does not hold the table's row type.
         FUNCTION(ScriptInternal)
-        RUNTIME_API NODISCARD const void* GetRowMemoryAt(int32 Index) const;
+        NODISCARD RUNTIME_API const void* GetRowMemoryAt(int32 Index) const;
 
         // FindRow starting from a remembered index, which is checked by name and refreshed when the row moved.
-        RUNTIME_API NODISCARD const void* FindRowHinted(const FName& RowName, int32& InOutIndex) const;
+        NODISCARD RUNTIME_API const void* FindRowHinted(const FName& RowName, int32& InOutIndex) const;
 
         /** Appends a default-constructed row. Returns its index, or Constants::kIndexNone with no RowStruct set. */
         RUNTIME_API int32 AddRow(const FName& RowName);
@@ -113,7 +113,7 @@ namespace Lumina
         RUNTIME_API void ClearRows();
 
         /** Unique "NewRow", "NewRow_1", ... for a table that already has rows. */
-        RUNTIME_API NODISCARD FName MakeUniqueRowName(const FName& Base) const;
+        NODISCARD RUNTIME_API FName MakeUniqueRowName(const FName& Base) const;
 
         RUNTIME_API void PostPropertyChange(FProperty* ChangedProperty) override;
 

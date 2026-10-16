@@ -27,6 +27,7 @@
 #include "World/Entity/Systems/KinematicsSystem.h"
 #include "World/Entity/Systems/SignificanceSystem.h"
 #include "World/Entity/Systems/SystemResources.h"
+#include "World/World.h"
 #include "World/WorldTypes.h"
 #include "Log/Log.h"
 #include "Renderer/SkeletonResource.h"
@@ -641,6 +642,7 @@ namespace Lumina
         {
             AnimGraph.NotifyEvents.clear();
             AnimGraph.PendingRootMotion = FRootMotionDelta();
+            DeltaTime = AnimGraph.bPlaying ? DeltaTime * AnimGraph.PlaybackSpeed : 0.0f;
 
             if (!AnimGraph.Graph.IsValid())
             {
@@ -897,8 +899,9 @@ namespace Lumina
         // Hoisted, since the graph bodies run in parallel and the context lookup is a per-type hash probe.
         const FKinematicsState* KinematicsState = Kinematics::GetState(SystemContext);
 
-        // A paused game holds its poses, while editor worlds run this stage to preview animation.
-        const bool   bFrozen   = SystemContext.GetUpdateStage() == EUpdateStage::Paused && SystemContext.GetWorldType() != EWorldType::Editor;
+        // A paused game holds its poses, while editor worlds run this stage to preview animation unless the world turned that off.
+        const bool bPreviewing = SystemContext.GetWorldType() == EWorldType::Editor && SystemContext.GetWorld()->AnimatesWhilePaused();
+        const bool   bFrozen   = SystemContext.GetUpdateStage() == EUpdateStage::Paused && !bPreviewing;
         const float  DeltaTime = bFrozen ? 0.0f : (float)SystemContext.GetDeltaTime();
         const double Now       = SystemContext.GetTime();
 

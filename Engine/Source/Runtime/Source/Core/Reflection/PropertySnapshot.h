@@ -18,6 +18,8 @@ namespace Lumina
 
         FPropertySnapshot(const FPropertySnapshot&) = delete;
         FPropertySnapshot& operator=(const FPropertySnapshot&) = delete;
+        FPropertySnapshot(FPropertySnapshot&&) = delete;
+        FPropertySnapshot& operator=(FPropertySnapshot&&) = delete;
 
         // Takes the fields and their current values in Container, dropping whatever was held before.
         void Capture(const TVector<FProperty*>& InFields, const void* Container);

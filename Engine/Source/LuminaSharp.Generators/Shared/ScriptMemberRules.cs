@@ -29,46 +29,49 @@ internal readonly struct FScriptMemberRule
     }
 }
 
-// The one copy of which attributes give a script member native storage, read by the type library, the rewriter, the struct layout and the analyzer.
+// The one copy of what a [Property] makes of a member, read by the type library, the rewriter, the struct layout and the analyzer.
 internal static class ScriptMemberRules
 {
-    public const string Property = "Property";
-    public const string Serialize = "Serialize";
-    public const string Sync = "Sync";
-    public const string SaveGame = "SaveGame";
-    public const string Bind = "Bind";
-    public const string Hide = "Hide";
+    public const string PropertyAttribute = "PropertyAttribute";
 
+    public const string Editable = "Editable";
+    public const string ReadOnly = "ReadOnly";
+    public const string Hidden = "Hidden";
+    public const string NoSerialize = "NoSerialize";
+    public const string SaveGame = "SaveGame";
+    public const string EditorOnly = "EditorOnly";
+    public const string DuplicateTransient = "DuplicateTransient";
+    public const string Sync = "Sync";
+    public const string Bind = "Bind";
+
+    private const uint ReadOnlyFlag = 1u << 1;
     private const uint NoSerializeFlag = 1u << 2;
+    private const uint EditorOnlyFlag = 1u << 11;
     private const uint ReplicatedFlag = 1u << 12;
+    private const uint DuplicateTransientFlag = 1u << 16;
     private const uint SaveGameFlag = 1u << 19;
 
-    // HasAttribute takes a bare name such as "SaveGame", without namespace or Attribute suffix.
-    public static FScriptMemberRule Classify(Func<string, bool> HasAttribute, EScriptMemberKind Kind, bool bOwnerIsNativeObject)
+    // HasSpecifier is null for a member with no [Property], and otherwise answers for a specifier or a named argument such as "Sync".
+    public static FScriptMemberRule Classify(Func<string, bool>? HasSpecifier, EScriptMemberKind Kind, bool bOwnerIsNativeObject)
     {
-        if (Kind == EScriptMemberKind.ReadOnlyProperty || HasAttribute(Hide))
+        if (HasSpecifier == null || Kind == EScriptMemberKind.ReadOnlyProperty)
         {
             return default;
         }
 
-        bool bProperty = HasAttribute(Property);
-        bool bSync = HasAttribute(Sync);
-        bool bSaveGame = HasAttribute(SaveGame);
-        bool bSerialize = HasAttribute(Serialize);
-
         // Only an object has a native block to put a UI binding in, so a plain view model keeps its own.
-        bool bBind = bOwnerIsNativeObject && HasAttribute(Bind);
+        if (HasSpecifier(Bind) && !bOwnerIsNativeObject)
+        {
+            return default;
+        }
 
-        bool bPersisted = bProperty || bSync || bSaveGame || bSerialize;
-        uint Flags = (bSync ? ReplicatedFlag : 0u) | (bSaveGame ? SaveGameFlag : 0u) | (bBind && !bPersisted ? NoSerializeFlag : 0u);
-        return new FScriptMemberRule(bPersisted || bBind, bProperty, Flags);
-    }
-
-    // Strips the namespace and the Attribute suffix, so a Roslyn name and a reflected type name compare alike.
-    public static string BareName(string AttributeName)
-    {
-        int Dot = AttributeName.LastIndexOf('.');
-        string Name = Dot >= 0 ? AttributeName.Substring(Dot + 1) : AttributeName;
-        return Name.EndsWith("Attribute", StringComparison.Ordinal) ? Name.Substring(0, Name.Length - "Attribute".Length) : Name;
+        bool bVisible = !HasSpecifier(Hidden);
+        uint Flags = (HasSpecifier(ReadOnly) ? ReadOnlyFlag : 0u)
+                   | (HasSpecifier(NoSerialize) ? NoSerializeFlag : 0u)
+                   | (HasSpecifier(EditorOnly) ? EditorOnlyFlag : 0u)
+                   | (HasSpecifier(Sync) ? ReplicatedFlag : 0u)
+                   | (HasSpecifier(DuplicateTransient) ? DuplicateTransientFlag : 0u)
+                   | (HasSpecifier(SaveGame) ? SaveGameFlag : 0u);
+        return new FScriptMemberRule(true, bVisible, Flags);
     }
 }
