@@ -713,10 +713,10 @@ namespace Lumina
         FUIntVector2 GetRenderExtent() const override;
         ECS::FEntity GetEntityAtPixel(uint32 X, uint32 Y) const override;
         bool GetSurfaceAtPixel(uint32 X, uint32 Y, TSpan<const ECS::FEntity> Ignored, FVector3& OutPosition, FVector3& OutNormal) const override;
+        #if USING(WITH_EDITOR)
         void RequestSurfaceSnapshot() override;
         void ReleaseSurfaceSnapshot() override;
         bool IsSurfaceSnapshotReady() const override;
-        #if USING(WITH_EDITOR)
         void SetPickerCursor(uint32 X, uint32 Y, bool bOverViewport) override;
         #endif
         const FShadowAtlas* GetShadowAtlas() const override { return &ShadowAtlas; }
