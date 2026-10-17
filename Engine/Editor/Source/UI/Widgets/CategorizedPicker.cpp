@@ -220,7 +220,8 @@ namespace Lumina
             Picked = SelectedItem;
         }
 
-        return Picked >= 0 && Picked < (int32)Items.size() ? &Items[Picked] : nullptr;
+        // Enter reaches a disabled item the same as the arrow keys do, so it is refused here rather than per input.
+        return Picked >= 0 && Picked < (int32)Items.size() && !Items[Picked].bDisabled ? &Items[Picked] : nullptr;
     }
 
     void FCategorizedPicker::Rebuild(const FGatherItems& Gather)
@@ -437,12 +438,13 @@ namespace Lumina
         const bool bSelected = ItemIndex == SelectedItem;
 
         ImGui::PushID(ItemIndex);
+        ImGui::BeginDisabled(Item.bDisabled);
         const ImVec2 RowStart = ImGui::GetCursorScreenPos();
         if (ImGui::Selectable("##Item", bSelected, ImGuiSelectableFlags_SpanAvailWidth, ImVec2(0.0f, ImGui::GetTextLineHeight() + 4.0f)))
         {
             OutPicked = ItemIndex;
         }
-        const bool bHovered = ImGui::IsItemHovered();
+        const bool bHovered = ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled);
         if (bSelected && bScrollToSelected)
         {
             ImGui::SetScrollHereY(0.5f);
@@ -456,6 +458,7 @@ namespace Lumina
             ImGui::SameLine();
         }
         DrawPickerMatchedName(Item.Name, ItemMatches[ItemIndex]);
+        ImGui::EndDisabled();
 
         if (bHovered && !Item.Tooltip.empty())
         {

@@ -595,7 +595,7 @@ namespace Lumina
 			PrimaryWindow = InWindow;
 		}
 
-		void SetCursorModeForNativeWindow(void* NativeWindow, ECursorMode Mode)
+		void SetCursorModeForNativeWindow(void* NativeWindow, ECursorMode Mode, bool bRawMotion)
 		{
 			GLFWwindow* Window = static_cast<GLFWwindow*>(NativeWindow);
 			if (Window == nullptr)
@@ -615,6 +615,10 @@ namespace Lumina
 			case ECursorMode::Disabled: Value = GLFW_CURSOR_DISABLED; break;
 			}
 			glfwSetInputMode(Window, GLFW_CURSOR, Value);
+			if (glfwRawMouseMotionSupported())
+			{
+				glfwSetInputMode(Window, GLFW_RAW_MOUSE_MOTION, (bRawMotion && Mode == ECursorMode::Disabled) ? GLFW_TRUE : GLFW_FALSE);
+			}
 		}
 
 		bool IsNativeWindowFocused(void* NativeWindow)
@@ -625,6 +629,23 @@ namespace Lumina
 				return false;
 			}
 			return glfwGetWindowAttrib(Window, GLFW_FOCUSED) != 0;
+		}
+
+		bool ReadGamepad(int32 Index, FRawGamepad& Out)
+		{
+			const int Joystick = GLFW_JOYSTICK_1 + Index;
+			GLFWgamepadstate State;
+			if (Joystick > GLFW_JOYSTICK_LAST || !glfwJoystickIsGamepad(Joystick) || !glfwGetGamepadState(Joystick, &State))
+			{
+				return false;
+			}
+
+			static_assert(sizeof(Out.Axes) / sizeof(float) == GLFW_GAMEPAD_AXIS_LAST + 1);
+			static_assert(sizeof(Out.Buttons) == GLFW_GAMEPAD_BUTTON_LAST + 1);
+			Memory::Memcpy(Out.Axes, State.axes, sizeof(Out.Axes));
+			Memory::Memcpy(Out.Buttons, State.buttons, sizeof(Out.Buttons));
+			Out.Name = glfwGetGamepadName(Joystick);
+			return true;
 		}
 	}
 }

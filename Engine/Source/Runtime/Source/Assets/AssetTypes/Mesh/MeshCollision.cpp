@@ -1,9 +1,9 @@
 #include "RuntimePCH.h"
-#include "CollisionShape.h"
+#include "MeshCollision.h"
 
 namespace Lumina
 {
-    bool CCollisionShape::HasCollision() const
+    bool SMeshCollision::HasCollision() const
     {
         if (bUseTriangleMesh)
         {
@@ -22,7 +22,7 @@ namespace Lumina
         return false;
     }
 
-    int32 CCollisionShape::NumHullPoints() const
+    int32 SMeshCollision::NumHullPoints() const
     {
         int32 Total = 0;
         for (const SCollisionPrimitive& Primitive : Primitives)
@@ -36,7 +36,7 @@ namespace Lumina
         return Total;
     }
 
-    void CCollisionShape::ClearGeneratedShapes()
+    void SMeshCollision::Clear()
     {
         Primitives.clear();
         TriangleVertices.clear();

@@ -15,7 +15,7 @@
 #include "DotNet/DotNetHost.h"
 #include "Core/Object/Class.h"
 #include "Core/Object/InstancedStruct.h"
-#include "Core/Object/ObjectArray.h"
+#include "Core/Object/ObjectIteration.h"
 #include "Core/Object/ObjectCore.h"
 #include "Core/Object/ObjectBase.h"
 #include "Core/Object/ManagedInstance.h"
@@ -126,7 +126,7 @@ namespace Lumina
         {
             int32 LiveInstances = 0;
             int32 LiveSubclasses = 0;
-            GObjectArray.ForEachObject([&](CObjectBase* Base, int32)
+            ForEachObject([&](CObjectBase* Base, int32)
             {
                 if (Base == nullptr || Base->HasAnyFlag(OF_MarkedDestroy))
                 {

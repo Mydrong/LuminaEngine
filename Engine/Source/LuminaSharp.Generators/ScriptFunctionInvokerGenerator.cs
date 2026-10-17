@@ -111,7 +111,9 @@ public sealed class ScriptFunctionInvokerGenerator : IIncrementalGenerator
                 : WriteStatement(ReturnSlot, "__result", ReturnType, bReturnIsBool);
         }
 
+        // Native calls the published pointer directly, so it has to be an entry point that makes the GC transition.
         var Builder = new StringBuilder();
+        Builder.Append("        [global::System.Runtime.InteropServices.UnmanagedCallersOnly]\n");
         Builder.Append("        private static void Invoke_").Append(Method.Name)
                .Append("(nint __instance, nint __frame, int* __offsets)\n        {\n");
         Builder.Append("            var __target = (").Append(OwnerName).Append(")global::System.Runtime.InteropServices.GCHandle.FromIntPtr(__instance).Target!;\n");
@@ -263,7 +265,7 @@ public sealed class ScriptFunctionInvokerGenerator : IIncrementalGenerator
             {
                 Builder.Append("            global::LuminaSharp.ScriptInvokerRegistry.Register(typeof(")
                        .Append(Entry.OwnerFullyQualified).Append("), \"").Append(Entry.Function)
-                       .Append("\", (nint)(delegate* managed<nint, nint, int*, void>)&Invoke_")
+                       .Append("\", (nint)(delegate* unmanaged<nint, nint, int*, void>)&Invoke_")
                        .Append(Entry.Function).Append(");\n");
             }
             Builder.Append("        }\n    }\n}\n");

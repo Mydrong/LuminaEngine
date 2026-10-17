@@ -11,15 +11,14 @@ namespace Lumina
         RequireUpdate(EUpdateStage::FrameStart, EUpdatePriority::Highest);
     }
 
-    bool STweenSystem::HasWork(EUpdateStage)
+    bool STweenSystem::HasWork(const SSystemContext& Context)
     {
         const FTweenManager* Tweens = GetWorld() != nullptr ? ECS::GetWorldRegistry(*GetWorld()).Ctx().Find<FTweenManager>() : nullptr;
         return Tweens != nullptr && Tweens->HasTweens();
     }
 
-    void STweenSystem::OnUpdate()
+    void STweenSystem::OnUpdate(const SSystemContext& Context)
     {
-        const FSystemContext& Context = GetContext();
 
         LUMINA_PROFILE_SCOPE();
 

@@ -45,9 +45,9 @@ namespace Lumina
 
         void Configure() override;
 
-        void OnStartup() override;
-        void OnUpdate() override;
-        void OnTeardown() override;
+        void OnStartup(const SSystemContext& Context) override;
+        void OnUpdate(const SSystemContext& Context) override;
+        void OnTeardown(const SSystemContext& Context) override;
 
         /** Restamps the active camera's ViewVolume from its live transform, advancing no blend or shake clock. */
         RUNTIME_API static void ResolveActiveCameraView(ECS::FRegistry& Registry);

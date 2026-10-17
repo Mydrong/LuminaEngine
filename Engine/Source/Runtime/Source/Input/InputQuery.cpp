@@ -1,9 +1,10 @@
 #include "RuntimePCH.h"
 #include "Input/InputQuery.h"
 
+#include "Config/GameUserSettings.h"
+
 #include "Input/InputActionMap.h"
 #include "Input/InputContext.h"
-#include "Input/InputProcessor.h"
 #include "Input/InputViewport.h"
 
 namespace Lumina::Input
@@ -36,21 +37,6 @@ namespace Lumina::Input
         static const SInputActionState Empty;
         const FInputContext* Context = GetReceivingContext(World);
         return Context != nullptr ? FInputActionMap::Get().GetActionState(Action, *Context) : Empty;
-    }
-
-    bool  IsActionDown    (const CWorld* World, const SInputActionHandle& Action) { return GetActionState(World, Action).IsDown(); }
-    bool  IsActionPressed (const CWorld* World, const SInputActionHandle& Action) { return GetActionState(World, Action).IsPressed(); }
-    bool  IsActionReleased(const CWorld* World, const SInputActionHandle& Action) { return GetActionState(World, Action).IsReleased(); }
-    bool  IsActionHeld    (const CWorld* World, const SInputActionHandle& Action) { return GetActionState(World, Action).IsHeld(); }
-    bool  WasActionTapped (const CWorld* World, const SInputActionHandle& Action) { return GetActionState(World, Action).IsTapped(); }
-
-    float GetActionAxis   (const CWorld* World, const SInputActionHandle& Action) { return GetActionState(World, Action).X; }
-    float GetActionHeldTime(const CWorld* World, const SInputActionHandle& Action) { return GetActionState(World, Action).HeldTime; }
-
-    FVector2 GetActionAxis2D(const CWorld* World, const SInputActionHandle& Action)
-    {
-        const SInputActionState& State = GetActionState(World, Action);
-        return FVector2(State.X, State.Y);
     }
 
     // A world must arm its pause layer while the editor holds focus, or the layer silently fails.
@@ -142,6 +128,144 @@ namespace Lumina::Input
         return Context != nullptr ? (float)Context->GetMouseZ() : 0.0f;
     }
 
+    bool IsGamepadConnected(const CWorld* World)
+    {
+        const FInputContext* Context = GetReceivingContext(World);
+        return Context != nullptr && Context->IsGamepadConnected();
+    }
+
+    bool IsGamepadButtonDown(const CWorld* World, EGamepadButton Button)
+    {
+        const FInputContext* Context = GetReceivingContext(World);
+        return Context != nullptr && Context->IsGamepadButtonDown(Button);
+    }
+
+    bool IsGamepadButtonPressed(const CWorld* World, EGamepadButton Button)
+    {
+        const FInputContext* Context = GetReceivingContext(World);
+        return Context != nullptr && Context->IsGamepadButtonPressed(Button);
+    }
+
+    bool IsGamepadButtonReleased(const CWorld* World, EGamepadButton Button)
+    {
+        const FInputContext* Context = GetReceivingContext(World);
+        return Context != nullptr && Context->IsGamepadButtonReleased(Button);
+    }
+
+    float GetGamepadAxis(const CWorld* World, EGamepadAxis Axis)
+    {
+        const FInputContext* Context = GetReceivingContext(World);
+        return Context != nullptr ? Context->GetGamepadAxis(Axis) : 0.0f;
+    }
+
+    FVector2 GetGamepadLeftStick(const CWorld* World)
+    {
+        return FVector2(GetGamepadAxis(World, EGamepadAxis::LeftX), GetGamepadAxis(World, EGamepadAxis::LeftY));
+    }
+
+    FVector2 GetGamepadRightStick(const CWorld* World)
+    {
+        return FVector2(GetGamepadAxis(World, EGamepadAxis::RightX), GetGamepadAxis(World, EGamepadAxis::RightY));
+    }
+
+    bool ConsumeBufferedPress(const CWorld* World, const SInputActionHandle& Action)
+    {
+        FInputContext* Context = GetReceivingContext(World) != nullptr ? FindOwnContext(World) : nullptr;
+        return Context != nullptr && Context->ConsumeBufferedPress(FInputActionMap::Get().ResolveIndex(Action));
+    }
+
+    EInputDevice GetLastUsedDevice(const CWorld* World)
+    {
+        const FInputContext* Context = FindOwnContext(World);
+        return Context != nullptr ? Context->GetLastUsedDevice() : EInputDevice::KeyboardMouse;
+    }
+
+    EGamepadFamily GetGamepadFamily()
+    {
+        // Pads are global, while a viewport that is not active is fed a disconnected one with no family.
+        return FInputViewportRegistry::Get().GetGamepads().GetCombined().Family;
+    }
+
+    FString GetActionPrompt(const CWorld* World, const SInputActionHandle& Action)
+    {
+        const FInputActionMap& Map = FInputActionMap::Get();
+        const int32 Index = Map.ResolveIndex(Action);
+        if (Index == Constants::kIndexNone)
+        {
+            return FString();
+        }
+
+        const bool bGamepad = GetLastUsedDevice(World) == EInputDevice::Gamepad;
+        const EGamepadFamily Family = GetGamepadFamily();
+        for (const SInputActionBinding& Binding : Map.GetAllActions()[Index].Bindings)
+        {
+            if (Binding.Source == EInputAxisSource::Key)
+            {
+                if (Binding.Key.IsValid() && Binding.Key.IsGamepad() == bGamepad)
+                {
+                    return bGamepad ? GetGamepadButtonDisplayName(Binding.Key.GamepadButton, Family) : Binding.Key.GetDisplayName();
+                }
+                continue;
+            }
+
+            const bool bGamepadSource = Binding.Source >= EInputAxisSource::GamepadLeftX;
+            if (bGamepadSource == bGamepad)
+            {
+                return Binding.GetDisplayName(Family);
+            }
+        }
+        return FString();
+    }
+
+    static const SInputActionBinding* FindBinding(FName Action, int32 BindingIndex)
+    {
+        const SInputAction* Found = FInputActionMap::Get().FindAction(Action);
+        return (Found != nullptr && BindingIndex >= 0 && BindingIndex < int32(Found->Bindings.size())) ? &Found->Bindings[BindingIndex] : nullptr;
+    }
+
+    int32 GetBindingCount(FName Action)
+    {
+        const SInputAction* Found = FInputActionMap::Get().FindAction(Action);
+        return Found != nullptr ? int32(Found->Bindings.size()) : 0;
+    }
+
+    FString GetBindingDisplayName(FName Action, int32 BindingIndex)
+    {
+        const SInputActionBinding* Binding = FindBinding(Action, BindingIndex);
+        return Binding != nullptr ? Binding->GetDisplayName(GetGamepadFamily()) : FString();
+    }
+
+    bool IsBindingRebindable(FName Action, int32 BindingIndex)
+    {
+        const SInputActionBinding* Binding = FindBinding(Action, BindingIndex);
+        return Binding != nullptr && Binding->Source == EInputAxisSource::Key;
+    }
+
+    bool BeginRebind(FName Action, int32 BindingIndex)
+    {
+        return FInputViewportRegistry::Get().BeginRebind(Action, BindingIndex);
+    }
+
+    void CancelRebind()
+    {
+        FInputViewportRegistry::Get().CancelRebind();
+    }
+
+    bool IsRebinding()
+    {
+        return FInputViewportRegistry::Get().IsRebinding();
+    }
+
+    FName GetRebindConflict()
+    {
+        return FInputViewportRegistry::Get().GetRebindConflict();
+    }
+
+    void ResetBindings(FName Action)
+    {
+        CGameUserSettings::Get().ResetBindingOverrides(Action);
+    }
+
     TSpan<const SInputEvent> GetFrameEvents(const CWorld* World)
     {
         const FInputContext* Context = GetReceivingContext(World);
@@ -155,7 +279,7 @@ namespace Lumina::Input
 
     void SetMouseMode(const CWorld* World, EMouseMode Mode)
     {
-        FInputProcessor::Get().SetMouseMode(Mode, World);
+        FInputViewportRegistry::Get().SetMouseMode(Mode, World);
     }
 
     EMouseMode GetMouseMode(const CWorld* World)

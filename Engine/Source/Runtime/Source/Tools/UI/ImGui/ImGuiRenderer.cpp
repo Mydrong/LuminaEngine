@@ -334,8 +334,13 @@ namespace Lumina
     	io.ConfigViewportsNoDefaultParent = true;
     	io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;     // Enable Keyboard Controls
     	io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;         // Enable Docking
-    	io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;       // Enable Multi-Viewport / Platform Windows
-    	io.BackendFlags |= ImGuiBackendFlags_PlatformHasViewports;
+
+    	// A game overlay keeps every window inside the game window rather than tearing them out into OS windows.
+    	if (!bOverlay)
+    	{
+    		io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
+    		io.BackendFlags |= ImGuiBackendFlags_PlatformHasViewports;
+    	}
 
 #if USING(WITH_EDITOR)
     	// One layout for the whole editor, rather than an imgui.ini in whatever directory the editor was launched from.
@@ -347,7 +352,17 @@ namespace Lumina
     	}
     	io.IniFilename = LayoutFilePath.c_str();
 #else
-    	io.IniFilename = nullptr;
+    	// Window positions persist per project, so a debug panel stays where it was dragged between runs.
+    	if (GEngine != nullptr && !GEngine->GetProjectPath().empty())
+    	{
+    		LayoutFilePath = FString(Paths::Combine(GEngine->GetProjectPath(), "Saved", "DevUILayout.ini").c_str());
+    		Filesystem::MakeParentDirectoryTree(LayoutFilePath);
+    		io.IniFilename = LayoutFilePath.c_str();
+    	}
+    	else
+    	{
+    		io.IniFilename = nullptr;
+    	}
 #endif
 
         ImGui::StyleColorsDark();
@@ -420,6 +435,7 @@ namespace Lumina
     	RefreshUIScaleIfNeeded();
     	RefreshStyleIfPaletteChanged();
     	OnStartFrame(UpdateContext);
+    	bFrameOpen = true;
     }
 
     ImDrawData* IImGuiRenderer::BuildFrame()
@@ -429,9 +445,14 @@ namespace Lumina
         // DisplaySize is not set here; NewFrame already consumed it and the GLFW backend restamps it.
         ImGuiIO& Io = ImGui::GetIO();
 
-        ImGuiX::NativeFrames::Update();
-        ImGuiX::Notifications::Render();
+        // Editor toasts such as a script recompile are noise over a running game, and their queue is capped either way.
+        if (!bOverlay)
+        {
+            ImGuiX::NativeFrames::Update();
+            ImGuiX::Notifications::Render();
+        }
         ImGui::Render();
+        bFrameOpen = false;
 
         ProcessTextureUpdates();
 

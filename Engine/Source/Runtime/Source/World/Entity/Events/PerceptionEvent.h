@@ -1,6 +1,7 @@
 #pragma once
 
 #include "World/ECS/Registry.h"
+#include "World/ECS/EventMeta.h"
 
 #include "Core/Object/ObjectMacros.h"
 #include "Core/Math/Math.h"
@@ -9,10 +10,7 @@
 
 namespace Lumina
 {
-    // Payload for the OnTargetPerceived / OnTargetLost EntityScript callbacks. Self-oriented: Perceiver is
-    // this entity, Target is the sensed/lost entity. Every field is blittable (ECS::FEntity surfaces as the
-    // C# Entity handle), so the Reflector auto-generates the LuminaSharp SPerceptionEvent value mirror + a
-    // native size assert, no hand-written mirror.
+    // A perceiver gained or lost a target, queued for systems and fanned out to its perception component's delegates.
     REFLECT(Event)
     struct RUNTIME_API SPerceptionEvent
     {
@@ -37,5 +35,16 @@ namespace Lumina
         /** Damage amount / noise loudness for hearing+damage; 0 for sight. */
         PROPERTY(Hidden)
         float Strength = 0.0f;
+
+        // False when the target was lost, which picks OnTargetLost over OnTargetPerceived.
+        PROPERTY(Hidden)
+        bool bPerceived = true;
+    };
+
+    // Defined beside the perception component it delivers to, which this header cannot see.
+    template<>
+    struct TEventFanOut<SPerceptionEvent>
+    {
+        RUNTIME_API static void Deliver(ECS::FRegistry& Registry, const SPerceptionEvent& Event);
     };
 }

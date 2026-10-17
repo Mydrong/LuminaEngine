@@ -1,7 +1,10 @@
 ﻿#include "RuntimePCH.h"
 #include "InputViewport.h"
 
+#include "Config/GameUserSettings.h"
+#include "Config/InputSettings.h"
 #include "Core/Diagnostics/BenchmarkRun.h"
+#include "Core/Object/ObjectCore.h"
 #include "Core/Windows/Window.h"
 #include "Events/Event.h"
 #include "Input/InputActionMap.h"
@@ -25,38 +28,23 @@ namespace Lumina
             case EMouseMode::Normal:   CursorMode = ECursorMode::Normal;   break;
             case EMouseMode::Captured: CursorMode = ECursorMode::Disabled; break;
             }
-            Windowing::SetCursorModeForNativeWindow(NativeWindow, CursorMode);
+            Windowing::SetCursorModeForNativeWindow(NativeWindow, CursorMode, FInputActionMap::Get().GetPlayerSettings().bRawMouseInput);
         }
 
         Rml::Input::KeyIdentifier ToRmlKey(EKey Key)
         {
             using K = Rml::Input::KeyIdentifier;
+
+            // Digits, letters, function keys and the numpad run contiguously in both enums.
+            auto InRange = [Key](EKey First, EKey Last) { return Key >= First && Key <= Last; };
+            auto Offset  = [Key](EKey First, K RmlFirst) { return K(int(RmlFirst) + (int(Key) - int(First))); };
+            if (InRange(EKey::D0, EKey::D9))   { return Offset(EKey::D0, K::KI_0); }
+            if (InRange(EKey::A, EKey::Z))     { return Offset(EKey::A, K::KI_A); }
+            if (InRange(EKey::F1, EKey::F24))  { return Offset(EKey::F1, K::KI_F1); }
+            if (InRange(EKey::KP0, EKey::KP9)) { return Offset(EKey::KP0, K::KI_NUMPAD0); }
+
             switch (Key)
             {
-            case EKey::A: return K::KI_A;  case EKey::B: return K::KI_B;
-            case EKey::C: return K::KI_C;  case EKey::D: return K::KI_D;
-            case EKey::E: return K::KI_E;  case EKey::F: return K::KI_F;
-            case EKey::G: return K::KI_G;  case EKey::H: return K::KI_H;
-            case EKey::I: return K::KI_I;  case EKey::J: return K::KI_J;
-            case EKey::K: return K::KI_K;  case EKey::L: return K::KI_L;
-            case EKey::M: return K::KI_M;  case EKey::N: return K::KI_N;
-            case EKey::O: return K::KI_O;  case EKey::P: return K::KI_P;
-            case EKey::Q: return K::KI_Q;  case EKey::R: return K::KI_R;
-            case EKey::S: return K::KI_S;  case EKey::T: return K::KI_T;
-            case EKey::U: return K::KI_U;  case EKey::V: return K::KI_V;
-            case EKey::W: return K::KI_W;  case EKey::X: return K::KI_X;
-            case EKey::Y: return K::KI_Y;  case EKey::Z: return K::KI_Z;
-            case EKey::D0: return K::KI_0; case EKey::D1: return K::KI_1;
-            case EKey::D2: return K::KI_2; case EKey::D3: return K::KI_3;
-            case EKey::D4: return K::KI_4; case EKey::D5: return K::KI_5;
-            case EKey::D6: return K::KI_6; case EKey::D7: return K::KI_7;
-            case EKey::D8: return K::KI_8; case EKey::D9: return K::KI_9;
-            case EKey::F1:  return K::KI_F1;  case EKey::F2:  return K::KI_F2;
-            case EKey::F3:  return K::KI_F3;  case EKey::F4:  return K::KI_F4;
-            case EKey::F5:  return K::KI_F5;  case EKey::F6:  return K::KI_F6;
-            case EKey::F7:  return K::KI_F7;  case EKey::F8:  return K::KI_F8;
-            case EKey::F9:  return K::KI_F9;  case EKey::F10: return K::KI_F10;
-            case EKey::F11: return K::KI_F11; case EKey::F12: return K::KI_F12;
             case EKey::Space:        return K::KI_SPACE;
             case EKey::Enter:        return K::KI_RETURN;
             case EKey::Tab:          return K::KI_TAB;
@@ -104,6 +92,16 @@ namespace Lumina
             }
         }
 
+        int ModifiersFromContext(const FInputContext& Context)
+        {
+            using namespace Rml::Input;
+            int Mods = 0;
+            if (Context.IsCtrlDownRaw())  Mods |= KM_CTRL;
+            if (Context.IsShiftDownRaw()) Mods |= KM_SHIFT;
+            if (Context.IsAltDownRaw())   Mods |= KM_ALT;
+            return Mods;
+        }
+
         int ModifiersFromKeyEvent(const FKeyEvent& KeyEvent)
         {
             using namespace Rml::Input;
@@ -147,48 +145,28 @@ namespace Lumina
         Context->OnEvent(Event);
 
         const EInputMode Mode = Context->GetInputMode();
-        const bool bWantsUI   = (Mode == EInputMode::UI || Mode == EInputMode::GameAndUI);
-
-        if (!bWantsUI)
+        if (Mode != EInputMode::UI && Mode != EInputMode::GameAndUI)
         {
             return false;
         }
 
-        if (Event.IsA<FMouseMovedEvent>())
-        {
-            FMouseMovedEvent& E = Event.As<FMouseMovedEvent>();
-            if (!ContainsWindowPoint(int(E.GetX()), int(E.GetY())))
-            {
-                return false;
-            }
-            return ForwardMouseEventToRmlUi(Event);
-        }
-        if (Event.IsA<FMouseButtonPressedEvent>())
-        {
-            FMouseButtonEvent& E = Event.As<FMouseButtonPressedEvent>();
-            if (!ContainsWindowPoint(int(E.GetX()), int(E.GetY())))
-            {
-                return false;
-            }
-            return ForwardMouseEventToRmlUi(Event);
-        }
-        if (Event.IsA<FMouseButtonReleasedEvent>())
-        {
-            // Forward unconditionally so RmlUi can close out an in-progress drag.
-            return ForwardMouseEventToRmlUi(Event);
-        }
-        if (Event.IsA<FMouseScrolledEvent>())
-        {
-            return ForwardMouseEventToRmlUi(Event);
-        }
-        if (Event.IsA<FKeyPressedEvent>()
-            || Event.IsA<FKeyReleasedEvent>()
-            || Event.IsA<FCharInputEvent>())
+        if (Event.IsA<FKeyPressedEvent>() || Event.IsA<FKeyReleasedEvent>() || Event.IsA<FCharInputEvent>())
         {
             return ForwardKeyEventToRmlUi(Event);
         }
 
-        return false;
+        // A move or press outside the panel is not the UI's, while a release always goes through so a drag can finish.
+        if (Event.IsA<FMouseMovedEvent>())
+        {
+            const FMouseMovedEvent& Move = Event.As<FMouseMovedEvent>();
+            return ContainsWindowPoint(int(Move.GetX()), int(Move.GetY())) && ForwardMouseEventToRmlUi(Event);
+        }
+        if (Event.IsA<FMouseButtonPressedEvent>())
+        {
+            const FMouseButtonEvent& Press = Event.As<FMouseButtonPressedEvent>();
+            return ContainsWindowPoint(int(Press.GetX()), int(Press.GetY())) && ForwardMouseEventToRmlUi(Event);
+        }
+        return ForwardMouseEventToRmlUi(Event);
     }
 
     bool FInputViewport::ForwardMouseEventToRmlUi(FEvent& Event)
@@ -212,7 +190,7 @@ namespace Lumina
             return false;
         }
 
-        const int Mods = Context->GetCachedModifierState();
+        const int Mods = ModifiersFromContext(*Context);
 
         if (Event.IsA<FMouseMovedEvent>())
         {
@@ -258,20 +236,16 @@ namespace Lumina
         if (Event.IsA<FKeyPressedEvent>())
         {
             FKeyPressedEvent& E = Event.As<FKeyPressedEvent>();
-            const int Mods = ModifiersFromKeyEvent(E);
-            Context->SetCachedModifierState(Mods);
             const Rml::Input::KeyIdentifier RmlKey = ToRmlKey(E.GetKeyCode());
             if (RmlKey == Rml::Input::KI_UNKNOWN) return false;
-            return !Ctx->ProcessKeyDown(RmlKey, Mods);
+            return !Ctx->ProcessKeyDown(RmlKey, ModifiersFromKeyEvent(E));
         }
         if (Event.IsA<FKeyReleasedEvent>())
         {
             FKeyReleasedEvent& E = Event.As<FKeyReleasedEvent>();
-            const int Mods = ModifiersFromKeyEvent(E);
-            Context->SetCachedModifierState(Mods);
             const Rml::Input::KeyIdentifier RmlKey = ToRmlKey(E.GetKeyCode());
             if (RmlKey == Rml::Input::KI_UNKNOWN) return false;
-            return !Ctx->ProcessKeyUp(RmlKey, Mods);
+            return !Ctx->ProcessKeyUp(RmlKey, ModifiersFromKeyEvent(E));
         }
         if (Event.IsA<FCharInputEvent>())
         {
@@ -315,9 +289,9 @@ namespace Lumina
             Viewports.erase(It);
         }
 
-        if (ActiveViewport  == Viewport) ActiveViewport  = Viewports.empty() ? nullptr : Viewports.front();
-        if (HoveredViewport == Viewport) HoveredViewport = nullptr;
-        if (FocusedViewport == Viewport) FocusedViewport = nullptr;
+        if (ActiveViewport     == Viewport) ActiveViewport     = Viewports.empty() ? nullptr : Viewports.front();
+        if (HoveredViewport    == Viewport) HoveredViewport    = nullptr;
+        if (MousePressViewport == Viewport) MousePressViewport = nullptr;
 
         ApplyActiveCursorMode();
     }
@@ -360,8 +334,60 @@ namespace Lumina
         {
             return;
         }
+        if (ActiveViewport != nullptr)
+        {
+            ActiveViewport->GetContext().ResetState();
+        }
         ActiveViewport = Viewport;
         ApplyActiveCursorMode();
+    }
+
+    void FInputViewportRegistry::UpdateViewportFocus(FInputViewport* Viewport, bool bHovered, bool bEditorFocused)
+    {
+        if (Viewport == nullptr)
+        {
+            return;
+        }
+
+        if (bHovered)
+        {
+            HoveredViewport = Viewport;
+        }
+        else if (HoveredViewport == Viewport)
+        {
+            HoveredViewport = nullptr;
+        }
+
+        if (!bGameInputFocused)
+        {
+            if (bEditorFocused)
+            {
+                SetActiveViewport(Viewport);
+            }
+            return;
+        }
+
+        // Editor focus lies under a captured cursor, while exactly one OS window is focused, so separate preview windows hand over cleanly.
+        const bool bActiveWindowFocused = ActiveViewport != nullptr && Windowing::IsNativeWindowFocused(ActiveViewport->GetNativeWindowHandle());
+        if (!bActiveWindowFocused && Windowing::IsNativeWindowFocused(Viewport->GetNativeWindowHandle()))
+        {
+            SetActiveViewport(Viewport);
+        }
+    }
+
+    void FInputViewportRegistry::TakeGameFocus(FInputViewport* Viewport)
+    {
+        if (Viewport != nullptr)
+        {
+            SetActiveViewport(Viewport);
+        }
+        SetGameInputFocused(true);
+    }
+
+    bool FInputViewportRegistry::IsGameOwningInput() const
+    {
+        const CWorld* ActiveWorld = ActiveViewport != nullptr ? ActiveViewport->GetWorld() : nullptr;
+        return bGameInputFocused && ActiveWorld != nullptr && ActiveWorld->IsGameWorld();
     }
 
     void FInputViewportRegistry::SetHoveredViewport(FInputViewport* Viewport)
@@ -381,23 +407,128 @@ namespace Lumina
         ApplyActiveCursorMode();
     }
 
-    void FInputViewportRegistry::SetFocusedViewport(FInputViewport* Viewport)
+    void FInputViewportRegistry::SetDevOverlayCapturing(bool bCapturing)
     {
-        if (FocusedViewport == Viewport)
+        if (bDevOverlayCapturing == bCapturing)
+        {
+            return;
+        }
+        bDevOverlayCapturing = bCapturing;
+
+        // A key held as the overlay opens would otherwise stay down for the game until it is pressed again.
+        OnWindowFocusLost();
+        ApplyActiveCursorMode();
+    }
+
+    bool FInputViewportRegistry::IsActiveViewportReceivingGamepad() const
+    {
+        if (ActiveViewport == nullptr || !bGameInputFocused || bDevOverlayCapturing)
+        {
+            return false;
+        }
+
+        void* Window = ActiveViewport->GetNativeWindowHandle();
+        if (Window == nullptr)
+        {
+            FWindow* Primary = Windowing::TryGetPrimaryWindowHandle();
+            Window = Primary != nullptr ? Primary->GetWindow() : nullptr;
+        }
+        return Window != nullptr && Windowing::IsNativeWindowFocused(Window);
+    }
+
+    void FInputViewportRegistry::FeedGamepads()
+    {
+        const CInputSettings* Settings = GetDefault<CInputSettings>();
+        FGamepadTuning Tuning;
+        Tuning.StickDeadZone = Settings->GamepadStickDeadZone;
+        Tuning.TriggerDeadZone = Settings->GamepadTriggerDeadZone;
+        Tuning.TriggerPressThreshold = Settings->GamepadTriggerPressThreshold;
+        Tuning.StickPressThreshold = Settings->GamepadStickPressThreshold;
+        Gamepads.Poll(Tuning);
+
+        const FGamepadState Disconnected;
+        const bool bActiveReceives = IsActiveViewportReceivingGamepad();
+        for (FInputViewport* V : Viewports)
+        {
+            V->GetContext().SetGamepadState((bActiveReceives && V == ActiveViewport) ? Gamepads.GetCombined() : Disconnected);
+        }
+        RawInput->SetGamepadState(Gamepads.GetCombined());
+    }
+
+    bool FInputViewportRegistry::BeginRebind(FName Action, int32 BindingIndex)
+    {
+        const SInputAction* Found = FInputActionMap::Get().FindAction(Action);
+        if (Found == nullptr || BindingIndex < 0 || BindingIndex >= int32(Found->Bindings.size())
+            || Found->Bindings[BindingIndex].Source != EInputAxisSource::Key)
+        {
+            return false;
+        }
+        RebindAction = Action;
+        RebindIndex = BindingIndex;
+        bRebindArmed = false;
+        RebindConflict = FName();
+        return true;
+    }
+
+    void FInputViewportRegistry::PollRebind()
+    {
+        if (RebindAction.IsNone())
         {
             return;
         }
 
-        // Otherwise a key held during the focus change reappears as "down" on return.
-        if (FocusedViewport != nullptr)
+        // The press that opened the capture, such as a menu click, can still read as pressed on the first frame.
+        if (!bRebindArmed)
         {
-            FocusedViewport->GetContext().ResetState();
+            bRebindArmed = true;
+            return;
         }
-        FocusedViewport = Viewport;
+
+        FInputActionMap& Map = FInputActionMap::Get();
+        const SInputAction* Action = Map.FindAction(RebindAction);
+        const EKey PressedKey = RawInput->GetFirstPressedKey();
+        if (Action == nullptr || RebindIndex >= int32(Action->Bindings.size()) || PressedKey == EKey::Escape)
+        {
+            CancelRebind();
+            return;
+        }
+
+        // A slot keeps its device class, so the keyboard column of a menu never ends up holding a pad button.
+        const SKey& Current = Action->Bindings[RebindIndex].Key;
+        SKey Captured;
+        if (!Current.IsGamepad())
+        {
+            const EMouseKey PressedButton = RawInput->GetFirstPressedMouseButton();
+            Captured = PressedKey != EKey::Num ? SKey(PressedKey) : PressedButton != EMouseKey::Num ? SKey(PressedButton) : SKey();
+        }
+        if (!Captured.IsValid() && !Current.IsKeyboard() && !Current.IsMouse())
+        {
+            const EGamepadButton PadButton = Gamepads.GetFirstPressedButton();
+            Captured = PadButton != EGamepadButton::Num ? SKey(PadButton) : SKey();
+        }
+        if (!Captured.IsValid())
+        {
+            return;
+        }
+
+        const FName Rebound = RebindAction;
+        CancelRebind();
+        RebindConflict = Map.FindActionUsingKey(Captured, Rebound);
+        CGameUserSettings::Get().SetBindingOverride(Rebound, RebindIndex, Captured);
+
+        // Otherwise the held capture key reads as a fresh press of its new action on the next frame.
+        for (FInputViewport* V : Viewports)
+        {
+            V->GetContext().ResetState();
+        }
+        RawInput->ResetState();
     }
 
     void FInputViewportRegistry::BeginFrame(double DeltaSeconds)
     {
+        FeedGamepads();
+        PollRebind();
+
         // Evaluated once after the events pump, so every query sees one snapshot and edges fire once.
         const FInputActionMap& Map = FInputActionMap::Get();
         for (FInputViewport* V : Viewports)
@@ -408,14 +539,14 @@ namespace Lumina
         Map.UpdateContext(*RawInput, (float)DeltaSeconds);
     }
 
-    void FInputViewportRegistry::EndFrame(double DeltaSeconds)
+    void FInputViewportRegistry::EndFrame()
     {
         for (FInputViewport* V : Viewports)
         {
-            V->GetContext().EndFrame(DeltaSeconds);
+            V->GetContext().EndFrame();
         }
 
-        RawInput->EndFrame(DeltaSeconds);
+        RawInput->EndFrame();
     }
 
     void FInputViewportRegistry::OnWindowFocusLost()
@@ -426,6 +557,7 @@ namespace Lumina
         }
 
         RawInput->ResetState();
+        Gamepads.Reset();
     }
 
     bool FInputViewportRegistry::OnEvent(FEvent& Event)
@@ -448,37 +580,33 @@ namespace Lumina
 
         RawInput->OnEvent(Event);
 
-        // ImGui hover and focus flags lie under a disabled cursor, and only the active viewport's cursor is ever captured.
-        if (IsActiveCursorCaptured())
-        {
-            return ActiveViewport->RouteEvent(Event);
-        }
+        FInputViewport* Target = bIsKeyEvent ? ActiveViewport : ResolveMouseTarget(Event);
+        return Target != nullptr && Target->RouteEvent(Event);
+    }
 
-        if (bIsKeyEvent)
+    FInputViewport* FInputViewportRegistry::ResolveMouseTarget(FEvent& Event)
+    {
+        // Hover is meaningless under a disabled cursor, and only the active viewport's cursor is ever captured.
+        const bool bCaptured = IsActiveCursorCaptured();
+        FInputViewport* Target = bCaptured ? ActiveViewport
+                               : MousePressViewport != nullptr ? MousePressViewport
+                               : HoveredViewport != nullptr ? HoveredViewport
+                               : ActiveViewport;
+
+        if (Event.IsA<FMouseButtonPressedEvent>() && !bCaptured)
         {
-            FInputViewport* Target = FocusedViewport ? FocusedViewport : ActiveViewport;
-            if (Target == nullptr)
+            MousePressViewport = Target;
+        }
+        else if (Event.IsA<FMouseButtonReleasedEvent>())
+        {
+            bool bAnyButtonDown = false;
+            for (uint32 Button = (uint32)EMouseKey::Button0; Button <= (uint32)EMouseKey::ButtonLast; ++Button)
             {
-                return false;
+                bAnyButtonDown = bAnyButtonDown || RawInput->IsMouseButtonDownRaw((EMouseKey)Button);
             }
-            return Target->RouteEvent(Event);
+            MousePressViewport = bAnyButtonDown ? MousePressViewport : nullptr;
         }
-
-        // So a release after the cursor leaves the panel still reaches whichever viewport saw the press.
-        FInputViewport* Target = HoveredViewport;
-        if (Target == nullptr)
-        {
-            Target = FocusedViewport;
-        }
-        if (Target == nullptr)
-        {
-            Target = ActiveViewport;
-        }
-        if (Target == nullptr)
-        {
-            return false;
-        }
-        return Target->RouteEvent(Event);
+        return Target;
     }
 
     void FInputViewportRegistry::ApplyActiveCursorMode()
@@ -504,7 +632,7 @@ namespace Lumina
     EMouseMode FInputViewportRegistry::GetActiveEffectiveMouseMode() const
     {
         // A benchmark run is unattended, and a captured cursor would vanish from whoever is using the machine.
-        if (ActiveViewport == nullptr || Benchmark::IsActive())
+        if (ActiveViewport == nullptr || Benchmark::IsActive() || bDevOverlayCapturing)
         {
             return EMouseMode::Normal;
         }
@@ -523,8 +651,19 @@ namespace Lumina
         return GetActiveEffectiveMouseMode() == EMouseMode::Captured;
     }
 
-    void FInputViewportRegistry::ReapplyActiveCursorMode()
+    void FInputViewportRegistry::SetMouseMode(EMouseMode Mode, const CWorld* CallerWorld)
     {
+        // Each player's script sets only its own window, so an inactive one cannot wipe the focused capture.
+        FInputViewport* Target = FindViewportForWorld(CallerWorld);
+        if (Target == nullptr)
+        {
+            Target = ActiveViewport;
+        }
+        if (Target == nullptr)
+        {
+            return;
+        }
+        Target->GetContext().SetMouseMode(Mode);
         ApplyActiveCursorMode();
     }
 }

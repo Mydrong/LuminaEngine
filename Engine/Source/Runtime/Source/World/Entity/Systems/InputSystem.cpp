@@ -15,9 +15,8 @@ namespace Lumina
         RequireUpdate(EUpdateStage::FrameStart, EUpdatePriority::Highest);
     }
 
-    void SInputSystem::OnUpdate()
+    void SInputSystem::OnUpdate(const SSystemContext& Context)
     {
-        const FSystemContext& Context = GetContext();
 
         LUMINA_PROFILE_SCOPE();
 

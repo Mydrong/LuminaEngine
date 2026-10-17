@@ -101,12 +101,12 @@ namespace Lumina
         LUMINA_PROFILE_SCOPE();
 
         Rows.clear();
-        TotalAlive = GObjectArray.GetNumAliveObjects();
-        TotalSlots = GObjectArray.GetMaxObjects();
+        TotalAlive = Object::Internal::GetNumAliveObjects();
+        TotalSlots = Object::Internal::GetMaxObjects();
         Rows.reserve((size_t)Math::Max(TotalAlive, 0));
 
         // The ONE walk, so the draw path never touches the object array or dereferences a CObject.
-        GObjectArray.ForEachObject([this](CObjectBase* Base, int32 Index)
+        ForEachObject([this](CObjectBase* Base, int32 Index)
         {
             CObject* Object = static_cast<CObject*>(Base);
             if (Object == nullptr)

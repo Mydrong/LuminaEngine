@@ -61,6 +61,74 @@ namespace Lumina
         return true;
     }
 
+    FConsoleLineResult FConsoleRegistry::ExecuteLine(FStringView Line, bool bEchoToLog)
+    {
+        while (!Line.empty() && (Line.front() == ' ' || Line.front() == '\t'))
+        {
+            Line.remove_prefix(1);
+        }
+        while (!Line.empty() && (Line.back() == ' ' || Line.back() == '\t'))
+        {
+            Line.remove_suffix(1);
+        }
+
+        FConsoleLineResult Result;
+        if (Line.empty())
+        {
+            return Result;
+        }
+        if (bEchoToLog)
+        {
+            LOG_INFO("> {}", Line);
+        }
+
+        const size_t Space = Line.find_first_of(' ');
+        const FStringView Name = Space == FStringView::npos ? Line : Line.substr(0, Space);
+        const FStringView Value = Space == FStringView::npos ? FStringView() : Line.substr(Space + 1);
+        Result.Name.assign(Name.data(), Name.size());
+
+        if (FindCommand(Name) != nullptr)
+        {
+            if (bEchoToLog && !Value.empty())
+            {
+                LOG_WARN("'{}' is a command and takes no arguments; ignoring '{}'", Name, Value);
+            }
+            ExecuteCommand(Name);
+            Result.Kind = EConsoleLineResult::RanCommand;
+            return Result;
+        }
+
+        if (Find(Name) == nullptr)
+        {
+            if (bEchoToLog)
+            {
+                LOG_WARN("Unknown console command or variable: '{}'", Name);
+            }
+            Result.Kind = EConsoleLineResult::Unknown;
+            return Result;
+        }
+
+        if (!Value.empty() && !SetValueFromString(Name, Value))
+        {
+            if (bEchoToLog)
+            {
+                LOG_WARN("Failed to set '{}' to '{}'", Name, Value);
+            }
+            Result.Kind = EConsoleLineResult::RejectedValue;
+            Result.Value.assign(Value.data(), Value.size());
+            return Result;
+        }
+
+        const TOptional<FString> Current = GetValueAsString(Name);
+        Result.Value = Current.has_value() ? *Current : FString("<unprintable>");
+        Result.Kind = Value.empty() ? EConsoleLineResult::ReadVariable : EConsoleLineResult::SetVariable;
+        if (bEchoToLog)
+        {
+            LOG_INFO("{} = {}", Name, Result.Value);
+        }
+        return Result;
+    }
+
     bool FConsoleRegistry::SetValueFromString(FStringView TargetName, FStringView StrValue)
     {
         FConsoleVariable* ConsoleVar = Find(TargetName);

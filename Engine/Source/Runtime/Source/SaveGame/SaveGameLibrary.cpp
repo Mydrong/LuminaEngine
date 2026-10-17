@@ -52,30 +52,14 @@ namespace Lumina
             return FStringView(String.c_str(), String.size());
         }
 
-        // A parallel system's request waits for the sync point, like any event it raises.
-        void SendRequest(CWorld* World, SSaveGameRequestEvent Request)
+        void SendRequest(CWorld* World, const SSaveGameRequestEvent& Request)
         {
             if (World == nullptr)
             {
                 LOG_WARN("A save game request for slot '{}' was given no world.", Request.SlotName.c_str());
                 return;
             }
-            ECS::FEventDispatcher* const* Found = ECS::GetWorldRegistry(*World).Ctx().Find<ECS::FEventDispatcher*>();
-            if (Found == nullptr || *Found == nullptr)
-            {
-                LOG_WARN("A save game request for slot '{}' went to a world that is not running.", Request.SlotName.c_str());
-                return;
-            }
-            ECS::FEventDispatcher* Dispatcher = *Found;
-            if (ECS::FCommandBus::ShouldDefer())
-            {
-                World->GetCommandBus().Enqueue([Dispatcher, Request = Move(Request)]() mutable
-                {
-                    Dispatcher->Trigger<SSaveGameRequestEvent>(Request);
-                });
-                return;
-            }
-            Dispatcher->Trigger<SSaveGameRequestEvent>(Request);
+            ECS::SendEvent(World->GetEvents(), Request);
         }
     }
 

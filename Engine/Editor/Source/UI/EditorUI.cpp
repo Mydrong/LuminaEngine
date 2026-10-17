@@ -80,7 +80,6 @@
 #include "Core/Object/Package/Package.h"
 #include "Core/Profiler/Profile.h"
 #include "Core/Reflection/PropertyCustomization/PropertyCustomization.h"
-#include "Input/InputProcessor.h"
 #include "Input/InputViewport.h"
 #include "Memory/Memory.h"
 #include "Platform/CrashReporter.h"
@@ -152,7 +151,6 @@
 #include "Tools/AssetEditors/AudioStream/AudioStreamEditorTool.h"
 #include "Tools/AssetEditors/AnimationMontage/AnimationMontageEditorTool.h"
 #include "Tools/AssetEditors/BlendSpace/BlendSpaceEditorTool.h"
-#include "Tools/AssetEditors/CollisionShape/CollisionShapeEditorTool.h"
 #include "Tools/AssetEditors/PhysicsAsset/PhysicsAssetEditorTool.h"
 #include "Tools/AssetEditors/SoundAttenuation/SoundAttenuationEditorTool.h"
 #include "Tools/AssetEditors/PhysicsMaterial/PhysicsMaterialEditorTool.h"
@@ -733,23 +731,7 @@ namespace Lumina
         LUMINA_PROFILE_SCOPE();
         ImGuizmo::BeginFrame();
 
-        // Driven off the single registry flag so it stays correct whichever preview window is active.
-        {
-            ImGuiIO& IO = ImGui::GetIO();
-
-            const ImGuiConfigFlags Mask = ImGuiConfigFlags_NoMouse | ImGuiConfigFlags_NoKeyboard | ImGuiConfigFlags_NoMouseCursorChange;
-
-            FInputViewportRegistry& Reg = FInputViewportRegistry::Get();
-            const FInputViewport* Active = Reg.GetActiveViewport();
-            const bool bGameOwnsInput = Reg.IsGameInputFocused()
-                                      && Active != nullptr
-                                      && Active->GetWorld() != nullptr
-                                      && Active->GetWorld()->IsGameWorld();
-            // Never clear per-frame, since the editor camera sets NoMouse itself during a right-button look.
-            if (bGameOwnsInput)            { IO.ConfigFlags |= Mask; }
-            else if (bWasGameOwningInput)  { IO.ConfigFlags &= ~Mask; }
-            bWasGameOwningInput = bGameOwnsInput;
-        }
+        SyncImGuiInputFlags();
 
         auto TitleBarMenuContents = [this, &UpdateContext] ()
         {
@@ -1113,11 +1095,6 @@ namespace Lumina
         for (FEditorTool* Tool : EditorTools)
         {
             Tool->EndFrame();
-        }
-
-        if (ImGui::IsKeyPressed(ImGuiKey_LeftShift) && ImGui::IsKeyPressed(ImGuiKey_F1))
-        {
-            FInputProcessor::Get().SetMouseMode(EMouseMode::Normal);
         }
 
         if (ImGui::IsKeyPressed(ImGuiKey_Escape) && ImGui::IsKeyDown(ImGuiMod_Shift) && GamePreviewTool != nullptr)
@@ -1507,11 +1484,17 @@ namespace Lumina
                 }
 
                 // Only a miss AFTER the registry has assets counts as gone, or a cold start loses tabs silently.
-                if (FAssetRegistry::Get().GetAssetByGUID(*Guid) == nullptr)
+                const FAssetData* Data = FAssetRegistry::Get().GetAssetByGUID(*Guid);
+                if (Data == nullptr)
                 {
                     Survivors.push_back(Tab);
                     ++NumUnscanned;
                     continue;
+                }
+
+                if (Data->IsClassMissing())
+                {
+                    continue;   // its type was removed, so it can never open again
                 }
 
                 Survivors.push_back(Tab);
@@ -1589,7 +1572,6 @@ namespace Lumina
         Registry.RegisterAssetEditor<CPhysicsAsset,       FPhysicsAssetEditorTool>(Owner);
         Registry.RegisterAssetEditor<CBlendSpace,         FBlendSpaceEditorTool>(Owner);
         Registry.RegisterAssetEditor<CAnimationMontage,   FAnimationMontageEditorTool>(Owner);
-        Registry.RegisterAssetEditor<CCollisionShape,     FCollisionShapeEditorTool>(Owner);
         Registry.RegisterAssetEditor<CCurveAsset,         FCurveAssetEditorTool>(Owner);
         Registry.RegisterAssetEditor<CAudioStream,        FAudioStreamEditorTool>(Owner);
         Registry.RegisterAssetEditor<CAudioGraph,         FAudioGraphEditorTool>(Owner);
@@ -1764,6 +1746,12 @@ namespace Lumina
 
     void FEditorUI::OpenAssetEditor(const FGuid& AssetGUID)
     {
+        if (const FAssetData* Data = FAssetRegistry::Get().GetAssetByGUID(AssetGUID); Data != nullptr && Data->IsClassMissing())
+        {
+            ImGuiX::Notifications::NotifyWarning("'{0}' cannot be opened because its type '{1}' no longer exists.", Data->AssetName.c_str(), Data->AssetClass.c_str());
+            return;
+        }
+
         // Fans the whole Hard and Owned closure across workers instead of an inline depth-first walk.
         CObject* Asset = CPackage::LoadAssetGraph(AssetGUID);
 
@@ -2233,21 +2221,16 @@ namespace Lumina
 
     void FEditorUI::DrawOrphanedDragPreview()
     {
-        if (!bDrawerClosedByDrag)
-        {
-            return;
-        }
-
         const DragDrop::FPayload* Payload = DragDrop::PeekPayload();
-        if (Payload == nullptr || !ImGui::IsMouseDown(ImGuiMouseButton_Left))
+        if (Payload == nullptr || !Payload->bSourceClosed || !ImGui::IsMouseDown(ImGuiMouseButton_Left))
         {
-            bDrawerClosedByDrag = false;
             return;
         }
 
-        const FStringView Path = Payload->Kind == DragDrop::EPayloadKind::Asset
-            ? FStringView(Payload->AssetPath.c_str(), Payload->AssetPath.size())
-            : FStringView(Payload->FilePath.c_str(), Payload->FilePath.size());
+        const FString EntityName = Payload->EntityName.ToString();
+        const FStringView Path = Payload->Kind == DragDrop::EPayloadKind::Asset    ? FStringView(Payload->AssetPath.c_str(), Payload->AssetPath.size())
+                               : Payload->Kind == DragDrop::EPayloadKind::NewEntity ? FStringView(EntityName.c_str(), EntityName.size())
+                               :                                                      FStringView(Payload->FilePath.c_str(), Payload->FilePath.size());
         if (Path.empty())
         {
             return;
@@ -2434,7 +2417,7 @@ namespace Lumina
         {
             OpenDrawer = nullptr;
             DrawerOpenAmount = 0.0f;
-            bDrawerClosedByDrag = true;
+            DragDrop::MarkSourceClosed();
         }
     }
 
@@ -2960,6 +2943,33 @@ namespace Lumina
                         ToolWindowFlags |= ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse;
                     }
                     
+                    // A window added after this tool's layout was saved has no settings, so it joins a docked sibling instead of floating.
+                    if (ImGui::FindWindowByName(ToolWindowName.c_str()) == nullptr && ImGui::FindWindowSettingsByID(ImHashStr(ToolWindowName.c_str())) == nullptr)
+                    {
+                        auto FindToolWindow = [&](const FName& Name)
+                        {
+                            return ImGui::FindWindowByName(FEditorTool::GetToolWindowName(Name.c_str(), Tool->GetCurrentDockspaceID()).c_str());
+                        };
+
+                        // A sibling tabbed behind the viewport would hide the new window there too.
+                        ImGuiID ViewportDockId = 0;
+                        for (auto& Sibling : Tool->ToolWindows)
+                        {
+                            ImGuiWindow* SiblingWindow = Sibling->bViewport ? FindToolWindow(Sibling->Name) : nullptr;
+                            ViewportDockId = SiblingWindow != nullptr ? SiblingWindow->DockId : ViewportDockId;
+                        }
+
+                        for (auto& Sibling : Tool->ToolWindows)
+                        {
+                            ImGuiWindow* SiblingWindow = (Sibling != Window && !Sibling->bViewport) ? FindToolWindow(Sibling->Name) : nullptr;
+                            if (SiblingWindow != nullptr && SiblingWindow->DockId != 0 && SiblingWindow->DockId != ViewportDockId)
+                            {
+                                ImGui::SetNextWindowDockID(SiblingWindow->DockId, ImGuiCond_FirstUseEver);
+                                break;
+                            }
+                        }
+                    }
+
                     ImGui::SetNextWindowClass(&Tool->ToolWindowsClass);
                     // Floor the size so a panel can't be dragged to a degenerate extent (child widgets assert at zero width).
                     ImGui::SetNextWindowSizeConstraints(ImVec2(100.0f, 80.0f), ImVec2(FLT_MAX, FLT_MAX));
@@ -3740,7 +3750,7 @@ namespace Lumina
         }
 
         FormatTo(Stats.Perf, LE_ICON_GAUGE " {:>3.0f} FPS / {:.2f} ms", SmoothedFPS, SmoothedFrameTime);
-        FormatTo(Stats.Objects, LE_ICON_CUBE_OUTLINE " {}", GObjectArray.GetNumAliveObjects());
+        FormatTo(Stats.Objects, LE_ICON_CUBE_OUTLINE " {}", Object::Internal::GetNumAliveObjects());
         FormatTo(Stats.Memory, LE_ICON_MEMORY " {:.0f} MiB", SmoothedMemoryMiB);
         FormatTo(Stats.GPUMemory, LE_ICON_EXPANSION_CARD " {:.0f} / {:.0f} MiB", SmoothedGPUMemoryMiB, GPUMemoryBudgetMiB);
 

@@ -32,6 +32,7 @@
 #include "Log/Log.h"
 #include "Renderer/SkeletonResource.h"
 #include "Containers/StringFormat.h"
+#include "Core/Math/Hash/Hash.h"
 
 namespace Lumina
 {
@@ -636,7 +637,7 @@ namespace Lumina
         }
 
         // One entity's graph update, parallel-safe; pose math happens in the execute phase.
-        void UpdateGraph(const FSystemContext& SystemContext, ECS::FEntity Entity,
+        void UpdateGraph(const SSystemContext& SystemContext, ECS::FEntity Entity,
                          SAnimationGraphComponent& AnimGraph, SSkeletalMeshComponent& Mesh,
                          float DeltaTime, double Now, const FKinematicsState* KinematicsState)
         {
@@ -849,38 +850,45 @@ namespace Lumina
                 }
             }
 
-            // Bit-exact because the same recipe on the same inputs runs the same instructions.
+            // Any other writer leaves the serial or the dirty flag moved, so only the animation system's own last pose is ever compared by hash.
+            const uint64 PoseHash = bProduced ? Hash::GetHash64(PoseScratch.data(), PoseScratch.size() * sizeof(FMatrix4)) : 0ull;
             const bool bPoseChanged = bProduced
                 && (PoseScratch.size() != Mesh.BoneTransforms.size()
-                || (!PoseScratch.empty()
-                    && Memory::Memcmp(PoseScratch.data(), Mesh.BoneTransforms.data(),
-                                      PoseScratch.size() * sizeof(FMatrix4)) != 0));
+                || Mesh.bRenderBonesDirty
+                || Mesh.PackedPoseSerial != Mesh.PoseSerial
+                || PoseHash != Mesh.PoseHash);
 
             if (bPoseChanged)
             {
-                // Swapped rather than copied, and the scratch inherits the old buffer to refill.
-                Mesh.BoneTransforms.swap(PoseScratch);
+                // Streamed rather than swapped, so the scratch stays cached and the component's cold lines are never read for ownership.
+                Mesh.BoneTransforms.resize(PoseScratch.size());
+                Memory::MemcpyToWriteCombined(Mesh.BoneTransforms.data(), PoseScratch.data(), PoseScratch.size() * sizeof(FMatrix4));
+
+                // Packed here while the scratch is in cache, so the gather copies half the bytes and never reads the matrices.
+                const uint32 NumBones = (uint32)PoseScratch.size();
+                Mesh.PackedBones.resize((SIZE_T)NumBones * 2u);
+                SkeletalUtils::PackRenderBones(PoseScratch.data(), NumBones, reinterpret_cast<FBoneTransform*>(Mesh.PackedBones.data()));
 
                 // A stale external write is superseded by the pose that just replaced it.
                 Mesh.bRenderBonesDirty = false;
 
-                // No pack here; the gather packs into its arena slice, only for what survives culling.
                 ++Mesh.PoseSerial;
+                Mesh.PackedPoseSerial = Mesh.PoseSerial;
+                Mesh.PoseHash         = PoseHash;
             }
         }
     }
 
 
-    void SAnimationSystem::OnUpdate()
+    void SAnimationSystem::OnUpdate(const SSystemContext& Context)
     {
-        const FSystemContext& SystemContext = GetContext();
 
         LUMINA_PROFILE_SCOPE();
 
-        auto SimpleView   = SystemContext.CreateView<SSimpleAnimationComponent, SSkeletalMeshComponent>(ECS::TExclude<SDisabledTag, SFollowerPoseComponent>{});
-        auto GraphView    = SystemContext.CreateView<SAnimationGraphComponent, SSkeletalMeshComponent>(ECS::TExclude<SDisabledTag, SFollowerPoseComponent>{});
-        auto MeshView     = SystemContext.CreateView<SSkeletalMeshComponent>(ECS::TExclude<SDisabledTag>{});
-        auto FollowerView = SystemContext.CreateView<SFollowerPoseComponent, SSkeletalMeshComponent>(ECS::TExclude<SDisabledTag>{});
+        auto SimpleView   = Context.CreateView<SSimpleAnimationComponent, SSkeletalMeshComponent>(ECS::TExclude<SDisabledTag, SFollowerPoseComponent>{});
+        auto GraphView    = Context.CreateView<SAnimationGraphComponent, SSkeletalMeshComponent>(ECS::TExclude<SDisabledTag, SFollowerPoseComponent>{});
+        auto MeshView     = Context.CreateView<SSkeletalMeshComponent>(ECS::TExclude<SDisabledTag>{});
+        auto FollowerView = Context.CreateView<SFollowerPoseComponent, SSkeletalMeshComponent>(ECS::TExclude<SDisabledTag>{});
 
         auto SimpleHandle   = SimpleView.GetDriver();
         auto GraphHandle    = GraphView.GetDriver();
@@ -897,26 +905,26 @@ namespace Lumina
         }
 
         // Hoisted, since the graph bodies run in parallel and the context lookup is a per-type hash probe.
-        const FKinematicsState* KinematicsState = Kinematics::GetState(SystemContext);
+        const FKinematicsState* KinematicsState = Kinematics::GetState(Context);
 
         // A paused game holds its poses, while editor worlds run this stage to preview animation unless the world turned that off.
-        const bool bPreviewing = SystemContext.GetWorldType() == EWorldType::Editor && SystemContext.GetWorld()->AnimatesWhilePaused();
-        const bool   bFrozen   = SystemContext.GetUpdateStage() == EUpdateStage::Paused && !bPreviewing;
-        const float  DeltaTime = bFrozen ? 0.0f : (float)SystemContext.GetDeltaTime();
-        const double Now       = SystemContext.GetTime();
+        const bool bPreviewing = Context.GetWorldType() == EWorldType::Editor && Context.GetWorld()->AnimatesWhilePaused();
+        const bool   bFrozen   = Context.GetUpdateStage() == EUpdateStage::Paused && !bPreviewing;
+        const float  DeltaTime = bFrozen ? 0.0f : (float)Context.GetDeltaTime();
+        const double Now       = Context.GetTime();
 
         // Relaxed throughout, since the TaskGraph::Wait() before the read is the ordering edge.
         std::atomic<bool> bAnyRootMotion{ false };
 
         if (bHasFollower)
         {
-            RaiseLeaderDemand(SystemContext.GetRegistry(), FollowerView, Now);
+            RaiseLeaderDemand(Context.GetRegistry(), FollowerView, Now);
         }
 
         NotifyQueue.Prepare();
 
         const bool bFuseExecute = CVarFuseAnimExecute.GetValue();
-        auto GraphStorage = SystemContext.GetStorage<SAnimationGraphComponent>();
+        auto GraphStorage = Context.GetStorage<SAnimationGraphComponent>();
 
         FTaskGraph TaskGraph;
 
@@ -958,7 +966,7 @@ namespace Lumina
                 GraphView.ForEachInRange(Range.Start, Range.End,
                     [&](ECS::FEntity Entity, SAnimationGraphComponent& AnimGraph, SSkeletalMeshComponent& Mesh)
                 {
-                    UpdateGraph(SystemContext, Entity, AnimGraph, Mesh, DeltaTime, Now, KinematicsState);
+                    UpdateGraph(Context, Entity, AnimGraph, Mesh, DeltaTime, Now, KinematicsState);
 
                     // Run while this mesh is hot, instead of after a barrier that waits for every graph.
                     if (bFuseExecute)
@@ -1007,7 +1015,7 @@ namespace Lumina
         // resolve to the root of their chain, so nothing here depends on the order within the pass.
         if (bHasFollower)
         {
-            ECS::FRegistry& Registry = SystemContext.GetRegistry();
+            ECS::FRegistry& Registry = Context.GetRegistry();
 
             const FTaskGraph::FNodeHandle CopyFollowers = TaskGraph.AddParallelFor((uint32)FollowerView.NumDenseSlots(), 16, [&](const Task::FParallelRange& Range)
             {
@@ -1099,7 +1107,7 @@ namespace Lumina
         TaskGraph.Wait();
 
         // Handlers run user code that may touch any component, so they wait for the flush after this batch.
-        NotifyQueue.Submit(SystemContext.GetCommandBus());
+        NotifyQueue.Submit(Context.GetCommandBus());
 
         // Nothing moved, so everything below is dead work.
         if (!bAnyRootMotion.load(std::memory_order_relaxed))
@@ -1108,7 +1116,7 @@ namespace Lumina
         }
 
         // Serial because applying root motion marks the transform dirty, which is not ParallelFor-safe.
-        auto TransformStorage = SystemContext.GetStorage<STransformComponent>();
+        auto TransformStorage = Context.GetStorage<STransformComponent>();
 
         const auto ApplyRootMotion = [&](ECS::FEntity Entity, FRootMotionDelta& Delta)
         {
@@ -1134,7 +1142,7 @@ namespace Lumina
         
         if (bHasSimple)
         {
-            for (auto&& [Entity, Anim] : SystemContext.GetStorage<SSimpleAnimationComponent>().Each())
+            for (auto&& [Entity, Anim] : Context.GetStorage<SSimpleAnimationComponent>().Each())
             {
                 if (Anim.PendingRootMotion.bHasMotion)
                 {
@@ -1145,7 +1153,7 @@ namespace Lumina
 
         if (bHasGraph)
         {
-            for (auto&& [Entity, AnimGraph] : SystemContext.GetStorage<SAnimationGraphComponent>().Each())
+            for (auto&& [Entity, AnimGraph] : Context.GetStorage<SAnimationGraphComponent>().Each())
             {
                 if (AnimGraph.PendingRootMotion.bHasMotion)
                 {

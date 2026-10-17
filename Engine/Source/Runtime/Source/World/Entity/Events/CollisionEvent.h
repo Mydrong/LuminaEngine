@@ -1,15 +1,23 @@
 #pragma once
 
 #include "World/ECS/Registry.h"
+#include "World/ECS/EventMeta.h"
 
 #include "Core/Object/ObjectMacros.h"
 #include "CollisionEvent.generated.h"
 
 namespace Lumina
 {
-    // Payload for OnContact/OnOverlap. Fields are self-oriented: Entity/Velocity = self, Normal away from self.
-    // Every field is blittable (ECS::FEntity surfaces as the C# Entity handle), so the Reflector auto-generates
-    // the LuminaSharp SCollisionEvent value mirror + a native size assert, no hand-written mirror.
+    REFLECT()
+    enum class ECollisionEventKind : uint8
+    {
+        ContactBegin,
+        ContactEnd,
+        OverlapBegin,
+        OverlapEnd,
+    };
+
+    // One per side of a contact, oriented from Entity, queued for systems and fanned out to its rigid body's delegates.
     REFLECT(Event)
     struct RUNTIME_API SCollisionEvent
     {
@@ -50,5 +58,35 @@ namespace Lumina
         /** True if the OTHER side was a trigger/sensor. */
         PROPERTY(Hidden)
         bool bIsTrigger = false;
+
+        // Which of the rigid body's four delegates the event fans out to.
+        PROPERTY(Hidden)
+        ECollisionEventKind Kind = ECollisionEventKind::ContactBegin;
+    };
+
+    // A body woke or fell asleep, queued for systems and fanned out to its rigid body's OnWake and OnSleep.
+    REFLECT(Event)
+    struct RUNTIME_API SBodyActivationEvent
+    {
+        GENERATED_BODY()
+
+        PROPERTY(Hidden)
+        ECS::FEntity Entity = ECS::NullEntity;
+
+        PROPERTY(Hidden)
+        bool bAwake = true;
+    };
+
+    // Defined beside the rigid body these deliver to, which this header cannot see.
+    template<>
+    struct TEventFanOut<SCollisionEvent>
+    {
+        RUNTIME_API static void Deliver(ECS::FRegistry& Registry, const SCollisionEvent& Event);
+    };
+
+    template<>
+    struct TEventFanOut<SBodyActivationEvent>
+    {
+        RUNTIME_API static void Deliver(ECS::FRegistry& Registry, const SBodyActivationEvent& Event);
     };
 }

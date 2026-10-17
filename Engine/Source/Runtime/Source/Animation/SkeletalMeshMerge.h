@@ -19,7 +19,7 @@ namespace Lumina::SkeletalMeshMerge
         // Names the merged mesh; its skeleton takes the same name with a "_Skeleton" suffix.
         FName Name;
 
-        // Union every input skeleton's sockets onto the merged one, first definition winning.
+        // Union the inputs' skeleton sockets onto the merged skeleton and their mesh sockets onto the merged mesh, first definition winning.
         bool bMergeSockets = true;
     };
 

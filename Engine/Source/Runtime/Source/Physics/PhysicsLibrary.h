@@ -198,6 +198,24 @@ namespace Lumina
         FUNCTION()
         static float GetMass(CWorld* World, ECS::FEntity Entity);
 
+        //~ One body by target, such as a ragdoll limb or the body a raycast hit. A stale or unset target is a no-op.
+
+        // The ragdoll limb simulating Bone, or its nearest ancestor with a body. Unset until the entity's ragdoll simulates.
+        FUNCTION()
+        static SPhysicsBodyTarget GetRagdollBody(CWorld* World, ECS::FEntity Entity, FName Bone);
+
+        FUNCTION()
+        static void AddImpulseToBody(CWorld* World, SPhysicsBodyTarget Body, FVector3 Impulse, FVector3 Position);
+
+        FUNCTION()
+        static void SetBodyLinearVelocity(CWorld* World, SPhysicsBodyTarget Body, FVector3 Velocity);
+
+        FUNCTION()
+        static void SetBodyAngularVelocity(CWorld* World, SPhysicsBodyTarget Body, FVector3 Velocity);
+
+        FUNCTION()
+        static FVector3 GetBodyLinearVelocity(CWorld* World, SPhysicsBodyTarget Body);
+
         FUNCTION()
         static void SetGravityFactor(CWorld* World, ECS::FEntity Entity, float Factor);
 

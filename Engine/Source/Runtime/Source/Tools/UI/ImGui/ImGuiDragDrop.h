@@ -12,6 +12,7 @@ namespace Lumina
 {
     class CObject;
     class CClass;
+    class CStruct;
     class CWorld;
     struct FAssetData;
 }
@@ -27,6 +28,10 @@ namespace Lumina::DragDrop
         Entity,
         SceneFolder,
         File,
+        // An entity the drop creates, named EntityName, carrying ComponentType or seeded from AssetObject when set.
+        NewEntity,
+        // An entry of a tool's palette, such as a collision shape type, named by its palette and index.
+        PaletteItem,
     };
 
     struct RUNTIME_API FPayload
@@ -43,6 +48,15 @@ namespace Lumina::DragDrop
 
         FFixedString    FilePath;
         FFixedString    FileExtension;
+
+        FName           EntityName;
+        CStruct*        ComponentType = nullptr;
+
+        FName           PaletteName;
+        int32           PaletteIndex = -1;
+
+        // Set once the UI that started the drag has closed, so something else draws the drag preview.
+        bool            bSourceClosed = false;
     };
 
     constexpr const char* GImGuiPayloadType = "LumDD";
@@ -54,6 +68,11 @@ namespace Lumina::DragDrop
     RUNTIME_API void SetEntityPayload(CWorld* World, ECS::FEntity Entity);
     RUNTIME_API void SetSceneFolderPayload(CWorld* World, uint32 FolderID);
     RUNTIME_API void SetFilePayload(FStringView VirtualPath);
+    RUNTIME_API void SetNewEntityPayload(FName EntityName, CStruct* ComponentType = nullptr, CObject* Seed = nullptr);
+    RUNTIME_API void SetPaletteItemPayload(FName Palette, int32 Index);
+
+    // For a source that closes mid-drag, such as a popup the cursor left, so the drag carries on without it.
+    RUNTIME_API void MarkSourceClosed();
 
     // Target helpers
 
@@ -81,6 +100,9 @@ namespace Lumina::DragDrop
 
     // Plain file drop. ExtensionFilter is empty for any file, or a lowercase extension without the dot such as "rml".
     RUNTIME_API bool AcceptFile(FStringView ExtensionFilter, FFixedString& OutPath);
+
+    // A palette entry from Palette, refused before it highlights anything when the drag carries something else.
+    RUNTIME_API bool AcceptPaletteItem(FName Palette, int32& OutIndex);
 
     // Internal: cleared when no drag is active so a stale payload does not
     // leak across frames. Safe to call from a per-frame top-level place.

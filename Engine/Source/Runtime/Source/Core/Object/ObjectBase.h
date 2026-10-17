@@ -11,6 +11,10 @@
 
 namespace Lumina
 {
+    namespace Object::Internal
+    {
+        class FCObjectArray;
+    }
 
     /** Publishes what is being constructed, so an object's own constructor can read its class, name and package. */
     class RUNTIME_API FScopedObjectConstruction
@@ -37,7 +41,7 @@ namespace Lumina
     class CObjectBase
     {
     public:
-        friend class FCObjectArray;
+        friend class Object::Internal::FCObjectArray;
         friend class CPackage;
         friend class FManagedInstanceTable;
 

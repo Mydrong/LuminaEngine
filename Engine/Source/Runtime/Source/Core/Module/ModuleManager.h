@@ -67,7 +67,16 @@
 
 #else
 
+// A game module draws developer UI with its own copy of ImGui, so it always exports the hook that shares the engine's context.
+#if defined(LUMINA_GAME_MODULE) && USING(WITH_DEV_UI)
+#include "Tools/UI/ImGui/ImGuiModule.h"
+#define LUMINA_GAME_MODULE_IMGUI() LUMINA_MODULE_IMGUI()
+#else
+#define LUMINA_GAME_MODULE_IMGUI() static_assert(true, "")
+#endif
+
 #define IMPLEMENT_MODULE(ModuleClass, ModuleName)                                           \
+    LUMINA_GAME_MODULE_IMGUI();                                                             \
     extern "C" DLL_EXPORT const char* LuminaModuleABISignature()                            \
     {                                                                                       \
         return LUMINA_MODULE_ABI_SIGNATURE;                                                 \

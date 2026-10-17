@@ -3,19 +3,18 @@
 #include "EntitySystem.h"
 
 #include "Core/Object/Class.h"
-#include "Core/Object/ObjectArray.h"
+#include "Core/Object/ObjectIteration.h"
 #include "Core/Object/ObjectCore.h"
 #include "Core/Object/ScriptClass.h"
 #include "Log/Log.h"
+#include "World/ECS/EventQueue.h"
 #include "World/Entity/Components/Component.h"
 #include "World/World.h"
 
 namespace Lumina
 {
-    const FSystemContext& CEntitySystem::GetContext() const
-    {
-        return OwningWorld->GetSystemContext();
-    }
+    // LuminaSharp's SSystemContext partial reads the world at offset zero.
+    static_assert(offsetof(SSystemContext, World) == 0);
 
     void CEntitySystem::RequireUpdate(EUpdateStage Stage, int32 Priority)
     {
@@ -32,10 +31,15 @@ namespace Lumina
         {
             Access.Writes.push_back((uint32)Ops->TypeId);
             Access.Pools.push_back(Ops->GetTypeID());
+            Access.bDeclaresComponents = true;
+        }
+        else if (const ECS::FComponentTypeID Event = ECS::FindEventType(Component); Event != ECS::InvalidComponentTypeID)
+        {
+            Access.Writes.push_back((uint32)Event);
         }
         else
         {
-            LOG_WARN("Entity system '{}' declares a write of unknown component '{}'.", GetClass()->GetName(), Component);
+            LOG_WARN("Entity system '{}' declares a write of unknown component or event '{}'.", GetClass()->GetName(), Component);
         }
     }
 
@@ -45,10 +49,15 @@ namespace Lumina
         {
             Access.Reads.push_back((uint32)Ops->TypeId);
             Access.Pools.push_back(Ops->GetTypeID());
+            Access.bDeclaresComponents = true;
+        }
+        else if (const ECS::FComponentTypeID Event = ECS::FindEventType(Component); Event != ECS::InvalidComponentTypeID)
+        {
+            Access.Reads.push_back((uint32)Event);
         }
         else
         {
-            LOG_WARN("Entity system '{}' declares a read of unknown component '{}'.", GetClass()->GetName(), Component);
+            LOG_WARN("Entity system '{}' declares a read of unknown component or event '{}'.", GetClass()->GetName(), Component);
         }
     }
 
@@ -59,10 +68,10 @@ namespace Lumina
 
         Configure();
 
-        // Declaring nothing means the system is not honest about what it touches, so it runs alone.
-        if (Access.Writes.empty() && Access.Reads.empty())
+        // Declaring no components means the system is not honest about what it touches, so it runs alone, its events kept for interest.
+        if (!Access.bDeclaresComponents)
         {
-            Access = FSystemAccess::Exclusive();
+            Access.bExclusive = true;
         }
     }
 
@@ -74,7 +83,7 @@ namespace Lumina
 
             // Collected before anything is visited, because creating a CDO mutates the object array.
             TVector<CClass*> Classes;
-            GObjectArray.ForEachObject([&](CObjectBase* Object, int32)
+            ForEachObject([&](CObjectBase* Object, int32)
             {
                 if (Object == nullptr || !Object->IsA<CClass>())
                 {
@@ -163,7 +172,7 @@ namespace Lumina
                     // Paired with OnStartup, so a system dropped before the world started never sees one.
                     if (System->HasStarted())
                     {
-                        System->OnTeardown();
+                        System->OnTeardown(System->GetWorld()->GetSystemContext());
                     }
                     System->SetOwningWorld(nullptr);
                     Systems.erase(Systems.begin() + (int64)(Index - 1));
@@ -202,7 +211,7 @@ namespace Lumina
                 if (System != nullptr && !System->HasStarted())
                 {
                     System->MarkStarted();
-                    System->OnStartup();
+                    System->OnStartup(System->GetWorld()->GetSystemContext());
                 }
             }
         }
@@ -234,7 +243,7 @@ namespace Lumina
                 {
                     if (System->HasStarted())
                     {
-                        System->OnTeardown();
+                        System->OnTeardown(System->GetWorld()->GetSystemContext());
                     }
                     System->SetOwningWorld(nullptr);
                 }

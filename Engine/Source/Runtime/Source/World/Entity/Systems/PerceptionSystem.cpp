@@ -26,15 +26,13 @@ namespace Lumina
 
         // Perception events fire at the batch's sync point, so the senses only touch these.
         Writes<SPerceptionComponent>();
+        SendsEvent<SPerceptionEvent>();
         Reads<SAIStimuliSourceComponent, STransformComponent, SystemResource::PhysicsQuery, SystemResource::Significance>();
     }
 
-    FOnPerceptionUpdated SPerceptionSystem::OnTargetPerceived;
-    FOnPerceptionUpdated SPerceptionSystem::OnTargetLost;
 
-    void SPerceptionSystem::OnStartup()
+    void SPerceptionSystem::OnStartup(const SSystemContext& Context)
     {
-        const FSystemContext& Context = GetContext();
 
         // Created serially at world init so Update only ever READS the registry context.
         Perception::GetOrCreateState(Context.GetRegistry());
@@ -183,52 +181,19 @@ namespace Lumina
             }
         }
 
-        void FirePerceptionEventNow(const FSystemContext& Context, ECS::FEntity Perceiver, const FPerceivedTarget& Target, bool bSensed)
+        SPerceptionEvent MakePerceptionEvent(ECS::FEntity Perceiver, const FPerceivedTarget& Target, bool bSensed)
         {
-            if (bSensed)
-            {
-                SPerceptionSystem::OnTargetPerceived.Broadcast(Perceiver, Target);
-            }
-            else
-            {
-                SPerceptionSystem::OnTargetLost.Broadcast(Perceiver, Target);
-            }
-
-            Context.DispatchEvent<FPerceptionUpdatedEvent>(FPerceptionUpdatedEvent{
-                Perceiver, Target.Target, (EAISenseChannel)Target.ActiveSenses, Target.LastKnownLocation, bSensed });
-
-            SPerceptionComponent* Comp = Context.TryGet<SPerceptionComponent>(Perceiver);
-            if (Comp == nullptr)
-            {
-                return;
-            }
-            TScriptDelegate<SPerceptionEvent>& Delegate = bSensed ? Comp->OnTargetPerceived : Comp->OnTargetLost;
-
-            if (!Delegate.IsBound())
-            {
-                return;
-            }
-
-            SPerceptionEvent Payload;
-            Payload.Perceiver = Perceiver;
-            Payload.Target    = Target.Target;
-            Payload.Location  = Target.LastKnownLocation;
-            Payload.Sense     = (EAISenseChannel)Target.ActiveSenses;
-            Payload.Strength  = Target.LastStrength;
-
-            Delegate.Broadcast(Payload);
+            SPerceptionEvent Event;
+            Event.Perceiver  = Perceiver;
+            Event.Target     = Target.Target;
+            Event.Location   = Target.LastKnownLocation;
+            Event.Sense      = (EAISenseChannel)Target.ActiveSenses;
+            Event.Strength   = Target.LastStrength;
+            Event.bPerceived = bSensed;
+            return Event;
         }
 
-        // Listeners are free to change the world, so every perception broadcast waits for the sync point.
-        void FirePerceptionEvent(const FSystemContext& Context, ECS::FEntity Perceiver, const FPerceivedTarget& Target, bool bSensed)
-        {
-            Context.GetCommandBus().Enqueue([InContext = &Context, Perceiver, Target, bSensed]()
-            {
-                FirePerceptionEventNow(*InContext, Perceiver, Target, bSensed);
-            });
-        }
-
-        void DrawPerceptionDebug(const FSystemContext& Context, const SPerceptionComponent& Comp,
+        void DrawPerceptionDebug(const SSystemContext& Context, const SPerceptionComponent& Comp,
                                  const FVector3& Eye, const FVector3& Loc, const FVector3& Forward)
         {
             constexpr float OneFrame = -1.0f;
@@ -253,9 +218,8 @@ namespace Lumina
         }
     }
 
-    void SPerceptionSystem::OnUpdate()
+    void SPerceptionSystem::OnUpdate(const SSystemContext& Context)
     {
-        const FSystemContext& Context = GetContext();
 
         LUMINA_PROFILE_SCOPE();
 
@@ -460,7 +424,7 @@ namespace Lumina
 
         for (const FPendingEvent& Ev : Events)
         {
-            FirePerceptionEvent(Context, Ev.Perceiver, Ev.Target, Ev.bSensed);
+            Context.SendEvent(MakePerceptionEvent(Ev.Perceiver, Ev.Target, Ev.bSensed));
         }
     }
 }

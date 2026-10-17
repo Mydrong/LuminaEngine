@@ -36,6 +36,7 @@
 #include "World/Scene/RenderScene/RenderScene.h"
 #include "World/World.h"
 #include "Containers/StringFormat.h"
+#include "Scripting/EntityScript.h"
 
 
 namespace Lumina
@@ -139,6 +140,8 @@ namespace Lumina
             {
                 ImGui::SetClipboardText(Format("{}", (Data.Entity).Value).c_str());
             }
+
+            DrawAddCollisionMenuItem(Data.Entity);
 
             if (!bIsRoot && Registry.GetHierarchy().GetParent(Data.Entity) != ECS::NullEntity)
             {
@@ -585,6 +588,8 @@ namespace Lumina
             Registry.EmplaceOrReplace<FNeedsTransformUpdate>(Entity);
         });
 
+        EntityScripts::DebugDraw(Registry);
+
         const ECS::FEntity LastSelected = GetLastSelectedEntity();
         if (Registry.IsValid(LastSelected))
         {
@@ -722,7 +727,8 @@ namespace Lumina
 
         Registry.Emplace<SPrefabComponent>(Entity).StableID = FName(FGuid::New().ToShortString());
 
-        if (Root != ECS::NullEntity && Root != Entity)
+        // One the spawn already parented, such as a drop onto a row, is inside the prefab already.
+        if (Root != ECS::NullEntity && Root != Entity && Registry.GetHierarchy().GetParent(Entity) == ECS::NullEntity)
         {
             ECS::Utils::ReparentEntity(Registry, Entity, Root);
         }
@@ -860,11 +866,7 @@ namespace Lumina
             return;
         }
 
-        // Asset drop (static mesh, material, etc.) onto an outliner row.
-        if (Peek->Kind == DragDrop::EPayloadKind::Asset && DragDrop::IsDelivered())
-        {
-            HandlePrefabContentDrop(FStringView(Peek->AssetPath.c_str(), Peek->AssetPath.size()), DropItem, /*bAttachToTarget*/ true);
-        }
+        AcceptContentBrowserPayload(DropItem, /*bAttachToTarget*/ true);
     }
 
     FString FPrefabEditorTool::GetReparentRefusal(ECS::FEntity Entity, ECS::FEntity NewParent)
@@ -924,30 +926,19 @@ namespace Lumina
         Registry.Remove<SPrefabOverrideComponent>(Entity);
     }
 
-    void FPrefabEditorTool::HandlePrefabContentDrop(FStringView VirtualPath, ECS::FEntity DropTarget, bool bAttachToTarget)
+    void FPrefabEditorTool::HandlePrefabContentDrop(FStringView VirtualPath, ECS::FEntity DropTarget, bool bAttachToTarget, const FTransform* SpawnTransform)
     {
-        // Default drop target is the prefab root so dropped meshes become prefab-owned children.
-        if (DropTarget == ECS::NullEntity)
-        {
-            DropTarget = FindPrefabRoot();
-        }
-
+        // A drop on empty space spawns a root, which AdoptSpawnedSubtree below files under the prefab root.
         BeginTransaction();
-        ECS::FEntity Spawned = HandleContentBrowserAssetDrop(VirtualPath, DropTarget, bAttachToTarget);
+        ECS::FEntity Spawned = HandleContentBrowserAssetDrop(VirtualPath, DropTarget, bAttachToTarget, SpawnTransform);
         if (Spawned != ECS::NullEntity && Spawned != DropTarget)
         {
             // A dropped prefab arrives as a whole subtree, and only what carries SPrefabComponent is saved.
             ECS::FRegistry& Registry = ECS::GetWorldRegistry(*World);
             const bool bWasInstance = Registry.HasAny<SPrefabInstanceComponent>(Spawned);
 
-            AdoptIntoPrefab(Spawned);
-            Registry.GetHierarchy().ForEachDescendant(Spawned, [this](ECS::FEntity Descendant)
-            {
-                AdoptIntoPrefab(Descendant);
-            });
-
+            AdoptSpawnedSubtree(Spawned);
             EndTransaction("Drop Asset");
-            OutlinerListView.MarkTreeDirty();
             Asset->GetPackage()->MarkDirty();
 
             if (bWasInstance)
@@ -1108,11 +1099,7 @@ namespace Lumina
     void FPrefabEditorTool::HandleOutlinerEmptyAreaDrop()
     {
         // A content-browser asset dropped on empty space spawns under the prefab root.
-        const DragDrop::FPayload* Peek = DragDrop::PeekPayload();
-        if (Peek && Peek->Kind == DragDrop::EPayloadKind::Asset && DragDrop::IsDelivered())
-        {
-            HandlePrefabContentDrop(FStringView(Peek->AssetPath.c_str(), Peek->AssetPath.size()), ECS::NullEntity, /*bAttachToTarget*/ false);
-        }
+        AcceptContentBrowserPayload(ECS::NullEntity, /*bAttachToTarget*/ false);
     }
 
     bool FPrefabEditorTool::CanDeleteEntity(ECS::FEntity Entity) const
@@ -1144,19 +1131,7 @@ namespace Lumina
         ImGuizmo::SetDrawlist(ImGui::GetCurrentWindow()->DrawList);
         ImGuizmo::SetRect(ViewportOrigin.x, ViewportOrigin.y, ViewportSize.x, ViewportSize.y);
 
-        // Dropping a content-browser asset on empty space spawns it under the prefab root.
-        {
-            const ImRect ViewportRect(ViewportOrigin, ImVec2(ViewportOrigin.x + ViewportSize.x, ViewportOrigin.y + ViewportSize.y));
-            if (ImGui::BeginDragDropTargetCustom(ViewportRect, ImGui::GetCurrentWindow()->ID))
-            {
-                const DragDrop::FPayload* Peek = DragDrop::PeekPayload();
-                if (Peek && Peek->Kind == DragDrop::EPayloadKind::Asset && DragDrop::IsDelivered())
-                {
-                    HandlePrefabContentDrop(FStringView(Peek->AssetPath.c_str(), Peek->AssetPath.size()), ECS::NullEntity, /*bAttachToTarget*/ false);
-                }
-                ImGui::EndDragDropTarget();
-            }
-        }
+        DrawViewportDropTarget();
 
         // Selected-camera PiP (shared with the world editor); before the gizmo's early returns.
         DrawCameraPreviewOverlay(ViewportOrigin, ViewportSize);

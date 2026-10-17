@@ -5,9 +5,7 @@
 #include "PropertyFlags.h"
 #include "Core/Reflection/ReflectionDesc.h"
 #include "Containers/Vector.h"
-#include "Containers/Function.h"
 #include "Core/LuminaMacros.h"
-#include "Core/Reflection/Type/Function.h"
 #include "Platform/GenericPlatform.h"
 
 

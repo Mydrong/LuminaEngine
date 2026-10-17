@@ -15,6 +15,8 @@ namespace Lumina
         FString     Category;
         FString     Tooltip;
         const char* Icon = nullptr;
+        // Listed but not pickable, such as a component every target already has.
+        bool        bDisabled = false;
     };
 
     // A searchable list filed into expandable categories, where a search opens every category holding a match and preselects the best one.

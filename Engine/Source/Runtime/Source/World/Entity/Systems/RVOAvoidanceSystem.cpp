@@ -40,14 +40,13 @@ namespace Lumina
               SNavMeshComponent, SystemResource::Significance>();
     }
 
-    void SRVOAvoidanceSystem::OnStartup()
+    void SRVOAvoidanceSystem::OnStartup(const SSystemContext& Context)
     {
-        GetContext().GetRegistry().Ctx().Emplace<FAvoidanceState>();
+        Context.GetRegistry().Ctx().Emplace<FAvoidanceState>();
     }
 
-    void SRVOAvoidanceSystem::OnUpdate()
+    void SRVOAvoidanceSystem::OnUpdate(const SSystemContext& Context)
     {
-        const FSystemContext& Context = GetContext();
 
         LUMINA_PROFILE_SCOPE();
 
@@ -339,7 +338,7 @@ namespace Lumina
 
     namespace Avoidance
     {
-        const FAvoidanceState* GetState(const FSystemContext& Context)
+        const FAvoidanceState* GetState(const SSystemContext& Context)
         {
             return Context.GetRegistry().Ctx().Find<FAvoidanceState>();
         }

@@ -17,7 +17,7 @@ namespace Lumina
     public:
 
         void Configure() override;
-        void OnUpdate() override;
+        void OnUpdate(const SSystemContext& Context) override;
 
         /** Immediate rebuild for callers that cannot wait a tick, such as the editor placing a shape. */
         static bool Rebuild(SBlockoutComponent& Shape, SDynamicMeshComponent& Mesh, bool bKeepCPUData);

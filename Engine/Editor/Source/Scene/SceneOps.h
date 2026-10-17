@@ -37,6 +37,18 @@ namespace Lumina::SceneOps
     EDITOR_API void ApplyAddComponent(ECS::FRegistry& Registry, const FAddComponentPlan& Plan,
         CStruct* Type);
 
+    // True when the entity carries any kind of collider, so it already takes part in collision.
+    NODISCARD EDITOR_API bool HasCollider(const ECS::FRegistry& Registry, ECS::FEntity Entity);
+
+    // The entity shows a static mesh and has no collider, so AddMeshCollision would give it one.
+    NODISCARD EDITOR_API bool CanAddMeshCollision(const ECS::FRegistry& Registry, ECS::FEntity Entity);
+
+    // A Mesh Collider over the entity's own static mesh, on a static body unless it already has one. False when it cannot.
+    EDITOR_API bool AddMeshCollision(ECS::FRegistry& Registry, ECS::FEntity Entity);
+
+    // AddMeshCollision for an entity just placed into a world, when the project's Placement settings ask for it.
+    EDITOR_API bool AddPlacementCollision(ECS::FRegistry& Registry, ECS::FEntity Entity);
+
     // Runs the hooks the details panel runs, for a caller that stores into a component directly.
     class EDITOR_API FPropertyEditScope
     {

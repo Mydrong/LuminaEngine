@@ -18,13 +18,6 @@ namespace Lumina
 {
 
     static TConsoleVar MaxCObjectCount("Core.CObject.MaxCount", 4'194'304, "Maximum number of allowed CObjects");
-    
-    RUNTIME_API FCObjectArray GObjectArray;
-
-
-    // Rooted objects are never auto-destroyed.
-    static THashSet<TStrongObjectPtr<CObjectBase>> GRootedObjects;
-    static FMutex RootMutex;
 
     struct FPendingTypes
     {
@@ -50,7 +43,9 @@ namespace Lumina
     namespace Object::Internal
     {
         // The currently constructing context of a CObject.
-        static thread_local const FConstructCObjectParams* GConstructing = nullptr;
+        static thread_local const FConstructCObjectParams*  GConstructing{};
+        static THashSet<TStrongObjectPtr<CObjectBase>>      GRootedObjects{};
+        static FMutex                                       GRootMutex{};
     }
 
     FScopedObjectConstruction::FScopedObjectConstruction(const FConstructCObjectParams& Params)
@@ -103,7 +98,7 @@ namespace Lumina
         FObjectHashTables::Get().RemoveObject(this);
         if (InternalIndex != Constants::kIndexNone)
         {
-            GObjectArray.DeallocateObject(InternalIndex);
+            Object::Internal::DeallocateObject(InternalIndex);
             InternalIndex = Constants::kIndexNone;
         }
     }
@@ -169,7 +164,7 @@ namespace Lumina
     void CObjectBase::FinishDestroyForShutdown()
     {
         // The claim is what keeps this exactly once even though the sweep does no other bookkeeping.
-        if (!GObjectArray.TryClaimDestroyForShutdown(this))
+        if (!Object::Internal::TryClaimDestroyForShutdown(this))
         {
             return;
         }
@@ -184,21 +179,21 @@ namespace Lumina
     void CObjectBase::ForceDestroyNow()
     {
         // Valid at shutdown but a bug at runtime, so long-lived non-owning references must be weak.
-        DEBUG_ASSERT(GObjectArray.IsShuttingDown() || GObjectArray.GetStrongRefCountByIndex(InternalIndex) == 0,
+        DEBUG_ASSERT(Object::Internal::IsShuttingDown() || Object::Internal::GetStrongRefCountByIndex(InternalIndex) == 0,
             "ForceDestroyNow on an object with live strong references; holders will dangle. Use TWeakObjectPtr for non-owning references.");
 
-        GObjectArray.ForceDestroy(this);
+        Object::Internal::ForceDestroy(this);
     }
 
     void CObjectBase::ConditionalBeginDestroy()
     {
         // Serialized against weak-to-strong upgrades, so this cannot race a resurrection into a free.
-        GObjectArray.ConditionalDestroy(this);
+        Object::Internal::ConditionalDestroy(this);
     }
 
     int32 CObjectBase::GetStrongRefCount() const
     {
-        return GObjectArray.GetStrongRefCountByIndex(InternalIndex);
+        return Object::Internal::GetStrongRefCountByIndex(InternalIndex);
     }
 
     void CObjectBase::HandleNameChange(const FName& NewName, CPackage* NewPackage) noexcept
@@ -230,8 +225,8 @@ namespace Lumina
 
     void CObjectBase::AddToRoot()
     {
-        FScopeLock Lock(RootMutex);
-        GRootedObjects.emplace(this);
+        FScopeLock Lock(Object::Internal::GRootMutex);
+        Object::Internal::GRootedObjects.emplace(this);
         SetFlag(OF_Rooted);
     }
 
@@ -246,8 +241,8 @@ namespace Lumina
         // The root set often holds the ONLY strong ref, so erase would free this before the flags clear.
         TStrongObjectPtr<CObjectBase> Pinned(this);
         {
-            FScopeLock Lock(RootMutex);
-            GRootedObjects.erase(this);
+            FScopeLock Lock(Object::Internal::GRootMutex);
+            Object::Internal::GRootedObjects.erase(this);
             ClearFlags(OF_Rooted);
         }
     }
@@ -263,7 +258,7 @@ namespace Lumina
         {
             return;
         }
-        InternalIndex = GObjectArray.AllocateObject(this).Index;
+        InternalIndex = Object::Internal::AllocateObject(this).Index;
         FObjectHashTables::Get().AddObject(this);
     }
 
@@ -381,17 +376,17 @@ namespace Lumina
 
     void InitializeCObjectSystem()
     {
-        GObjectArray.AllocateObjectPool(MaxCObjectCount.GetValue());
+        Object::Internal::AllocateObjectPool(MaxCObjectCount.GetValue());
     }
 
     void ShutdownCObjectSystem()
     {
         // Otherwise dropping the last ref on each rooted object destroys it immediately.
-        GObjectArray.BeginShutdown();
+        Object::Internal::BeginShutdown();
 
-        GRootedObjects.clear();
+        Object::Internal::GRootedObjects.clear();
 
-        GObjectArray.Shutdown();
+        Object::Internal::Shutdown();
 
         FObjectHashTables::Get().Clear();
     }

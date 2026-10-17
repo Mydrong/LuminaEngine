@@ -25,6 +25,14 @@ namespace Lumina::ECS
         }
     }
 
+    void FComponentTypeRegistry::SetEventFanOut(FComponentTypeID TypeID, FEventFanOut FanOut)
+    {
+        if (TypeID < Types.size())
+        {
+            Types[TypeID]->EventFanOut = FanOut;
+        }
+    }
+
     FComponentTypeID FComponentTypeRegistry::Acquire(const FComponentTypeInfo& Info)
     {
         if (const FComponentTypeID Existing = FindByName(Info.Name); Existing != InvalidComponentTypeID)
@@ -87,7 +95,9 @@ namespace Lumina::ECS
     {
         ASSERT(TypeID < Types.size());
         FComponentTypeInfo& Stored = *Types[TypeID];
+        const FEventFanOut FanOut = Stored.EventFanOut;
         Stored = Info;
+        Stored.EventFanOut = FanOut;
         Stored.TypeID = TypeID;
         Stored.bRuntimeLayout = true;
 

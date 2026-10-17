@@ -99,13 +99,23 @@ namespace Lumina
 		RUNTIME_API FWindow* TryGetPrimaryWindowHandle();
 		void SetPrimaryWindowHandle(FWindow* InWindow);
 
-		// Apply a cursor mode to a specific native window (GLFWwindow*); null falls back to the primary.
-		// Lets mouse capture target the focused PIE preview window rather than always the primary window.
-		RUNTIME_API void SetCursorModeForNativeWindow(void* NativeWindow, ECursorMode Mode);
+		// Null falls back to the primary window. Raw motion only applies while disabled and skips the desktop's pointer acceleration.
+		RUNTIME_API void SetCursorModeForNativeWindow(void* NativeWindow, ECursorMode Mode, bool bRawMotion = false);
 
 		// Authoritative OS-level focus for a native window (GLFWwindow*). Exactly one window is focused at a
 		// time, so this disambiguates the active viewport across separate preview windows under game input.
 		RUNTIME_API bool IsNativeWindowFocused(void* NativeWindow);
+
+		// A gamepad slot read through the platform's standard mapping, with axes in the device's raw -1 to 1 range.
+		struct FRawGamepad
+		{
+			float       Axes[6] = {};
+			uint8       Buttons[15] = {};
+			const char* Name = nullptr;
+		};
+
+		// False when the slot is empty or holds a device with no standard gamepad mapping.
+		RUNTIME_API bool ReadGamepad(int32 Index, FRawGamepad& Out);
 	}
 
 }

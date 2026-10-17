@@ -66,6 +66,10 @@ namespace Lumina
         FUNCTION()
         virtual void OnDebugDraw(bool bSelected) {}
 
+        // Once a frame while the developer overlay shows, between ImGui's NewFrame and Render, so ImGui calls build debug windows.
+        FUNCTION()
+        virtual void OnDebugGui() {}
+
         FUNCTION()
         virtual void OnFixedUpdate(float FixedDeltaTime) {}
 
@@ -314,6 +318,11 @@ namespace Lumina
 
         #if USING(WITH_EDITOR)
         RUNTIME_API void DebugDraw(ECS::FRegistry& Registry);
+        #endif
+
+        #if USING(WITH_DEV_UI)
+        // Runs OnDebugGui on every live script, recovering ImGui's stacks after each so one that throws or forgets End leaves the rest intact.
+        RUNTIME_API void DebugGui(ECS::FRegistry& Registry);
         #endif
 
         // Bumped by anything that changes which scripts are attached or able to tick, so a batched update knows when to stop.

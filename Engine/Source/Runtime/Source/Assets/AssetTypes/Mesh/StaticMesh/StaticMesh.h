@@ -1,12 +1,11 @@
 #pragma once
 #include "Assets/AssetTypes/Mesh/Mesh.h"
+#include "Assets/AssetTypes/Mesh/MeshCollision.h"
 #include "Assets/AssetTypes/Mesh/MeshSocket.h"
 #include "StaticMesh.generated.h"
 
 namespace Lumina
 {
-    class CCollisionShape;
-
     REFLECT()
     class RUNTIME_API CStaticMesh : public CMesh
     {
@@ -18,18 +17,15 @@ namespace Lumina
 
         const SMeshSocket* FindSocket(const FName& SocketName) const { return FindSocketByName(Sockets, SocketName); }
 
-        // The default collision shape when it is loaded and holds collision, otherwise null.
-        const CCollisionShape* GetDefaultCollisionShape() const;
-
-        // A shape that is set but not loaded yet, which callers wait on rather than baking the render mesh instead.
-        bool IsDefaultCollisionShapeLoading() const;
+        // This mesh's collision when it builds anything, otherwise null so callers fall back to the render mesh.
+        const SMeshCollision* GetCollision() const { return Collision.HasCollision() ? &Collision : nullptr; }
 
         /** Named attach points relative to the mesh origin (BoneName unused). */
         PROPERTY(Editable, Category = "Sockets")
         TVector<SMeshSocket> Sockets;
 
-        // Simplified collision used by foliage, mesh colliders and navigation wherever they name no shape of their own.
-        PROPERTY(Editable, Category = "Collision")
-        TStrongObjectPtr<CCollisionShape> DefaultCollisionShape;
+        // Simplified collision that mesh colliders, foliage and navigation use, edited in the mesh's Collision tab rather than the grid.
+        PROPERTY(Hidden)
+        SMeshCollision Collision;
     };
 }

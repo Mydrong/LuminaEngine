@@ -21,7 +21,7 @@
 #include "Core/Math/Math.h"
 #include "Core/Object/Cast.h"
 #include "Core/Object/Class.h"
-#include "Core/Object/ObjectArray.h"
+#include "Core/Object/ObjectIteration.h"
 #include "Core/Object/Package/Package.h"
 #include "Tools/UI/ImGui/ImGuiX.h"
 #include "UI/Properties/PropertyEditContexts.h"
@@ -869,7 +869,7 @@ namespace Lumina
         if (!bEnumCacheBuilt)
         {
             bEnumCacheBuilt = true;
-            GObjectArray.ForEachObject([&](CObjectBase* Object, int32)
+            ForEachObject([&](CObjectBase* Object, int32)
             {
                 if (Object != nullptr && Object->IsA<CEnum>())
                 {

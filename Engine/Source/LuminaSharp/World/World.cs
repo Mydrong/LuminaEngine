@@ -12,6 +12,9 @@ public unsafe partial class CWorld
     internal ulong WorldHandle => (ulong)Handle.ToInt64();
     public GameplayMessageBus Messages => new(this);
 
+    // The world's event queues, for systems that drain them and scripts that send into them.
+    public WorldEvents Events => new(this);
+
     // The subsystem of type T in this world, or null when none was created. Finds a C++ one just the same.
     public T? GetSubsystem<T>() where T : NativeObject
         => CGameLibrary.GetSubsystem(this, SubsystemName<T>.Value) as T;

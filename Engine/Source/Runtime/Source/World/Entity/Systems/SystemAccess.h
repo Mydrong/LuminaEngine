@@ -26,11 +26,15 @@ namespace Lumina
 
         bool            bExclusive = false;
 
+        // Events alone say nothing about the components a system touches, so they leave it exclusive.
+        bool            bDeclaresComponents = false;
+
         template<typename... Ts>
         FSystemAccess& Write()
         {
             (Writes.push_back(static_cast<uint32>(ECS::GetComponentTypeID<Ts>())), ...);
             (AddPoolAssurer<Ts>(), ...);
+            bDeclaresComponents = true;
             return *this;
         }
 
@@ -39,6 +43,7 @@ namespace Lumina
         {
             (Reads.push_back(static_cast<uint32>(ECS::GetComponentTypeID<Ts>())), ...);
             (AddPoolAssurer<Ts>(), ...);
+            bDeclaresComponents = true;
             return *this;
         }
 
@@ -102,7 +107,7 @@ namespace Lumina
     // "Write<STransformComponent>"). No-op when no system access is bound (i.e. called outside the scheduler,
     // such as gameplay code or editor tools) or when the bound system is exclusive (declares everything).
     // ConnectComponentAccessValidators hooks the pool signals, catching a structural write through the raw
-    // registry that never reaches an FSystemContext helper.
+    // registry that never reaches an SSystemContext helper.
 #if defined(LE_SHIPPING)
     inline void SetExecutingSystemAccess(const FSystemAccess*) {}
     inline const FSystemAccess* GetExecutingSystemAccess() { return nullptr; }

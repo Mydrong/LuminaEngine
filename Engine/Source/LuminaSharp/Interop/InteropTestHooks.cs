@@ -1037,4 +1037,53 @@ internal static unsafe class InteropTestHooks
             }
         }
     }
+
+    // Reads what native queued through fresh readers, then sends three script pings for the next hook to read back.
+    [ManagedExport]
+    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
+    public static int Test_EventsReadEngineAndSend(IntPtr World, int* OutJumpSum, int* OutSlotLength, int* OutUnreadAfter)
+    {
+        WorldEvents Events = new Lumina.CWorld(World).Events;
+
+        EventReader<SCharacterJumpedEvent> Jumps = default;
+        int Count = 0;
+        foreach (ref readonly SCharacterJumpedEvent Jump in Events.Read(ref Jumps))
+        {
+            *OutJumpSum += Jump.JumpCount;
+            ++Count;
+        }
+        *OutUnreadAfter = Events.HasUnread(in Jumps) ? 1 : 0;
+
+        EventReader<SSaveGameCompletedEvent> Completions = default;
+        foreach (SSaveGameCompletedEvent Completed in Events.ReadViews(ref Completions))
+        {
+            *OutSlotLength += Completed.SlotName.Length;
+        }
+
+        ReadOnlySpan<TestScriptPing> Pings = stackalloc TestScriptPing[] { new() { Value = 1 }, new() { Value = 2 }, new() { Value = 3, Scale = 0.5 } };
+        Events.Send(Pings);
+        return Count;
+    }
+
+    [ManagedExport]
+    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
+    public static int Test_EventsReadScript(IntPtr World, double* OutScaleSum)
+    {
+        WorldEvents Events = new Lumina.CWorld(World).Events;
+        EventReader<TestScriptPing> Reader = default;
+        int Sum = 0;
+        foreach (ref readonly TestScriptPing Ping in Events.Read(ref Reader))
+        {
+            Sum += Ping.Value;
+            *OutScaleSum += Ping.Scale;
+        }
+        return Sum;
+    }
+}
+
+// A script event with no native counterpart, laid out from C# alone and padded so its alignment is not four.
+internal struct TestScriptPing : IEvent
+{
+    public int Value;
+    public double Scale;
 }

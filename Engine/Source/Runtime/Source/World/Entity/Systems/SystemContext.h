@@ -1,7 +1,7 @@
 #pragma once
 
 #include "World/ECS/Registry.h"
-#include "World/ECS/EventDispatcher.h"
+#include "World/ECS/EventQueue.h"
 #include "World/ECS/CommandBus.h"
 
 #include "Core/UpdateStage.h"
@@ -12,6 +12,7 @@
 #include "SystemResources.h"
 #include "TaskSystem/TaskSystem.h"
 #include "World/Entity/Components/TransformComponent.h"
+#include "SystemContext.generated.h"
 
 
 namespace Lumina
@@ -27,13 +28,15 @@ namespace Lumina
         class IPhysicsScene;
     }
 
-    struct FSystemContext : INonCopyable
+    // What a system's OnUpdate and HasWork receive for the running stage, the same value C# reads through a handle.
+    REFLECT()
+    struct SSystemContext
     {
-        friend class CWorld;
-        
-        FSystemContext(CWorld* InWorld);
-        ~FSystemContext() = default;
-        
+        GENERATED_BODY()
+
+        SSystemContext() = default;
+        explicit SSystemContext(CWorld* InWorld);
+
         RUNTIME_API FORCEINLINE double GetDeltaTime() const { return DeltaTime; }
 
         // For systems that drive world-level state rather than just components (the sequencer switching
@@ -45,50 +48,64 @@ namespace Lumina
         RUNTIME_API void SetEntityLifetime(ECS::FEntity Entity, float Lifetime) const;
 
 
+        // Readable after this batch's sync point, so any system or worker may send, given SendsEvent<T> was declared.
         template<typename T>
-        NODISCARD auto& EventSink() const
+        void SendEvent(const T& Event) const
         {
-            return Dispatcher.Sink<T>();
+            ValidateSystemAccess(static_cast<uint32>(ECS::GetComponentTypeID<T>()), true, "SendsEvent<T>");
+            ECS::SendEvent(*Events, Event);
         }
 
-        // A parallel system's event waits for the batch to end, since listeners are free to change the world.
-        template<typename T, typename ... TArgs>
-        void DispatchEvent(TArgs&&... Args) const
+        template<typename T>
+        void SendEvents(TSpan<const T> InEvents) const
         {
-            if (ECS::FCommandBus::ShouldDefer())
-            {
-                CommandBus.Enqueue([InDispatcher = &Dispatcher, Event = T(Forward<TArgs>(Args)...)]() mutable
-                {
-                    InDispatcher->Trigger<T>(Event);
-                });
-                return;
-            }
-            Dispatcher.Trigger<T>(Forward<TArgs>(Args)...);
+            ValidateSystemAccess(static_cast<uint32>(ECS::GetComponentTypeID<T>()), true, "SendsEvent<T>");
+            ECS::SendEvents(*Events, InEvents);
+        }
+
+        // Every T sent since Reader last read, oldest first, for a Reader that ReadsEvent<T> handed out.
+        template<typename T>
+        NODISCARD ECS::TEventRange<T> ReadEvents(ECS::TEventReader<T>& Reader) const
+        {
+            ValidateSystemAccess(static_cast<uint32>(ECS::GetComponentTypeID<T>()), false, "ReadsEvent<T>");
+            return ECS::ReadEvents(*Events, Reader);
+        }
+
+        // For HasWork, so a system that only answers events stays out of a frame that sent none.
+        template<typename T>
+        NODISCARD bool HasUnreadEvents(const ECS::TEventReader<T>& Reader) const
+        {
+            return ECS::HasUnreadEvents(*Events, Reader);
+        }
+
+        NODISCARD ECS::FEventQueues& GetEvents() const
+        {
+            return *Events;
         }
 
         // Deferred adds, removes and patches, applied at the next sync point in record order.
         NODISCARD ECS::FCommandBus& GetCommandBus() const
         {
-            return CommandBus;
+            return *CommandBus;
         }
         
         template<typename... Ts, typename... TArgs>
         NODISCARD auto CreateView(TArgs&&... Args) const -> decltype(std::declval<ECS::FRegistry>().View<Ts...>(std::forward<TArgs>(Args)...))
         {
-            return Registry.View<Ts...>(std::forward<TArgs>(Args)...);
+            return Registry->View<Ts...>(std::forward<TArgs>(Args)...);
         }
         
         template<typename... Ts, typename TFunc, typename... TArgs>
         void ForEach(TFunc&& Function, TArgs&&... Args) const
         {
-            auto View = Registry.View<Ts...>(std::forward<TArgs>(Args)...);
+            auto View = Registry->View<Ts...>(std::forward<TArgs>(Args)...);
             View.ForEach(Forward<TFunc>(Function));
         }
 
         template<typename... Ts, typename TFunc, typename... TArgs>
         void ParallelForEach(TFunc&& Function, TArgs&&... Args) const
         {
-            ParallelForEachView(Registry.View<Ts...>(std::forward<TArgs>(Args)...), Forward<TFunc>(Function));
+            ParallelForEachView(Registry->View<Ts...>(std::forward<TArgs>(Args)...), Forward<TFunc>(Function));
         }
 
         // Fans an already built view out over the workers, running it inline when it is too small to be worth splitting.
@@ -113,7 +130,7 @@ namespace Lumina
 
         NODISCARD auto& GetRegistryContext() const
         {
-            return Registry.Ctx();
+            return Registry->Ctx();
         }
 
         // The parent links, which a system walking them declares as SystemResource::Hierarchy.
@@ -121,64 +138,64 @@ namespace Lumina
 
         NODISCARD ECS::FRegistry& GetRegistry() const
         {
-            return Registry;
+            return *Registry;
         }
         
         template<typename... Ts, typename ... TArgs>
         NODISCARD auto CreateGroup(TArgs&&... Args) const
         {
-            return Registry.View<Ts...>(std::forward<TArgs>(Args)...);
+            return Registry->View<Ts...>(std::forward<TArgs>(Args)...);
         }
 
         template<typename... Ts>
         NODISCARD decltype(auto) Get(ECS::FEntity entity) const
         {
-            return Registry.Get<Ts...>(entity);
+            return Registry->Get<Ts...>(entity);
         }
 
         template<typename... Ts>
         NODISCARD decltype(auto) TryGet(ECS::FEntity entity) const
         {
-            return Registry.TryGet<Ts...>(entity);
+            return Registry->TryGet<Ts...>(entity);
         }
         
         template<typename... Ts>
         void Clear() const
         {
             (ValidateSystemAccess(static_cast<uint32>(ECS::GetComponentTypeID<Ts>()), true, "Write<> of the cleared component"), ...);
-            Registry.ClearComponent<Ts...>();
+            Registry->ClearComponent<Ts...>();
         }
 
         template<typename... Ts>
         NODISCARD bool HasAnyOf(ECS::FEntity EntityID) const
         {
-            return Registry.HasAny<Ts...>(EntityID);
+            return Registry->HasAny<Ts...>(EntityID);
         }
 
         template<typename ... Ts>
         NODISCARD bool HasAllOf(ECS::FEntity EntityID) const
         {
-            return Registry.HasAll<Ts...>(EntityID);
+            return Registry->HasAll<Ts...>(EntityID);
         }
 
         template<typename T, typename ... TArgs>
         T& Emplace(ECS::FEntity entity, TArgs&& ... Args)
         {
             ValidateSystemAccess(static_cast<uint32>(ECS::GetComponentTypeID<T>()), true, "Write<> of the emplaced component");
-            return Registry.Emplace<T>(entity, std::forward<TArgs>(Args)...);
+            return Registry->Emplace<T>(entity, std::forward<TArgs>(Args)...);
         }
 
         template<typename T, typename ... TArgs>
         T& EmplaceOrReplace(ECS::FEntity entity, TArgs&& ... Args) const
         {
             ValidateSystemAccess(static_cast<uint32>(ECS::GetComponentTypeID<T>()), true, "Write<> of the emplaced component");
-            return Registry.EmplaceOrReplace<T>(entity, std::forward<TArgs>(Args)...);
+            return Registry->EmplaceOrReplace<T>(entity, std::forward<TArgs>(Args)...);
         }
         
         template<typename T>
         decltype(auto) GetStorage() const
         {
-            return Registry.GetStorage<T>();
+            return Registry->GetStorage<T>();
         }
         
         /** The world's physics scene, or null when the world has none. */
@@ -238,11 +255,11 @@ namespace Lumina
         {
             if (ECS::FCommandBus::ShouldDefer())
             {
-                CommandBus.Destroy(Entity);
+                CommandBus->Destroy(Entity);
                 return;
             }
             ValidateSystemAccess(static_cast<uint32>(ECS::GetComponentTypeID<SystemResource::EntityStructure>()), true, "Write<SystemResource::EntityStructure>");
-            Registry.Destroy(Entity);
+            Registry->Destroy(Entity);
         }
 
         RUNTIME_API size_t GetNumEntities() const;
@@ -250,17 +267,20 @@ namespace Lumina
         
         RUNTIME_API EWorldType GetWorldType() const;
     
-    private:
+        // First, because the C# SSystemContext reads the world from offset zero.
+        CWorld*             World = nullptr;
+        ECS::FRegistry*     Registry = nullptr;
+        ECS::FEventQueues*  Events = nullptr;
+        ECS::FCommandBus*   CommandBus = nullptr;
 
-    private:
+        PROPERTY(Hidden)
+        double DeltaTime = 0.0;
 
-        double                  DeltaTime = 0.0;
-        double                  Time = 0.0;
-        CWorld*                 World = nullptr;
-        ECS::FRegistry&         Registry;
-        ECS::FEventDispatcher&       Dispatcher;
-        ECS::FCommandBus&       CommandBus;
-        EUpdateStage            UpdateStage = EUpdateStage::FrameStart;
+        PROPERTY(Hidden)
+        double Time = 0.0;
+
+        PROPERTY(Hidden)
+        EUpdateStage UpdateStage = EUpdateStage::FrameStart;
     };
     
     

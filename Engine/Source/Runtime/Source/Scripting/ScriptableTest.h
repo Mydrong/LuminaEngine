@@ -210,9 +210,9 @@ namespace Lumina
             DeclareRead("SStaticMeshComponent");
         }
 
-        void OnStartup() override  { ++StartupCount; }
-        void OnUpdate() override   { ++UpdateCount; }
-        void OnTeardown() override { ++TeardownCount; }
+        void OnStartup(const SSystemContext& Context) override  { ++StartupCount; }
+        void OnUpdate(const SSystemContext& Context) override   { ++UpdateCount; }
+        void OnTeardown(const SSystemContext& Context) override { ++TeardownCount; }
 
         int32 ConfigureCount = 0;
         int32 StartupCount = 0;

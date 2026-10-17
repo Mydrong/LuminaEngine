@@ -85,7 +85,7 @@ namespace Lumina
         }
 
         TVector<CObject*> Originals;
-        GObjectArray.ForEachObject([&](CObjectBase* Base, int32)
+        ForEachObject([&](CObjectBase* Base, int32)
         {
             if (Base == nullptr || Base->HasAnyFlag(OF_MarkedDestroy) || Base->HasAnyFlag(OF_DefaultObject))
             {
@@ -103,14 +103,14 @@ namespace Lumina
         for (CObject* Old : Originals)
         {
             CClass* const NewClass = ClassMap.find(Old->GetClass())->second;
-            const FObjectHandle OldHandle = GObjectArray.GetHandleByObject(Old);
+            const FObjectHandle OldHandle = Object::Internal::GetHandleByObject(Old);
             if (CObject* New = BuildReplacement(Old, NewClass))
             {
                 ObjectMap.insert_or_assign(Old, New);
 
                 // A weak reference is not a property, so no walk can reach it. Redirecting the handle is what
                 // makes one follow the instance instead of reading as destroyed.
-                GObjectArray.AddReinstanceRedirect(OldHandle, GObjectArray.GetHandleByObject(New));
+                Object::Internal::AddReinstanceRedirect(OldHandle, Object::Internal::GetHandleByObject(New));
                 ++Result.InstancesReplaced;
             }
         }
@@ -144,7 +144,7 @@ namespace Lumina
 
         // Raw is safe here because every original is pinned above, so none dies while the walk is still going.
         TVector<CObject*> Live;
-        GObjectArray.ForEachObject([&](CObjectBase* Base, int32)
+        ForEachObject([&](CObjectBase* Base, int32)
         {
             if (Base != nullptr && !Base->HasAnyFlag(OF_MarkedDestroy))
             {
@@ -177,7 +177,7 @@ namespace Lumina
             {
                 continue;   // a retired class is taken out by whoever minted it, not here
             }
-            Doomed.emplace_back(GObjectArray.GetHandleByObject(Old), Old);
+            Doomed.emplace_back(Object::Internal::GetHandleByObject(Old), Old);
         }
 
         // An original nothing reaches any more dies here, which the handle check below then skips.
@@ -186,7 +186,7 @@ namespace Lumina
         FString Stranded;
         for (const TPair<FObjectHandle, CObject*>& Entry : Doomed)
         {
-            if (GObjectArray.ResolveHandle(Entry.first) != Entry.second)
+            if (Object::Internal::ResolveHandle(Entry.first) != Entry.second)
             {
                 continue;   // an earlier destroy in this loop already took it
             }
@@ -194,7 +194,7 @@ namespace Lumina
             // Forcing it down while a strong reference survives would dangle that holder. The original is
             // already renamed aside and resolves to nothing, so leaving it to its refcount is safe, and a
             // reference the walk could not reach keeps working until its owner lets go.
-            if (GObjectArray.GetStrongRefCountByIndex(Entry.first.Index) == 0)
+            if (Object::Internal::GetStrongRefCountByIndex(Entry.first.Index) == 0)
             {
                 Entry.second->ForceDestroyNow();
             }

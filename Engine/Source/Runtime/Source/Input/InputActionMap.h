@@ -9,72 +9,67 @@ namespace Lumina
 {
     class FInputContext;
 
-    // Runtime evaluator for the project's input actions. Actions are authored on CInputSettings (the
-    // Settings panel); this caches them with an O(1) name lookup, evaluates every action once per frame
-    // into the querying FInputContext, and answers down/pressed/released/axis queries off that cache.
+    // The project's authored actions with the player's overrides applied, evaluated once a frame into every input context.
     class FInputActionMap
     {
     public:
 
         RUNTIME_API static FInputActionMap& Get();
 
-        // Pull the action list from CInputSettings' default object and rebuild the lookup. Called after
-        // config load and whenever the Input settings are saved in the editor.
+        // Reloads the actions from CInputSettings, after config load and whenever the Input settings are saved.
         RUNTIME_API void RebuildFromSettings();
 
-        // Bumped by every rebuild. A cached action index is only valid while this is unchanged, which is
-        // what lets the script layer resolve a name to an index once instead of per query.
+        // Applies a player's sensitivity, invert, toggles and rebinds, which CGameUserSettings pushes whenever they change.
+        RUNTIME_API void SetPlayerSettings(const SPlayerInputSettings& Settings);
+        RUNTIME_API const SPlayerInputSettings& GetPlayerSettings() const { return PlayerSettings; }
+
+        // Bumped whenever the action list may have changed, so a cached action index stays valid exactly while it is unchanged.
         RUNTIME_API uint32 GetSerial() const { return Serial; }
 
         RUNTIME_API const SInputAction* FindAction(FName Name) const;
 
-        // Authored mapping layer by name, or null. Rebuilt alongside the actions.
-        RUNTIME_API const SInputMappingContext* FindMappingContext(FName Name) const;
-
-        // Index into GetAllActions() / the context's state array, or Constants::kIndexNone.
+        // Index into GetAllActions() and every context's state array, or Constants::kIndexNone.
         RUNTIME_API int32 FindActionIndex(FName Name) const;
 
-        // Evaluate every action into Context's state array. Called once per frame per context, before the
-        // world update, so every query within the frame sees one consistent snapshot.
+        // The handle's index, re-resolved only after a rebuild or a rename.
+        RUNTIME_API int32 ResolveIndex(const SInputActionHandle& Handle) const;
+
+        // An action other than IgnoreAction with a key binding equal to Key, for flagging a rebind conflict, or none.
+        RUNTIME_API FName FindActionUsingKey(const SKey& Key, FName IgnoreAction) const;
+
+        // Runs before the world update, so every query in the frame reads one consistent snapshot.
         RUNTIME_API void UpdateContext(FInputContext& Context, float DeltaSeconds) const;
 
-        RUNTIME_API const SInputActionState& GetActionState(FName Name, const FInputContext& Context) const;
-
-        // Handle overload: resolves the name only when the action table has been rebuilt since last time, so a steady-state query is an array read.
+        // Zeroed when the handle names no action or the context has not been updated since the last rebuild.
         RUNTIME_API const SInputActionState& GetActionState(const SInputActionHandle& Handle, const FInputContext& Context) const;
 
-        RUNTIME_API bool  IsActionDown    (FName Name, const FInputContext& Context) const;
-        RUNTIME_API bool  IsActionPressed (FName Name, const FInputContext& Context) const;
-        RUNTIME_API bool  IsActionReleased(FName Name, const FInputContext& Context) const;
-        RUNTIME_API bool  IsActionHeld    (FName Name, const FInputContext& Context) const;
-        RUNTIME_API bool  WasActionTapped (FName Name, const FInputContext& Context) const;
-        RUNTIME_API float GetActionAxis   (FName Name, const FInputContext& Context) const;
-        RUNTIME_API float GetActionAxisY  (FName Name, const FInputContext& Context) const;
-        RUNTIME_API float GetActionHeldTime(FName Name, const FInputContext& Context) const;
-
+        // The effective actions, with the player's rebinds already in their Bindings.
         const TVector<SInputAction>& GetAllActions() const { return Actions; }
-
-        RUNTIME_API static FString   KeyToString(EKey Key);
-        RUNTIME_API static FString   MouseButtonToString(EMouseKey Button);
-        RUNTIME_API static EKey      KeyFromString(FStringView Token);
-        RUNTIME_API static EMouseKey MouseButtonFromString(FStringView Token);
-        RUNTIME_API static const TVector<EKey>&      AllSupportedKeys();
-        RUNTIME_API static const TVector<EMouseKey>& AllSupportedMouseButtons();
 
     private:
 
-        // Whether the context's pushed mapping layers (and, failing those, its input mode) let this action fire.
+        void Rebuild();
+
+        const SInputMappingContext* FindMappingContext(FName Name) const;
+
+        // Whether the context's pushed layers, or failing those its input mode, let this action fire.
         bool PassesGate(const SInputAction& Action, const FInputContext& Context) const;
 
-        // Sum this action's bindings into per-channel raw values, then shape them (invert, sensitivity,
-        // dead zone). bOutAnyKeyDown reports whether a digital binding is held, which is what a Digital
-        // action keys off regardless of the shaped magnitude.
+        // Sums the bindings per channel and shapes the result. bOutAnyKeyDown is what a Digital action keys off.
         void EvaluateRaw(const SInputAction& Action, const FInputContext& Context,
             float& OutX, float& OutY, bool& bOutAnyKeyDown) const;
+
+        // Gated and evaluated, which is all a chord needs to know about its partner.
+        bool IsRawDown(const SInputAction& Action, const FInputContext& Context) const;
 
         TVector<SInputAction>  Actions;
         TVector<SInputMappingContext> MappingContexts;
         THashMap<FName, int32> Lookup;
+
+        SPlayerInputSettings   PlayerSettings;
+
+        // Parallel to Actions, true where the player chose toggle over hold.
+        TVector<bool>          ToggleActions;
         uint32                 Serial = 0;
     };
 }

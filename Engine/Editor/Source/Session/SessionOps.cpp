@@ -153,6 +153,7 @@ namespace Lumina::SessionOps
 
         Out.bPlaying = Tool->HasSimulatingWorld();
         Out.bPaused  = Out.bPlaying && Tool->IsPlaySessionPaused();
+        Out.bEjected = Tool->IsEjectedFromPlay();
 
         if (CWorld* World = Tool->GetSceneWorld(); World != nullptr && World->GetPackage() != nullptr)
         {

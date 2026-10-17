@@ -2,14 +2,14 @@
 #include "InputContext.h"
 
 #include "Events/Event.h"
-#include "Input/InputActionMap.h"
 
 namespace Lumina
 {
-    void FInputContext::SetMouseMode(EMouseMode Mode)
-    {
-        MouseMode = Mode;
-    }
+    // Movement under this many pixels in one event is hand tremor or sensor noise, not the player switching devices.
+    static constexpr double kDeviceSwitchMousePixels = 3.0;
+
+    // A stick or trigger past this is the player picking up the pad, well clear of a resting stick.
+    static constexpr float kDeviceSwitchAxis = 0.3f;
 
     void FInputContext::SetWindowRect(int MinX, int MinY, int MaxX, int MaxY)
     {
@@ -74,31 +74,26 @@ namespace Lumina
         return U >= 0.0 && U <= 1.0 && V >= 0.0 && V <= 1.0;
     }
 
+    void FInputContext::AddHeldModifiers(SInputEvent& Event) const
+    {
+        if (IsCtrlDownRaw())  { Event.AddFlag(EInputEventFlags::Ctrl); }
+        if (IsShiftDownRaw()) { Event.AddFlag(EInputEventFlags::Shift); }
+        if (IsAltDownRaw())   { Event.AddFlag(EInputEventFlags::Alt); }
+    }
+
     bool FInputContext::OnEvent(FEvent& Event)
     {
-        // Mouse events carry no modifier flags, so the chord comes from the cached modifier state.
-        auto MouseKeyWithMods = [this](EMouseKey Button) -> SKey
-        {
-            SKey K;
-            K.SetMouseButton(Button);
-            K.bCtrl  = (CachedModifierState & 1) != 0;
-            K.bShift = (CachedModifierState & 2) != 0;
-            K.bAlt   = (CachedModifierState & 4) != 0;
-            return K;
-        };
-
         if (Event.IsA<FMouseMovedEvent>())
         {
             FMouseMovedEvent& MouseEvent = Event.As<FMouseMovedEvent>();
             // Deltas stay in window pixels; position is translated to RT space.
             MouseDeltaX += MouseEvent.GetDeltaX();
             MouseDeltaY += MouseEvent.GetDeltaY();
-
-            double Cx = 0.0;
-            double Cy = 0.0;
-            WindowToContext(MouseEvent.GetX(), MouseEvent.GetY(), Cx, Cy);
-            MouseX = Cx;
-            MouseY = Cy;
+            if (Math::Abs(MouseEvent.GetDeltaX()) + Math::Abs(MouseEvent.GetDeltaY()) >= kDeviceSwitchMousePixels)
+            {
+                LastUsedDevice = EInputDevice::KeyboardMouse;
+            }
+            WindowToContext(MouseEvent.GetX(), MouseEvent.GetY(), MouseX, MouseY);
 
             SInputEvent Ev;
             Ev.Type   = EInputEventType::MouseMove;
@@ -108,62 +103,47 @@ namespace Lumina
             Ev.DeltaY = MouseEvent.GetDeltaY();
             FrameEvents.push_back(Ev);
         }
-        else if (Event.IsA<FMouseButtonPressedEvent>())
+        else if (Event.IsA<FMouseButtonPressedEvent>() || Event.IsA<FMouseButtonReleasedEvent>())
         {
-            FMouseButtonEvent& MouseButtonEvent = Event.As<FMouseButtonPressedEvent>();
-            const uint32 MouseCode = (uint32)MouseButtonEvent.GetButton();
-            MouseStates[MouseCode]        = Input::EMouseState::Pressed;
-            MouseKeyDownTimes[MouseCode]  = 0.0f;
+            const bool bPressed = Event.IsA<FMouseButtonPressedEvent>();
+            const EMouseKey Button = static_cast<FMouseButtonEvent&>(Event).GetButton();
+            MouseStates[(uint32)Button] = bPressed ? Input::EButtonState::Pressed : Input::EButtonState::Released;
+            LastUsedDevice = EInputDevice::KeyboardMouse;
 
             SInputEvent Ev;
-            Ev.Type   = EInputEventType::MouseDown;
-            Ev.SetKey(MouseKeyWithMods(MouseButtonEvent.GetButton()));
+            Ev.Type = bPressed ? EInputEventType::MouseDown : EInputEventType::MouseUp;
+            Ev.SetKey(SKey(Button));
+            AddHeldModifiers(Ev);
             Ev.MouseX = MouseX;
             Ev.MouseY = MouseY;
             FrameEvents.push_back(Ev);
         }
-        else if (Event.IsA<FMouseButtonReleasedEvent>())
+        else if (Event.IsA<FKeyPressedEvent>() || Event.IsA<FKeyReleasedEvent>())
         {
-            FMouseButtonEvent& MouseButtonEvent = Event.As<FMouseButtonReleasedEvent>();
-            const uint32 MouseCode = (uint32)MouseButtonEvent.GetButton();
-            MouseStates[MouseCode]        = Input::EMouseState::Released;
-            MouseKeyDownTimes[MouseCode]  = -1.0f;
+            const bool bPressed = Event.IsA<FKeyPressedEvent>();
+            FKeyEvent& KeyEvent = static_cast<FKeyEvent&>(Event);
+            const bool bRepeat = bPressed && Event.As<FKeyPressedEvent>().IsRepeat();
+            Input::EButtonState& State = KeyStates[(uint32)KeyEvent.GetKeyCode()];
+            LastUsedDevice = EInputDevice::KeyboardMouse;
+
+            // A repeat after a focus reset still counts as held, but never as a fresh press.
+            if (!bPressed)
+            {
+                State = Input::EButtonState::Released;
+            }
+            else if (!bRepeat)
+            {
+                State = Input::EButtonState::Pressed;
+            }
+            else if (!Input::IsDown(State))
+            {
+                State = Input::EButtonState::Held;
+            }
 
             SInputEvent Ev;
-            Ev.Type   = EInputEventType::MouseUp;
-            Ev.SetKey(MouseKeyWithMods(MouseButtonEvent.GetButton()));
-            Ev.MouseX = MouseX;
-            Ev.MouseY = MouseY;
-            FrameEvents.push_back(Ev);
-        }
-        else if (Event.IsA<FKeyPressedEvent>())
-        {
-            FKeyPressedEvent& KeyEvent = Event.As<FKeyPressedEvent>();
-            const uint32 KeyCode = (uint32)KeyEvent.GetKeyCode();
-            KeyStates[KeyCode] = KeyEvent.IsRepeat()
-                ? Input::EKeyState::Repeated
-                : Input::EKeyState::Pressed;
-
-            SInputEvent Ev;
-            Ev.Type   = EInputEventType::KeyDown;
-            Ev.Device = EKeyDevice::Keyboard;
-            Ev.Key    = KeyEvent.GetKeyCode();
-            if (KeyEvent.IsRepeat())    { Ev.AddFlag(EInputEventFlags::Repeat); }
-            if (KeyEvent.IsCtrlDown())  { Ev.AddFlag(EInputEventFlags::Ctrl); }
-            if (KeyEvent.IsShiftDown()) { Ev.AddFlag(EInputEventFlags::Shift); }
-            if (KeyEvent.IsAltDown())   { Ev.AddFlag(EInputEventFlags::Alt); }
-            FrameEvents.push_back(Ev);
-        }
-        else if (Event.IsA<FKeyReleasedEvent>())
-        {
-            FKeyReleasedEvent& KeyEvent = Event.As<FKeyReleasedEvent>();
-            const uint32 KeyCode = (uint32)KeyEvent.GetKeyCode();
-            KeyStates[KeyCode] = Input::EKeyState::Released;
-
-            SInputEvent Ev;
-            Ev.Type = EInputEventType::KeyUp;
-            Ev.Device = EKeyDevice::Keyboard;
-            Ev.Key    = KeyEvent.GetKeyCode();
+            Ev.Type = bPressed ? EInputEventType::KeyDown : EInputEventType::KeyUp;
+            Ev.SetKey(SKey(KeyEvent.GetKeyCode()));
+            if (bRepeat)                { Ev.AddFlag(EInputEventFlags::Repeat); }
             if (KeyEvent.IsCtrlDown())  { Ev.AddFlag(EInputEventFlags::Ctrl); }
             if (KeyEvent.IsShiftDown()) { Ev.AddFlag(EInputEventFlags::Shift); }
             if (KeyEvent.IsAltDown())   { Ev.AddFlag(EInputEventFlags::Alt); }
@@ -171,22 +151,44 @@ namespace Lumina
         }
         else if (Event.IsA<FMouseScrolledEvent>())
         {
-            FMouseScrolledEvent& MouseEvent = Event.As<FMouseScrolledEvent>();
-            MouseZ = MouseEvent.GetOffset();
-            const uint32 KeyCode = (uint32)MouseEvent.GetCode();
-            MouseStates[KeyCode] = MouseZ > 0.0
-                ? Input::EMouseState::Up
-                : Input::EMouseState::Held;
+            MouseZ = Event.As<FMouseScrolledEvent>().GetOffset();
 
             SInputEvent Ev;
             Ev.Type   = EInputEventType::MouseScroll;
-            Ev.Scroll = MouseEvent.GetOffset();
+            Ev.Scroll = MouseZ;
             Ev.MouseX = MouseX;
             Ev.MouseY = MouseY;
             FrameEvents.push_back(Ev);
         }
 
         return false;
+    }
+
+    void FInputContext::SetGamepadState(const FGamepadState& State)
+    {
+        Gamepad = State;
+        for (float Axis : Gamepad.Axes)
+        {
+            if (Math::Abs(Axis) >= kDeviceSwitchAxis)
+            {
+                LastUsedDevice = EInputDevice::Gamepad;
+            }
+        }
+
+        for (uint32 Button = 0; Button < (uint32)EGamepadButton::Num; ++Button)
+        {
+            const Input::EButtonState ButtonState = Gamepad.Buttons[Button];
+            if (ButtonState != Input::EButtonState::Pressed && ButtonState != Input::EButtonState::Released)
+            {
+                continue;
+            }
+            LastUsedDevice = EInputDevice::Gamepad;
+
+            SInputEvent Ev;
+            Ev.Type = (ButtonState == Input::EButtonState::Pressed) ? EInputEventType::GamepadDown : EInputEventType::GamepadUp;
+            Ev.SetKey(SKey((EGamepadButton)Button));
+            FrameEvents.push_back(Ev);
+        }
     }
 
     void FInputContext::PushInputLayer(FName Name)
@@ -222,26 +224,52 @@ namespace Lumina
         InputLayers.clear();
     }
 
-    void FInputContext::EndFrame(double DeltaSeconds)
+    EKey FInputContext::GetFirstPressedKey() const
     {
-        for (auto& State : MouseStates)
+        for (uint32 Key = 0; Key < (uint32)EKey::Num; ++Key)
         {
-            if (State == Input::EMouseState::Pressed)  State = Input::EMouseState::Held;
-            if (State == Input::EMouseState::Released) State = Input::EMouseState::Up;
-        }
-
-        for (auto& State : KeyStates)
-        {
-            if (State == Input::EKeyState::Pressed)  State = Input::EKeyState::Held;
-            if (State == Input::EKeyState::Released) State = Input::EKeyState::Up;
-        }
-
-        for (uint32 i = 0; i < (uint32)EMouseKey::Num; ++i)
-        {
-            if (MouseKeyDownTimes[i] >= 0.0f)
+            if (KeyStates[Key] == Input::EButtonState::Pressed)
             {
-                MouseKeyDownTimes[i] += (float)DeltaSeconds;
+                return (EKey)Key;
             }
+        }
+        return EKey::Num;
+    }
+
+    EMouseKey FInputContext::GetFirstPressedMouseButton() const
+    {
+        for (uint32 Button = (uint32)EMouseKey::Button0; Button <= (uint32)EMouseKey::ButtonLast; ++Button)
+        {
+            if (MouseStates[Button] == Input::EButtonState::Pressed)
+            {
+                return (EMouseKey)Button;
+            }
+        }
+        return EMouseKey::Num;
+    }
+
+    bool FInputContext::ConsumeBufferedPress(int32 ActionIndex)
+    {
+        if (ActionIndex < 0 || ActionIndex >= int32(ActionStates.size()) || ActionIndex >= int32(TriggerStates.size()))
+        {
+            return false;
+        }
+        SInputActionState& State = ActionStates[ActionIndex];
+        const bool bHadPress = State.IsBuffered();
+        State.Flags &= ~SInputActionState::Flag_Buffered;
+        TriggerStates[ActionIndex].BufferRemaining = 0.0f;
+        return bHadPress;
+    }
+
+    void FInputContext::EndFrame()
+    {
+        for (Input::EButtonState& State : KeyStates)
+        {
+            State = Input::Settle(State);
+        }
+        for (Input::EButtonState& State : MouseStates)
+        {
+            State = Input::Settle(State);
         }
 
         MouseDeltaX = 0.0;
@@ -253,17 +281,20 @@ namespace Lumina
 
     void FInputContext::ResetState()
     {
-        for (auto& S : KeyStates)   S = Input::EKeyState::Up;
-        for (auto& S : MouseStates) S = Input::EMouseState::Up;
-        for (auto& T : MouseKeyDownTimes) T = -1.0f;
+        KeyStates = {};
+        MouseStates = {};
+        Gamepad = FGamepadState();
         MouseDeltaX = 0.0;
         MouseDeltaY = 0.0;
         MouseZ      = 0.0;
-        CachedModifierState = 0;
         // Without this a focus regain fires a spurious Released callback.
         for (SInputActionState& State : ActionStates)
         {
             State = SInputActionState();
+        }
+        for (FActionTriggerState& Trigger : TriggerStates)
+        {
+            Trigger = FActionTriggerState();
         }
         FrameEvents.clear();
     }

@@ -29,7 +29,7 @@ LUMINA_DOTNET_EXPORT(void*, ObjectResolve)(int32 Index, int32 Generation)
 // The object's array entry, which outlives the object, so managed can revalidate without crossing back.
 LUMINA_DOTNET_EXPORT(void*, ObjectGetEntry)(void* Object)
 {
-    return Lumina::GObjectArray.GetEntry(static_cast<Lumina::CObjectBase*>(static_cast<Lumina::CObject*>(Object)));
+    return Lumina::Object::Internal::GetEntry(static_cast<Lumina::CObjectBase*>(static_cast<Lumina::CObject*>(Object)));
 }
 
 // Field offsets for that revalidation, exported rather than hard-coded so a layout change cannot drift.
@@ -37,8 +37,8 @@ LUMINA_DOTNET_EXPORT(int32, ObjectLayoutOffset)(int32 Which)
 {
     switch (Which)
     {
-        case 0:  return (int32)offsetof(Lumina::FCObjectEntry, Generation);
-        case 1:  return (int32)offsetof(Lumina::FCObjectEntry, Object);
+        case 0:  return (int32)offsetof(Lumina::Object::Internal::FCObjectEntry, Generation);
+        case 1:  return (int32)offsetof(Lumina::Object::Internal::FCObjectEntry, Object);
         case 2:  return (int32)Lumina::CObjectBase::GetFlagsOffsetForInterop();
         case 3:  return (int32)Lumina::OF_MarkedDestroy;
         default: return -1;

@@ -78,6 +78,8 @@ namespace Lumina
         // and is latched out of camera gestures until release.
         bool        bLeftMouseDownPrev  = false;
         bool        bLeftGestureBlocked = false;
+        // Set by a tool's transform gizmo from last frame's hover, so an Alt press on it grabs the gizmo instead of orbiting.
+        bool        bGizmoHovered       = false;
         // Published for the viewport picking/gizmo code, which draws later in the same frame.
         bool        bLeftDragGesture    = false;
 
@@ -108,6 +110,9 @@ namespace Lumina
         FVector3   FocusOrbitTarget    = FVector3(0.0f);
         float       FocusOrbitDistance  = 5.0f;
     };
+
+    // The only writer of ImGui's NoMouse, NoKeyboard and NoMouseCursorChange flags, derived from who owns input this frame.
+    EDITOR_API void SyncImGuiInputFlags();
 
     // EDITOR_API: exported so editor plugins can derive their own tools out-of-module.
     // Every tool hears a script reload through OnScriptsReloaded, the one place to rebuild what it built from C# types.
@@ -190,15 +195,19 @@ namespace Lumina
         ImVec2 ViewportScreenMin  = ImVec2(0.0f, 0.0f);
         ImVec2 ViewportScreenSize = ImVec2(0.0f, 0.0f);
 
-        // Traces the world along the ray through ScreenPos and returns where an asset dropped there
-        // should land. Falls back through terrain -> mesh bounds -> ground plane -> a fixed distance in
-        // front of the camera, so it always produces something usable. Returns false only when there is
-        // no camera to build a ray from.
-        /** Cursor ray against terrain, then mesh bounds, then the ground plane; always yields a location.
-         *  OutHitEntity (optional) receives the mesh entity that was hit, or ECS::NullEntity when the location
-         *  came from terrain, the ground plane, or the fallback distance -- which is what lets a drop know
-         *  whether it landed ON something. */
-        bool TraceViewportPlacement(ImVec2 ScreenPos, FVector3& OutLocation, ECS::FEntity* OutHitEntity = nullptr) const;
+        struct FViewportHit
+        {
+            FVector3     Location = FVector3(0.0f);
+            FVector3     Normal   = FVector3(0.0f, 1.0f, 0.0f);
+            // Null when the hit came from terrain, the ground plane or the fallback distance.
+            ECS::FEntity Entity   = ECS::NullEntity;
+        };
+
+        // Where the cursor meets the world, read through foliage and Ignored, from rendered depth before any bounds trace. False outside the viewport.
+        bool TraceViewportPlacement(ImVec2 ScreenPos, FViewportHit& OutHit, TSpan<const ECS::FEntity> Ignored = {}) const;
+
+        // The picker pixel under ScreenPos, false when it is outside the viewport.
+        bool ScreenToPickerPixel(ImVec2 ScreenPos, uint32& OutX, uint32& OutY) const;
 
         /** Cursor -> world ray through the tool's viewport rect. False when there is no camera. */
         bool BuildViewportRay(ImVec2 ScreenPos, FVector3& OutOrigin, FVector3& OutDirection) const;
@@ -292,6 +301,9 @@ namespace Lumina
 
         /** Snap OrbitTarget back to OrbitAnchor (undo MMB-drag pan). */
         void ResetOrbitPan();
+
+        // Carries the camera along by a world delta in either mode, so it can ride with something being dragged.
+        void MoveEditorCameraBy(const FVector3& Delta);
 
     private:
 
@@ -448,11 +460,23 @@ namespace Lumina
         /** Returns a transform placed in front of the active editor camera by the given distance. */
         FTransform GetCameraSpawnTransform(float DistanceForward = 5.0f) const;
 
+        // Where a drop under the cursor spawns, in front of the camera when the cursor is outside the viewport.
+        FTransform GetDropSpawnTransform(CObject* Placed) const;
+
+        // Hit lifted along its normal so Placed's mesh bounds, turned and scaled as given, rest on the surface rather than in it.
+        FTransform PlaceOnHit(const FViewportHit& Hit, CObject* Placed, const FQuat& Rotation = FQuat::Identity(), float Scale = 1.0f) const;
+
+        // Marks the surface a drag under the cursor would land on.
+        void DrawDropPlacementMarker(const FViewportHit& Hit) const;
+
+        // The asset at VirtualPath, loaded with its closure when it is not in memory yet. Null when it cannot load.
+        CObject* LoadDroppedAsset(FStringView VirtualPath) const;
+
         /** Dispatches a content-browser asset drop by asset class. Returns the spawned entity (or ECS::NullEntity). */
         /** DropTarget is the entity the drop landed on (outliner row, or the viewport ray hit).
          *  bAttachToTarget is the separate question of whether the gesture meant to PARENT under it --
          *  true only for an outliner row drop; viewport placement acts on the target without adopting it. */
-        ECS::FEntity HandleContentBrowserAssetDrop(FStringView VirtualPath, ECS::FEntity DropTarget, bool bAttachToTarget = false);
+        ECS::FEntity HandleContentBrowserAssetDrop(FStringView VirtualPath, ECS::FEntity DropTarget, bool bAttachToTarget = false, const FTransform* SpawnTransform = nullptr);
 
         /** Records a before/after image of Object around Mutate, so an edit from outside the tool can be undone. */
         void RunObjectTransacted(FName Label, CObject* Object, const TFunction<void()>& Mutate);

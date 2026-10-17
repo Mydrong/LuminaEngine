@@ -397,8 +397,63 @@ namespace Lumina::Physics
             }
         }
 
+        Handle->Skeleton = Request.Skeleton;
         Handle->bAddedToScene = true;
+        SimulatingRagdolls.FindOrAdd(Desc.Entity) = Handle.get();
         return Handle;
+    }
+
+    const FPhysicsRagdollHandle* FBox3DPhysicsScene::FindSimulatingRagdoll(ECS::FEntity Entity) const
+    {
+        FPhysicsRagdollHandle* const* Ragdoll = SimulatingRagdolls.Find(Entity);
+        return Ragdoll != nullptr && IsRagdollReady(**Ragdoll) ? *Ragdoll : nullptr;
+    }
+
+    FBox3DPhysicsScene::FRagdollMotion FBox3DPhysicsScene::MeasureRagdoll(const FPhysicsRagdollHandle& Ragdoll) const
+    {
+        FRagdollMotion Motion;
+        for (b3BodyId Body : Ragdoll.Bodies)
+        {
+            if (!b3Body_IsValid(Body))
+            {
+                continue;
+            }
+            const float Mass = b3Body_GetMass(Body);
+            Motion.Mass += Mass;
+            Motion.CenterOfMass += Box3DUtils::FromB3Vec3(b3Body_GetWorldCenter(Body)) * Mass;
+            Motion.LinearVelocity += Box3DUtils::FromB3Vec3(b3Body_GetLinearVelocity(Body)) * Mass;
+            Motion.AngularVelocity += Box3DUtils::FromB3Vec3(b3Body_GetAngularVelocity(Body)) * Mass;
+        }
+        if (Motion.Mass > 0.0f)
+        {
+            Motion.CenterOfMass /= Motion.Mass;
+            Motion.LinearVelocity /= Motion.Mass;
+            Motion.AngularVelocity /= Motion.Mass;
+        }
+        return Motion;
+    }
+
+    SPhysicsBodyTarget FBox3DPhysicsScene::GetRagdollBoneTarget(ECS::FEntity Entity, FName Bone) const
+    {
+        const FPhysicsRagdollHandle* Ragdoll = FindSimulatingRagdoll(Entity);
+        if (Ragdoll == nullptr || Ragdoll->Skeleton == nullptr)
+        {
+            return {};
+        }
+
+        // A bone too small for a body, such as a finger, moves with the nearest ancestor that has one.
+        for (int32 BoneIndex = Ragdoll->Skeleton->FindBoneIndex(Bone); Ragdoll->Skeleton->IsBoneIndexValid(BoneIndex);
+             BoneIndex = Ragdoll->Skeleton->GetBone(BoneIndex).ParentIndex)
+        {
+            for (size_t Part = 0; Part < Ragdoll->JointToBone.size() && Part < Ragdoll->BodyHandles.size(); ++Part)
+            {
+                if (Ragdoll->JointToBone[Part] == BoneIndex)
+                {
+                    return MakeBodyTarget(Ragdoll->BodyHandles[Part]);
+                }
+            }
+        }
+        return {};
     }
 
     bool FBox3DPhysicsScene::IsRagdollReady(const FPhysicsRagdollHandle& Handle) const
@@ -482,10 +537,9 @@ namespace Lumina::Physics
         OutRotation = Box3DUtils::FromB3Quat(b3Body_GetRotation(Handle.Bodies[0]));
     }
 
-    void FBox3DPhysicsScene::ApplyBuoyancy(ECS::FEntity Entity, const FVector3& SurfacePosition, const FVector3& SurfaceNormal,
+    void FBox3DPhysicsScene::ApplyBuoyancy(b3BodyId BodyId, const FVector3& SurfacePosition, const FVector3& SurfaceNormal,
         float Buoyancy, float LinearDrag, float AngularDrag, const FVector3& FluidVelocity, float DeltaTime)
     {
-        const b3BodyId BodyId = ResolveBody(FindEntityBody(Entity));
         if (!b3Body_IsValid(BodyId) || b3Body_GetType(BodyId) != b3_dynamicBody)
         {
             return;

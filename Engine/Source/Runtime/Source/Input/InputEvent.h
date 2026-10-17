@@ -16,6 +16,8 @@ namespace Lumina
         MouseUp,      // a mouse button was released
         MouseMove,    // the cursor moved (DeltaX/DeltaY carry the motion)
         MouseScroll,  // the wheel turned (Scroll carries the signed delta)
+        GamepadDown,  // a gamepad button went down, including a trigger or stick pushed past its threshold
+        GamepadUp,    // a gamepad button was released
     };
 
     // Bit flags rather than bools, because a C# bool is not blittable and a ScriptEvent parameter must be.
@@ -28,20 +30,6 @@ namespace Lumina
         Alt    = 1 << 2,
         Repeat = 1 << 3,
     };
-
-    inline const char* InputEventTypeToString(EInputEventType Type)
-    {
-        switch (Type)
-        {
-        case EInputEventType::KeyDown:     return "KeyDown";
-        case EInputEventType::KeyUp:       return "KeyUp";
-        case EInputEventType::MouseDown:   return "MouseDown";
-        case EInputEventType::MouseUp:     return "MouseUp";
-        case EInputEventType::MouseMove:   return "MouseMove";
-        case EInputEventType::MouseScroll: return "MouseScroll";
-        }
-        return "Unknown";
-    }
 
     // Flattened instead of carrying an SKey: SKey holds bools, and one non-blittable member makes the whole struct illegal as a ScriptEvent parameter, which is what kept OnInput dead for C# scripts.
     REFLECT(Event)
@@ -63,6 +51,10 @@ namespace Lumina
         /** The mouse button, valid when Device is Mouse. */
         PROPERTY(Hidden)
         EMouseKey Button = EMouseKey::Num;
+
+        /** The gamepad button, valid when Device is Gamepad. */
+        PROPERTY(Hidden)
+        EGamepadButton GamepadButton = EGamepadButton::Num;
 
         PROPERTY(Hidden)
         EInputEventFlags Flags = EInputEventFlags::None;
@@ -98,13 +90,19 @@ namespace Lumina
         bool IsRepeat()    const { return HasFlag(EInputEventFlags::Repeat); }
         bool IsKeyboard()  const { return Device == EKeyDevice::Keyboard; }
         bool IsMouse()     const { return Device == EKeyDevice::Mouse; }
+        bool IsGamepad()   const { return Device == EKeyDevice::Gamepad; }
 
         /** Rebuild the equivalent SKey, so chord matching against a bound SKey still works. */
         SKey ToKey() const
         {
             SKey Out;
-            if (Device == EKeyDevice::Keyboard) { Out.SetKey(Key); }
-            else if (Device == EKeyDevice::Mouse) { Out.SetMouseButton(Button); }
+            switch (Device)
+            {
+            case EKeyDevice::Keyboard: Out.SetKey(Key); break;
+            case EKeyDevice::Mouse:    Out.SetMouseButton(Button); break;
+            case EKeyDevice::Gamepad:  Out.SetGamepadButton(GamepadButton); return Out;
+            case EKeyDevice::None:     break;
+            }
             Out.bShift = IsShiftDown();
             Out.bCtrl  = IsCtrlDown();
             Out.bAlt   = IsAltDown();
@@ -113,9 +111,10 @@ namespace Lumina
 
         void SetKey(const SKey& InKey)
         {
-            Device = InKey.Device;
-            Key    = InKey.Key;
-            Button = InKey.MouseButton;
+            Device        = InKey.Device;
+            Key           = InKey.Key;
+            Button        = InKey.MouseButton;
+            GamepadButton = InKey.GamepadButton;
             if (InKey.bShift) { AddFlag(EInputEventFlags::Shift); }
             if (InKey.bCtrl)  { AddFlag(EInputEventFlags::Ctrl); }
             if (InKey.bAlt)   { AddFlag(EInputEventFlags::Alt); }

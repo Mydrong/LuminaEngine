@@ -9,7 +9,7 @@
 #include "Core/Object/Cast.h"
 #include "Core/Object/Class.h"
 #include "Core/Object/Object.h"
-#include "Core/Object/ObjectArray.h"
+#include "Core/Object/ObjectIteration.h"
 #include "Core/Object/ObjectCore.h"
 #include "Core/Object/Package/Package.h"
 #include "Core/Serialization/Archiver.h"
@@ -235,7 +235,7 @@ namespace Lumina
         }
 
         THashSet<CObject*> Collected;
-        GObjectArray.ForEachObject([&](CObjectBase* Base, int32)
+        ForEachObject([&](CObjectBase* Base, int32)
         {
             CObject* Candidate = static_cast<CObject*>(Base);
             if (Candidate == Target || Candidate->GetClass() == nullptr)

@@ -23,6 +23,10 @@ namespace Lumina
 namespace Lumina::ECS
 {
     class FSparseSet;
+    class FRegistry;
+
+    // Hands a run of newly committed events of one type to whatever entity delegates they name.
+    using FEventFanOut = void (*)(FRegistry& Registry, const void* Events, uint32 Count);
 
     // A dense index, so a storage lookup is an array index and never a hash of a type name.
     using FComponentTypeID = uint16;
@@ -69,6 +73,9 @@ namespace Lumina::ECS
 
         bool bTriviallyDestructible = false;
 
+        // A copy is a memcpy, which is what lets an event queue take a send in one block.
+        bool bTriviallyCopyable = false;
+
         // Laid out at runtime from a C# type, so its pools are tracked and laid out again when the type is reshaped.
         bool bRuntimeLayout = false;
 
@@ -81,6 +88,9 @@ namespace Lumina::ECS
 
         // Move-constructs into Dest and destroys Source. Null when a memcpy does the same job.
         void (*Relocate)(const FComponentTypeInfo& Info, void* Dest, void* Source) = nullptr;
+
+        // Set for an event type that delivers to entity delegates, run at the sync point its queue commits on.
+        FEventFanOut EventFanOut = nullptr;
     };
 
     // Carries one element's value from an old layout of its type into a default-constructed new one.
@@ -99,6 +109,8 @@ namespace Lumina::ECS
 
         // Binds the reflected type at startup, so no later read has to resolve one lazily.
         RUNTIME_API void BindStruct(FComponentTypeID TypeID, CStruct* Struct);
+
+        RUNTIME_API void SetEventFanOut(FComponentTypeID TypeID, FEventFanOut FanOut);
 
         // Idempotent per name, so a plugin reload and a second DLL both land on the same id.
         RUNTIME_API FComponentTypeID Acquire(const FComponentTypeInfo& Info);
@@ -307,6 +319,7 @@ namespace Lumina::ECS
 
         Info.bTriviallyRelocatable  = std::is_trivially_copyable_v<T> || TIsTriviallyRelocatable_V<T>;
         Info.bTriviallyDestructible = std::is_trivially_destructible_v<T>;
+        Info.bTriviallyCopyable     = std::is_trivially_copyable_v<T>;
 
         if constexpr (!TComponentTraits<T>::bEmpty)
         {

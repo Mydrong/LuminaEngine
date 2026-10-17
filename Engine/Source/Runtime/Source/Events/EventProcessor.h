@@ -9,6 +9,9 @@ namespace Lumina
     enum class EInputLayer : int32
     {
         EditorShortcuts = 1500,
+
+        // A game's developer overlay, which takes the keyboard and mouse ahead of the game while it is open.
+        DevOverlay   = 1200,
         Viewport     = 1000,
         EditorChrome = 500,
         Default      = 0,

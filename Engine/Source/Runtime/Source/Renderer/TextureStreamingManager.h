@@ -7,6 +7,7 @@
 #include "Containers/Name.h"
 #include "Containers/String.h"
 #include "Core/Object/ObjectHandleTyped.h"
+#include "Core/Serialization/BulkDataRef.h"
 #include "Core/Threading/Thread.h"
 #include "Memory/SmartPtr.h"
 #include "Platform/GenericPlatform.h"

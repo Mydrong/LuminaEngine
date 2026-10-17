@@ -1,6 +1,7 @@
 #include "RuntimePCH.h"
 #include "Box3DPhysicsScene.h"
 #include "Box3DInternal.h"
+#include "Box3DRagdollHandle.h"
 #include "Box3DUtils.h"
 #include "World/Entity/Components/PhysicsComponent.h"
 #include "TaskSystem/Scheduler/JobScheduler.h"
@@ -85,7 +86,7 @@ namespace Lumina::Physics
         }
 
         FBodyCommand Command = InCommand;
-        if (Command.Type != EBodyCommand::TargetForce)
+        if (!Command.Target.IsSet())
         {
             const FBodyRecord* Record = FindBodyRecord(Command.Entity);
             Command.Revision = Record != nullptr ? Record->Revision : 0;
@@ -139,9 +140,14 @@ namespace Lumina::Physics
     FBox3DPhysicsScene::EBodyCommandResult FBox3DPhysicsScene::ApplyBodyCommand(const FBodyCommand& Command)
     {
         b3BodyId Body = b3_nullBodyId;
-        if (Command.Type == EBodyCommand::TargetForce)
+        if (Command.Target.IsSet())
         {
             Body = ResolveTarget(Command.Target);
+        }
+        else if (const FPhysicsRagdollHandle* Ragdoll = FindSimulatingRagdoll(Command.Entity))
+        {
+            ApplyRagdollCommand(*Ragdoll, Command);
+            return EBodyCommandResult::Applied;
         }
         else
         {
@@ -161,21 +167,28 @@ namespace Lumina::Physics
         {
             return EBodyCommandResult::Dropped;
         }
+        ApplyCommandToBody(Body, Command, 1.0f);
+        return EBodyCommandResult::Applied;
+    }
+
+    void FBox3DPhysicsScene::ApplyCommandToBody(b3BodyId Body, const FBodyCommand& Command, float Share)
+    {
         const b3Vec3 Value = Box3DUtils::ToB3Vec3(Command.Value);
+        const b3Vec3 Shared = Box3DUtils::ToB3Vec3(Command.Value * Share);
         const b3Vec3 Point = Box3DUtils::ToB3Vec3(Command.Point);
         switch (Command.Type)
         {
             case EBodyCommand::Impulse:
-                b3Body_ApplyLinearImpulseToCenter(Body, Value, true);
+                b3Body_ApplyLinearImpulseToCenter(Body, Shared, true);
                 break;
             case EBodyCommand::Force:
-                b3Body_ApplyForceToCenter(Body, Value, true);
+                b3Body_ApplyForceToCenter(Body, Shared, true);
                 break;
             case EBodyCommand::Torque:
-                b3Body_ApplyTorque(Body, Value, true);
+                b3Body_ApplyTorque(Body, Shared, true);
                 break;
             case EBodyCommand::AngularImpulse:
-                b3Body_ApplyAngularImpulse(Body, Value, true);
+                b3Body_ApplyAngularImpulse(Body, Shared, true);
                 break;
             case EBodyCommand::LinearVelocity:
                 b3Body_SetLinearVelocity(Body, Value);
@@ -186,11 +199,10 @@ namespace Lumina::Physics
                 b3Body_SetAwake(Body, true);
                 break;
             case EBodyCommand::ImpulseAtPosition:
-                b3Body_ApplyLinearImpulse(Body, Value, Point, true);
+                b3Body_ApplyLinearImpulse(Body, Shared, Point, true);
                 break;
             case EBodyCommand::ForceAtPosition:
-            case EBodyCommand::TargetForce:
-                b3Body_ApplyForce(Body, Value, Point, true);
+                b3Body_ApplyForce(Body, Shared, Point, true);
                 break;
             case EBodyCommand::Gravity:
                 b3Body_SetGravityScale(Body, Command.Parameters.x);
@@ -215,19 +227,81 @@ namespace Lumina::Physics
                 ApplySurfaceVelocity(Body, Command.Value, Command.Secondary);
                 break;
             case EBodyCommand::Buoyancy:
-                ApplyBuoyancy(Command.Entity, Command.Point, Command.Secondary,
+                ApplyBuoyancy(Body, Command.Point, Command.Secondary,
                     Command.Parameters.x, Command.Parameters.y, Command.Parameters.z, Command.Value, Command.Parameters.w);
                 break;
         }
-        return EBodyCommandResult::Applied;
+    }
+
+    void FBox3DPhysicsScene::ApplyRagdollCommand(const FPhysicsRagdollHandle& Ragdoll, const FBodyCommand& Command)
+    {
+        // A push at a point lands whole on the limb nearest it, the way a hit on that limb would.
+        if (Command.Type == EBodyCommand::ImpulseAtPosition || Command.Type == EBodyCommand::ForceAtPosition)
+        {
+            b3BodyId Nearest = b3_nullBodyId;
+            float NearestDistance = FLT_MAX;
+            for (b3BodyId Body : Ragdoll.Bodies)
+            {
+                const float Distance = b3Body_IsValid(Body)
+                    ? Math::LengthSquared(Box3DUtils::FromB3Vec3(b3Body_GetWorldCenter(Body)) - Command.Point) : FLT_MAX;
+                if (Distance < NearestDistance)
+                {
+                    NearestDistance = Distance;
+                    Nearest = Body;
+                }
+            }
+            if (b3Body_IsValid(Nearest))
+            {
+                ApplyCommandToBody(Nearest, Command, 1.0f);
+            }
+            return;
+        }
+
+        const bool bSharedByMass = Command.Type == EBodyCommand::Impulse || Command.Type == EBodyCommand::Force
+                                || Command.Type == EBodyCommand::Torque || Command.Type == EBodyCommand::AngularImpulse;
+        const float TotalMass = bSharedByMass ? MeasureRagdoll(Ragdoll).Mass : 0.0f;
+        for (b3BodyId Body : Ragdoll.Bodies)
+        {
+            if (!b3Body_IsValid(Body))
+            {
+                continue;
+            }
+            const float Share = !bSharedByMass ? 1.0f : TotalMass > 0.0f ? b3Body_GetMass(Body) / TotalMass : 0.0f;
+            ApplyCommandToBody(Body, Command, Share);
+        }
     }
 
     void FBox3DPhysicsScene::AddForceAtTarget(const SPhysicsBodyTarget& Target, const FVector3& Force, const FVector3& Point)
     {
-        FBodyCommand Command{ EBodyCommand::TargetForce };
+        FBodyCommand Command{ EBodyCommand::ForceAtPosition };
         Command.Target = Target;
         Command.Value = Force;
         Command.Point = Point;
+        QueueBodyCommand(Command);
+    }
+
+    void FBox3DPhysicsScene::AddImpulseAtTarget(const SPhysicsBodyTarget& Target, const FVector3& Impulse, const FVector3& Point)
+    {
+        FBodyCommand Command{ EBodyCommand::ImpulseAtPosition };
+        Command.Target = Target;
+        Command.Value = Impulse;
+        Command.Point = Point;
+        QueueBodyCommand(Command);
+    }
+
+    void FBox3DPhysicsScene::SetTargetLinearVelocity(const SPhysicsBodyTarget& Target, const FVector3& Velocity)
+    {
+        FBodyCommand Command{ EBodyCommand::LinearVelocity };
+        Command.Target = Target;
+        Command.Value = Velocity;
+        QueueBodyCommand(Command);
+    }
+
+    void FBox3DPhysicsScene::SetTargetAngularVelocity(const SPhysicsBodyTarget& Target, const FVector3& Velocity)
+    {
+        FBodyCommand Command{ EBodyCommand::AngularVelocity };
+        Command.Target = Target;
+        Command.Value = Velocity;
         QueueBodyCommand(Command);
     }
 

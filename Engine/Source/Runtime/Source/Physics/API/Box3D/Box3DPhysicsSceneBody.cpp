@@ -7,7 +7,7 @@
 #include "Box3DUtils.h"
 
 #include "Assets/AssetTypes/Mesh/StaticMesh/StaticMesh.h"
-#include "Assets/AssetTypes/Physics/CollisionShape.h"
+#include "Assets/AssetTypes/Mesh/MeshCollision.h"
 #include "Log/Log.h"
 #include "Renderer/MeshQuantization.h"
 #include "World/Entity/Components/PhysicsComponent.h"
@@ -272,13 +272,13 @@ namespace Lumina::Physics
         return !OutShapes.empty();
     }
 
-    bool FBox3DPhysicsScene::BuildCollisionShapeAsset(const CCollisionShape& Asset, const FVector3& Scale, TVector<FPendingShape>& OutShapes)
+    bool FBox3DPhysicsScene::BuildMeshCollision(const SMeshCollision& Collision, const FVector3& Scale, TVector<FPendingShape>& OutShapes)
     {
         const float UniformScale = Math::Max(Math::Max(Math::Abs(Scale.x), Math::Abs(Scale.y)), Math::Abs(Scale.z));
 
-        for (const SCollisionPrimitive& Primitive : Asset.Primitives)
+        for (const SCollisionPrimitive& Primitive : Collision.Primitives)
         {
-            const FQuat Rotation(Primitive.Rotation);
+            const FQuat Rotation(Math::Radians(Primitive.Rotation));
             const FVector3 Offset = Primitive.Center * Scale;
 
             switch (Primitive.Type)
@@ -328,17 +328,17 @@ namespace Lumina::Physics
             }
         }
 
-        if (Asset.IsConcave() && !Asset.TriangleVertices.empty() && !Asset.TriangleIndices.empty())
+        if (Collision.IsConcave() && !Collision.TriangleVertices.empty() && !Collision.TriangleIndices.empty())
         {
             TVector<b3Vec3> Points;
             TVector<int32> Indices;
-            Points.reserve(Asset.TriangleVertices.size());
-            for (const FVector3& P : Asset.TriangleVertices)
+            Points.reserve(Collision.TriangleVertices.size());
+            for (const FVector3& P : Collision.TriangleVertices)
             {
                 Points.push_back(Box3DUtils::ToB3Vec3(P));
             }
-            Indices.reserve(Asset.TriangleIndices.size());
-            for (uint32 Index : Asset.TriangleIndices)
+            Indices.reserve(Collision.TriangleIndices.size());
+            for (uint32 Index : Collision.TriangleIndices)
             {
                 Indices.push_back((int32)Index);
             }

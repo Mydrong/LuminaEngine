@@ -137,8 +137,11 @@ namespace Lumina
         // True once the frame the ticket armed has finished on the GPU, moving its pixels into Out.
         RUNTIME_API bool TakeWindowCapture(uint64 Ticket, FWindowCapture& Out);
 
-        #if WITH_EDITOR
+        #if USING(WITH_DEV_UI)
         IImGuiRenderer* GetImGuiRenderer() const { return ImGuiRenderer; }
+        #endif
+
+        #if WITH_EDITOR
         NODISCARD FMaterialCompileQueue& GetMaterialCompileQueue() { return MaterialCompileQueue; }
         NODISCARD FParticleCompileQueue& GetParticleCompileQueue() { return ParticleCompileQueue; }
         #endif
@@ -167,8 +170,11 @@ namespace Lumina
         // Runs once the slot's fence has been waited, which is when its copy is complete.
         void ResolveWindowCapture(uint8 FrameIndex);
 
-        #if WITH_EDITOR
+        #if USING(WITH_DEV_UI)
         IImGuiRenderer*                     ImGuiRenderer = nullptr;
+        #endif
+
+        #if WITH_EDITOR
         FMaterialCompileQueue               MaterialCompileQueue;
         FParticleCompileQueue               ParticleCompileQueue;
         #endif

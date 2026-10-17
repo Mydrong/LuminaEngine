@@ -337,6 +337,7 @@ namespace Lumina
             MeshletCullDispatchArgsRing[Slot].Release();
             SkinDispatchArgsRing[Slot].Release();
             SkinWorkBaseRing[Slot].Release();
+            SkinWorkEntryRing[Slot].Release();
             InstanceViewRangeRing[Slot].Release();
             MaterialClassifyRing[Slot].Release();
             VisibleInstanceRing[Slot].Release();
@@ -408,12 +409,9 @@ namespace Lumina
         #if USING(WITH_EDITOR)
         for (FPickerReadbackSlot& Slot : PickerReadbackRing)
         {
-            if (Slot.Readback.Gpu != 0)
-            {
-                RHI::Retire(Slot.Readback);
-                Slot.Readback = {};
-            }
+            ReleasePickerSlot(Slot);
         }
+        ReleasePickerSlot(SurfaceSnapshot);
         #endif
 
     }
@@ -1381,15 +1379,9 @@ namespace Lumina
         // Drop old readback slots; sized to previous extent so pixel grid no longer matches clicks.
         for (FPickerReadbackSlot& Slot : PickerReadbackRing)
         {
-            if (Slot.Readback.Gpu != 0)
-            {
-                RHI::Retire(Slot.Readback);
-                Slot.Readback = {};
-            }
-            Slot.Width = 0;
-            Slot.Height = 0;
-            Slot.bPending = false;
+            ReleasePickerSlot(Slot);
         }
+        ReleasePickerSlot(SurfaceSnapshot);
         #endif
     }
 
@@ -1637,6 +1629,7 @@ namespace Lumina
             RenderBucketRing[Slot].Allocate(sizeof(FRenderBucketGPU));
             MeshletBlockRing[Slot].Allocate(sizeof(uint32) * 2);
             SkinWorkBaseRing[Slot].Allocate(sizeof(uint32) * 2);
+            SkinWorkEntryRing[Slot].Allocate(sizeof(uint32) * 2);
             VisibleInstanceRing[Slot].Allocate(sizeof(FGPUInstance));
 
             // Fixed size, one grid each, rewritten every frame.
@@ -1723,6 +1716,7 @@ namespace Lumina
         case ENamedImage::DepthAttachment:    return "Scene.DepthAttachment";
         case ENamedImage::DepthPyramid:       return "Scene.DepthPyramid";
         case ENamedImage::Picker:             return "Scene.Picker";
+        case ENamedImage::PickerFoliage:      return "Scene.PickerFoliage";
         case ENamedImage::VisBuffer:          return "Scene.VisBuffer";
         case ENamedImage::GBufferA:           return "Scene.GBufferA";
         case ENamedImage::GBufferB:           return "Scene.GBufferB";
@@ -2158,6 +2152,10 @@ namespace Lumina
         Desc.Format = EFormat::R32_UINT;
         Desc.Usage  = RHI::EImageUsageFlags::ColorAttachment | RHI::EImageUsageFlags::Sampled | RHI::EImageUsageFlags::TransferSrc;
         View.Images[(int)ENamedImage::Picker] = CreateSceneImage(Desc);
+
+        // Marks the picker texels whose front surface is foliage, which placement reads through.
+        Desc.Format = EFormat::R8_UINT;
+        View.Images[(int)ENamedImage::PickerFoliage] = CreateSceneImage(Desc);
         #endif
 
         Desc.Format = EFormat::R32_UINT;

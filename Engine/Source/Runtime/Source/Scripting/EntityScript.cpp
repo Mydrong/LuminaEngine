@@ -38,6 +38,11 @@
 #include "Log/Log.h"
 #include "TaskSystem/TaskSystem.h"
 
+#if USING(WITH_DEV_UI)
+#include <imgui.h>
+#include <imgui_internal.h>
+#endif
+
 namespace Lumina
 {
     namespace
@@ -1434,10 +1439,12 @@ namespace Lumina
         }
     }
 
-    namespace EntityScripts
+    #if USING(WITH_DEV_UI)
+    namespace
     {
-        #if USING(WITH_EDITOR)
-        void DebugDraw(ECS::FRegistry& Registry)
+        // Every live script in the world, with an owner lent for the call to one that has none, as in a prefab editor's preview.
+        template<typename TFunc>
+        void ForEachLiveScript(ECS::FRegistry& Registry, TFunc&& Func)
         {
             CWorld** WorldPtr = Registry.Ctx().Find<CWorld*>();
             if (WorldPtr == nullptr || *WorldPtr == nullptr)
@@ -1468,7 +1475,7 @@ namespace Lumina
                         Script->SetOwner(Entity, World);
                     }
 
-                    Script->OnDebugDraw(Registry.HasAll<FSelectedInEditorComponent>(Entity));
+                    Func(Script, Entity);
 
                     if (bNeedsOwner)
                     {
@@ -1476,6 +1483,44 @@ namespace Lumina
                     }
                 }
             }
+        }
+    }
+    #endif
+
+    namespace EntityScripts
+    {
+        #if USING(WITH_EDITOR)
+        void DebugDraw(ECS::FRegistry& Registry)
+        {
+            ForEachLiveScript(Registry, [&Registry](CEntityScript* Script, ECS::FEntity Entity)
+            {
+                Script->OnDebugDraw(Registry.HasAll<FSelectedInEditorComponent>(Entity));
+            });
+        }
+        #endif
+
+        #if USING(WITH_DEV_UI)
+        void DebugGui(ECS::FRegistry& Registry)
+        {
+            if (ImGui::GetCurrentContext() == nullptr)
+            {
+                return;
+            }
+
+            // A script's unbalanced Begin is recovered rather than asserted on, then the host's own setting comes back.
+            ImGuiIO& IO = ImGui::GetIO();
+            const bool bAssertOnRecovery = IO.ConfigErrorRecoveryEnableAssert;
+            IO.ConfigErrorRecoveryEnableAssert = false;
+
+            ForEachLiveScript(Registry, [](CEntityScript* Script, ECS::FEntity)
+            {
+                ImGuiErrorRecoveryState Recovery;
+                ImGui::ErrorRecoveryStoreState(&Recovery);
+                Script->OnDebugGui();
+                ImGui::ErrorRecoveryTryToRecoverState(&Recovery);
+            });
+
+            IO.ConfigErrorRecoveryEnableAssert = bAssertOnRecovery;
         }
         #endif
 

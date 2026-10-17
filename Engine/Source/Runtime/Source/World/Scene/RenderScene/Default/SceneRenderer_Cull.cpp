@@ -262,63 +262,87 @@ namespace Lumina
         const uint64 SyncedSerial = BoneArenaSyncedSerial[CurrentFrameSlot];
         BoneArenaSyncedSerial[CurrentFrameSlot] = Serial;
 
-        TVector<FUIntVector2>& Ranges = BoneUploadScratch;
-        Ranges.assign(Frame.Geometry.BoneUploadRanges.begin(), Frame.Geometry.BoneUploadRanges.end());
+        const TVector<FUIntVector2>& FrameRanges = Frame.Geometry.BoneUploadRanges;
         const bool bMissedLastUpload = SyncedSerial + 2u == Serial;
-        if (bMissedLastUpload)
-        {
-            Ranges.insert(Ranges.end(), LastBoneUploadRanges.begin(), LastBoneUploadRanges.end());
-        }
-        LastBoneUploadRanges.assign(Frame.Geometry.BoneUploadRanges.begin(), Frame.Geometry.BoneUploadRanges.end());
 
         // A reallocation drops every resident pose, and so does an arena older than the ranges kept, so the dirty set no longer describes it.
         if (Arena.Gpu != PrevArena || (SyncedSerial + 1u != Serial && !bMissedLastUpload))
         {
+            LastBoneUploadRanges.assign(FrameRanges.begin(), FrameRanges.end());
             StageWrite(Arena.Gpu, Mirror.data(), ArenaBytes, /*bFillBeforeSubmit*/ true);
             FlushStagedWrites(CL);
             return;
         }
 
-        if (Ranges.empty())
+        // Chunks rather than a sorted range list, since a crowd dirties tens of thousands of slices a frame.
+        constexpr uint32 kChunkShift = 6;
+        const uint32 NumChunks = (ArenaCount + (1u << kChunkShift) - 1u) >> kChunkShift;
+
+        TVector<uint64>& Dirty = BoneDirtyChunks;
+        Dirty.assign((NumChunks + 63u) / 64u, 0ull);
+
+        bool bAnyDirty = false;
+        const auto MarkRanges = [&](const TVector<FUIntVector2>& Ranges)
+        {
+            for (const FUIntVector2& Range : Ranges)
+            {
+                const uint32 End = Math::Min(Range.x + Range.y, ArenaCount);
+                if (Range.x >= End)
+                {
+                    continue;
+                }
+                for (uint32 Chunk = Range.x >> kChunkShift; Chunk <= ((End - 1u) >> kChunkShift); ++Chunk)
+                {
+                    Dirty[Chunk >> 6u] |= 1ull << (Chunk & 63u);
+                }
+                bAnyDirty = true;
+            }
+        };
+
+        MarkRanges(FrameRanges);
+        if (bMissedLastUpload)
+        {
+            MarkRanges(LastBoneUploadRanges);
+        }
+        LastBoneUploadRanges.assign(FrameRanges.begin(), FrameRanges.end());
+
+        if (!bAnyDirty)
         {
             return;   // every pose the gather kept is already resident
         }
 
-        Algo::Sort(Ranges,
-                    [](const FUIntVector2& A, const FUIntVector2& B) { return A.x < B.x; });
+        // Merging across a small gap re-sends slices that were already resident, which beats a second copy.
+        constexpr uint32 kMergeGapChunks = 1024u >> kChunkShift;
 
-        // Merging across a small gap re-sends a slice that was already resident, which beats a second copy.
-        constexpr uint32 kBoneMergeGap = 1024;
-
-        const auto Flush = [&](uint32 Start, uint32 End)
+        const auto Flush = [&](uint32 StartChunk, uint32 EndChunk)
         {
-            End = Math::Min(End, ArenaCount);
-            if (Start >= End)
+            const uint32 Start = StartChunk << kChunkShift;
+            const uint32 End   = Math::Min(EndChunk << kChunkShift, ArenaCount);
+            if (Start < End)
             {
-                return;
+                StageWrite(Arena.Gpu + (uint64)Start * sizeof(FBoneTransform), Mirror.data() + Start,
+                           (uint64)(End - Start) * sizeof(FBoneTransform), /*bFillBeforeSubmit*/ true);
             }
-
-            StageWrite(Arena.Gpu + (uint64)Start * sizeof(FBoneTransform), Mirror.data() + Start,
-                       (uint64)(End - Start) * sizeof(FBoneTransform), /*bFillBeforeSubmit*/ true);
         };
 
-        uint32 RunStart = Ranges[0].x;
-        uint32 RunEnd   = Ranges[0].x + Ranges[0].y;
-
-        for (SIZE_T i = 1; i < Ranges.size(); ++i)
+        uint32 RunStart = Constants::kIndexNoneU32;
+        uint32 RunEnd   = 0;
+        for (uint32 Word = 0; Word < (uint32)Dirty.size(); ++Word)
         {
-            const uint32 Start = Ranges[i].x;
-            const uint32 End   = Ranges[i].x + Ranges[i].y;
-
-            if (Start <= RunEnd + kBoneMergeGap)
+            for (uint64 Bits = Dirty[Word]; Bits != 0ull; Bits &= Bits - 1ull)
             {
-                RunEnd = Math::Max(RunEnd, End);
-                continue;
+                const uint32 Chunk = Word * 64u + (uint32)Math::CountTrailingZeros64(Bits);
+                if (RunStart != Constants::kIndexNoneU32 && Chunk > RunEnd + kMergeGapChunks)
+                {
+                    Flush(RunStart, RunEnd);
+                    RunStart = Constants::kIndexNoneU32;
+                }
+                if (RunStart == Constants::kIndexNoneU32)
+                {
+                    RunStart = Chunk;
+                }
+                RunEnd = Chunk + 1u;
             }
-
-            Flush(RunStart, RunEnd);
-            RunStart = Start;
-            RunEnd   = End;
         }
         Flush(RunStart, RunEnd);
         FlushStagedWrites(CL);
@@ -334,6 +358,8 @@ namespace Lumina
 
         // Minted here rather than reused from MeshletDrawTag, which wraps at 4095 and can alias.
         CurrentSkinnedFrameTag++;
+
+        SkinWorkCapacity = 0;
 
         if (Data.empty() || Slots.empty())
         {
@@ -367,6 +393,8 @@ namespace Lumina
             SkinnedBoundsMaxRange = Math::Max(SkinnedBoundsMaxRange, Len);
             BoundsTotal += Len;
         }
+
+        SkinWorkCapacity = (uint32)Math::Min<uint64>(BoundsTotal, Constants::kIndexNoneU32 - 1u);
 
         ReserveBuffer(CL, SkinnedMeshletBoundsBuffer, Math::Max<SIZE_T>(sizeof(FMeshletSphere), (SIZE_T)BoundsTotal * sizeof(FMeshletSphere)));
 
@@ -921,7 +949,8 @@ namespace Lumina
 
         static const FShaderH WorkShader = FShaderLibrary::Get("BuildSkinWork.slang");
         static const FShaderH SkinShader = FShaderLibrary::Get("Skinning.slang");
-        if (!SkinShader || !WorkShader)
+        static const FShaderH EntryShader = FShaderLibrary::Get("SkinWorkEntries.slang");
+        if (!SkinShader || !WorkShader || !EntryShader)
         {
             return;
         }
@@ -929,27 +958,34 @@ namespace Lumina
         const uint8 Slot = CurrentFrameSlot;
 
         ReserveBuffer(CL, SkinWorkBaseRing[Slot], (uint64)NumSkinned * sizeof(uint32));
-        if (!SkinWorkBaseRing[Slot] || !GetSkinDispatchArgs() || !GetPreSkinnedVerticesBuffer()
+        ReserveBuffer(CL, SkinWorkEntryRing[Slot], (uint64)Math::Max(SkinWorkCapacity, 1u) * sizeof(uint32));
+        if (!SkinWorkBaseRing[Slot] || !SkinWorkEntryRing[Slot] || !GetSkinDispatchArgs() || !GetPreSkinnedVerticesBuffer()
             || !SkinnedSlotListBuffer || !SkinnedFrameDataBuffer || !RetainedStaticBuffer)
         {
             return;
         }
 
+        const uint32 WorkEntryCount = Math::Min(SkinWorkCapacity, SkinWorkEntryRing[Slot].CapacityOf<uint32>());
+
         //~ Lay out the dispatch as one workgroup per instance and meshlet, enumerated on the GPU.
         {
+            SCENE_GPU_SCOPE(CL, "Build Skin Work");
+
             struct FBuildSkinWorkPC
             {
                 RHI::TGPUSpan<uint32>            SlotList;
                 RHI::TGPUSpan<FSkinnedFrameData> SkinnedData;
                 RHI::TGPUSpan<uint32>            OutWorkBase;
                 RHI::TGPUSpan<RHI::FDispatchIndirectArguments> OutDispatchArgs;
+                RHI::TGPUSpan<uint32>            WorkEntry;
             } WPC = {};
-            static_assert(sizeof(FBuildSkinWorkPC) == 64, "FBuildSkinWorkPC must match BuildSkinWork.slang.");
+            static_assert(sizeof(FBuildSkinWorkPC) == 80, "FBuildSkinWorkPC must match BuildSkinWork.slang.");
 
             WPC.SlotList        = { SkinnedSlotListBuffer, NumSkinned };
             WPC.SkinnedData     = { SkinnedFrameDataBuffer };
             WPC.OutWorkBase     = { SkinWorkBaseRing[Slot], NumSkinned };
             WPC.OutDispatchArgs = { GetSkinDispatchArgs() };
+            WPC.WorkEntry       = { SkinWorkEntryRing[Slot], WorkEntryCount };
 
             DispatchCompute(CL, WorkShader, WPC, 1u, 1u, 1u);
 
@@ -957,25 +993,55 @@ namespace Lumina
                 RHI::EStageFlags::Compute | RHI::EStageFlags::IndirectArguments, RHI::EAccessFlags::ShaderRead | RHI::EAccessFlags::ShaderWrite | RHI::EAccessFlags::IndirectRead);
         }
 
+        //~ Stamp each work index with its entry, one thread per entry so the stores spread over the whole GPU.
+        {
+            SCENE_GPU_SCOPE(CL, "Skin Work Entries");
+
+            struct FSkinWorkEntriesPC
+            {
+                RHI::TGPUSpan<uint32>            SlotList;
+                RHI::TGPUSpan<FSkinnedFrameData> SkinnedData;
+                RHI::TGPUSpan<uint32>            WorkBase;
+                RHI::TGPUSpan<uint32>            OutWorkEntry;
+            } EPC = {};
+            static_assert(sizeof(FSkinWorkEntriesPC) == 64, "FSkinWorkEntriesPC must match SkinWorkEntries.slang.");
+
+            EPC.SlotList     = { SkinnedSlotListBuffer, NumSkinned };
+            EPC.SkinnedData  = { SkinnedFrameDataBuffer };
+            EPC.WorkBase     = { SkinWorkBaseRing[Slot], NumSkinned };
+            EPC.OutWorkEntry = { SkinWorkEntryRing[Slot], WorkEntryCount };
+
+            const FUIntVector2 Groups = RenderUtils::FoldGroupCount(RenderUtils::GetGroupCount(NumSkinned, 64u));
+            DispatchCompute(CL, EntryShader, EPC, Groups.x, Groups.y, 1u);
+
+            RHI::CmdBarrier(CL, RHI::EStageFlags::Compute, RHI::EAccessFlags::ShaderWrite,
+                RHI::EStageFlags::Compute, RHI::EAccessFlags::ShaderRead);
+        }
+
         struct FSkinningPushConstants
         {
             RHI::TGPUSpan<uint32>             WorkBase;
+            RHI::TGPUSpan<uint32>             WorkEntry;
             RHI::TGPUSpan<uint32>             SlotList;
             RHI::TGPUSpan<FSkinnedFrameData>  SkinnedData;
             RHI::TGPUSpan<FInstanceStatic>    RetainedStatic;
             RHI::TGPUSpan<FPreSkinnedVertex>  OutVertices;
             RHI::TGPUSpan<FPrevSkinnedPosition> OutPrevPositions;
         } PC = {};
-        static_assert(sizeof(FSkinningPushConstants) == 96, "FSkinningPushConstants must match Skinning.slang.");
+        static_assert(sizeof(FSkinningPushConstants) == 112, "FSkinningPushConstants must match Skinning.slang.");
 
         PC.WorkBase       = { SkinWorkBaseRing[Slot], NumSkinned };
+        PC.WorkEntry      = { SkinWorkEntryRing[Slot], WorkEntryCount };
         PC.SlotList       = { SkinnedSlotListBuffer, NumSkinned };
         PC.SkinnedData    = { SkinnedFrameDataBuffer };
         PC.RetainedStatic = { RetainedStaticBuffer };
         PC.OutVertices    = { GetPreSkinnedVerticesBuffer() };
         PC.OutPrevPositions = { PreSkinnedPrevPositionsBuffer, PreSkinnedPrevCapacity };
 
-        DispatchComputeIndirect(CL, SkinShader, PC, GetSkinDispatchArgs());
+        {
+            SCENE_GPU_SCOPE(CL, "Skin Vertices");
+            DispatchComputeIndirect(CL, SkinShader, PC, GetSkinDispatchArgs());
+        }
 
         // Pre-skinned vertices feed every draw VS.
         RHI::CmdBarrier(CL,

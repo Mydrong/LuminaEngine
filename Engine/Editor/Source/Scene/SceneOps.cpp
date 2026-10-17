@@ -7,7 +7,10 @@
 #include "Core/Object/Class.h"
 #include "Core/Object/Class/StructTraits.h"
 #include "Core/Reflection/Type/LuminaTypes.h"
+#include "Settings/EditorSettings.h"
+#include "World/Entity/Components/StaticMeshComponent.h"
 #include "World/Entity/Components/DirtyComponent.h"
+#include "World/Entity/Components/PhysicsComponent.h"
 #include "World/Entity/Components/TransformComponent.h"
 #include "World/Entity/Components/Component.h"
 #include "World/Entity/EntityUtils.h"
@@ -127,5 +130,48 @@ namespace Lumina::SceneOps
         }
 
         CPrefab::RecaptureComponentOverrides(Registry, Entity, Event.OuterType);
+    }
+
+    bool HasCollider(const ECS::FRegistry& Registry, ECS::FEntity Entity)
+    {
+        return Registry.HasAny<SBoxColliderComponent, SSphereColliderComponent, SCapsuleColliderComponent, SCylinderColliderComponent,
+                               STaperedCapsuleColliderComponent, STaperedCylinderColliderComponent, SPlaneColliderComponent,
+                               SDynamicMeshColliderComponent, STerrainColliderComponent, SCompoundColliderComponent,
+                               SMeshColliderComponent>(Entity);
+    }
+
+    bool CanAddMeshCollision(const ECS::FRegistry& Registry, ECS::FEntity Entity)
+    {
+        if (!Registry.IsValid(Entity) || HasCollider(Registry, Entity))
+        {
+            return false;
+        }
+        const SStaticMeshComponent* MeshComponent = Registry.TryGet<SStaticMeshComponent>(Entity);
+        return MeshComponent != nullptr && MeshComponent->StaticMesh.Get() != nullptr;
+    }
+
+    bool AddMeshCollision(ECS::FRegistry& Registry, ECS::FEntity Entity)
+    {
+        if (!CanAddMeshCollision(Registry, Entity))
+        {
+            return false;
+        }
+
+        // Before the collider, whose construction would otherwise add a body of the default, dynamic, type.
+        if (!Registry.HasAll<SRigidBodyComponent>(Entity))
+        {
+            SRigidBodyComponent Body;
+            Body.BodyType = EBodyType::Static;
+            Registry.Emplace<SRigidBodyComponent>(Entity, Body);
+        }
+
+        Registry.Emplace<SMeshColliderComponent>(Entity);
+        return true;
+    }
+
+    bool AddPlacementCollision(ECS::FRegistry& Registry, ECS::FEntity Entity)
+    {
+        const CPlacementSettings* Settings = GetDefault<CPlacementSettings>();
+        return Settings != nullptr && Settings->bAddCollisionToPlacedMeshes && AddMeshCollision(Registry, Entity);
     }
 }

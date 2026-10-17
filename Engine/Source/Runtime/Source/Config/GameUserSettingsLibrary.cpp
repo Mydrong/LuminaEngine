@@ -6,6 +6,77 @@
 
 namespace Lumina
 {
+    namespace
+    {
+        constexpr float kMinLookSensitivity = 0.01f;
+        constexpr float kMaxLookSensitivity = 20.0f;
+    }
+
+    float CGameUserSettingsLibrary::GetMouseSensitivity()
+    {
+        return CGameUserSettings::Get().Input.MouseSensitivity;
+    }
+
+    void CGameUserSettingsLibrary::SetMouseSensitivity(float Sensitivity)
+    {
+        CGameUserSettings::Get().Input.MouseSensitivity = Math::Clamp(Sensitivity, kMinLookSensitivity, kMaxLookSensitivity);
+    }
+
+    float CGameUserSettingsLibrary::GetGamepadLookSensitivity()
+    {
+        return CGameUserSettings::Get().Input.GamepadLookSensitivity;
+    }
+
+    void CGameUserSettingsLibrary::SetGamepadLookSensitivity(float Sensitivity)
+    {
+        CGameUserSettings::Get().Input.GamepadLookSensitivity = Math::Clamp(Sensitivity, kMinLookSensitivity, kMaxLookSensitivity);
+    }
+
+    bool CGameUserSettingsLibrary::GetInvertMouseY()
+    {
+        return CGameUserSettings::Get().Input.bInvertMouseY;
+    }
+
+    void CGameUserSettingsLibrary::SetInvertMouseY(bool bInvert)
+    {
+        CGameUserSettings::Get().Input.bInvertMouseY = bInvert;
+    }
+
+    bool CGameUserSettingsLibrary::GetInvertGamepadLookY()
+    {
+        return CGameUserSettings::Get().Input.bInvertGamepadLookY;
+    }
+
+    void CGameUserSettingsLibrary::SetInvertGamepadLookY(bool bInvert)
+    {
+        CGameUserSettings::Get().Input.bInvertGamepadLookY = bInvert;
+    }
+
+    bool CGameUserSettingsLibrary::GetRawMouseInput()
+    {
+        return CGameUserSettings::Get().Input.bRawMouseInput;
+    }
+
+    void CGameUserSettingsLibrary::SetRawMouseInput(bool bRaw)
+    {
+        CGameUserSettings::Get().Input.bRawMouseInput = bRaw;
+    }
+
+    bool CGameUserSettingsLibrary::IsActionToggled(const FName& Action)
+    {
+        return Algo::Contains(CGameUserSettings::Get().Input.ToggleActions, Action);
+    }
+
+    void CGameUserSettingsLibrary::SetActionToggled(const FName& Action, bool bToggled)
+    {
+        TVector<FName>& Toggles = CGameUserSettings::Get().Input.ToggleActions;
+        Toggles.erase(Algo::Remove(Toggles, Action), Toggles.end());
+        if (bToggled && !Action.IsNone())
+        {
+            Toggles.push_back(Action);
+        }
+    }
+
     EWindowMode CGameUserSettingsLibrary::GetWindowMode()
     {
         return CGameUserSettings::Get().WindowMode;

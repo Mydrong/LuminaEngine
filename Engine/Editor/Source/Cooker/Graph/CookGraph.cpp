@@ -114,6 +114,16 @@ namespace Lumina
             Issues.emplace_back(Move(Issue));
             return false;
         }
+        // A package whose class is gone cannot load in the game either, so shipping it only carries dead bytes.
+        if (Data->IsClassMissing())
+        {
+            FCookGraphIssue Issue;
+            Issue.Source = FString(Data->Path.c_str(), Data->Path.size());
+            Issue.Detail = FString("Asset type '") + Data->AssetClass.c_str() + "' no longer exists, so the asset was left out; delete it or restore the type.";
+            Issues.emplace_back(Move(Issue));
+            return false;
+        }
+
         // Editor-only assets always stripped.
         if (HasFlag(Data->Flags, EAssetFlags::EditorOnly))
         {

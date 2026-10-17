@@ -34,16 +34,14 @@ namespace Lumina
         constexpr uint32 kKinematicsInvalidBody = Constants::kIndexNoneU32;
     }
 
-    void SKinematicsSystem::OnStartup()
+    void SKinematicsSystem::OnStartup(const SSystemContext& Context)
     {
-        const FSystemContext& Context = GetContext();
 
         Context.GetRegistry().Ctx().Emplace<FKinematicsState>();
     }
 
-    void SKinematicsSystem::OnUpdate()
+    void SKinematicsSystem::OnUpdate(const SSystemContext& Context)
     {
-        const FSystemContext& Context = GetContext();
 
         LUMINA_PROFILE_SCOPE();
 
@@ -205,7 +203,7 @@ namespace Lumina
 
     namespace Kinematics
     {
-        const FKinematicsState* GetState(const FSystemContext& Context)
+        const FKinematicsState* GetState(const SSystemContext& Context)
         {
             return Context.GetRegistry().Ctx().Find<FKinematicsState>();
         }

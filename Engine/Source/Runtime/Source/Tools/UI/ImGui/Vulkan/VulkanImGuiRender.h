@@ -23,6 +23,8 @@ namespace Lumina
     {
     public:
 
+        explicit FVulkanImGuiRender(bool bInOverlay = false) : IImGuiRenderer(bInOverlay) {}
+
         void Initialize() override;
         void Deinitialize() override;
 

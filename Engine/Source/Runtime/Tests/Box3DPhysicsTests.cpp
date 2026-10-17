@@ -6,7 +6,8 @@
 #include "Physics/API/Box3D/Box3DTaskBridge.h"
 #include "Physics/API/Box3D/Box3DUtils.h"
 #include "Physics/API/Box3D/Box3DInternal.h"
-#include "Physics/CollisionShapeGen.h"
+#include "Assets/AssetTypes/Mesh/MeshCollision.h"
+#include "Physics/CollisionGen.h"
 
 using namespace Lumina;
 
@@ -297,6 +298,51 @@ TEST(Box3DPhysics, HullGeneratorReducesPointCloud)
     TVector<uint32> Indices;
     ASSERT_TRUE(Physics::CollisionGen::BuildHullTriangles(Points, Vertices, Indices));
     EXPECT_EQ(Indices.size(), 36u);
+}
+
+TEST(Box3DPhysics, FittedCapsuleEnclosesPointsAlongTheLongestAxis)
+{
+    // Box corners plus face centers, long on one axis, so the cylinder and both caps are exercised.
+    const auto MakeBlock = [](const FVector3& Half)
+    {
+        TVector<FVector3> Points;
+        for (int32 i = 0; i < 8; ++i)
+        {
+            Points.push_back(FVector3((i & 1) ? Half.x : -Half.x, (i & 2) ? Half.y : -Half.y, (i & 4) ? Half.z : -Half.z) + FVector3(3.0f, -1.0f, 2.0f));
+        }
+        for (int32 Axis = 0; Axis < 3; ++Axis)
+        {
+            FVector3 Face(0.0f);
+            Face[Axis] = Half[Axis];
+            Points.push_back(Face + FVector3(3.0f, -1.0f, 2.0f));
+            Points.push_back(-Face + FVector3(3.0f, -1.0f, 2.0f));
+        }
+        return Points;
+    };
+
+    const FVector3 Halves[] = { FVector3(2.0f, 0.3f, 0.2f), FVector3(0.25f, 1.5f, 0.3f), FVector3(0.2f, 0.3f, 2.5f) };
+    for (int32 LongAxis = 0; LongAxis < 3; ++LongAxis)
+    {
+        const TVector<FVector3> Points = MakeBlock(Halves[LongAxis]);
+
+        SCollisionPrimitive Capsule;
+        ASSERT_TRUE(Physics::CollisionGen::FitCapsule(Points, Capsule));
+        EXPECT_EQ(Capsule.Type, ECollisionPrimitiveType::Capsule);
+
+        // Rotation is authored in degrees, the way the editor draws it and the physics build reads it.
+        const FVector3 CapsuleAxis = Math::Normalize(FQuat(Math::Radians(Capsule.Rotation)) * FVector3(0.0f, 1.0f, 0.0f));
+        EXPECT_NEAR(Math::Abs(CapsuleAxis[LongAxis]), 1.0f, 1e-4f) << "long axis " << LongAxis;
+
+        for (const FVector3& P : Points)
+        {
+            const float Along = Math::Clamp(Math::Dot(P - Capsule.Center, CapsuleAxis), -Capsule.HalfHeight, Capsule.HalfHeight);
+            const float Distance = Math::Length(P - (Capsule.Center + CapsuleAxis * Along));
+            EXPECT_LE(Distance, Capsule.Radius + 1e-4f) << "long axis " << LongAxis;
+        }
+    }
+
+    SCollisionPrimitive Empty;
+    EXPECT_FALSE(Physics::CollisionGen::FitCapsule(TVector<FVector3>(), Empty));
 }
 
 TEST(Box3DPhysics, DegenerateHullInputIsRejected)

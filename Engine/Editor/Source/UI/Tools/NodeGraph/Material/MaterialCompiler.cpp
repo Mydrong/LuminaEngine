@@ -465,9 +465,40 @@ namespace Lumina
 			Result.ComponentCount	= Count;
 			Result.Value 			= DefaultValueStr;
 			Result.Mask  			= LiteralWidth > 0 ? EComponentMask::None : Input->GetComponentMask();
+			ApplyFallbackAliasDeriv(Result);
 		}
 
 		return Result;
+	}
+
+	void FMaterialCompiler::ApplyFallbackAliasDeriv(FInputValue& Value) const
+	{
+		const FString& Fallback = Value.Value;
+		FString Alias;
+		if (Fallback == "UV0" || Fallback == "float2(UV0)")
+		{
+			Alias = "UV0";
+		}
+		else if (Fallback == "WorldPosition" || Fallback == "WorldPositionExcludingOffsets" || Fallback == "VertexColor")
+		{
+			Alias = Fallback;
+		}
+		else if (Fallback == "WorldNormal")
+		{
+			// The deferred pass declares no normal gradient, since its normal is normalized and two-sided-flipped.
+			Value.Deriv = EDerivState::Unknown;
+			return;
+		}
+
+		// The vertex templates declare none of the pairs, and nothing samples with gradients there.
+		if (Alias.empty() || CurrentStage == EMaterialCompileStage::Vertex)
+		{
+			return;
+		}
+
+		Value.Deriv = EDerivState::Valid;
+		Value.DDX   = Alias + "_DDX";
+		Value.DDY   = Alias + "_DDY";
 	}
 
 	void FMaterialCompiler::EmitDedupedParamFetch(const FString& TypeStr, const FString& NodeID, const FString& FetchExpr)

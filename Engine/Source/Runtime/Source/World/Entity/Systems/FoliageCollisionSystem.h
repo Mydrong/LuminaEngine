@@ -15,7 +15,7 @@ namespace Lumina
 
         void Configure() override;
 
-        void OnUpdate() override;
-        void OnTeardown() override;
+        void OnUpdate(const SSystemContext& Context) override;
+        void OnTeardown(const SSystemContext& Context) override;
     };
 }

@@ -1,5 +1,5 @@
 ﻿#pragma once
-#include "ObjectArray.h"
+#include "ObjectIteration.h"
 #include "ObjectBase.h"
 #include "Containers/Vector.h"
 
@@ -17,7 +17,7 @@ namespace Lumina
         explicit TObjectIterator(bool bIncludeDerivedClasses = true)
             : Index(0)
         {
-            GObjectArray.ForEachObject([&](CObjectBase* Object, int32)
+            ForEachObject([&](CObjectBase* Object, int32)
             {
                 if (!Object)
                 {

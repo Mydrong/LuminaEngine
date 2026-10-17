@@ -2,7 +2,7 @@
 #include "Networking/NetRealm.h"
 
 #include "Core/Object/Class.h"
-#include "Core/Object/ObjectArray.h"
+#include "Core/Object/ObjectIteration.h"
 #include "Core/Object/ObjectCore.h"
 #include "Core/Object/ScriptClass.h"
 #include "Log/Log.h"
@@ -31,7 +31,7 @@ namespace Lumina::WorldSubsystems
 
         // Collected before anything is built, because creating a CDO or an instance mutates the object array.
         TVector<CClass*> Candidates;
-        GObjectArray.ForEachObject([&](CObjectBase* Object, int32)
+        ForEachObject([&](CObjectBase* Object, int32)
         {
             if (Object == nullptr || !Object->IsA<CClass>())
             {

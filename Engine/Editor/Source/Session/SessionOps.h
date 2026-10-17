@@ -60,6 +60,7 @@ namespace Lumina::SessionOps
     {
         bool    bPlaying = false;
         bool    bPaused  = false;
+        bool    bEjected = false;
 
         // Package path of the world on show, empty when it has never been saved.
         FString World;

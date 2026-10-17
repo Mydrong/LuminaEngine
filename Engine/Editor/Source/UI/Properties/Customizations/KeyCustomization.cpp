@@ -1,9 +1,11 @@
 ﻿#include "Containers/StringFormat.h"
 #include <iterator>
 #include "CoreTypeCustomization.h"
+#include "AssetPickerFilter.h"
 
 #include "imgui.h"
-#include "Input/InputActionMap.h"
+#include "Input/InputViewport.h"
+#include "Tools/UI/ImGui/EditorColors.h"
 #include "Tools/UI/ImGui/ImGuiDesignIcons.h"
 #include "Tools/UI/ImGui/ImGuiKeyCapture.h"
 #include "Tools/UI/ImGui/ImGuiX.h"
@@ -12,7 +14,6 @@ namespace Lumina
 {
     namespace
     {
-        // The whole binding as one string, such as Ctrl + Shift + K, RMB, or Unbound.
         FString KeyBindingText(const SKey& Key)
         {
             if (!Key.IsValid())
@@ -20,26 +21,8 @@ namespace Lumina
                 return FString("Unbound");
             }
 
-            FString Text;
-            if (Key.bCtrl)  { Text += "Ctrl + "; }
-            if (Key.bShift) { Text += "Shift + "; }
-            if (Key.bAlt)   { Text += "Alt + "; }
-
-            if (Key.IsMouse())
-            {
-                switch (Key.MouseButton)
-                {
-                case EMouseKey::ButtonLeft:   Text += "LMB"; break;
-                case EMouseKey::ButtonRight:  Text += "RMB"; break;
-                case EMouseKey::ButtonMiddle: Text += "MMB"; break;
-                default:                      Text += FInputActionMap::MouseButtonToString(Key.MouseButton); break;
-                }
-            }
-            else
-            {
-                Text += FInputActionMap::KeyToString(Key.Key);
-            }
-            return Text;
+            const char* Icon = Key.IsGamepad() ? LE_ICON_GAMEPAD_VARIANT : Key.IsMouse() ? LE_ICON_MOUSE : LE_ICON_KEYBOARD;
+            return FString(Icon) + "  " + Key.GetDisplayName();
         }
     }
 
@@ -48,38 +31,47 @@ namespace Lumina
         bool bCommitted = false; // a new binding was set (or cleared) this frame
 
         const ImGuiStyle& St     = ImGui::GetStyle();
-        const float       Height = ImGui::GetFrameHeight();
         const bool        bValid = DisplayValue.IsValid();
 
-        // Its own button, so hit-testing is ImGui's, and hidden while listening or the click double-counts.
-        const bool  bShowClear = bValid && !bCapturing;
-        const float ClearW     = bShowClear ? Height + St.ItemSpacing.x : 0.0f;
-        const float Avail  = ImGui::GetContentRegionAvail().x - ClearW;
-        const float FieldW = Avail > 1.0f ? Avail : 1.0f;
+        // Kept at full width while listening, so the field does not jump as the clear button comes and goes.
+        const float ClearW = AssetPickerFilter::kButtonSize.x + St.ItemSpacing.x;
+        const float FieldW = ImGui::GetContentRegionAvail().x - ClearW;
 
         FFixedString Label;
         AppendFormat(Label, "{}##skey",
-            bCapturing ? "Press a key..." : KeyBindingText(DisplayValue).c_str());
+            bCapturing ? LE_ICON_KEYBOARD "  Press a key, mouse button or gamepad button..." : KeyBindingText(DisplayValue).c_str());
 
-        if (ImGui::Button(Label.c_str(), ImVec2(FieldW, Height)) && !bCapturing)
+        // Styled as a value field rather than a button, since it shows the binding the way its neighbors show theirs.
+        ImGui::PushStyleColor(ImGuiCol_Button,        St.Colors[ImGuiCol_FrameBg]);
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, St.Colors[ImGuiCol_FrameBgHovered]);
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive,  St.Colors[ImGuiCol_FrameBgActive]);
+        ImGui::PushStyleColor(ImGuiCol_Text, bCapturing ? EditorColors::Accent() : bValid ? St.Colors[ImGuiCol_Text] : EditorColors::TextMuted());
+        ImGui::PushStyleVar(ImGuiStyleVar_ButtonTextAlign, ImVec2(0.0f, 0.5f));
+        if (ImGui::Button(Label.c_str(), ImVec2(FieldW > 1.0f ? FieldW : 1.0f, 0.0f)) && !bCapturing)
         {
             bCapturing = true;
             bArmed     = false;
         }
-        ImGuiX::TextTooltip("{}", bCapturing ? "Press a key or mouse button. Esc cancels."
-                                             : "Click, then press a key or mouse button to rebind");
+        ImGui::PopStyleVar();
+        ImGui::PopStyleColor(4);
+        ImGuiX::TextTooltip("{}", bCapturing ? "Press a key, mouse button or gamepad button. Esc cancels."
+                                             : "Click, then press a key, mouse button or gamepad button to rebind");
 
-        if (bShowClear)
+        // Disabled rather than hidden while listening, or the activating click would land on it.
+        ImGui::SameLine(0.0f, St.ItemSpacing.x);
+        ImGui::BeginDisabled(!bValid || bCapturing);
+        ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.6f, 0.2f, 0.2f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.7f, 0.25f, 0.25f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive,  ImVec4(0.5f, 0.15f, 0.15f, 1.0f));
+        if (ImGui::Button(LE_ICON_CLOSE_CIRCLE "##clearskey", AssetPickerFilter::kButtonSize))
         {
-            ImGui::SameLine(0.0f, St.ItemSpacing.x);
-            if (ImGui::Button(LE_ICON_CLOSE "##clearskey", ImVec2(Height, Height)))
-            {
-                DisplayValue.Clear();
-                bCapturing = false;
-                bCommitted = true;
-            }
-            ImGuiX::TextTooltip("Clear binding");
+            DisplayValue.Clear();
+            bCapturing = false;
+            bCommitted = true;
         }
+        ImGui::PopStyleColor(3);
+        ImGui::EndDisabled();
+        ImGuiX::TextTooltip("{}", "Clear the binding.");
 
         if (bCapturing)
         {
@@ -112,6 +104,12 @@ namespace Lumina
                     DisplayValue.bCtrl  = Io.KeyCtrl;
                     DisplayValue.bShift = Io.KeyShift;
                     DisplayValue.bAlt   = Io.KeyAlt;
+                    bCapturing = false;
+                    bCommitted = true;
+                }
+                else if (const EGamepadButton G = FInputViewportRegistry::Get().GetGamepads().GetFirstPressedButton(); G != EGamepadButton::Num)
+                {
+                    DisplayValue.SetGamepadButton(G);
                     bCapturing = false;
                     bCommitted = true;
                 }

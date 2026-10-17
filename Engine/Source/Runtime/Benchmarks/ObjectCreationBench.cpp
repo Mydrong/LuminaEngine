@@ -20,7 +20,6 @@ namespace LuminaObjectCreationBench
     using Lumina::CGrassType;
     using Lumina::CObjectRefTest;
     using Lumina::FGuid;
-    using Lumina::GObjectArray;
     using Lumina::int32;
     using Lumina::uint64;
     using Lumina::NAME_None;
@@ -51,7 +50,7 @@ namespace LuminaObjectCreationBench
     {
         for (CObject* Object : Objects)
         {
-            GObjectArray.ConditionalDestroy(Object);
+            Lumina::Object::Internal::ConditionalDestroy(Object);
         }
         Objects.clear();
     }

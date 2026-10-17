@@ -10,11 +10,21 @@ struct FVisBufferPickerArgs
 };
 FVisBufferPickerArgs* Pass() { return GetPassArgs<FVisBufferPickerArgs>(); }
 
+struct FPickerOutput
+{
+    uint EntityID : SV_Target0;
+    // Placement reads through foliage, and grass carries its terrain's entity, so only the instance can say.
+    uint Foliage  : SV_Target1;
+};
+
 [shader("fragment")]
-uint FragmentMain(float4 SvPosition : SV_Position) : SV_Target0
+FPickerOutput FragmentMain(float4 SvPosition : SV_Position)
 {
     const uint Raw        = Pass().VisBuffer.Load(int2(SvPosition.xy));
     const uint InstanceID = ResolveVisInstance(Raw, Pass().DrawListCount);
 
-    return (InstanceID == ~0u) ? 0u : GetInstanceEntityID(InstanceID);
+    FPickerOutput Output;
+    Output.EntityID = (InstanceID == ~0u) ? 0u : GetInstanceEntityID(InstanceID);
+    Output.Foliage  = (InstanceID != ~0u && Instances()[InstanceID].HasFlag(EInstanceFlags::Foliage)) ? 1u : 0u;
+    return Output;
 }

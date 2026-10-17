@@ -14,9 +14,8 @@ namespace Lumina
         Writes<SHealthComponent>();
     }
 
-    void SHealthSystem::OnUpdate()
+    void SHealthSystem::OnUpdate(const SSystemContext& Context)
     {
-        const FSystemContext& Context = GetContext();
 
         if (Context.GetWorldType() == EWorldType::Editor)
         {

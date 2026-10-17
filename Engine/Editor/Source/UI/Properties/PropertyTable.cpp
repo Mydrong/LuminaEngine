@@ -477,6 +477,52 @@ namespace Lumina
         return EditCondition.Evaluate(GetEditConditionContainer());
     }
 
+    void FPropertyRow::SetExpandedRecursive(bool bExpand)
+    {
+        // The saved state too, so a filter that is active right now does not undo the choice when it clears.
+        bExpanded = bExpand;
+        bExpandedSaved = bExpand;
+        for (const TUniquePtr<FPropertyRow>& Child : Children)
+        {
+            Child->SetExpandedRecursive(bExpand);
+        }
+    }
+
+    FString FPropertyRow::GetExpansionKey() const
+    {
+        if (PropertyHandle == nullptr || PropertyHandle->Property == nullptr)
+        {
+            return FString();
+        }
+        if (IsArrayElementProperty())
+        {
+            return Lumina::Format("[{}]", PropertyHandle->Index);
+        }
+        return PropertyHandle->Property->GetPropertyName().ToString();
+    }
+
+    void FPropertyRow::CaptureExpansion(FRowExpansionState& Out, const FString& Path) const
+    {
+        Out[Path] = bExpanded;
+        for (const TUniquePtr<FPropertyRow>& Child : Children)
+        {
+            Child->CaptureExpansion(Out, Path + "/" + Child->GetExpansionKey());
+        }
+    }
+
+    void FPropertyRow::RestoreExpansion(const FRowExpansionState& In, const FString& Path)
+    {
+        if (auto Found = In.find(Path); Found != In.end())
+        {
+            bExpanded = Found->second;
+            bExpandedSaved = Found->second;
+        }
+        for (const TUniquePtr<FPropertyRow>& Child : Children)
+        {
+            Child->RestoreExpansion(In, Path + "/" + Child->GetExpansionKey());
+        }
+    }
+
     void FPropertyRow::DestroyChildren()
     {
         Children.clear();
@@ -782,16 +828,33 @@ namespace Lumina
         }
 
         // Skipped while Shift is held, so the copy chord above does not also pop the menu.
-        if (!bIsCategory && !bShiftHeld && PropertyHandle && PropertyHandle->Property)
+        const bool bHasProperty = !bIsCategory && PropertyHandle && PropertyHandle->Property;
+        const bool bCanExpand = !Children.empty();
+        if (!bShiftHeld && (bHasProperty || bCanExpand))
         {
             if (ImGui::BeginPopupContextItem("##PropCtx"))
             {
-                ImGui::BeginDisabled(!bDiffers || bReadOnly || IsReadOnly() || bMultipleValues);
-                if (ImGui::MenuItem(LE_ICON_REFRESH " Reset to Default"))
+                if (bHasProperty)
                 {
-                    PerformResetToDefault();
+                    ImGui::BeginDisabled(!bDiffers || bReadOnly || IsReadOnly() || bMultipleValues);
+                    if (ImGui::MenuItem(LE_ICON_REFRESH " Reset to Default"))
+                    {
+                        PerformResetToDefault();
+                    }
+                    ImGui::EndDisabled();
                 }
-                ImGui::EndDisabled();
+                if (bHasProperty && bCanExpand)
+                {
+                    ImGui::Separator();
+                }
+                if (bCanExpand && ImGui::MenuItem(LE_ICON_EXPAND_ALL " Expand All"))
+                {
+                    SetExpandedRecursive(true);
+                }
+                if (bCanExpand && ImGui::MenuItem(LE_ICON_COLLAPSE_ALL " Collapse All"))
+                {
+                    SetExpandedRecursive(false);
+                }
                 ImGui::EndPopup();
             }
         }
@@ -979,6 +1042,39 @@ namespace Lumina
         ImGuiX::WrappedTooltip_Internal(Tooltip);
     }
 
+    // An element's inner property has no name or tooltip, so the element reads as its place in the array plus the array's own tooltip.
+    static void DrawRowTooltip(const FPropertyHandle* Handle, const FProperty* Property, bool bLabelClipped, FStringView Label = FStringView())
+    {
+        if (Handle == nullptr || Handle->OwnerArray == nullptr)
+        {
+            DrawPropertyTooltip(Property, bLabelClipped);
+            return;
+        }
+        if (!ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
+        {
+            return;
+        }
+
+        const FArrayProperty* Array = Handle->OwnerArray;
+        const FString TypeName = Property->GetType() == EPropertyTypeFlags::Struct
+            ? static_cast<const FStructProperty*>(Property)->GetStruct()->GetName().ToString()
+            : FString(PropertyTypePlainNames[(size_t)Property->GetType()]);
+
+        FString Text;
+        if (bLabelClipped && !Label.empty())
+        {
+            Text += FString(Label.data(), Label.size()) + "\n\n";
+        }
+        Text += Lumina::Format("Element {} of {} ({})", Handle->Index, Array->GetPropertyDisplayName().c_str(), TypeName.c_str());
+
+        const FStringView ArrayTooltip = Array->GetMetadata("ToolTip");
+        if (!ArrayTooltip.empty())
+        {
+            Text += "\n\n" + FString(ArrayTooltip.data(), ArrayTooltip.size());
+        }
+        ImGuiX::WrappedTooltip_Internal(FStringView(Text.c_str(), Text.size()));
+    }
+
     // A label too long for its cell ends in an ellipsis rather than being cut mid-letter, and reports that it did.
     static bool DrawHeaderLabel(const char* Label)
     {
@@ -1083,7 +1179,7 @@ namespace Lumina
             bClipped = DrawHeaderLabel(PropertyHandle->Property->GetPropertyDisplayName().c_str());
         }
 
-        DrawPropertyTooltip(PropertyHandle->Property, bClipped);
+        DrawRowTooltip(PropertyHandle.get(), PropertyHandle->Property, bClipped);
     }
 
     void FPropertyPropertyRow::DrawEditor(const FPropertyDrawArgs& Args)
@@ -1125,9 +1221,37 @@ namespace Lumina
         return ArrayRow->AllowResize() || ArrayRow->AllowReorder();
     }
 
+    namespace
+    {
+        constexpr float kElementButtonWidth = 18.0f;
+
+        // Disabled rather than hidden when it cannot act, so every element row keeps the same columns.
+        bool ElementButton(const char* Icon, bool bEnabled, const char* Tooltip)
+        {
+            ImGui::BeginDisabled(!bEnabled);
+            ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(0, 4));
+            const bool bClicked = ImGuiX::FlatButton(Icon, ImVec2(kElementButtonWidth, 24), ArrayControlSeed);
+            ImGui::PopStyleVar();
+            ImGui::EndDisabled();
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort | ImGuiHoveredFlags_AllowWhenDisabled))
+            {
+                ImGuiX::TextTooltip_Internal(Tooltip);
+            }
+            return bClicked;
+        }
+    }
+
     float FPropertyRow::GetExtraControlsSectionWidth()
     {
-        return bArrayElement ? 22.0f : 0.0f;
+        if (!bArrayElement)
+        {
+            return 0.0f;
+        }
+
+        // Up and down for a reorderable array, delete for a resizable one, then the options menu.
+        const FArrayPropertyRow* ArrayRow = static_cast<const FArrayPropertyRow*>(ParentRow);
+        const int32 Buttons = 1 + (ArrayRow->AllowReorder() ? 2 : 0) + (ArrayRow->AllowResize() ? 1 : 0);
+        return Buttons * kElementButtonWidth + (Buttons - 1) * ImGui::GetStyle().ItemSpacing.x + 4.0f;
     }
 
     void FPropertyRow::DrawExtraControlsSection()
@@ -1139,9 +1263,50 @@ namespace Lumina
         const int64 Index = PropertyHandle->Index;
         const bool bAllowResize = ArrayRow->AllowResize();
         const bool bAllowReorder = ArrayRow->AllowReorder();
+        const bool bCanMoveUp = bAllowReorder && Index > 0;
+        const bool bCanMoveDown = bAllowReorder && ArrayNum > 0 && Cmp::Less(Index, ArrayNum - 1);
+
+        auto QueueMove = [ArrayRow, ArrayProperty, ContainerPtr, Index](int64 Target)
+        {
+            ArrayRow->QueueMutation([ArrayRow, ArrayProperty, ContainerPtr, Index, Target]
+            {
+                ArrayProperty->Swap(ContainerPtr, Index, Target);
+                ArrayRow->SwapElementExpansion(Index, Target);
+            });
+        };
+        auto QueueRemove = [ArrayRow, ArrayProperty, ContainerPtr, Index]()
+        {
+            ArrayRow->QueueMutation([ArrayRow, ArrayProperty, ContainerPtr, Index]
+            {
+                ArrayProperty->RemoveAt(ContainerPtr, Index);
+                ArrayRow->RemoveElementExpansion(Index);
+            });
+        };
+
+        if (bAllowReorder)
+        {
+            if (ElementButton(LE_ICON_ARROW_UP, bCanMoveUp, "Move element up"))
+            {
+                QueueMove(Index - 1);
+            }
+            ImGui::SameLine();
+            if (ElementButton(LE_ICON_ARROW_DOWN, bCanMoveDown, "Move element down"))
+            {
+                QueueMove(Index + 1);
+            }
+            ImGui::SameLine();
+        }
+        if (bAllowResize)
+        {
+            if (ElementButton(LE_ICON_TRASH_CAN, true, "Remove element"))
+            {
+                QueueRemove();
+            }
+            ImGui::SameLine();
+        }
 
         ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(0, 4));
-        ImGuiX::FlatButton(LE_ICON_DOTS_HORIZONTAL, ImVec2(18, 24), ArrayControlSeed);
+        ImGuiX::FlatButton(LE_ICON_DOTS_HORIZONTAL, ImVec2(kElementButtonWidth, 24), ArrayControlSeed);
         ImGui::PopStyleVar();
 
         if (ImGui::BeginPopupContextItem(nullptr, ImGuiPopupFlags_MouseButtonLeft))
@@ -1154,28 +1319,19 @@ namespace Lumina
                 });
             }
 
-            if (bAllowReorder && Index > 0 && ImGui::MenuItem(LE_ICON_ARROW_UP " Move Element Up"))
+            if (bCanMoveUp && ImGui::MenuItem(LE_ICON_ARROW_UP " Move Element Up"))
             {
-                ArrayRow->QueueMutation([ArrayProperty, ContainerPtr, Index]
-                {
-                    ArrayProperty->Swap(ContainerPtr, Index, Index - 1);
-                });
+                QueueMove(Index - 1);
             }
 
-            if (bAllowReorder && ArrayNum > 0 && Cmp::Less(Index, ArrayNum - 1) && ImGui::MenuItem(LE_ICON_ARROW_DOWN " Move Element Down"))
+            if (bCanMoveDown && ImGui::MenuItem(LE_ICON_ARROW_DOWN " Move Element Down"))
             {
-                ArrayRow->QueueMutation([ArrayProperty, ContainerPtr, Index]
-                {
-                    ArrayProperty->Swap(ContainerPtr, Index, Index + 1);
-                });
+                QueueMove(Index + 1);
             }
 
             if (bAllowResize && ImGui::MenuItem(LE_ICON_TRASH_CAN " Remove Element"))
             {
-                ArrayRow->QueueMutation([ArrayProperty, ContainerPtr, Index]
-                {
-                    ArrayProperty->RemoveAt(ContainerPtr, Index);
-                });
+                QueueRemove();
             }
 
             ImGui::EndPopup();
@@ -1202,6 +1358,15 @@ namespace Lumina
         {
             // Structural edits must notify like value edits; Started fires before mutation so the undo snapshot captures the pre-edit array.
             DispatchChange(EPropertyChangeOp::Started);
+
+            // Live rows hold the newest state, while elements outside the window keep whatever was saved for them.
+            ElementStates.resize(Math::Max((int32)ElementStates.size(), GetElementCount()));
+            for (int32 i = 0; i < (int32)Children.size(); ++i)
+            {
+                FRowExpansionState& State = ElementStates[WindowBegin + i];
+                State.clear();
+                Children[i]->CaptureExpansion(State);
+            }
 
             for (const TFunction<void()>& Mutation : PendingMutations)
             {
@@ -1354,6 +1519,14 @@ namespace Lumina
         return (int32)ArrayProperty->GetNum(GetPropertyHandle()->GetValuePtr());
     }
 
+    void FArrayPropertyRow::SetExpandedRecursive(bool bExpand)
+    {
+        // Saved states would override the choice on every element created afterwards.
+        ElementStates.clear();
+        ElementExpansion = bExpand;
+        FPropertyRow::SetExpandedRecursive(bExpand);
+    }
+
     TUniquePtr<FPropertyRow> FArrayPropertyRow::CreateElementRow(int32 Index)
     {
         TSharedPtr<FPropertyHandle> ElementPropHandle = MakeShared<FPropertyHandle>(
@@ -1364,7 +1537,31 @@ namespace Lumina
             static_cast<int64>(Index));
         TUniquePtr<FPropertyRow> NewRow = CreatePropertyRow(ElementPropHandle, this, Callbacks);
         NewRow->SetIsArrayElement(true);
+        if (ElementExpansion.has_value())
+        {
+            NewRow->SetExpandedRecursive(*ElementExpansion);
+        }
+        if (Index < (int32)ElementStates.size())
+        {
+            NewRow->RestoreExpansion(ElementStates[Index]);
+        }
         return NewRow;
+    }
+
+    void FArrayPropertyRow::SwapElementExpansion(int64 A, int64 B)
+    {
+        if (A >= 0 && B >= 0 && A < (int64)ElementStates.size() && B < (int64)ElementStates.size())
+        {
+            std::swap(ElementStates[A], ElementStates[B]);
+        }
+    }
+
+    void FArrayPropertyRow::RemoveElementExpansion(int64 Index)
+    {
+        if (Index >= 0 && Index < (int64)ElementStates.size())
+        {
+            ElementStates.erase(ElementStates.begin() + Index);
+        }
     }
 
     void FArrayPropertyRow::SetWindow(int32 Begin, int32 End)
@@ -1446,9 +1643,10 @@ namespace Lumina
         ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(0, 4));
         if (ImGuiX::FlatButton(LE_ICON_TRASH_CAN, ImVec2(18, 24), ArrayControlSeed))
         {
-            QueueMutation([LocalArrayProperty, LocalContainerPtr]
+            QueueMutation([this, LocalArrayProperty, LocalContainerPtr]
             {
                 LocalArrayProperty->Clear(LocalContainerPtr);
+                ClearElementExpansion();
             });
         }
         ImGui::PopStyleVar();
@@ -1887,14 +2085,7 @@ namespace Lumina
         if (Customization)
         {
             const bool bLabelClipped = DrawHeaderLabel(Label.c_str());
-            if (IsArrayElementProperty() && bLabelClipped && ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
-            {
-                ImGuiX::WrappedTooltip_Internal(Label);
-            }
-            else
-            {
-                DrawPropertyTooltip(StructProperty, bLabelClipped);
-            }
+            DrawRowTooltip(PropertyHandle.get(), StructProperty, bLabelClipped, FStringView(Label.c_str(), Label.size()));
             return;
         }
 
@@ -1906,14 +2097,7 @@ namespace Lumina
         bExpanded = CollapsingHeaderEllipsis(Label.c_str(), 0, bClipped, this);
         ImGui::PopStyleColor(3);
 
-        if (IsArrayElementProperty() && bClipped && ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
-        {
-            ImGuiX::WrappedTooltip_Internal(Label);
-        }
-        else
-        {
-            DrawPropertyTooltip(StructProperty, bClipped);
-        }
+        DrawRowTooltip(PropertyHandle.get(), StructProperty, bClipped, FStringView(Label.c_str(), Label.size()));
     }
 
     void FStructPropertyRow::DrawEditor(const FPropertyDrawArgs& Args)
@@ -2046,7 +2230,7 @@ namespace Lumina
         bExpanded = CollapsingHeaderEllipsis(InstancedStructProperty->GetPropertyDisplayName().c_str(), 0, bClipped);
         ImGui::PopStyleColor(3);
 
-        DrawPropertyTooltip(InstancedStructProperty, bClipped);
+        DrawRowTooltip(PropertyHandle.get(), InstancedStructProperty, bClipped);
     }
 
     void FInstancedStructPropertyRow::DrawEditor(const FPropertyDrawArgs& Args)
@@ -2125,7 +2309,7 @@ namespace Lumina
         ImGui::Dummy(ImVec2(Offset, 0));
         ImGui::SameLine();
         const bool bClipped = DrawHeaderLabel(OptionalProperty->GetPropertyDisplayName().c_str());
-        DrawPropertyTooltip(OptionalProperty, bClipped);
+        DrawRowTooltip(PropertyHandle.get(), OptionalProperty, bClipped);
     }
 
     void FOptionalPropertyRow::DrawEditor(const FPropertyDrawArgs& Args)

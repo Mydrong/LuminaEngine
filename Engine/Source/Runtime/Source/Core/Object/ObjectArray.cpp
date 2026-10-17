@@ -1,13 +1,40 @@
 ﻿#include "RuntimePCH.h"
 #include "ObjectArray.h"
+#include "ObjectBase.h"
 
 #include "Class.h"          // CField, for the shutdown type-object ordering below
 #include "Memory/Memory.h"
 #include "Memory/MemoryTracking.h"
 
 
-namespace Lumina
+namespace Lumina::Object::Internal
 {
+    namespace
+    {
+        FCObjectArray GObjectArray;
+    }
+
+    void AllocateObjectPool(int32 MaxObjects) { GObjectArray.AllocateObjectPool(MaxObjects); }
+    void BeginShutdown() { GObjectArray.BeginShutdown(); }
+    void Shutdown() { GObjectArray.Shutdown(); }
+    FObjectHandle AllocateObject(CObjectBase* Object) { return GObjectArray.AllocateObject(Object); }
+    void DeallocateObject(int32 Index) { GObjectArray.DeallocateObject(Index); }
+    CObjectBase* ResolveHandle(const FObjectHandle& Handle) { return GObjectArray.ResolveHandle(Handle); }
+    void AddReinstanceRedirect(const FObjectHandle& From, const FObjectHandle& To) { GObjectArray.AddReinstanceRedirect(From, To); }
+    FObjectHandle GetHandleByObject(const CObjectBase* Object) { return GObjectArray.GetHandleByObject(Object); }
+    FObjectHandle GetHandleByIndex(int32 Index) { return GObjectArray.GetHandleByIndex(Index); }
+    FCObjectEntry* GetEntry(const CObjectBase* Object) { return GObjectArray.GetEntry(Object); }
+    bool ReleaseStrongRefEntry(FCObjectEntry* Entry, const CObjectBase* Expected) { return GObjectArray.ReleaseStrongRefEntry(Entry, Expected); }
+    bool ReleaseStrongRef(CObjectBase* Object) { return GObjectArray.ReleaseStrongRef(Object); }
+    CObjectBase* TryAddStrongRef(const FObjectHandle& Handle) { return GObjectArray.TryAddStrongRef(Handle); }
+    bool ConditionalDestroy(CObjectBase* Object) { return GObjectArray.ConditionalDestroy(Object); }
+    bool ForceDestroy(CObjectBase* Object) { return GObjectArray.ForceDestroy(Object); }
+    bool TryClaimDestroyForShutdown(CObjectBase* Object) { return GObjectArray.TryClaimDestroyForShutdown(Object); }
+    int32 GetStrongRefCountByIndex(int32 Index) { return GObjectArray.GetStrongRefCountByIndex(Index); }
+    int32 GetNumAliveObjects() { return GObjectArray.GetNumAliveObjects(); }
+    int32 GetMaxObjects() { return GObjectArray.GetMaxObjects(); }
+    bool IsShuttingDown() { return GObjectArray.IsShuttingDown(); }
+
     void FChunkedFixedCObjectArray::Initialize(int32 InMaxElements)
     {
         DEBUG_ASSERT(Objects == nullptr, "Already initialized!");
@@ -608,5 +635,13 @@ namespace Lumina
     bool FScopedStaleReferenceTolerance::IsTolerated()
     {
         return GStaleReferenceTolerance > 0;
+    }
+}
+
+namespace Lumina
+{
+    void ForEachObject(TFunctionRef<bool(CObjectBase*, int32)> Function)
+    {
+        Object::Internal::GObjectArray.ForEachObject(Function);
     }
 }

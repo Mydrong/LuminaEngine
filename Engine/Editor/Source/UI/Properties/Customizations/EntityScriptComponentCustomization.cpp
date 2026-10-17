@@ -8,6 +8,7 @@
 #include "Scripting/EntityScript.h"
 #include "Scripting/ScriptableObject.h"
 #include "Tools/UI/ImGui/ImGuiDesignIcons.h"
+#include "Tools/UI/ImGui/ImGuiDragDrop.h"
 #include "Tools/UI/ImGui/ImGuiX.h"
 #include "Tools/UI/ImGui/EditorColors.h"
 #include "UI/Properties/PropertyTable.h"
@@ -217,9 +218,26 @@ namespace Lumina
         ScriptPicker.SearchHint = "Search scripts...";
         ScriptPicker.ItemNoun   = "scripts";
         ScriptPicker.TrailingCategory = EntityScriptPicker::NativeCategory;
+        ImGui::BeginGroup();
         const FPickerItem* Picked = ScriptPicker.DrawButton("##AddEntityScript", LE_ICON_PLUS " Add Script", &EntityScriptPicker::GatherItems);
+        ImGui::EndGroup();
 
         CClass* Class = Picked != nullptr ? FindObject<CClass>(FName(Picked->Key)) : nullptr;
+
+        // A .cs file dragged from the content browser adds the script it declares.
+        if (ImGui::BeginDragDropTarget())
+        {
+            FFixedString ScriptPath;
+            if (DragDrop::AcceptFile("cs", ScriptPath))
+            {
+                Class = EntityScriptPicker::FindScriptClassForSource(FStringView(ScriptPath.c_str(), ScriptPath.size()));
+                if (Class == nullptr)
+                {
+                    ImGuiX::Notifications::NotifyWarning("\"{}\" declares no entity script to add.", ScriptPath.c_str());
+                }
+            }
+            ImGui::EndDragDropTarget();
+        }
         if (Class != nullptr)
         {
             PendingMutation = [Component, Class]

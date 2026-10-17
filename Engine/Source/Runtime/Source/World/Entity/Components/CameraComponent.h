@@ -195,9 +195,4 @@ namespace Lumina
 
         FViewVolume ViewVolume;
     };
-
-    struct RUNTIME_API FSwitchActiveCameraEvent
-    {
-        ECS::FEntity NewActiveEntity;
-    };
 }

@@ -82,13 +82,10 @@ namespace Lumina
             const FUIntVector2 WinExtent = MainWindow->GetExtent();
             PrimaryViewport->SetWindowRect(0, 0, int(WinExtent.x), int(WinExtent.y));
             PrimaryViewport->SetRenderTargetSize(WinExtent.x, WinExtent.y);
-            PrimaryViewport->SetHovered(true);
-            PrimaryViewport->SetFocused(true);
 
             FInputViewportRegistry::Get().Register(PrimaryViewport.get());
             FInputViewportRegistry::Get().SetActiveViewport(PrimaryViewport.get());
             FInputViewportRegistry::Get().SetHoveredViewport(PrimaryViewport.get());
-            FInputViewportRegistry::Get().SetFocusedViewport(PrimaryViewport.get());
         }
         #endif
 
@@ -135,7 +132,7 @@ namespace Lumina
 
             if (!GIsHeadless)
             {
-                FInputViewportRegistry::Get().EndFrame(GEngine->GetDeltaTime());
+                FInputViewportRegistry::Get().EndFrame();
             }
         }
 

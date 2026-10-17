@@ -15,7 +15,7 @@ namespace Lumina
         Load,
     };
 
-    // Asks the world's SSaveGameSystem to save or load at its next update, so any system on any thread may ask.
+    // Queued for the world's SSaveGameSystem, which saves or loads at its next update, so any system on any thread may ask.
     REFLECT(Event)
     struct RUNTIME_API SSaveGameRequestEvent
     {
@@ -35,7 +35,7 @@ namespace Lumina
         TStrongObjectPtr<CSaveGame> SaveGame;
     };
 
-    // A request has run. SaveGame is what was written, or what was read and restored into the world.
+    // Queued once a request has run. SaveGame is what was written, or what was read and restored into the world.
     REFLECT(Event)
     struct RUNTIME_API SSaveGameCompletedEvent
     {
@@ -55,25 +55,5 @@ namespace Lumina
 
         PROPERTY(Hidden)
         bool bSucceeded = false;
-    };
-
-    // The world is about to be captured, so state kept outside SaveGame fields can be folded into them.
-    REFLECT(Event)
-    struct RUNTIME_API SWorldSavingEvent
-    {
-        GENERATED_BODY()
-
-        PROPERTY(Hidden)
-        TStrongObjectPtr<CSaveGame> SaveGame;
-    };
-
-    // The world was just restored, so anything derived from saved fields can be rebuilt.
-    REFLECT(Event)
-    struct RUNTIME_API SWorldRestoredEvent
-    {
-        GENERATED_BODY()
-
-        PROPERTY(Hidden)
-        TStrongObjectPtr<CSaveGame> SaveGame;
     };
 }

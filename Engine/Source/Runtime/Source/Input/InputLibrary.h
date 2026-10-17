@@ -48,6 +48,20 @@ namespace Lumina
         static bool WasActionTapped(CWorld* World, const FName& Action);
 
         FUNCTION()
+        static bool WasActionDoubleTapped(CWorld* World, const FName& Action);
+
+        /** True on the press and again each time a repeat comes due while held. */
+        FUNCTION()
+        static bool IsActionRepeated(CWorld* World, const FName& Action);
+
+        FUNCTION()
+        static bool IsActionBuffered(CWorld* World, const FName& Action);
+
+        /** Takes the buffered press so it acts once, returning whether there was one. */
+        FUNCTION()
+        static bool ConsumeBufferedPress(CWorld* World, const FName& Action);
+
+        FUNCTION()
         static float GetActionAxis(CWorld* World, const FName& Action);
 
         FUNCTION()
@@ -107,6 +121,71 @@ namespace Lumina
 
         FUNCTION()
         static float GetMouseWheel(CWorld* World);
+
+        /** False when no pad is connected, or the world is not receiving input. */
+        FUNCTION()
+        static bool IsGamepadConnected(CWorld* World);
+
+        FUNCTION()
+        static bool IsGamepadButtonDown(CWorld* World, EGamepadButton Button);
+
+        FUNCTION()
+        static bool WasGamepadButtonPressed(CWorld* World, EGamepadButton Button);
+
+        FUNCTION()
+        static bool WasGamepadButtonReleased(CWorld* World, EGamepadButton Button);
+
+        /** Dead-zoned, with stick Y positive up and triggers from 0 to 1. */
+        FUNCTION()
+        static float GetGamepadAxis(CWorld* World, EGamepadAxis Axis);
+
+        FUNCTION()
+        static FVector2 GetGamepadLeftStick(CWorld* World);
+
+        FUNCTION()
+        static FVector2 GetGamepadRightStick(CWorld* World);
+
+        //~ Prompts, which follow whichever device the player touched last.
+
+        FUNCTION()
+        static EInputDevice GetLastUsedDevice(CWorld* World);
+
+        FUNCTION()
+        static EGamepadFamily GetGamepadFamily();
+
+        /** Such as "E" or "Cross", and empty when the action has no binding on the last used device. */
+        FUNCTION()
+        static FString GetActionPrompt(CWorld* World, const FName& Action);
+
+        //~ Rebinding, for a controls menu. A rebind applies at once and SaveSettings keeps it.
+
+        FUNCTION()
+        static int32 GetBindingCount(const FName& Action);
+
+        FUNCTION()
+        static FString GetBindingDisplayName(const FName& Action, int32 BindingIndex);
+
+        /** Only key bindings rebind, so a continuous source such as Mouse X reports false. */
+        FUNCTION()
+        static bool IsBindingRebindable(const FName& Action, int32 BindingIndex);
+
+        /** Captures the next key, mouse button or pad button pressed, where Escape cancels. */
+        FUNCTION()
+        static bool BeginRebind(const FName& Action, int32 BindingIndex);
+
+        FUNCTION()
+        static void CancelRebind();
+
+        FUNCTION()
+        static bool IsRebinding();
+
+        /** Another action already bound to the key the last rebind captured, or none. */
+        FUNCTION()
+        static FName GetRebindConflict();
+
+        /** Back to the authored keys for Action, or for every action when it is none. */
+        FUNCTION()
+        static void ResetBindings(const FName& Action);
 
         //~ Cursor and routing, which act on the world's own viewport rather than the receiving one.
 

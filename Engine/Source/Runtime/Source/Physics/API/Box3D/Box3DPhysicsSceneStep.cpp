@@ -66,9 +66,6 @@ namespace Lumina::Physics
         Registry.GetSignals<SPlaneColliderComponent>().OnConstruct.Connect<&FBox3DPhysicsScene::OnColliderComponentAdded>(this);
         Registry.GetSignals<SPlaneColliderComponent>().OnUpdate.Connect<&FBox3DPhysicsScene::OnColliderComponentAdded>(this);
         Registry.GetSignals<SPlaneColliderComponent>().OnDestroy.Connect<&FBox3DPhysicsScene::OnColliderComponentRemoved>(this);
-        Registry.GetSignals<SCollisionShapeComponent>().OnConstruct.Connect<&FBox3DPhysicsScene::OnColliderComponentAdded>(this);
-        Registry.GetSignals<SCollisionShapeComponent>().OnUpdate.Connect<&FBox3DPhysicsScene::OnColliderComponentAdded>(this);
-        Registry.GetSignals<SCollisionShapeComponent>().OnDestroy.Connect<&FBox3DPhysicsScene::OnColliderComponentRemoved>(this);
         Registry.GetSignals<SCompoundColliderComponent>().OnConstruct.Connect<&FBox3DPhysicsScene::OnColliderComponentAdded>(this);
         Registry.GetSignals<SCompoundColliderComponent>().OnUpdate.Connect<&FBox3DPhysicsScene::OnColliderComponentAdded>(this);
         Registry.GetSignals<SCompoundColliderComponent>().OnDestroy.Connect<&FBox3DPhysicsScene::OnColliderComponentRemoved>(this);
@@ -124,9 +121,6 @@ namespace Lumina::Physics
         Registry.GetSignals<SPlaneColliderComponent>().OnConstruct.Disconnect<&FBox3DPhysicsScene::OnColliderComponentAdded>(this);
         Registry.GetSignals<SPlaneColliderComponent>().OnUpdate.Disconnect<&FBox3DPhysicsScene::OnColliderComponentAdded>(this);
         Registry.GetSignals<SPlaneColliderComponent>().OnDestroy.Disconnect<&FBox3DPhysicsScene::OnColliderComponentRemoved>(this);
-        Registry.GetSignals<SCollisionShapeComponent>().OnConstruct.Disconnect<&FBox3DPhysicsScene::OnColliderComponentAdded>(this);
-        Registry.GetSignals<SCollisionShapeComponent>().OnUpdate.Disconnect<&FBox3DPhysicsScene::OnColliderComponentAdded>(this);
-        Registry.GetSignals<SCollisionShapeComponent>().OnDestroy.Disconnect<&FBox3DPhysicsScene::OnColliderComponentRemoved>(this);
         Registry.GetSignals<SCompoundColliderComponent>().OnConstruct.Disconnect<&FBox3DPhysicsScene::OnColliderComponentAdded>(this);
         Registry.GetSignals<SCompoundColliderComponent>().OnUpdate.Disconnect<&FBox3DPhysicsScene::OnColliderComponentAdded>(this);
         Registry.GetSignals<SCompoundColliderComponent>().OnDestroy.Disconnect<&FBox3DPhysicsScene::OnColliderComponentRemoved>(this);

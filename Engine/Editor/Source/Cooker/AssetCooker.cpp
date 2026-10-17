@@ -82,7 +82,7 @@ namespace Lumina
 
             // C# sources too, since the game loads the script assemblies the packager prebuilt.
             constexpr FStringView Suffixes[] = { ".cs", ".csproj", ".sln", ".user", ".DotSettings", "/.gitkeep", "/.gitignore", "/.hidden",
-                                                 "/Config/EditorSession.json" };
+                                                 "/Config/EditorSession.json", "/Config/EditorProjectSettings.json" };
             for (const FStringView Suffix : Suffixes)
             {
                 if (VirtualPath.ends_with(Suffix))

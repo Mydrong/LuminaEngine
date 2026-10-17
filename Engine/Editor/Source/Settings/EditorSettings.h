@@ -163,6 +163,18 @@ namespace Lumina
         TVector<FString> OpenTabs;
     };
 
+    // What the level editor adds to content placed into a world, decided per project.
+    REFLECT(MinimalAPI, ConfigFile = "/Config/EditorProjectSettings.json", DisplayName = "Placement", Category = "Project")
+    class CPlacementSettings : public CDeveloperSettings
+    {
+        GENERATED_BODY()
+    public:
+
+        // Static meshes dropped or created into a world get a static body and a Mesh Collider; adding the component by hand never does.
+        PROPERTY(Editable, Category = "Collision")
+        bool bAddCollisionToPlacedMeshes = true;
+    };
+
     // Material editor preferences.
     REFLECT(MinimalAPI, ConfigFile = "/Editor/Config/EditorPreferences.json", DisplayName = "Material Editor", Category = "Editor")
     class CMaterialEditorSettings : public CDeveloperSettings

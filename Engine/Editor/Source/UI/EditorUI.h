@@ -327,7 +327,6 @@ namespace Lumina
         // Tracks the game-owns-input state so the ImGui stand-down flags are reasserted while the game owns
         // input and cleared ONCE on the way out -- never per-frame, which would clobber the editor camera's
         // own NoMouse capture during RMB-look.
-        bool                                            bWasGameOwningInput = false;
 
         struct FShortcutLayer final : IEventHandler
         {
@@ -359,7 +358,6 @@ namespace Lumina
         // A drag begun inside the drawer closes it once it leaves, uncovering the drop target underneath.
         bool                                            bDrawerDragSeen = false;
         bool                                            bDrawerDragStartedInDrawer = false;
-        bool                                            bDrawerClosedByDrag = false;
         ImGuiID                                         MainDockspaceID = 0;    // root editor dockspace, for "Dock in Layout"
 
         /**

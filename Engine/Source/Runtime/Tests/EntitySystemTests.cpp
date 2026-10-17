@@ -202,21 +202,6 @@ TEST(EntitySystem, DropScriptedLeavesNativeSystemsAlone)
     EntitySystems::DestroyAll(Systems);
 }
 
-namespace
-{
-    struct FSinkProbeEvent { int Value = 0; };
-
-    struct FSinkProbeListener
-    {
-        int Seen = 0;
-        void OnEvent(const FSinkProbeEvent& Event) { Seen += Event.Value; }
-    };
-}
-
-// Returning the sink by value swallowed the connect, which left the auto-activate camera unbound.
-static_assert(std::is_reference_v<decltype(std::declval<const FSystemContext&>().EventSink<FSinkProbeEvent>())>,
-    "FSystemContext::EventSink must hand back the dispatcher's sink, not a copy of it.");
-
 // Every wrapper below forwards a signal that lives in the registry, so a deduced value would drop the connect.
 static_assert(std::is_reference_v<decltype(std::declval<CWorld&>().OnConstruct<SStaticMeshComponent>())>,
     "CWorld::OnConstruct must hand back the registry's signal, not a copy of it.");
@@ -228,26 +213,3 @@ static_assert(std::is_reference_v<decltype(std::declval<CWorld&>().OnEntityConst
     "CWorld::OnEntityConstruct must hand back the registry's signal, not a copy of it.");
 static_assert(std::is_reference_v<decltype(std::declval<CWorld&>().OnEntityDestroy())>,
     "CWorld::OnEntityDestroy must hand back the registry's signal, not a copy of it.");
-
-TEST(EventDispatcher, ConnectingThroughTheSinkReachesTrigger)
-{
-    ECS::FEventDispatcher Dispatcher;
-    FSinkProbeListener Listener;
-
-    Dispatcher.Sink<FSinkProbeEvent>().Connect<&FSinkProbeListener::OnEvent>(&Listener);
-    Dispatcher.Trigger<FSinkProbeEvent>(FSinkProbeEvent{3});
-
-    EXPECT_EQ(Listener.Seen, 3) << "a listener connected to the dispatcher's sink never ran";
-}
-
-TEST(EventDispatcher, ConnectingThroughACopyOfTheSinkIsLost)
-{
-    ECS::FEventDispatcher Dispatcher;
-    FSinkProbeListener Listener;
-
-    ECS::TEventSink<FSinkProbeEvent> Copy = Dispatcher.Sink<FSinkProbeEvent>();
-    Copy.Connect<&FSinkProbeListener::OnEvent>(&Listener);
-    Dispatcher.Trigger<FSinkProbeEvent>(FSinkProbeEvent{3});
-
-    EXPECT_EQ(Listener.Seen, 0) << "the copy must not share the dispatcher's listener list";
-}

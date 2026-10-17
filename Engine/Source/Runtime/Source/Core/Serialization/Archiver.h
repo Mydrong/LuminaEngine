@@ -8,6 +8,7 @@
 #include "Containers/Name.h"
 #include "Containers/String.h"
 #include "Core/Object/ObjectHandle.h"
+#include "Core/Serialization/BulkDataRef.h"
 #include "Core/Templates/CanBulkSerialize.h"
 #include "Core/Templates/IsSigned.h"
 #include "Core/Versioning/CoreVersion.h"
@@ -45,23 +46,6 @@ enum class EArchiverFlags : uint8
 namespace Lumina
 {
     class CObject;
-
-    /**
-     * Locates a payload inside its package's bulk-data region. Written inline in the export, so an object
-     * knows where its heavy data lives without any of it being resident; the bytes are pulled later with
-     * CPackage::ReadBulkData, which turns into one ranged file read.
-     *
-     * Offset is relative to the start of the region, NOT the file -- the region's own file offset moves
-     * whenever the compressed container changes size, so a file-absolute offset would be invalidated by
-     * every save.
-     */
-    struct FBulkDataRef
-    {
-        int64 Offset = 0;
-        int64 Size   = 0;
-
-        bool IsValid() const { return Size > 0; }
-    };
 
     class RUNTIME_API FArchive
     {

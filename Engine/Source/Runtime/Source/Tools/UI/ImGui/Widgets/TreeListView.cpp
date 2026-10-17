@@ -541,19 +541,8 @@ namespace Lumina
 
         ImGui::PopStyleColor(); // text color
 
+        // Selects only; expansion belongs to the arrow and to double-click.
         bool bTreeNodeClicked = ImGui::IsItemClicked(ImGuiMouseButton_Left) && !ImGui::IsItemToggledOpen();
-
-        // Expand only, never collapse; folding a folder shut under the cursor is the annoying half.
-        if (bTreeNodeClicked && bDeclaresChildren && !State.bExpanded)
-        {
-            State.bExpanded = true;
-            bAnyRowExpansionChanged = true;
-
-            if (Node.bHasLazyChildren && !Node.bChildrenBuilt)
-            {
-                EnsureChildrenBuilt(NodeIdx, Context);
-            }
-        }
 
         if (ImGui::IsItemHovered())
         {

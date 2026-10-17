@@ -321,51 +321,47 @@ namespace LuminaSaveGameTests
 {
     struct FEventLog
     {
-        int32 Saving = 0;
-        int32 Restored = 0;
+        ECS::TEventReader<SSaveGameCompletedEvent> Reader;
         TVector<SSaveGameCompletedEvent> Completed;
-
-        void OnSaving(const SWorldSavingEvent&) { ++Saving; }
-        void OnRestored(const SWorldRestoredEvent&) { ++Restored; }
-        void OnCompleted(const SSaveGameCompletedEvent& Event) { Completed.push_back(Event); }
     };
 
-    // The parts of InitializeWorld the save path leans on, a dispatcher in the context and running systems.
+    // The parts of InitializeWorld the save path leans on, its event queues and running systems.
     struct FRunningWorld
     {
         FLevel                 Level = LoadLevel();
-        ECS::FEventDispatcher  Dispatcher;
         FEventLog              Log;
         CSaveGameTestSystem*   Listener = nullptr;
         SSaveGameSystem*       Saver = nullptr;
 
         FRunningWorld()
         {
-            Level.Registry().Ctx().Emplace<ECS::FEventDispatcher*>(&Dispatcher);
-            Dispatcher.Sink<SWorldSavingEvent>().Connect<&FEventLog::OnSaving>(&Log);
-            Dispatcher.Sink<SWorldRestoredEvent>().Connect<&FEventLog::OnRestored>(&Log);
-            Dispatcher.Sink<SSaveGameCompletedEvent>().Connect<&FEventLog::OnCompleted>(&Log);
-
             Listener = NewObject<CSaveGameTestSystem>(nullptr, NAME_None, FGuid::New(), OF_Transient);
             Saver = NewObject<SSaveGameSystem>(nullptr, NAME_None, FGuid::New(), OF_Transient);
             for (CEntitySystem* System : { (CEntitySystem*)Listener, (CEntitySystem*)Saver })
             {
                 System->SetOwningWorld(Level.World);
                 Level.World->Systems.push_back(System);
-                System->OnStartup();
+                System->OnStartup(Level.World->GetSystemContext());
             }
         }
 
         ~FRunningWorld()
         {
-            Saver->OnTeardown();
+            Saver->OnTeardown(Level.World->GetSystemContext());
         }
 
+        // Requests commit at a sync point before the system can see them, and the completions it sends at the next.
         void EndFrame()
         {
-            if (Saver->HasWork(EUpdateStage::FrameEnd))
+            Level.World->FlushCommands();
+            if (Saver->HasWork(Level.World->GetSystemContext()))
             {
-                Saver->OnUpdate();
+                Saver->OnUpdate(Level.World->GetSystemContext());
+            }
+            Level.World->FlushCommands();
+            for (const SSaveGameCompletedEvent& Event : ECS::ReadEvents(Level.World->GetEvents(), Log.Reader))
+            {
+                Log.Completed.push_back(Event);
             }
         }
     };
@@ -381,12 +377,12 @@ TEST(SaveGame, RequestsRunAtTheSystemUpdateAndReportThroughEventsAndSystems)
     Game->Score = 77;
 
     CSaveGameLibrary::RequestSaveGame(Session.Level.World, Game, Slot, 0);
-    EXPECT_EQ(Session.Log.Saving, 0);
-    EXPECT_TRUE(Session.Saver->HasWork(EUpdateStage::FrameEnd));
+    EXPECT_EQ(Session.Listener->SavingCount, 0);
+    Session.Level.World->FlushCommands();
+    EXPECT_TRUE(Session.Saver->HasWork(Session.Level.World->GetSystemContext()));
     Session.EndFrame();
-    EXPECT_FALSE(Session.Saver->HasWork(EUpdateStage::FrameEnd));
+    EXPECT_FALSE(Session.Saver->HasWork(Session.Level.World->GetSystemContext()));
 
-    EXPECT_EQ(Session.Log.Saving, 1);
     EXPECT_EQ(Session.Listener->SavingCount, 1);
     EXPECT_EQ(Session.Listener->LastSaveGame, Game);
     EXPECT_EQ(WizardScript(Session.Level)->SavingCount, 1);
@@ -404,7 +400,6 @@ TEST(SaveGame, RequestsRunAtTheSystemUpdateAndReportThroughEventsAndSystems)
     EXPECT_EQ(Loaded.Action, ESaveGameAction::Load);
     ASSERT_NE(Loaded.SaveGame.Get(), nullptr);
     EXPECT_EQ(static_cast<CSaveGameTest*>(Loaded.SaveGame.Get())->Score, 77);
-    EXPECT_EQ(Fresh.Log.Restored, 1);
     EXPECT_EQ(Fresh.Listener->RestoredCount, 1);
     EXPECT_EQ(Fresh.Listener->LastSaveGame, Loaded.SaveGame.Get());
     EXPECT_EQ(Fresh.Level.Registry().Get<SSaveGameTestComponent>(Fresh.Level.Chest).Coins, 50);

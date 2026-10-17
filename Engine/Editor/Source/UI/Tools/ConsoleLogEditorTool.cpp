@@ -697,45 +697,7 @@ namespace Lumina
 
     void FConsoleLogEditorTool::ProcessCommand(FStringView Command)
     {
-        LOG_INFO("> {}", Command);
-
-        size_t Index = Command.find_first_of(' ');
-        FStringView Name = (Index == FString::npos) ? Command : Command.substr(0, Index);
-        FStringView ValueString = (Index == FString::npos) ? FStringView{} : Command.substr(Index + 1);
-
-        FConsoleRegistry& Registry = FConsoleRegistry::Get();
-
-        if (Registry.FindCommand(Name))
-        {
-            if (Index != FString::npos)
-            {
-                LOG_WARN("'{}' is a command and takes no arguments; ignoring '{}'", Name, ValueString);
-            }
-            Registry.ExecuteCommand(Name);
-            return;
-        }
-
-        if (Registry.Find(Name))
-        {
-            if (Index == FString::npos)
-            {
-                TOptional<FString> Value = Registry.GetValueAsString(Name);
-                LOG_INFO("{} = {}", Name, Value.has_value() ? *Value : FString("<unprintable>"));
-                return;
-            }
-
-            if (Registry.SetValueFromString(Name, ValueString))
-            {
-                LOG_INFO("{} New Value: {}", Name, ValueString);
-            }
-            else
-            {
-                LOG_WARN("Failed to set '{}' to '{}'", Name, ValueString);
-            }
-            return;
-        }
-
-        LOG_WARN("Unknown console command or variable: '{}'", Name);
+        FConsoleRegistry::Get().ExecuteLine(Command, true);
     }
 
     void FConsoleLogEditorTool::AddCommandToHistory(FStringView Command)

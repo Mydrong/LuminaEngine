@@ -2,7 +2,7 @@
 #include "World/ECS/Registry.h"
 #include "FoliageCollisionSystem.h"
 #include "SystemContext.h"
-#include "Assets/AssetTypes/Physics/CollisionShape.h"
+#include "Assets/AssetTypes/Mesh/StaticMesh/StaticMesh.h"
 #include "Physics/PhysicsScene.h"
 #include "World/Entity/Components/FoliageComponent.h"
 
@@ -15,9 +15,8 @@ namespace Lumina
         Writes<SystemResource::PhysicsQuery>();
     }
 
-    void SFoliageCollisionSystem::OnUpdate()
+    void SFoliageCollisionSystem::OnUpdate(const SSystemContext& Context)
     {
-        const FSystemContext& Context = GetContext();
 
         LUMINA_PROFILE_SCOPE();
 
@@ -51,35 +50,20 @@ namespace Lumina
                     continue;
                 }
 
-                const CCollisionShape* Shape = Type.CollisionShape.Get();
-                if (Shape != nullptr && Shape->HasAnyFlag(OF_NeedsLoad))
+                const CStaticMesh* Mesh = Type.Mesh.Get();
+                if (Mesh == nullptr || Mesh->HasAnyFlag(OF_NeedsLoad) || Mesh->GetMeshResource().MeshletData.IsEmpty())
                 {
                     bSourcesReady = false;
                     continue;
                 }
-                if (Shape != nullptr && !Shape->HasCollision())
-                {
-                    Shape = nullptr;
-                }
-
-                const CStaticMesh* Mesh = Type.Mesh.Get();
-                if (Shape == nullptr)
-                {
-                    if (Mesh == nullptr || Mesh->HasAnyFlag(OF_NeedsLoad) || Mesh->GetMeshResource().MeshletData.IsEmpty() ||
-                        Mesh->IsDefaultCollisionShapeLoading())
-                    {
-                        bSourcesReady = false;
-                        continue;
-                    }
-                    Shape = Mesh->GetDefaultCollisionShape();
-                }
+                const SMeshCollision* Collision = Mesh->GetCollision();
 
                 Physics::FStaticInstanceDesc& Desc = Descs.emplace_back();
-                Desc.Position = Inst.Position;
-                Desc.Rotation = Inst.GetRotationQuat();
-                Desc.Scale    = Inst.Scale;
-                Desc.Shape    = Shape;
-                Desc.Mesh     = Shape == nullptr ? Mesh : nullptr;
+                Desc.Position  = Inst.Position;
+                Desc.Rotation  = Inst.GetRotationQuat();
+                Desc.Scale     = Inst.Scale;
+                Desc.Collision = Collision;
+                Desc.Mesh      = Collision == nullptr ? Mesh : nullptr;
                 Desc.Material = Type.PhysicsMaterial.Get();
                 Desc.bConvex  = Type.bConvexCollision;
             }
@@ -103,9 +87,8 @@ namespace Lumina
         });
     }
 
-    void SFoliageCollisionSystem::OnTeardown()
+    void SFoliageCollisionSystem::OnTeardown(const SSystemContext& Context)
     {
-        const FSystemContext& Context = GetContext();
 
         Physics::IPhysicsScene* Scene = Context.GetPhysicsScene();
 

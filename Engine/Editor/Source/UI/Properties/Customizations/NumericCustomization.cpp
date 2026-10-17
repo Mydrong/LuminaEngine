@@ -368,8 +368,10 @@ namespace Lumina
         }
 
         bool bRotationReset = false;
+        const FVector3 PreviousEuler = EulerDegrees;
         const EPropertyChangeOp RotationOp = DrawAxisRow("R", LE_ICON_ROTATE_360, ImVec4(0.40f, 1.0f, 0.70f, 1.0f), "Rotation (Euler Angles)", Math::ValuePtr(EulerDegrees), 0.1f * MouseAdaptiveDragScale(), bRotationReset, 0.0f, "%.3f\xc2\xb0");
-        if (RotationOp == EPropertyChangeOp::Updated || bRotationReset)
+        // A typed value lands on the frame the field deactivates, which reports Finished rather than Updated.
+        if (EulerDegrees != PreviousEuler || bRotationReset)
         {
             DisplayValue.SetRotationFromEuler(EulerDegrees);
             EulerRotationSource = DisplayValue.GetRotation();
@@ -383,14 +385,14 @@ namespace Lumina
         const EPropertyChangeOp ScaleOp = DrawAxisRow("S", LE_ICON_ARROW_TOP_RIGHT_BOTTOM_LEFT, ImVec4(1.0f, 0.70f, 0.40f, 1.0f),
             "Scale (multiplier)", Math::ValuePtr(ScaleVec), 0.01f * MouseAdaptiveDragScale(), bScaleReset, 1.0f, "%.3f\xc3\x97", &bUniformScale);
 
-        if (bUniformScale && ScaleOp == EPropertyChangeOp::Updated)
+        if (bUniformScale)
         {
-            // Propagated by RATIO, since scale multiplies, and a previous zero has no ratio to carry.
+            // Propagated by ratio, since scale multiplies, and a previous zero has no ratio to carry.
             float* Scale = Math::ValuePtr(ScaleVec);
             const float* Prev = Math::ValuePtr(PrevScale);
             for (int32 Axis = 0; Axis < 3; ++Axis)
             {
-                if (Scale[Axis] == Prev[Axis])
+                if (Math::IsNearlyEqual(Scale[Axis], Prev[Axis]))
                 {
                     continue;
                 }

@@ -73,8 +73,8 @@ namespace Lumina
         // Paused as well as FrameStart, since editor worlds tick only Paused. Highest so it lands first.
         void Configure() override;
 
-        void OnStartup() override;
-        void OnUpdate() override;
+        void OnStartup(const SSystemContext& Context) override;
+        void OnUpdate(const SSystemContext& Context) override;
     };
 
     namespace Significance
@@ -82,7 +82,7 @@ namespace Lumina
         // Reference radius for a meshless entity, which puts the bands at 30, 60 and 120 meters.
         inline constexpr float kDefaultRadius = 1.0f;
 
-        RUNTIME_API const FSignificanceState* GetState(const FSystemContext& Context);
+        RUNTIME_API const FSignificanceState* GetState(const SSystemContext& Context);
         RUNTIME_API const FSignificanceState* GetState(CWorld* World);
 
         // The one definition of the tick bands, shared with the metric SAnimationSystem gets from the gather.

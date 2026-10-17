@@ -2,7 +2,6 @@
 #include "CameraSystem.h"
 #include "Core/Math/Easing.h"
 #include "World/ECS/Registry.h"
-#include "World/ECS/EventDispatcher.h"
 #include "SystemSingletons.h"
 #include "World/World.h"
 #include "World/Entity/Components/CameraComponent.h"
@@ -39,7 +38,7 @@ namespace Lumina
         static void NewCameraConstructed(ECS::FRegistry& Registry, ECS::FEntity Entity)
         {
             // Play-mode only, since auto-activate in the editor hijacks the viewport with no way back.
-            const CWorld* World = Registry.Ctx().Get<CWorld*>();
+            CWorld* World = Registry.Ctx().Get<CWorld*>();
             if (World == nullptr || World->GetWorldType() == EWorldType::Editor)
             {
                 return;
@@ -48,7 +47,7 @@ namespace Lumina
             SCameraComponent& Camera = Registry.Get<SCameraComponent>(Entity);
             if (Camera.bAutoActivate)
             {
-                Registry.Ctx().Get<ECS::FEventDispatcher*>()->Trigger<FSwitchActiveCameraEvent>(FSwitchActiveCameraEvent{Entity});
+                World->SetActiveCamera(Entity);
             }
         }
 
@@ -164,20 +163,18 @@ namespace Lumina
         }
     }
 
-    void SCameraSystem::OnStartup()
+    void SCameraSystem::OnStartup(const SSystemContext& Context)
     {
-        const FSystemContext& Context = GetContext();
 
         Context.GetRegistry().GetSignals<SCameraComponent>().OnConstruct.Connect<&Detail::NewCameraConstructed>();
     }
 
-    void SCameraSystem::OnTeardown()
+    void SCameraSystem::OnTeardown(const SSystemContext& Context)
     {
     }
 
-    void SCameraSystem::OnUpdate()
+    void SCameraSystem::OnUpdate(const SSystemContext& Context)
     {
-        const FSystemContext& Context = GetContext();
 
         LUMINA_PROFILE_SCOPE();
 

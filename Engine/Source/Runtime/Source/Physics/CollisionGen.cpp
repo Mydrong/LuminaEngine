@@ -1,8 +1,8 @@
 #include "RuntimePCH.h"
-#include "CollisionShapeGen.h"
+#include "CollisionGen.h"
 
 #include "Assets/AssetTypes/Mesh/StaticMesh/StaticMesh.h"
-#include "Assets/AssetTypes/Physics/CollisionShape.h"
+#include "Assets/AssetTypes/Mesh/MeshCollision.h"
 #include "Renderer/MeshData.h"
 #include "Log/Log.h"
 #include "Renderer/MeshQuantization.h"
@@ -76,12 +76,29 @@ namespace Lumina::Physics::CollisionGen
         return !OutPositions.empty() && OutIndices.size() >= 3;
     }
 
-    bool GenerateSingleHull(const CStaticMesh* Mesh, CCollisionShape* OutShape)
+    namespace
     {
-        if (OutShape == nullptr)
+        bool GatherMeshBounds(const CStaticMesh* Mesh, TVector<FVector3>& OutPositions, FVector3& OutMin, FVector3& OutMax)
         {
-            return false;
+            TVector<uint32> Indices;
+            if (!GatherMeshGeometry(Mesh, OutPositions, Indices) || OutPositions.empty())
+            {
+                return false;
+            }
+
+            OutMin = OutPositions[0];
+            OutMax = OutPositions[0];
+            for (const FVector3& P : OutPositions)
+            {
+                OutMin = Math::Min(OutMin, P);
+                OutMax = Math::Max(OutMax, P);
+            }
+            return true;
         }
+    }
+
+    bool GenerateSingleHull(const CStaticMesh* Mesh, SMeshCollision& OutCollision)
+    {
 
         TVector<FVector3> Positions;
         TVector<uint32> Indices;
@@ -96,21 +113,17 @@ namespace Lumina::Physics::CollisionGen
             return false;
         }
 
-        OutShape->ClearGeneratedShapes();
+        OutCollision.Clear();
 
-        SCollisionPrimitive& Primitive = OutShape->Primitives.emplace_back();
+        SCollisionPrimitive& Primitive = OutCollision.Primitives.emplace_back();
         Primitive.Type = ECollisionPrimitiveType::ConvexHull;
         Primitive.HullPoints = Move(Hull);
 
         return true;
     }
 
-    bool GeneratePerSurfaceHulls(const CStaticMesh* Mesh, CCollisionShape* OutShape)
+    bool GeneratePerSurfaceHulls(const CStaticMesh* Mesh, SMeshCollision& OutCollision)
     {
-        if (OutShape == nullptr)
-        {
-            return false;
-        }
 
         const FMeshResource* Resource = ResolveResource(Mesh);
         if (Resource == nullptr)
@@ -148,17 +161,13 @@ namespace Lumina::Physics::CollisionGen
             return false;
         }
 
-        OutShape->ClearGeneratedShapes();
-        OutShape->Primitives = Move(Generated);
+        OutCollision.Clear();
+        OutCollision.Primitives = Move(Generated);
         return true;
     }
 
-    bool GenerateTriangleMesh(const CStaticMesh* Mesh, CCollisionShape* OutShape)
+    bool GenerateTriangleMesh(const CStaticMesh* Mesh, SMeshCollision& OutCollision)
     {
-        if (OutShape == nullptr)
-        {
-            return false;
-        }
 
         TVector<FVector3> Positions;
         TVector<uint32> Indices;
@@ -167,39 +176,27 @@ namespace Lumina::Physics::CollisionGen
             return false;
         }
 
-        OutShape->ClearGeneratedShapes();
-        OutShape->TriangleVertices = Move(Positions);
-        OutShape->TriangleIndices  = Move(Indices);
-        OutShape->bUseTriangleMesh = true;
+        OutCollision.Clear();
+        OutCollision.TriangleVertices = Move(Positions);
+        OutCollision.TriangleIndices  = Move(Indices);
+        OutCollision.bUseTriangleMesh = true;
 
         return true;
     }
 
-    bool GenerateFittedBox(const CStaticMesh* Mesh, CCollisionShape* OutShape)
+    bool GenerateFittedBox(const CStaticMesh* Mesh, SMeshCollision& OutCollision)
     {
-        if (OutShape == nullptr)
-        {
-            return false;
-        }
 
         TVector<FVector3> Positions;
-        TVector<uint32> Indices;
-        if (!GatherMeshGeometry(Mesh, Positions, Indices))
+        FVector3 Min, Max;
+        if (!GatherMeshBounds(Mesh, Positions, Min, Max))
         {
             return false;
         }
 
-        FVector3 Min = Positions[0];
-        FVector3 Max = Positions[0];
-        for (const FVector3& P : Positions)
-        {
-            Min = FVector3(Math::Min(Min.x, P.x), Math::Min(Min.y, P.y), Math::Min(Min.z, P.z));
-            Max = FVector3(Math::Max(Max.x, P.x), Math::Max(Max.y, P.y), Math::Max(Max.z, P.z));
-        }
+        OutCollision.Clear();
 
-        OutShape->ClearGeneratedShapes();
-
-        SCollisionPrimitive& Primitive = OutShape->Primitives.emplace_back();
+        SCollisionPrimitive& Primitive = OutCollision.Primitives.emplace_back();
         Primitive.Type = ECollisionPrimitiveType::Box;
         Primitive.Center = (Min + Max) * 0.5f;
         Primitive.HalfExtent = (Max - Min) * 0.5f;
@@ -207,26 +204,14 @@ namespace Lumina::Physics::CollisionGen
         return true;
     }
 
-    bool GenerateFittedSphere(const CStaticMesh* Mesh, CCollisionShape* OutShape)
+    bool GenerateFittedSphere(const CStaticMesh* Mesh, SMeshCollision& OutCollision)
     {
-        if (OutShape == nullptr)
-        {
-            return false;
-        }
 
         TVector<FVector3> Positions;
-        TVector<uint32> Indices;
-        if (!GatherMeshGeometry(Mesh, Positions, Indices))
+        FVector3 Min, Max;
+        if (!GatherMeshBounds(Mesh, Positions, Min, Max))
         {
             return false;
-        }
-
-        FVector3 Min = Positions[0];
-        FVector3 Max = Positions[0];
-        for (const FVector3& P : Positions)
-        {
-            Min = FVector3(Math::Min(Min.x, P.x), Math::Min(Min.y, P.y), Math::Min(Min.z, P.z));
-            Max = FVector3(Math::Max(Max.x, P.x), Math::Max(Max.y, P.y), Math::Max(Max.z, P.z));
         }
 
         const FVector3 Center = (Min + Max) * 0.5f;
@@ -238,13 +223,89 @@ namespace Lumina::Physics::CollisionGen
             RadiusSq = Math::Max(RadiusSq, Math::LengthSquared(P - Center));
         }
 
-        OutShape->ClearGeneratedShapes();
+        OutCollision.Clear();
 
-        SCollisionPrimitive& Primitive = OutShape->Primitives.emplace_back();
+        SCollisionPrimitive& Primitive = OutCollision.Primitives.emplace_back();
         Primitive.Type = ECollisionPrimitiveType::Sphere;
         Primitive.Center = Center;
         Primitive.Radius = Math::Max(Math::Sqrt(RadiusSq), 0.001f);
 
         return true;
+    }
+
+    bool FitCapsule(const TVector<FVector3>& Points, SCollisionPrimitive& OutPrimitive)
+    {
+        if (Points.empty())
+        {
+            return false;
+        }
+
+        FVector3 Min = Points[0];
+        FVector3 Max = Points[0];
+        for (const FVector3& P : Points)
+        {
+            Min = Math::Min(Min, P);
+            Max = Math::Max(Max, P);
+        }
+
+        const FVector3 Center = (Min + Max) * 0.5f;
+        const FVector3 Size   = Max - Min;
+        const int32 Axis = (Size.x >= Size.y && Size.x >= Size.z) ? 0 : (Size.y >= Size.z ? 1 : 2);
+
+        float RadiusSq = 0.0f;
+        for (const FVector3& P : Points)
+        {
+            FVector3 Radial = P - Center;
+            Radial[Axis] = 0.0f;
+            RadiusSq = Math::Max(RadiusSq, Math::LengthSquared(Radial));
+        }
+
+        // The cylinder stops where a cap's hemisphere still reaches the farthest point at that radius.
+        float HalfHeight = 0.0f;
+        for (const FVector3& P : Points)
+        {
+            const FVector3 Offset = P - Center;
+            FVector3 Radial = Offset;
+            Radial[Axis] = 0.0f;
+            HalfHeight = Math::Max(HalfHeight, Math::Abs(Offset[Axis]) - Math::Sqrt(Math::Max(RadiusSq - Math::LengthSquared(Radial), 0.0f)));
+        }
+
+        // The capsule runs along its local Y, so the X and Z cases turn Y onto that axis.
+        OutPrimitive.Type       = ECollisionPrimitiveType::Capsule;
+        OutPrimitive.Center     = Center;
+        OutPrimitive.Rotation   = Axis == 0 ? FVector3(0.0f, 0.0f, -90.0f) : (Axis == 2 ? FVector3(90.0f, 0.0f, 0.0f) : FVector3(0.0f));
+        OutPrimitive.Radius     = Math::Max(Math::Sqrt(RadiusSq), 0.001f);
+        OutPrimitive.HalfHeight = HalfHeight;
+        return true;
+    }
+
+    bool GenerateFittedCapsule(const CStaticMesh* Mesh, SMeshCollision& OutCollision)
+    {
+
+        TVector<FVector3> Positions;
+        TVector<uint32> Indices;
+        SCollisionPrimitive Capsule;
+        if (!GatherMeshGeometry(Mesh, Positions, Indices) || !FitCapsule(Positions, Capsule))
+        {
+            return false;
+        }
+
+        OutCollision.Clear();
+        OutCollision.Primitives.push_back(Capsule);
+        return true;
+    }
+
+    bool Generate(ECollisionGenerator Generator, const CStaticMesh* Mesh, SMeshCollision& OutCollision)
+    {
+        switch (Generator)
+        {
+        case ECollisionGenerator::Box:             return GenerateFittedBox(Mesh, OutCollision);
+        case ECollisionGenerator::Sphere:          return GenerateFittedSphere(Mesh, OutCollision);
+        case ECollisionGenerator::Capsule:         return GenerateFittedCapsule(Mesh, OutCollision);
+        case ECollisionGenerator::SingleHull:      return GenerateSingleHull(Mesh, OutCollision);
+        case ECollisionGenerator::PerSurfaceHulls: return GeneratePerSurfaceHulls(Mesh, OutCollision);
+        case ECollisionGenerator::TriangleMesh:    return GenerateTriangleMesh(Mesh, OutCollision);
+        }
+        return false;
     }
 }

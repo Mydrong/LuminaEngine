@@ -1,4 +1,5 @@
 #include "Includes/SceneGlobals.slang"
+#include "Includes/GroupScan.slang"
 
 // One workgroup per (skinned entry, meshlet), keyed on skinned indices that all hold this frame's data.
 
@@ -14,9 +15,12 @@ struct FBuildSkinWorkArgs
     GPUSpan<uint>              SlotList;
     GPUSpan<FSkinnedFrameData> SkinnedData;   // indexed by the skinned index SlotList holds, not by list position
 
-    // One running base per slot, written for empty slots too, so Skinning.slang's search never reads a stale one.
+    // One running base per slot, written for empty slots too, since Skinning.slang subtracts it from the work index.
     GPUSpan<uint> OutWorkBase;
     GPUSpan<FDispatchIndirectArguments> OutDispatchArgs;
+
+    // Only its count is read here, since SkinWorkEntries.slang fills it and the dispatch must not outrun it.
+    GPUSpan<uint> WorkEntry;
 };
 FBuildSkinWorkArgs* Pass() { return GetPassArgs<FBuildSkinWorkArgs>(); }
 
@@ -30,68 +34,72 @@ uint SkinMeshletCount(FSkinnedFrameData Data)
     return Data.SurfaceMeshletCount;
 }
 
-#define SKIN_WORK_GROUP 256
+uint EntryMeshletCount(uint Entry)
+{
+    return SkinMeshletCount(Pass().SkinnedData.Get(Pass().SlotList.Get(Entry)));
+}
 
-groupshared uint gsScan[SKIN_WORK_GROUP];
-groupshared uint gsRunning;
+#define SKIN_WORK_GROUP 1024u
 
-// No lane may return early, or the barriers below go non-uniform and AMD hangs.
+// Loads issued together, since a lone dependent load per iteration would serialize on its latency.
+#define SKIN_WORK_BATCH 8u
+
+// Each thread owns a contiguous run of entries, so one group-wide scan orders them all. No lane may return early.
 [shader("compute")]
 [numthreads(SKIN_WORK_GROUP, 1, 1)]
 void ComputeMain(uint Lane : SV_GroupIndex)
 {
-    const uint NumSlots = Pass().SlotList.Count;
+    const uint NumSlots  = Pass().SlotList.Count;
+    const uint PerThread = (NumSlots + SKIN_WORK_GROUP - 1u) / SKIN_WORK_GROUP;
+    const uint Begin     = min(Lane * PerThread, NumSlots);
+    const uint End       = min(Begin + PerThread, NumSlots);
 
-    if (Lane == 0u)
+    uint Sum = 0u;
+    for (uint Base = Begin; Base < End; Base += SKIN_WORK_BATCH)
     {
-        gsRunning = 0u;
+        uint Counts[SKIN_WORK_BATCH];
+        [unroll]
+        for (uint k = 0u; k < SKIN_WORK_BATCH; ++k)
+        {
+            Counts[k] = (Base + k < End) ? EntryMeshletCount(Base + k) : 0u;
+        }
+        [unroll]
+        for (uint k = 0u; k < SKIN_WORK_BATCH; ++k)
+        {
+            Sum += Counts[k];
+        }
     }
-    GroupMemoryBarrierWithGroupSync();
 
-    // The running base is sequential across tiles, but the 256 loads inside one are not.
-    for (uint TileBase = 0u; TileBase < NumSlots; TileBase += SKIN_WORK_GROUP)
+    uint2 GroupTotal;
+    const uint ThreadBase = GroupExclusiveScan(uint2(Sum, 0u), Lane, SKIN_WORK_GROUP, GroupTotal).x;
+
+    uint Running = ThreadBase;
+    for (uint Base = Begin; Base < End; Base += SKIN_WORK_BATCH)
     {
-        const uint Entry = TileBase + Lane;
-
-        uint Count = 0u;
-        if (Entry < NumSlots)
+        uint Counts[SKIN_WORK_BATCH];
+        [unroll]
+        for (uint k = 0u; k < SKIN_WORK_BATCH; ++k)
         {
-            Count = SkinMeshletCount(Pass().SkinnedData.Get(Pass().SlotList.Get(Entry)));
+            Counts[k] = (Base + k < End) ? EntryMeshletCount(Base + k) : 0u;
         }
-
-        gsScan[Lane] = Count;
-        GroupMemoryBarrierWithGroupSync();
-
-        for (uint Offset = 1u; Offset < SKIN_WORK_GROUP; Offset <<= 1u)
+        [unroll]
+        for (uint k = 0u; k < SKIN_WORK_BATCH; ++k)
         {
-            const uint Add = (Lane >= Offset) ? gsScan[Lane - Offset] : 0u;
-            GroupMemoryBarrierWithGroupSync();
-            gsScan[Lane] += Add;
-            GroupMemoryBarrierWithGroupSync();
+            if (Base + k < End)
+            {
+                Pass().OutWorkBase.Set(Base + k, Running);
+            }
+            Running += Counts[k];
         }
-
-        const uint Inclusive = gsScan[Lane];
-
-        if (Entry < NumSlots)
-        {
-            Pass().OutWorkBase.Set(Entry, gsRunning + (Inclusive - Count));
-        }
-
-        const uint TileTotal = gsScan[SKIN_WORK_GROUP - 1u];
-        GroupMemoryBarrierWithGroupSync();
-        if (Lane == 0u)
-        {
-            gsRunning += TileTotal;
-        }
-        GroupMemoryBarrierWithGroupSync();
     }
 
     if (Lane == 0u)
     {
         // Folded across Y exactly as every other oversized grid in the renderer; Skinning.slang undoes it.
+        const uint Groups = min(GroupTotal.x, Pass().WorkEntry.Count);
         FDispatchIndirectArguments Args;
-        Args.GroupX = min(gsRunning, (uint)MAX_DISPATCH_AXIS);
-        Args.GroupY = (gsRunning + (uint)MAX_DISPATCH_AXIS - 1u) / (uint)MAX_DISPATCH_AXIS;
+        Args.GroupX = min(Groups, (uint)MAX_DISPATCH_AXIS);
+        Args.GroupY = (Groups + (uint)MAX_DISPATCH_AXIS - 1u) / (uint)MAX_DISPATCH_AXIS;
         Args.GroupZ = 1u;
         Pass().OutDispatchArgs.Set(0u, Args);
     }

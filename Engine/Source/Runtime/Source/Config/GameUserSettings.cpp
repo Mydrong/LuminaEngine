@@ -6,6 +6,8 @@
 #include "Core/Object/Class.h"
 #include "Core/Serialization/Structured/JsonStructuredArchive.h"
 #include "Core/Windows/Window.h"
+#include "Input/InputActionMap.h"
+#include "Input/InputViewport.h"
 #include "Log/Log.h"
 #include "Paths/Paths.h"
 #include "Platform/Filesystem/PlatformFilesystem.h"
@@ -128,6 +130,36 @@ namespace Lumina
     {
         ApplyDisplay();
         ApplyQuality();
+        ApplyInput();
+    }
+
+    void CGameUserSettings::ApplyInput()
+    {
+        FInputActionMap::Get().SetPlayerSettings(Input);
+
+        // Raw motion is a window setting, so a captured cursor picks up the change only when the mode is pushed again.
+        FInputViewportRegistry::Get().ApplyActiveCursorMode();
+    }
+
+    void CGameUserSettings::SetBindingOverride(FName Action, int32 BindingIndex, const SKey& Key)
+    {
+        TVector<SInputBindingOverride>& Overrides = Input.BindingOverrides;
+        Overrides.erase(Algo::RemoveIf(Overrides, [&](const SInputBindingOverride& Override)
+        {
+            return Override.Action == Action && Override.BindingIndex == BindingIndex;
+        }), Overrides.end());
+        Input.BindingOverrides.push_back(SInputBindingOverride{ Action, BindingIndex, Key });
+        ApplyInput();
+    }
+
+    void CGameUserSettings::ResetBindingOverrides(FName Action)
+    {
+        TVector<SInputBindingOverride>& Overrides = Input.BindingOverrides;
+        Overrides.erase(Algo::RemoveIf(Overrides, [&](const SInputBindingOverride& Override)
+        {
+            return Action.IsNone() || Override.Action == Action;
+        }), Overrides.end());
+        ApplyInput();
     }
 
     void CGameUserSettings::ApplyQuality()
@@ -211,6 +243,7 @@ namespace Lumina
         Upscaler = EUpscaler::None;
         UpscalerMode = EUpscalerMode::Custom;
         ScreenPercentage = 100.0f;
+        Input = SPlayerInputSettings();
     }
 
     EQualityLevel& CGameUserSettings::QualitySlot(EScalabilityGroup Group)

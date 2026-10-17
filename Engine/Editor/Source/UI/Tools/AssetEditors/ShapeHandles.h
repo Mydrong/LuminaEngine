@@ -12,7 +12,7 @@ namespace Lumina
 {
     class CWorld;
 
-    /** Which dimension a draggable dot owns, shared by the collision shape and physics asset editors. */
+    // Which dimension a draggable dot owns, shared by the mesh collision and physics asset editors.
     enum class EShapeHandle : uint8
     {
         None,

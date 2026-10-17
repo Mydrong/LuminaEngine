@@ -5,12 +5,14 @@
 #include "Core/Math/Math.h"
 #include "Tools/UI/ImGui/ImGuiFonts.h"
 #include "Tools/UI/ImGui/ImGuiX.h"
+#include "World/Entity/Components/CameraComponent.h"
 #include "World/Entity/Components/EnvironmentComponent.h"
 #include "World/Entity/Components/SkyLightComponent.h"
 #include "World/Entity/Components/LightComponent.h"
 #include "World/Entity/Components/SkeletalMeshComponent.h"
 #include "World/Entity/Components/StaticMeshComponent.h"
 #include "Renderer/SkeletonResource.h"
+#include "Containers/Algorithm.h"
 #include "Containers/StringFormat.h"
 
 
@@ -18,6 +20,10 @@ namespace Lumina
 {
     static const char* SkeletonPropertiesName       = "Skeleton Properties";
     static const char* BoneHierarchyName            = "Bone Hierarchy";
+
+    // Sized for a character standing about two meters tall.
+    static constexpr float kSocketMarkerRadius      = 0.045f;
+
 
     FSkeletonEditorTool::FSkeletonEditorTool(IEditorToolContext* Context, CObject* InAsset)
         : FAssetEditorTool(Context, InAsset->GetName().c_str(), InAsset, NewObject<CWorld>())
@@ -90,97 +96,11 @@ namespace Lumina
             ImGuiX::Font::PopFont();
             ImGui::Spacing();
             
-            BoneListView.Draw(BoneListContext);
+            SocketHierarchy.DrawTree();
         });
-        
-        
-                
-        BoneListContext.ItemContextMenuFunction = [this](FTreeListView& Tree, FTreeNodeID Item)
-        {
-            if (!Item.IsValid())
-            {
-                return;
-            }
 
-            const FName BoneName = Tree.Get<FTreeNodeDisplay>(Item).DisplayName;
-
-            if (ImGui::MenuItem(LE_ICON_PLUS " Add Socket"))
-            {
-                CSkeleton* Skeleton = GetAsset<CSkeleton>();
-
-                FString Base(BoneName.c_str());
-                Base += "_Socket";
-                FName SocketName(Base.c_str());
-                int32 Suffix = 1;
-                while (Skeleton->FindSocket(SocketName) != nullptr)
-                {
-                    FString Numbered = Base;
-                    Numbered += "_";
-                    Numbered += Format("{}", Suffix++).c_str();
-                    SocketName = FName(Numbered.c_str());
-                }
-
-                SMeshSocket& Socket = Skeleton->Sockets.emplace_back();
-                Socket.SocketName = SocketName;
-                Socket.BoneName = BoneName;
-
-                Asset->GetPackage()->MarkDirty();
-                PropertyTable.MarkDirty();
-            }
-        };
-
-        BoneListContext.DragDropFunction = [this](FTreeListView& Tree, FTreeNodeID Item)
-        {
-
-        };
-
-        BoneListContext.RebuildTreeFunction = [this](FTreeListView& Tree)
-        {
-            CSkeleton* Skeleton = GetAsset<CSkeleton>();
-            TFunction<void(FTreeNodeID, const FSkeletonResource::FBoneInfo&)> AddChildrenRecursive;
-
-            AddChildrenRecursive = [&](FTreeNodeID ParentItem, const FSkeletonResource::FBoneInfo& Bone)
-            {
-                int32 Index = Skeleton->GetSkeletonResource()->FindBoneIndex(Bone.Name);
-
-                for (int32 Child : Skeleton->GetSkeletonResource()->GetChildBones(Index))
-                {
-                    const FSkeletonResource::FBoneInfo& ChildBone = Skeleton->GetSkeletonResource()->GetBone(Child);
-
-                    FTreeNodeID NewNode = Tree.CreateNode(ParentItem, FStringView(ChildBone.Name.c_str()));
-                    Tree.Get<FTreeNodeState>(NewNode).bExpanded = true;
-                    AddChildrenRecursive(NewNode, ChildBone);
-                }
-            };
-
-            for (int32 BoneIndex : Skeleton->GetSkeletonResource()->GetRootBones())
-            {
-                const FSkeletonResource::FBoneInfo& Bone = Skeleton->GetSkeletonResource()->GetBone(BoneIndex);
-                FTreeNodeID RootItem = Tree.CreateNode(InvalidTreeNode, FStringView(Bone.Name.c_str()));
-                Tree.Get<FTreeNodeState>(RootItem).bExpanded = true;
-
-                AddChildrenRecursive(RootItem, Bone);
-            }
-        };
-
-        BoneListContext.ItemSelectedFunction = [this] (FTreeListView& Tree, FTreeNodeID Item, bool)
-        {
-            if (!Item.IsValid())
-            {
-                SelectedBone = NAME_None;
-            }
-            else
-            {
-                SelectedBone = Tree.Get<FTreeNodeDisplay>(Item).DisplayName;
-            }
-        };
-
-        BoneListContext.KeyPressedFunction = [this] (FTreeListView& Tree, FTreeNodeID Item, ImGuiKey Key) -> bool
-        {
-            return false;
-        };
-        
-        BoneListView.MarkTreeDirty();
+        SocketHierarchy.Initialize(GetAsset<CSkeleton>(), nullptr, &GetTransactionManager());
+        SocketHierarchy.OnSocketsEdited = [this]() { PropertyTable.MarkDirty(); };
     }
 
     void FSkeletonEditorTool::SetupWorldForTool()
@@ -233,56 +153,36 @@ namespace Lumina
         CSkeleton* Skeleton = GetAsset<CSkeleton>();
         FSkeletonResource* SkeletonResource = Skeleton->GetSkeletonResource();
 
-        const int32 SelectedIndex = (SelectedBone != NAME_None) ? SkeletonResource->FindBoneIndex(SelectedBone) : Constants::kIndexNone;
-        if (SelectedIndex == Constants::kIndexNone && Skeleton->Sockets.empty())
-        {
-            return;
-        }
-
-        // Bind-pose world transforms; shared by the selected-bone overlay and the socket markers.
         FMatrix4 EntityMatrix = FMatrix4(1.0f);
         if (MeshEntity != ECS::NullEntity)
         {
             EntityMatrix = World->GetComponent<STransformComponent>(MeshEntity).GetWorldMatrix();
         }
 
-        TVector<FMatrix4> WorldTransforms;
-        WorldTransforms.resize(SkeletonResource->GetNumBones());
-        for (int i = 0; i < SkeletonResource->GetNumBones(); ++i)
+        BoneWorldTransforms.resize(SkeletonResource->GetNumBones());
+        for (int32 i = 0; i < SkeletonResource->GetNumBones(); ++i)
         {
             const FSkeletonResource::FBoneInfo& Bone = SkeletonResource->GetBone(i);
-            if (Bone.ParentIndex == Constants::kIndexNone)
-            {
-                WorldTransforms[i] = EntityMatrix * Bone.LocalTransform;
-            }
-            else
-            {
-                WorldTransforms[i] = WorldTransforms[Bone.ParentIndex] * Bone.LocalTransform;
-            }
+            const FMatrix4& ParentMatrix = (Bone.ParentIndex == Constants::kIndexNone) ? EntityMatrix : BoneWorldTransforms[Bone.ParentIndex];
+            BoneWorldTransforms[i] = ParentMatrix * Bone.LocalTransform;
         }
 
-        if (SelectedIndex != Constants::kIndexNone)
+        SocketHierarchy.SetBoneWorldTransforms(BoneWorldTransforms);
+
+        const int32 SelectedBoneIndex = SocketHierarchy.GetSelectedBoneIndex();
+        if (SelectedBoneIndex >= 0 && SelectedBoneIndex < SkeletonResource->GetNumBones())
         {
-            DrawBoneHierarchy(World.Get(), SkeletonResource, WorldTransforms, SelectedIndex);
+            DrawBoneHierarchy(World.Get(), SkeletonResource, BoneWorldTransforms, SelectedBoneIndex);
         }
 
-        for (const SMeshSocket& Socket : Skeleton->Sockets)
-        {
-            const int32 BoneIndex = SkeletonResource->FindBoneIndex(Socket.BoneName);
-            if (BoneIndex == Constants::kIndexNone)
-            {
-                continue;
-            }
+        SocketHierarchy.DrawSocketMarkers(World.Get(), kSocketMarkerRadius);
+    }
 
-            const FMatrix4 SocketMatrix = WorldTransforms[BoneIndex] * Socket.RelativeTransform.GetMatrix();
-            const FVector3 Position = FVector3(SocketMatrix[3]);
-            constexpr float AxisLength = 0.18f;
-
-            World->GetDebugInterface()->DrawSphere(Position, 0.045f, FVector4(1.0f, 0.82f, 0.4f, 1.0f), 12, 2.5f, false);
-            World->GetDebugInterface()->DrawLine(Position, Position + Math::Normalize(FVector3(SocketMatrix[0])) * AxisLength, FVector4(1.0f, 0.2f, 0.2f, 1.0f), 3.0f, false);
-            World->GetDebugInterface()->DrawLine(Position, Position + Math::Normalize(FVector3(SocketMatrix[1])) * AxisLength, FVector4(0.2f, 1.0f, 0.2f, 1.0f), 3.0f, false);
-            World->GetDebugInterface()->DrawLine(Position, Position + Math::Normalize(FVector3(SocketMatrix[2])) * AxisLength, FVector4(0.2f, 0.4f, 1.0f, 1.0f), 3.0f, false);
-        }
+    void FSkeletonEditorTool::DrawViewportOverlayElements(const FUpdateContext& UpdateContext, ImTextureRef ViewportTexture, ImVec2 ViewportSize)
+    {
+        const ImVec2 ViewportOrigin = ViewportScreenMin;
+        FAssetEditorTool::DrawViewportOverlayElements(UpdateContext, ViewportTexture, ViewportSize);
+        SocketHierarchy.TickViewport(World.Get(), ViewportOrigin, ViewportSize, GuizmoOp, bViewportHovered, ShouldSuppressViewportClickInput(), kSocketMarkerRadius);
     }
 
     void FSkeletonEditorTool::OnDeinitialize(const FUpdateContext& UpdateContext)
@@ -293,14 +193,32 @@ namespace Lumina
     {
     }
 
+    // Sockets are edited in the property table too, so any edit can rename, move or remove a row.
+    void FSkeletonEditorTool::OnPropertyEditFinished(const FPropertyChangedEvent& Event)
+    {
+        SocketHierarchy.Refresh();
+    }
+
+    void FSkeletonEditorTool::OnPostUndoRedo()
+    {
+        FAssetEditorTool::OnPostUndoRedo();
+        SocketHierarchy.OnUndoRedo();
+    }
+
+    void FSkeletonEditorTool::OnAssetDataChangedExternally()
+    {
+        FAssetEditorTool::OnAssetDataChangedExternally();
+        SocketHierarchy.Refresh();
+    }
+
     void FSkeletonEditorTool::DrawHelpMenu()
     {
         DrawHelpTextRow("Hierarchy",
             "Bone tree on the left mirrors the import. Click a bone to select; transforms come from the "
             "bind pose. Multi-select extends sockets/constraints across bones.");
         DrawHelpTextRow("Sockets",
-            "Sockets are named transforms relative to a bone. Add via the bone context menu. Runtime code "
-            "looks them up by name (e.g. 'WeaponR' for an attachment).");
+            "Sockets are named transforms relative to a bone, listed in gold under their bone. Right-click a "
+            "bone to add one and a socket to delete it. Runtime code looks them up by name (e.g. 'WeaponR').");
         DrawHelpTextRow("Retargeting",
             "Two skeletons with identical bone names auto-retarget animations between them. Otherwise, "
             "set up a per-bone mapping table on the asset.");
@@ -317,7 +235,7 @@ namespace Lumina
         if (ImGui::BeginMenu(LE_ICON_MOVE_RESIZE " Gizmo Control"))
         {
             const char* operations[] = { "Translate", "Rotate", "Scale" };
-            static int currentOp = 0;
+            int currentOp = (GuizmoOp == ImGuizmo::ROTATE) ? 1 : (GuizmoOp == ImGuizmo::SCALE) ? 2 : 0;
 
             if (ImGui::Combo("##", &currentOp, operations, IM_ARRAYSIZE(operations)))
             {

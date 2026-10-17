@@ -17,9 +17,8 @@ namespace Lumina
         Writes<STerrainComponent, SFoliageComponent>();
     }
 
-    void SFoliageTerrainSystem::OnStartup()
+    void SFoliageTerrainSystem::OnStartup(const SSystemContext& Context)
     {
-        const FSystemContext& Context = GetContext();
 
         (void)Context.CreateView<STerrainComponent, STransformComponent>();
     }
@@ -36,9 +35,8 @@ namespace Lumina
         };
     }
 
-    void SFoliageTerrainSystem::OnUpdate()
+    void SFoliageTerrainSystem::OnUpdate(const SSystemContext& Context)
     {
-        const FSystemContext& Context = GetContext();
 
         LUMINA_PROFILE_SCOPE();
 

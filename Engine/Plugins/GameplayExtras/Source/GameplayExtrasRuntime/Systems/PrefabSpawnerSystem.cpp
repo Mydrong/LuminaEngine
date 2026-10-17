@@ -21,7 +21,7 @@ namespace Lumina
         }
 
         // Instantiate creates entities and components, so a live view can be reallocated under the loop.
-        void GatherSpawners(const FSystemContext& Context, TVector<ECS::FEntity>& Out)
+        void GatherSpawners(const SSystemContext& Context, TVector<ECS::FEntity>& Out)
         {
             auto View = Context.CreateView<SPrefabSpawnerComponent, STransformComponent>();
             Out.reserve(View.Num());
@@ -40,9 +40,8 @@ namespace Lumina
         Reads<STransformComponent>();
     }
 
-    void SPrefabSpawnerSystem::OnStartup()
+    void SPrefabSpawnerSystem::OnStartup(const SSystemContext& Context)
     {
-        const FSystemContext& Context = GetContext();
 
         if (Context.GetWorldType() == EWorldType::Editor)
         {
@@ -73,9 +72,8 @@ namespace Lumina
         }
     }
 
-    void SPrefabSpawnerSystem::OnUpdate()
+    void SPrefabSpawnerSystem::OnUpdate(const SSystemContext& Context)
     {
-        const FSystemContext& Context = GetContext();
 
         const float DeltaTime = static_cast<float>(Context.GetDeltaTime());
 
@@ -118,7 +116,7 @@ namespace Lumina
         }
     }
 
-    void SPrefabSpawnerSystem::OnTeardown()
+    void SPrefabSpawnerSystem::OnTeardown(const SSystemContext& Context)
     {
     }
 }

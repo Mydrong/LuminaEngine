@@ -102,5 +102,8 @@ namespace Lumina
 
         // Plugin name for /<PluginName>/* content (empty for /Game and /Engine).
         FName                       OwningPlugin;
+
+        // The class it was saved as is no longer registered, so it can never load and is only good for deleting.
+        NODISCARD RUNTIME_API bool IsClassMissing() const;
     };
 }

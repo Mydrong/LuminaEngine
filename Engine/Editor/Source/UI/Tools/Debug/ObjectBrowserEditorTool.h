@@ -78,7 +78,6 @@ namespace Lumina
         void DrawTable();
         void DrawDetailsPanel();
 
-        /** Walks GObjectArray once and rebuilds Rows. The only place that touches the object array. */
         void TakeSnapshot();
 
         /** Rebuilds VisibleRows from Rows against the current filters, then sorts. Neither runs per frame. */

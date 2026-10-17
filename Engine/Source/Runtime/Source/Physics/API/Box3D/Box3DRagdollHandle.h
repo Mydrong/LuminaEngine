@@ -3,10 +3,13 @@
 #include <box3d/box3d.h>
 #include "Containers/Vector.h"
 #include "Core/Math/Matrix/MatrixMath.h"
+#include "Memory/SmartPtr.h"
 #include "Platform/GenericPlatform.h"
 
 namespace Lumina
 {
+    struct FSkeletonResource;
+
     // Box3D has no ragdoll object, so a ragdoll is just the bodies and joints the scene built for it.
     struct FPhysicsRagdollHandle
     {
@@ -18,6 +21,9 @@ namespace Lumina
         // Bind-pose body transform per part, used to rebuild the skinning matrix from the simulated pose.
         TVector<FMatrix4>   PartBindInverse;
         TVector<int32>      JointToBone;
+
+        // Bone names and parents, so a limb can be found by bone name.
+        TSharedPtr<FSkeletonResource> Skeleton;
 
         bool bAddedToScene = false;
         bool bPendingDestroy = false;

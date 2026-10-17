@@ -22,6 +22,14 @@ public class ImGui : LuminaThirdPartyModuleRules
         // ImGui vendors several optional back ends and add-ons; only the ones the engine uses
         // are built.
         bUseExplicitSourceList = true;
+
+        // Without the developer UI nothing draws, so calls link to generated no-ops rather than the library.
+        if (!LuminaFeatures.IsActive(Target, LuminaFeatures.DevUI))
+        {
+            ExtraSourceFiles.Add("stubs/imgui_stubs.cpp");
+            return;
+        }
+
         ExtraSourceFiles.AddRange(new[]
         {
             "imgui.cpp",

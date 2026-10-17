@@ -9,6 +9,7 @@
 #include "Core/Object/SoftObjectPtr.h"
 #include "Core/Reflection/Type/LuminaTypes.h"
 #include "Core/Reflection/Type/Properties/ArrayProperty.h"
+#include "Core/Object/ObjectArray.h"
 #include "Core/Object/ObjectHandleTyped.h"
 #include "Scripting/ScriptStruct.h"
 #include "Scripting/ScriptableObject.h"
@@ -76,6 +77,35 @@ TEST(ObjectReferenceReplacer, RewritesASoftReferenceByGuidWithoutLoadingIt)
     const FSoftObjectPath* Result = Soft->GetValuePtr<FSoftObjectPath>(Owner);
     EXPECT_EQ(Result->GetCachedGUID(), NewGuid);
     EXPECT_EQ(FString(Result->GetPath().data(), Result->GetPath().size()), FString("/Game/New"));
+}
+
+// A deleted skeletal mesh and its skeleton own each other, so clearing the skeleton's preview mesh freed the skeleton mid-visit.
+TEST(ObjectReferenceReplacer, SurvivesFreeingTheObjectItIsVisitingThroughACycle)
+{
+    Scripting::FScriptExportSchema Schema;
+    Schema.Fields.push_back(ScriptTest::ScalarField("Ref", EPropertyTypeFlags::Object));
+
+    CScriptClass* Holder = ScriptTest::MintWith("Replacer_CycleHolder", Schema);
+    ASSERT_NE(Holder, nullptr);
+
+    CObject* Skeleton = NewObject(Holder, nullptr, NAME_None, FGuid::New(), OF_Transient);
+    CObject* Mesh     = NewObject(Holder, nullptr, NAME_None, FGuid::New(), OF_Transient);
+    ASSERT_NE(Skeleton, nullptr);
+    ASSERT_NE(Mesh, nullptr);
+
+    FProperty* Ref = Holder->GetProperty(FName("Ref"));
+    ASSERT_NE(Ref, nullptr);
+    *Ref->GetValuePtr<TStrongObjectPtr<CObject>>(Skeleton) = Mesh;
+    *Ref->GetValuePtr<TStrongObjectPtr<CObject>>(Mesh) = Skeleton;
+
+    const FObjectHandle SkeletonHandle = Object::Internal::GetHandleByObject(Skeleton);
+    const FObjectHandle MeshHandle     = Object::Internal::GetHandleByObject(Mesh);
+
+    FObjectReferenceReplacer Replacer(Mesh, nullptr);
+    EXPECT_EQ(Replacer.ApplyTo(Skeleton), 1u);
+
+    EXPECT_EQ(Object::Internal::ResolveHandle(MeshHandle), nullptr) << "the mesh lost its only owner";
+    EXPECT_EQ(Object::Internal::ResolveHandle(SkeletonHandle), nullptr) << "the skeleton went with it, and the visit stopped touching it";
 }
 
 TEST(ObjectReferenceReplacer, ReachesAReferenceInsideAContainer)

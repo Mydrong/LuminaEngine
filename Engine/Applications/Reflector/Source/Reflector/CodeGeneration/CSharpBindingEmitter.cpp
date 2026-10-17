@@ -2059,7 +2059,7 @@ namespace Lumina::Reflection
             if (A.bEntity) { return true; }
             switch (A.Kind)
             {
-            case EBind::Number: case EBind::Bool: case EBind::Enum: case EBind::StructValue: case EBind::Object: return true;
+            case EBind::Number: case EBind::Bool: case EBind::Enum: case EBind::StructValue: case EBind::StructOpaque: case EBind::Object: return true;
             default: return false;
             }
         }
@@ -2131,7 +2131,7 @@ namespace Lumina::Reflection
         std::string SeArgAbiCS(const FArg& A)
         {
             if (A.bEntity) { return "uint"; }
-            switch (A.Kind) { case EBind::Bool: return "byte"; case EBind::Enum: return "int"; case EBind::Object: return "global::System.IntPtr"; default: return A.CSharp; }
+            switch (A.Kind) { case EBind::Bool: return "byte"; case EBind::Enum: return "int"; case EBind::Object: case EBind::StructOpaque: return "global::System.IntPtr"; default: return A.CSharp; }
         }
         std::string SeArgFromAbiCS(const FArg& A, const std::string& N)
         {
@@ -2144,6 +2144,8 @@ namespace Lumina::Reflection
             case EBind::Object: return A.bCObject
                 ? "global::LuminaSharp.NativeObjectMarshal.FromHandle<" + A.CSharp + ">(" + N + ")"
                 : "global::LuminaSharp.NativeStructs.FromAddressOrNull<" + StripNullable(A.CSharp) + ">(" + N + ")";
+            // Passed by reference, so the handle views the caller's value for the length of the call.
+            case EBind::StructOpaque: return "global::LuminaSharp.NativeStructs.FromAddress<" + A.CSharp + ">(" + N + ")";
             default:            return N;
             }
         }
@@ -2171,17 +2173,17 @@ namespace Lumina::Reflection
         std::string SeArgCppParam(const FArg& A)
         {
             if (A.bEntity) { return "Lumina::ECS::FEntity"; }
-            switch (A.Kind) { case EBind::Bool: return "bool"; case EBind::Enum: return A.TargetCpp; case EBind::StructValue: return A.TargetCpp; case EBind::Object: return A.TargetCpp + "*"; default: return A.Cpp; }
+            switch (A.Kind) { case EBind::Bool: return "bool"; case EBind::Enum: return A.TargetCpp; case EBind::StructValue: return A.TargetCpp; case EBind::StructOpaque: return "const " + A.TargetCpp + "&"; case EBind::Object: return A.TargetCpp + "*"; default: return A.Cpp; }
         }
         std::string SeArgAbiCpp(const FArg& A)
         {
             if (A.bEntity) { return "uint32"; }
-            switch (A.Kind) { case EBind::Bool: return "unsigned char"; case EBind::Enum: return "int"; case EBind::StructValue: return A.TargetCpp; case EBind::Object: return "void*"; default: return A.Cpp; }
+            switch (A.Kind) { case EBind::Bool: return "unsigned char"; case EBind::Enum: return "int"; case EBind::StructValue: return A.TargetCpp; case EBind::Object: case EBind::StructOpaque: return "void*"; default: return A.Cpp; }
         }
         std::string SeArgCppToAbi(const FArg& A, const std::string& N)
         {
             if (A.bEntity) { return "(uint32)" + N; }
-            switch (A.Kind) { case EBind::Bool: return "(unsigned char)(" + N + " ? 1 : 0)"; case EBind::Enum: return "(int)" + N; case EBind::Object: return "(void*)" + N; default: return N; }
+            switch (A.Kind) { case EBind::Bool: return "(unsigned char)(" + N + " ? 1 : 0)"; case EBind::Enum: return "(int)" + N; case EBind::Object: return "(void*)" + N; case EBind::StructOpaque: return "(void*)&" + N; default: return N; }
         }
         // A parms field for an object is a TStrongObjectPtr, where the shim's own parameter is already a raw pointer.
         std::string SeParmsField(const FArg& A, const std::string& N)
@@ -2309,6 +2311,7 @@ namespace Lumina::Reflection
                     else if (A.Kind == EBind::Bool)  { CallArgs += "(" + An + " != 0)"; }
                     else if (A.Kind == EBind::Enum)  { CallArgs += "(" + A.TargetCpp + ")" + An; }
                     else if (A.Kind == EBind::Object){ CallArgs += "static_cast<" + A.TargetCpp + "*>(" + An + ")"; }
+                    else if (A.Kind == EBind::StructOpaque) { CallArgs += "*static_cast<const " + A.TargetCpp + "*>(" + An + ")"; }
                     else                             { CallArgs += An; }
                 }
                 const std::string Call = std::string("Self->") + Qualified + "::" + E.Fn->Name + "(" + CallArgs + ")";
@@ -2555,8 +2558,9 @@ namespace Lumina::Reflection
             const char* Name = Struct.DisplayName.c_str();
             EmitDocSummary(Writer, Struct.Metadata);
             Writer.Linef("[global::LuminaSharp.NativeType(\"%s\")]", Name);
-            Writer.Linef("public readonly unsafe partial struct %s : global::LuminaSharp.%s<%s>", Name,
-                bComponent ? "IComponent" : "INativeStruct", Name);
+            // An event view also carries the marker the world's event queues are read and sent through.
+            Writer.Linef("public readonly unsafe partial struct %s : global::LuminaSharp.%s<%s>%s", Name,
+                bComponent ? "IComponent" : "INativeStruct", Name, Struct.HasMetadata("Event") ? ", global::LuminaSharp.IEvent" : "");
             Writer.BeginBlock();
             if (bComponent)
             {
@@ -2749,7 +2753,7 @@ namespace Lumina::Reflection
             EmitDocSummary(Writer, Struct.Metadata);
             Writer.Linef("[global::LuminaSharp.NativeType(\"%s\")]", Struct.DisplayName.c_str());
             Writer.Line("[System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]");
-            Writer.Linef("public partial struct %s", Struct.DisplayName.c_str());
+            Writer.Linef("public partial struct %s%s", Struct.DisplayName.c_str(), Struct.HasMetadata("Event") ? " : global::LuminaSharp.IEvent" : "");
             Writer.BeginBlock();
             for (const auto& Prop : Struct.Props)
             {

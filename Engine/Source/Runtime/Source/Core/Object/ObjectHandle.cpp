@@ -2,6 +2,7 @@
 #include "ObjectHandle.h"
 
 #include "ObjectArray.h"
+#include "ObjectBase.h"
 
 namespace Lumina
 {
@@ -12,11 +13,11 @@ namespace Lumina
             *this = FObjectHandle();
             return;
         }
-        *this = GObjectArray.GetHandleByIndex(InObject->GetInternalIndex());
+        *this = Object::Internal::GetHandleByIndex(InObject->GetInternalIndex());
     }
 
     CObject* FObjectHandle::Resolve() const
     {
-        return (CObject*)GObjectArray.ResolveHandle(*this);
+        return (CObject*)Object::Internal::ResolveHandle(*this);
     }
 }

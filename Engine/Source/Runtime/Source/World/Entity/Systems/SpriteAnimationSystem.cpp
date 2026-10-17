@@ -15,9 +15,8 @@ namespace Lumina
         Writes<SAnimatedSprite3DComponent, SSprite3DComponent>();
     }
 
-    void SSpriteAnimationSystem::OnUpdate()
+    void SSpriteAnimationSystem::OnUpdate(const SSystemContext& Context)
     {
-        const FSystemContext& Context = GetContext();
 
         LUMINA_PROFILE_SCOPE();
 

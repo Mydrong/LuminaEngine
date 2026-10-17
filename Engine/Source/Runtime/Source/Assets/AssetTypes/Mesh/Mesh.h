@@ -89,6 +89,9 @@ namespace Lumina
         
         FUNCTION()
         FORCEINLINE const SAABB& GetAABB() const { return BoundingBox; }
+
+        // The box the renderer culls against, in the space the mesh is drawn in rather than the one its vertices are stored in.
+        virtual SAABB GetCullBounds() const { return BoundingBox; }
         
         template<typename TCallable>
         void ForEachSurface(TCallable&& Lambda) const;

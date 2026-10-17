@@ -36,20 +36,19 @@ namespace Lumina
         Reads<SystemResource::Hierarchy, SystemResource::PhysicsQuery>();
     }
 
-    void SRagdollSystem::OnUpdate()
+    void SRagdollSystem::OnUpdate(const SSystemContext& Context)
     {
-        const FSystemContext& SystemContext = GetContext();
 
         LUMINA_PROFILE_SCOPE();
 
-        Physics::IPhysicsScene* Scene = SystemContext.GetPhysicsScene();
+        Physics::IPhysicsScene* Scene = Context.GetPhysicsScene();
         if (Scene == nullptr)
         {
             return;
         }
 
-        const EUpdateStage Stage = SystemContext.GetUpdateStage();
-        auto View = SystemContext.CreateView<SRagdollComponent, SSkeletalMeshComponent, STransformComponent>();
+        const EUpdateStage Stage = Context.GetUpdateStage();
+        auto View = Context.CreateView<SRagdollComponent, SSkeletalMeshComponent, STransformComponent>();
 
         if (Stage == EUpdateStage::PrePhysics)
         {
@@ -88,7 +87,7 @@ namespace Lumina
                         Globals[i] = (*Source)[i] * Math::Inverse(Skeleton->GetBone(i).InvBindMatrix);
                     }
 
-                    SystemContext.GetCommandBus().Enqueue([Scene, Entity, Skeleton, Globals = Move(Globals),
+                    Context.GetCommandBus().Enqueue([Scene, Entity, Skeleton, Globals = Move(Globals),
                                                            EntityToWorld = Transform.GetWorldMatrix()](ECS::FRegistry& Registry)
                     {
                         SRagdollComponent* Live = Registry.IsValid(Entity) ? Registry.TryGet<SRagdollComponent>(Entity) : nullptr;
@@ -113,7 +112,7 @@ namespace Lumina
                 // Simulated to Inactive, so tear the bodies down.
                 else if (Ragdoll.State == ERagdollState::Inactive && Ragdoll.RealizedState == ERagdollState::Simulated)
                 {
-                    SystemContext.GetCommandBus().Enqueue([Scene, Entity](ECS::FRegistry& Registry)
+                    Context.GetCommandBus().Enqueue([Scene, Entity](ECS::FRegistry& Registry)
                     {
                         SRagdollComponent* Live = Registry.IsValid(Entity) ? Registry.TryGet<SRagdollComponent>(Entity) : nullptr;
                         if (Live == nullptr || Live->RealizedState != ERagdollState::Simulated)
@@ -158,7 +157,7 @@ namespace Lumina
                     World.SetLocation(RootPos);
                     World.SetRotation(RootRot);
                     World.SetScale(Transform.GetWorldScale());
-                    ECS::Utils::SetEntityWorldTransform(SystemContext.GetRegistry(), Entity, World);
+                    ECS::Utils::SetEntityWorldTransform(Context.GetRegistry(), Entity, World);
 
                     WorldToEntity = Math::Inverse(AnimPose::ComposeTRS(RootPos, RootRot, World.GetScale()));
                 }

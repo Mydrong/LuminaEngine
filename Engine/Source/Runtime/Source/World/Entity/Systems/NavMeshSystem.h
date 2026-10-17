@@ -24,12 +24,12 @@ namespace Lumina
         // Update only reads colliders/transforms and writes SNavMeshComponent (no structural changes),
         // so it overlaps animation/camera in the editor (Paused) stage. Defined in the .cpp.
 
-        void OnStartup() override;
-        void OnUpdate() override;
-        void OnTeardown() override;
+        void OnStartup(const SSystemContext& Context) override;
+        void OnUpdate(const SSystemContext& Context) override;
+        void OnTeardown(const SSystemContext& Context) override;
 
         /** Kick async bake; no-op if one is already in flight. */
-        static void RequestBake(const FSystemContext& Context, SNavMeshComponent& Component);
+        static void RequestBake(const SSystemContext& Context, SNavMeshComponent& Component);
     };
 
     class CWorld;
@@ -40,11 +40,11 @@ namespace Lumina
     {
         /** First ready navmesh in the world, or null. Resolve once and reuse across a batch of queries. */
         // An unnamed agent takes a volume with no agent name, or failing that any ready volume. A named one takes only its own.
-        RUNTIME_API FNavMesh* GetReadyNavMesh(const FSystemContext& Context, FName Agent = FName());
+        RUNTIME_API FNavMesh* GetReadyNavMesh(const SSystemContext& Context, FName Agent = FName());
 
-        RUNTIME_API bool FindPath(const FSystemContext& Context, const FVector3& Start, const FVector3& End, const FNavQueryFilter& Filter, FNavPath& Out, FName Agent = FName());
-        RUNTIME_API bool ProjectPoint(const FSystemContext& Context, const FVector3& World, const FVector3& Extents, const FNavQueryFilter& Filter, FVector3& Out, FName Agent = FName());
-        RUNTIME_API bool Raycast(const FSystemContext& Context, const FVector3& Start, const FVector3& End, const FNavQueryFilter& Filter, SNavRaycastResult& Out, FName Agent = FName());
+        RUNTIME_API bool FindPath(const SSystemContext& Context, const FVector3& Start, const FVector3& End, const FNavQueryFilter& Filter, FNavPath& Out, FName Agent = FName());
+        RUNTIME_API bool ProjectPoint(const SSystemContext& Context, const FVector3& World, const FVector3& Extents, const FNavQueryFilter& Filter, FVector3& Out, FName Agent = FName());
+        RUNTIME_API bool Raycast(const SSystemContext& Context, const FVector3& Start, const FVector3& End, const FNavQueryFilter& Filter, SNavRaycastResult& Out, FName Agent = FName());
 
         RUNTIME_API bool IsReady(CWorld* World, FName Agent = FName());
 

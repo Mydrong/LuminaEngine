@@ -11,7 +11,6 @@
 #include "Box3DUtils.h"
 
 #include "Assets/AssetTypes/Mesh/StaticMesh/StaticMesh.h"
-#include "Assets/AssetTypes/Physics/CollisionShape.h"
 #include "Assets/AssetTypes/PhysicsMaterial/PhysicsMaterial.h"
 #include "Core/Console/ConsoleVariable.h"
 #include "Core/Math/SIMD/SIMD.h"
@@ -138,7 +137,6 @@ namespace Lumina::Physics
         Registry.GetSignals<STaperedCapsuleColliderComponent>().OnConstruct.Connect<&ECS::FRegistry::GetOrEmplace<SRigidBodyComponent>>();
         Registry.GetSignals<STaperedCylinderColliderComponent>().OnConstruct.Connect<&ECS::FRegistry::GetOrEmplace<SRigidBodyComponent>>();
         Registry.GetSignals<SPlaneColliderComponent>().OnConstruct.Connect<&ECS::FRegistry::GetOrEmplace<SRigidBodyComponent>>();
-        Registry.GetSignals<SCollisionShapeComponent>().OnConstruct.Connect<&ECS::FRegistry::GetOrEmplace<SRigidBodyComponent>>();
         Registry.GetSignals<SCompoundColliderComponent>().OnConstruct.Connect<&ECS::FRegistry::GetOrEmplace<SRigidBodyComponent>>();
         Registry.GetSignals<SMeshColliderComponent>().OnConstruct.Connect<&ECS::FRegistry::GetOrEmplace<SRigidBodyComponent>>();
         Registry.GetSignals<STerrainColliderComponent>().OnConstruct.Connect<&ECS::FRegistry::GetOrEmplace<SRigidBodyComponent>>();
@@ -159,7 +157,6 @@ namespace Lumina::Physics
         Registry.GetSignals<STaperedCapsuleColliderComponent>().OnConstruct.Disconnect<&ECS::FRegistry::GetOrEmplace<SRigidBodyComponent>>();
         Registry.GetSignals<STaperedCylinderColliderComponent>().OnConstruct.Disconnect<&ECS::FRegistry::GetOrEmplace<SRigidBodyComponent>>();
         Registry.GetSignals<SPlaneColliderComponent>().OnConstruct.Disconnect<&ECS::FRegistry::GetOrEmplace<SRigidBodyComponent>>();
-        Registry.GetSignals<SCollisionShapeComponent>().OnConstruct.Disconnect<&ECS::FRegistry::GetOrEmplace<SRigidBodyComponent>>();
         Registry.GetSignals<SCompoundColliderComponent>().OnConstruct.Disconnect<&ECS::FRegistry::GetOrEmplace<SRigidBodyComponent>>();
         Registry.GetSignals<SMeshColliderComponent>().OnConstruct.Disconnect<&ECS::FRegistry::GetOrEmplace<SRigidBodyComponent>>();
         Registry.GetSignals<STerrainColliderComponent>().OnConstruct.Disconnect<&ECS::FRegistry::GetOrEmplace<SRigidBodyComponent>>();
@@ -382,12 +379,20 @@ namespace Lumina::Physics
 
     FVector3 FBox3DPhysicsScene::GetLinearVelocity(ECS::FEntity Entity) const
     {
+        if (const FPhysicsRagdollHandle* Ragdoll = FindSimulatingRagdoll(Entity))
+        {
+            return MeasureRagdoll(*Ragdoll).LinearVelocity;
+        }
         const b3BodyId Body = ResolveBody(FindEntityBody(Entity));
         return b3Body_IsValid(Body) ? Box3DUtils::FromB3Vec3(b3Body_GetLinearVelocity(Body)) : FVector3(0.0f);
     }
 
     FVector3 FBox3DPhysicsScene::GetAngularVelocity(ECS::FEntity Entity) const
     {
+        if (const FPhysicsRagdollHandle* Ragdoll = FindSimulatingRagdoll(Entity))
+        {
+            return MeasureRagdoll(*Ragdoll).AngularVelocity;
+        }
         const b3BodyId Body = ResolveBody(FindEntityBody(Entity));
         return b3Body_IsValid(Body) ? Box3DUtils::FromB3Vec3(b3Body_GetAngularVelocity(Body)) : FVector3(0.0f);
     }
@@ -402,12 +407,20 @@ namespace Lumina::Physics
 
     FVector3 FBox3DPhysicsScene::GetCenterOfMass(ECS::FEntity Entity) const
     {
+        if (const FPhysicsRagdollHandle* Ragdoll = FindSimulatingRagdoll(Entity))
+        {
+            return MeasureRagdoll(*Ragdoll).CenterOfMass;
+        }
         const b3BodyId Body = ResolveBody(FindEntityBody(Entity));
         return b3Body_IsValid(Body) ? Box3DUtils::FromB3Vec3(b3Body_GetWorldCenter(Body)) : FVector3(0.0f);
     }
 
     float FBox3DPhysicsScene::GetBodyMass(ECS::FEntity Entity) const
     {
+        if (const FPhysicsRagdollHandle* Ragdoll = FindSimulatingRagdoll(Entity))
+        {
+            return MeasureRagdoll(*Ragdoll).Mass;
+        }
         const b3BodyId Body = ResolveBody(FindEntityBody(Entity));
         return b3Body_IsValid(Body) ? b3Body_GetMass(Body) : 0.0f;
     }

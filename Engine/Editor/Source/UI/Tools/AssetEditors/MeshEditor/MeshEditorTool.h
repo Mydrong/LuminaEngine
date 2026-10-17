@@ -8,6 +8,8 @@
 
 #include "ImGuizmo.h"
 #include "MeshUVViewer.h"
+#include "Memory/SmartPtr.h"
+#include "MeshCollisionEditing.h"
 #include "UI/Tools/AssetEditors/AssetEditorTool.h"
 
 namespace Lumina
@@ -18,6 +20,7 @@ namespace Lumina
 
         FStringView MeshPropertiesName = "MeshProperties";
         FStringView UVViewerName = "UVs";
+        FStringView CollisionName = "Collision";
         
         LUMINA_EDITOR_TOOL(FStaticMeshEditorTool)
         
@@ -40,6 +43,7 @@ namespace Lumina
         void DrawHelpMenu() override;
         void DrawViewportOverlayElements(const FUpdateContext& UpdateContext, ImTextureRef ViewportTexture, ImVec2 ViewportSize) override;
         void OnAssetDataChangedExternally() override;
+        void OnPostUndoRedo() override;
         void InitializeDockingLayout(ImGuiID InDockspaceID, const ImVec2& InDockspaceSize) const override;
         bool ShouldGenerateThumbnailOnSave() const override { return true; }
 
@@ -61,5 +65,13 @@ namespace Lumina
 
         // Unwrapped-UV inspector; owns its own view state (zoom/pan/LOD) across frames.
         FMeshUVViewer UVViewer;
+
+    private:
+
+        void DrawCollisionWindow();
+        void DrawCollisionMenu();
+
+        // Edits the collision stored on this mesh, through the Collision tab and the viewport.
+        TUniquePtr<FMeshCollisionEditing> CollisionEditing;
     };
 }

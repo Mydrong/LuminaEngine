@@ -70,8 +70,9 @@ namespace Lumina
         // The player's saved window, vsync, frame limit and quality, applied before the first level renders.
         RUNTIME_API void ApplyUserSettings();
 
-        #if WITH_EDITOR
-        RUNTIME_API virtual IDevelopmentToolUI* CreateDevelopmentTools() = 0;
+        #if USING(WITH_DEV_UI)
+        // The editor supplies its whole UI, while a game build gets the developer overlay and console.
+        RUNTIME_API virtual IDevelopmentToolUI* CreateDevelopmentTools();
         RUNTIME_API IDevelopmentToolUI* GetDevelopmentToolsUI() const { return DeveloperToolUI.Get(); }
         #endif
 
@@ -148,6 +149,12 @@ namespace Lumina
         // A headless process of -bots=N scripted clients that connect to a server, for load testing it.
         void LoadBotWorlds(FStringView MapName);
 
+        // Creates the developer UI on Layer, the editor chrome's in the editor and the overlay's in a game.
+        void StartDevelopmentTools(EInputLayer Layer);
+
+        // Null where the developer UI is compiled out or a game runs headless, so every frame hook reads the same.
+        IDevelopmentToolUI* GetActiveDevelopmentTools() const;
+
         // The game's name, followed by engine and frame details in any build but Shipping.
         void RefreshWindowTitle(double AverageFrameSeconds = 0.0);
         double                        TitleSampleStart = 0.0;
@@ -213,7 +220,7 @@ namespace Lumina
         uint32                        CarriedLocalPeerId = 0;
         bool                          bHasCarriedConnection = false;
 
-        #if WITH_EDITOR
+        #if USING(WITH_DEV_UI)
         TUniquePtr<IDevelopmentToolUI> DeveloperToolUI;
         #endif
         

@@ -1,5 +1,7 @@
 ﻿#include "MeshEditorTool.h"
 
+#include "Tools/UI/ImGui/EditorColors.h"
+
 #include "ImGuiDrawUtils.h"
 #include "Core/Object/Cast.h"
 #include "Core/Math/Math.h"
@@ -34,6 +36,9 @@ namespace Lumina
 
     void FStaticMeshEditorTool::OnInitialize()
     {
+        CollisionEditing = MakeUnique<FMeshCollisionEditing>(GetTransactionManager());
+        CollisionEditing->SetMesh(Cast<CStaticMesh>(Asset.Get()));
+
         // Scrolling is off, since the UV canvas claims the wheel for zoom and a scrollable host would fight.
         CreateToolWindow(UVViewerName, [&](bool bFocused)
         {
@@ -404,6 +409,12 @@ namespace Lumina
             ImGui::Spacing();
             PropertyTable.DrawTree();
         });
+
+        // After Mesh Properties, so a layout saved before this tab existed docks it beside that window instead of floating it.
+        CreateToolWindow(CollisionName, [&](bool bFocused)
+        {
+            DrawCollisionWindow();
+        });
     }
 
     void FStaticMeshEditorTool::SetupWorldForTool()
@@ -504,6 +515,8 @@ namespace Lumina
             }
         }
 
+        CollisionEditing->Tick(World.Get());
+
         if (IsValid(StaticMeshComponent.StaticMesh.Get()) && !StaticMeshComponent.StaticMesh->Sockets.empty())
         {
             const FMatrix4 EntityMatrix = Transform.GetWorldMatrix();
@@ -524,11 +537,108 @@ namespace Lumina
 
     void FStaticMeshEditorTool::OnDeinitialize(const FUpdateContext& UpdateContext)
     {
+        CollisionEditing->CloseOpenDragTransaction();
     }
 
     void FStaticMeshEditorTool::DrawViewportOverlayElements(const FUpdateContext& UpdateContext, ImTextureRef ViewportTexture, ImVec2 ViewportSize)
     {
         DrawCameraModeSelector();
+        CollisionEditing->TickViewport(World.Get(), ViewportScreenMin, ViewportSize, bViewportHovered, ShouldSuppressViewportClickInput());
+    }
+
+    void FStaticMeshEditorTool::OnPostUndoRedo()
+    {
+        FAssetEditorTool::OnPostUndoRedo();
+        CollisionEditing->OnUndoRedo();
+    }
+
+    void FStaticMeshEditorTool::DrawCollisionWindow()
+    {
+        CStaticMesh* Mesh = Cast<CStaticMesh>(Asset.Get());
+        if (Mesh == nullptr)
+        {
+            return;
+        }
+
+        const SMeshCollision& Collision = Mesh->Collision;
+
+        ImGuiX::Font::PushFont(ImGuiX::Font::EFont::Large);
+        ImGui::SeparatorText("Collision");
+        ImGuiX::Font::PopFont();
+        ImGui::Spacing();
+
+        if (!Collision.HasCollision())
+        {
+            ImGui::TextWrapped("This mesh has no collision yet. Click a shape to wrap the mesh, or drag one onto the mesh to "
+                               "place it. Every entity that shows this mesh with a Mesh Collider uses it.");
+        }
+        else if (Collision.IsConcave())
+        {
+            ImGui::TextColored(EditorColors::Warning(), LE_ICON_ALERT " Exact Mesh only collides on objects that never simulate.");
+        }
+        else
+        {
+            ImGui::TextWrapped("Every entity that shows this mesh with a Mesh Collider uses this collision. Save the mesh to keep it.");
+        }
+        ImGui::Spacing();
+
+        ImGui::SeparatorText("Add Shapes");
+        CollisionEditing->DrawPalette();
+
+        ImGui::Spacing();
+        ImGui::SeparatorText("Shapes");
+        CollisionEditing->DrawShapeList();
+
+        if (CollisionEditing->HasSelection())
+        {
+            ImGui::Spacing();
+            ImGui::SeparatorText("Selected Shape");
+            ImGui::TextDisabled("Drag the dots to resize, use the gizmo to move. Space switches to rotate.");
+            CollisionEditing->DrawPrimitiveDetails();
+        }
+
+        ImGui::Spacing();
+        ImGui::SeparatorText("Settings");
+        CollisionEditing->DrawSettings();
+    }
+
+    void FStaticMeshEditorTool::DrawCollisionMenu()
+    {
+        if (!ImGui::BeginMenu(LE_ICON_CUBE_OUTLINE " Collision"))
+        {
+            return;
+        }
+
+        CollisionEditing->DrawViewMenuItems();
+        ImGui::Separator();
+
+        using Physics::CollisionGen::ECollisionGenerator;
+        constexpr ECollisionGenerator Generators[] =
+        {
+            ECollisionGenerator::Box, ECollisionGenerator::Sphere, ECollisionGenerator::Capsule,
+            ECollisionGenerator::SingleHull, ECollisionGenerator::PerSurfaceHulls, ECollisionGenerator::TriangleMesh,
+        };
+
+        if (ImGui::BeginMenu(LE_ICON_PLUS " Add Shape"))
+        {
+            for (ECollisionGenerator Generator : Generators)
+            {
+                if (ImGui::MenuItem(FMeshCollisionEditing::GetGeneratorLabel(Generator)))
+                {
+                    CollisionEditing->AddGenerated(Generator);
+                }
+                ImGuiX::TextTooltip("{}", FMeshCollisionEditing::GetGeneratorTooltip(Generator));
+            }
+            ImGui::EndMenu();
+        }
+
+        const CStaticMesh* Mesh = Cast<CStaticMesh>(Asset.Get());
+        if (ImGui::MenuItem(LE_ICON_BROOM " Clear Collision", nullptr, false, Mesh != nullptr && Mesh->Collision.HasCollision()))
+        {
+            CollisionEditing->ClearAll();
+        }
+
+        ImGui::EndMenu();
     }
 
     void FStaticMeshEditorTool::OnAssetLoadFinished()
@@ -541,6 +651,7 @@ namespace Lumina
 
         // The unwrap is built from the old meshlets and the indices bound arrays that just changed length.
         UVViewer.Invalidate();
+        CollisionEditing->RebuildHullWireframes();
         SelectedSurfaceIndex = -1;
         PreviewLODIndex = -1;
     }
@@ -559,6 +670,10 @@ namespace Lumina
         DrawHelpTextRow("Visualizers",
             "Toggle wireframe, normals, tangents, AABB from the View menu. Useful for verifying imports "
             "and diagnosing lighting issues.");
+        DrawHelpTextRow("Collision",
+            "The Collision tab makes and edits this mesh's collision. Pick Box, Sphere, Capsule, Convex Hull, Hull per Part "
+            "or Exact Mesh to create it, then click shapes in the viewport to move and resize them. Any entity showing "
+            "this mesh with a Mesh Collider uses it. Saving the mesh saves its collision too.");
         DrawHelpTextRow("Reimport",
             "If the source FBX/GLTF on disk changed, use File > Reimport to refresh, preserves material "
             "overrides where slot names match.");
@@ -637,6 +752,8 @@ namespace Lumina
             ImGui::EndMenu();
         }
 
+        DrawCollisionMenu();
+
         if (ImGui::BeginMenu(LE_ICON_LINK " Sockets"))
         {
             if (ImGui::MenuItem(LE_ICON_PLUS " Add Socket"))
@@ -677,5 +794,6 @@ namespace Lumina
         // The unwrap wants the same large canvas, and this is an inspect-one-then-the-other workflow.
         ImGui::DockBuilderDockWindow(GetToolWindowName(UVViewerName.data()).c_str(), leftDockID);
         ImGui::DockBuilderDockWindow(GetToolWindowName(MeshPropertiesName.data()).c_str(), rightDockID);
+        ImGui::DockBuilderDockWindow(GetToolWindowName(CollisionName.data()).c_str(), rightDockID);
     }
 }

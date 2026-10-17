@@ -106,6 +106,25 @@ namespace Lumina
         {}
     };
 
+    enum class EConsoleLineResult : uint8
+    {
+        Empty,
+        RanCommand,
+        ReadVariable,
+        SetVariable,
+        RejectedValue,
+        Unknown,
+    };
+
+    // What one typed console line did, for a console to report and a tool to turn into its own result.
+    struct FConsoleLineResult
+    {
+        EConsoleLineResult Kind = EConsoleLineResult::Empty;
+        FString            Name;
+        // The variable's value once the line ran, or the text a rejected set tried to assign.
+        FString            Value;
+    };
+
     class RUNTIME_API FConsoleRegistry
     {
     public:
@@ -166,6 +185,9 @@ namespace Lumina
         TOptional<FString> GetValueAsString(FStringView VariableName);
 
         bool ExecuteCommand(FStringView Name);
+
+        // A command name, or a variable name with an optional new value, as every console types it. Echoes to the log when asked.
+        FConsoleLineResult ExecuteLine(FStringView Line, bool bEchoToLog);
 
         void SaveToConfig();
         void LoadFromConfig();

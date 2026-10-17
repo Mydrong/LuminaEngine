@@ -23,9 +23,8 @@ namespace Lumina
         Reads<SNetworkComponent>();
     }
 
-    void SNetMovementInterpSystem::OnUpdate()
+    void SNetMovementInterpSystem::OnUpdate(const SSystemContext& Context)
     {
-        const FSystemContext& Context = GetContext();
 
         LUMINA_PROFILE_SCOPE();
 

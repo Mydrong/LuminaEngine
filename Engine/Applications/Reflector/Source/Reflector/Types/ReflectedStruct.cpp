@@ -229,7 +229,17 @@ namespace Lumina::Reflection
         DefineFunctionTable(Writer);
         CloseNamespace(Writer);
 
-        EmitTypeFunctions(Writer, HasMetadata("Component") ? ("Lumina::Meta::RegisterComponentMeta<" + Cpp + ">();") : std::string());
+        // Components register their ops and events their queue type, so both are reachable by name from a script.
+        std::string Registration;
+        if (HasMetadata("Component"))
+        {
+            Registration = "Lumina::Meta::RegisterComponentMeta<" + Cpp + ">();";
+        }
+        else if (HasMetadata("Event"))
+        {
+            Registration = "Lumina::Meta::RegisterEventMeta<" + Cpp + ">();";
+        }
+        EmitTypeFunctions(Writer, Registration);
 
         // An alias has no StaticStruct member to define.
         if (!bIsAlias)

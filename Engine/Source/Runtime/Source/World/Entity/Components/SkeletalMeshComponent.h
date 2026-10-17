@@ -105,6 +105,13 @@ namespace Lumina
         // a pose only when this moved, so an off-screen mesh is never packed at all.
         uint32 PoseSerial = 0;
 
+        // BoneTransforms in the GPU bone layout at two vectors a bone, packed while the pose was still in cache; current only while PackedPoseSerial equals PoseSerial.
+        TVector<FVector4> PackedBones;
+        uint32 PackedPoseSerial = 0;
+
+        // Hash of the last pose the animation system wrote, so an unchanged pose is caught without reading the cold matrices back.
+        uint64 PoseHash = 0;
+
         // The recipe BoneTransforms was last built from. The executor reads nothing outside the task
         // list, so an identical recipe reproduces the same pose and the whole execute is skipped.
         FAnimTaskList LastRecipe;

@@ -583,7 +583,6 @@ namespace Lumina
         return true;
     }
 
-    // One zone per mesh and none per task, since fiber builds push every Tracy event through one lock.
     void Anim::InertCaptureForTest(FAnimInertializer& In, const FPose& Source, const FPose& SourcePrev, const FPose& Target,
                                    float Dt, bool bHasVel, int32 NumActiveBones, bool bScalarOnly)
     {
@@ -592,8 +591,6 @@ namespace Lumina
 
     bool Anim::ExecuteTaskList(FAnimTaskList& List, TVector<FMatrix4>& OutMatrices, FAnimTaskSnapshot* OutSnapshot)
     {
-        LUMINA_PROFILE_SCOPE();
-
         FSkeletonResource* Skeleton = List.Skeleton;
         if (Skeleton == nullptr || Skeleton->GetNumBones() == 0)
         {

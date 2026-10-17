@@ -2514,8 +2514,14 @@ namespace Lumina
 
         FBoneTransform* Dst = Arena.data() + BoneSlice;
 
+        static_assert(sizeof(FBoneTransform) == 2 * sizeof(FVector4), "PackedBones holds two vectors per bone.");
+
         // A partial pose cannot be packed against this slice, so it falls through to identity.
-        if ((uint32)MeshComponent.BoneTransforms.size() == BoneCount)
+        if (MeshComponent.PackedPoseSerial == MeshComponent.PoseSerial && MeshComponent.PackedBones.size() == (SIZE_T)BoneCount * 2u)
+        {
+            Memory::Memcpy(Dst, MeshComponent.PackedBones.data(), (SIZE_T)BoneCount * sizeof(FBoneTransform));
+        }
+        else if ((uint32)MeshComponent.BoneTransforms.size() == BoneCount)
         {
             SkeletalUtils::PackRenderBones(MeshComponent.BoneTransforms.data(), BoneCount, Dst);
         }

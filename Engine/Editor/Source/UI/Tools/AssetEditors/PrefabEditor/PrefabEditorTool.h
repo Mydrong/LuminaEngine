@@ -80,7 +80,7 @@ namespace Lumina
         void DrawVariantBanner();
 
         void HandleOutlinerDragDrop(FTreeListView& Tree, ECS::FEntity DropItem);
-        void HandlePrefabContentDrop(FStringView VirtualPath, ECS::FEntity DropTarget, bool bAttachToTarget) override;
+        void HandlePrefabContentDrop(FStringView VirtualPath, ECS::FEntity DropTarget, bool bAttachToTarget, const FTransform* SpawnTransform = nullptr) override;
 
         // Tags one entity as this prefab's own and strips the instance tracking a dropped prefab brings.
         void AdoptIntoPrefab(ECS::FEntity Entity);

@@ -2,7 +2,7 @@
 
 #include "EdGraphNode.h"
 #include "Core/Delegates/CoreDelegates.h"
-#include "Core/Object/ObjectArray.h"
+#include "Core/Object/ObjectIteration.h"
 
 namespace Lumina
 {
@@ -36,9 +36,9 @@ namespace Lumina
     {
         CClass* NodeBase = CEdGraphNode::StaticClass();
 
-        // GetDefaultObject allocates into GObjectArray, so the walk collects before it resolves.
+        // GetDefaultObject allocates objects, so the walk collects before it resolves.
         TVector<CClass*> Candidates;
-        GObjectArray.ForEachObject([&](CObjectBase* Object, int32)
+        ForEachObject([&](CObjectBase* Object, int32)
         {
             if (Object == nullptr || !Object->IsA<CClass>())
             {

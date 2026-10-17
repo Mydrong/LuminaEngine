@@ -49,7 +49,7 @@ namespace Lumina
 
 		// Each volume fades toward its own weight when it is ungrouped or wins its group, and toward silence otherwise.
 		template <typename TTransformStorage>
-		void UpdateAudioVolumes(const FSystemContext& Context, TTransformStorage& XForms, const FVector3& Listener, float DeltaTime)
+		void UpdateAudioVolumes(const SSystemContext& Context, TTransformStorage& XForms, const FVector3& Listener, float DeltaTime)
 		{
 			TVector<FVolumeGroupWinner> Winners;
 			TVector<SAudioVolumeComponent*> GroupVoices;
@@ -166,13 +166,12 @@ namespace Lumina
 		}
 	}
 
-	void SAudioSystem::OnStartup()
+	void SAudioSystem::OnStartup(const SSystemContext& Context)
 	{
 	}
 
-	void SAudioSystem::OnTeardown()
+	void SAudioSystem::OnTeardown(const SSystemContext& Context)
 	{
-	    const FSystemContext& Context = GetContext();
 
 		// No audio device in a headless dedicated server (Audio::Initialize is skipped).
 		if (!Audio::HasDevice())
@@ -212,9 +211,8 @@ namespace Lumina
 		});
 	}
 
-	void SAudioSystem::OnUpdate()
+	void SAudioSystem::OnUpdate(const SSystemContext& Context)
 	{
-	    const FSystemContext& SystemContext = GetContext();
 
 		LUMINA_PROFILE_SCOPE();
 
@@ -225,21 +223,21 @@ namespace Lumina
 		}
 
 		const CAudioSettings* Settings = GetDefault<CAudioSettings>();
-		const float DeltaTime = (float)SystemContext.GetDeltaTime();
+		const float DeltaTime = (float)Context.GetDeltaTime();
 
-		auto XFormStorage = SystemContext.GetStorage<STransformComponent>();
-		const FKinematicsState* KinematicsState = Kinematics::GetState(SystemContext);
+		auto XFormStorage = Context.GetStorage<STransformComponent>();
+		const FKinematicsState* KinematicsState = Kinematics::GetState(Context);
 
 		FVector3 ListenerPosition(0.0f);
 		bool bHasListener = false;
 		uint32 DrivenListenerMask = 0;
 
-		CWorld* World = SystemContext.GetWorld();
+		CWorld* World = Context.GetWorld();
 		const ECS::FEntity ActiveCamera = World != nullptr ? World->GetActiveCameraEntity() : ECS::NullEntity;
 		const bool bCameraHasTransform = ActiveCamera != ECS::NullEntity && !ActiveCamera.IsTombstone() && XFormStorage.Contains(ActiveCamera);
 
 		{
-			auto ListenerView = SystemContext.CreateView<SAudioListenerComponent>();
+			auto ListenerView = Context.CreateView<SAudioListenerComponent>();
 			ListenerView.ForEach([&](ECS::FEntity Entity, SAudioListenerComponent& Listener)
 			{
 				const uint32 Index = (uint32)Math::Clamp(Listener.ListenerIndex, 0, 3);
@@ -273,16 +271,16 @@ namespace Lumina
 
 		if (bHasListener)
 		{
-			UpdateAudioVolumes(SystemContext, XFormStorage, ListenerPosition, DeltaTime);
+			UpdateAudioVolumes(Context, XFormStorage, ListenerPosition, DeltaTime);
 		}
 
 		const bool bOcclusionAllowed = bHasListener && Settings != nullptr && Settings->bOcclusionEnabled;
-		Physics::IPhysicsScene* PhysicsScene = bOcclusionAllowed ? SystemContext.GetPhysicsScene() : nullptr;
+		Physics::IPhysicsScene* PhysicsScene = bOcclusionAllowed ? Context.GetPhysicsScene() : nullptr;
 		uint32 TraceBudget = (Settings != nullptr) ? Settings->MaxOcclusionTracesPerTick : 0;
-		const FSignificanceState* SignificanceState = Significance::GetState(SystemContext);
+		const FSignificanceState* SignificanceState = Significance::GetState(Context);
 
 		{
-			auto SourceView = SystemContext.CreateView<SAudioSourceComponent>();
+			auto SourceView = Context.CreateView<SAudioSourceComponent>();
 			SourceView.ForEach([&](ECS::FEntity Entity, SAudioSourceComponent& Audio)
 			{
 				const STransformComponent& Transform = XFormStorage.Get(Entity);
@@ -405,7 +403,7 @@ namespace Lumina
 		}
 
 		{
-			auto ProceduralView = SystemContext.CreateView<SProceduralAudioComponent>();
+			auto ProceduralView = Context.CreateView<SProceduralAudioComponent>();
 			ProceduralView.ForEach([&](ECS::FEntity Entity, SProceduralAudioComponent& Audio)
 			{
 				if (!Audio.bReady)

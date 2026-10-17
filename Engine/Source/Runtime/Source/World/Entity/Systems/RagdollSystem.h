@@ -18,6 +18,6 @@ namespace Lumina
 
     public:
 
-        void OnUpdate() override;
+        void OnUpdate(const SSystemContext& Context) override;
     };
 }

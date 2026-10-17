@@ -36,7 +36,15 @@ namespace Lumina
         const bool   bOutline = !RenderFrame->Extracts.SelectionBits.empty();
         const uint64 Cursor   = PickerCursorPacked.load(std::memory_order_relaxed);
         const bool   bHover   = (Cursor & 1ull) != 0;
-        if (!bOutline && !bHover)
+
+        const uint32 SnapshotRequest = SurfaceSnapshotRequest.load(std::memory_order_acquire);
+        bSurfaceSnapshotThisFrame    = bSurfaceSnapshotWanted.load(std::memory_order_acquire) && SnapshotRequest != SurfaceSnapshotServed;
+        if (bSurfaceSnapshotThisFrame)
+        {
+            SurfaceSnapshotServed = SnapshotRequest;
+        }
+
+        if (!bOutline && !bHover && !bSurfaceSnapshotThisFrame)
         {
             return;
         }
@@ -51,20 +59,23 @@ namespace Lumina
         LUMINA_PROFILE_SECTION_COLORED("Picker Resolve", tracy::Color::SlateBlue);
         SCENE_GPU_SCOPE(CL, "Picker Resolve");
 
-        const FSceneImage& PickerImg = GetNamedImage(ENamedImage::Picker);
-        const FSceneImage& VisRT     = GetNamedImage(ENamedImage::VisBuffer);
+        const FSceneImage& PickerImg  = GetNamedImage(ENamedImage::Picker);
+        const FSceneImage& FoliageImg = GetNamedImage(ENamedImage::PickerFoliage);
+        const FSceneImage& VisRT      = GetNamedImage(ENamedImage::VisBuffer);
         const FUIntVector2 Extent    = GetNamedImage(ENamedImage::HDR).GetExtent();
 
         // With no mesh draws the VisBuffer was never written, but the outline and the later picker writers still read this image.
         if (RenderFrame->Geometry.DrawCommands.empty())
         {
-            RHI::FRenderAttachment Cleared;
-            Cleared.Texture = PickerImg.Texture;
-            Cleared.LoadOp  = RHI::ELoadOp::Clear;
-            Cleared.StoreOp = RHI::EStoreOp::Store;
+            RHI::FRenderAttachment Cleared[2];
+            Cleared[0].Texture = PickerImg.Texture;
+            Cleared[0].LoadOp  = RHI::ELoadOp::Clear;
+            Cleared[0].StoreOp = RHI::EStoreOp::Store;
+            Cleared[1]         = Cleared[0];
+            Cleared[1].Texture = FoliageImg.Texture;
 
             RHI::FRenderPassDesc ClearPass;
-            ClearPass.ColorAttachments = TSpan<const RHI::FRenderAttachment>(&Cleared, 1);
+            ClearPass.ColorAttachments = TSpan<const RHI::FRenderAttachment>(Cleared, 2);
             ClearPass.RenderArea       = Extent;
             RHI::CmdBeginRenderPass(CL, ClearPass);
             RHI::CmdEndRenderPass(CL);
@@ -72,18 +83,20 @@ namespace Lumina
             return;
         }
 
-        RHI::FRenderAttachment Color;
-        Color.Texture        = PickerImg.Texture;
-        Color.LoadOp         = RHI::ELoadOp::Undefined;   // every pixel is written, background included
-        Color.StoreOp        = RHI::EStoreOp::Store;
+        RHI::FRenderAttachment Color[2];
+        Color[0].Texture     = PickerImg.Texture;
+        Color[0].LoadOp      = RHI::ELoadOp::Undefined;   // every pixel is written, background included
+        Color[0].StoreOp     = RHI::EStoreOp::Store;
+        Color[1]             = Color[0];
+        Color[1].Texture     = FoliageImg.Texture;
 
         RHI::FRenderPassDesc Pass;
-        Pass.ColorAttachments = TSpan<const RHI::FRenderAttachment>(&Color, 1);
+        Pass.ColorAttachments = TSpan<const RHI::FRenderAttachment>(Color, 2);
         Pass.RenderArea       = Extent;
 
         RHI::CmdBeginRenderPass(CL, Pass);
         SetViewportScissor(CL, Extent);
-        if (!bOutline && Extent.x > 0 && Extent.y > 0)
+        if (!bOutline && !bSurfaceSnapshotThisFrame && Extent.x > 0 && Extent.y > 0)
         {
             const FPickerRegion Region = PickerCursorRegion(Cursor, Extent.x, Extent.y, PickerRegionExtent);
             RHI::CmdSetScissor(CL, RHI::FRect{ (int)Region.X, (int)(Region.X + Region.Width), (int)Region.Y, (int)(Region.Y + Region.Height) });
@@ -95,6 +108,7 @@ namespace Lumina
         Key.VS = VertexShader;
         Key.PS = PixelShader;
         Key.ColorTargets.push_back({ PickerImg.Desc.Format, {} });
+        Key.ColorTargets.push_back({ FoliageImg.Desc.Format, {} });
         RHI::CmdSetPipeline(CL, GetOrCreatePipeline(Key));
 
         struct FVisBufferPickerPC
@@ -294,18 +308,12 @@ namespace Lumina
         return FUIntVector2((uint32)PickerX, (uint32)PickerY);
     }
 
-    ECS::FEntity FDefaultSceneRenderer::GetEntityAtPixel(uint32 DisplayX, uint32 DisplayY) const
-    {
     #if USING(WITH_EDITOR)
-        const FUIntVector2 Texel = DisplayToPickerTexel(DisplayX, DisplayY);
-        const uint32 X = Texel.x;
-        const uint32 Y = Texel.y;
-
-        int32 BestSlotIdx = -1;
-        uint64 BestFrame = 0;
-        for (uint32 i = 0; i < PickerReadbackRingSize; ++i)
+    const FDefaultSceneRenderer::FPickerReadbackSlot* FDefaultSceneRenderer::FindPickerReadbackSlot(FUIntVector2 Texel) const
+    {
+        const FPickerReadbackSlot* Best = nullptr;
+        for (const FPickerReadbackSlot& Slot : PickerReadbackRing)
         {
-            const FPickerReadbackSlot& Slot = PickerReadbackRing[i];
             if (!Slot.bPending || Slot.Readback.Gpu == 0)
             {
                 continue;
@@ -314,46 +322,178 @@ namespace Lumina
             {
                 continue;
             }
-            if (X < Slot.OriginX || X >= Slot.OriginX + Slot.Width ||
-                Y < Slot.OriginY || Y >= Slot.OriginY + Slot.Height)
+            if (Texel.x < Slot.OriginX || Texel.x >= Slot.OriginX + Slot.Width ||
+                Texel.y < Slot.OriginY || Texel.y >= Slot.OriginY + Slot.Height)
             {
                 continue;
             }
-            if (BestSlotIdx == -1 || Slot.SubmittedFrame > BestFrame)
+            if (Best == nullptr || Slot.SubmittedFrame > Best->SubmittedFrame)
             {
-                BestSlotIdx = static_cast<int32>(i);
-                BestFrame = Slot.SubmittedFrame;
+                Best = &Slot;
             }
         }
+        return Best;
+    }
+    #endif
 
-        if (BestSlotIdx == -1)
-        {
-            return ECS::NullEntity;
-        }
-
-        const FPickerReadbackSlot& Slot = PickerReadbackRing[BestSlotIdx];
-        const uint32 LocalX = X - Slot.OriginX;
-        const uint32 LocalY = Y - Slot.OriginY;
+    ECS::FEntity FDefaultSceneRenderer::GetEntityAtPixel(uint32 DisplayX, uint32 DisplayY) const
+    {
+    #if USING(WITH_EDITOR)
+        const FUIntVector2 Texel = DisplayToPickerTexel(DisplayX, DisplayY);
+        const FPickerReadbackSlot* Slot = FindPickerReadbackSlot(Texel);
 
         // CPURead allocations are persistently mapped; the readback is tightly packed (RowLength = Width).
-        const uint32* Pixels = Slot.Readback.CpuAs<const uint32>();
+        const uint32* Pixels = Slot != nullptr ? Slot->Readback.CpuAs<const uint32>() : nullptr;
         if (Pixels == nullptr)
         {
             return ECS::NullEntity;
         }
 
-        const uint32 PixelValue = Pixels[LocalY * Slot.Width + LocalX];
-
-        if (PixelValue == 0)
-        {
-            return ECS::NullEntity;
-        }
-
-        return static_cast<ECS::FEntity>(PixelValue);
+        const uint32 PixelValue = Pixels[(Texel.y - Slot->OriginY) * Slot->Width + (Texel.x - Slot->OriginX)];
+        return PixelValue == 0 ? ECS::NullEntity : static_cast<ECS::FEntity>(PixelValue);
     #else
         (void)DisplayX;
         (void)DisplayY;
         return ECS::NullEntity;
+    #endif
+    }
+
+    bool FDefaultSceneRenderer::GetSurfaceAtPixel(uint32 DisplayX, uint32 DisplayY, TSpan<const ECS::FEntity> Ignored, FVector3& OutPosition, FVector3& OutNormal) const
+    {
+    #if USING(WITH_EDITOR)
+        const FUIntVector2 Texel = DisplayToPickerTexel(DisplayX, DisplayY);
+        const FPickerReadbackSlot* Slot = FindPickerReadbackSlot(Texel);
+
+        // The snapshot predates whatever is being placed, so it sees under it, but only while the camera matches the live window.
+        if (IsSurfaceSnapshotReady() && (Slot == nullptr || Slot->InverseView == SurfaceSnapshot.InverseView)
+            && Texel.x < SurfaceSnapshot.Width && Texel.y < SurfaceSnapshot.Height)
+        {
+            Slot = &SurfaceSnapshot;
+        }
+        if (Slot == nullptr || Slot->ImageWidth == 0 || Slot->ImageHeight == 0)
+        {
+            return false;
+        }
+
+        const float*  Depths   = Slot->DepthReadback.CpuAs<const float>();
+        const uint32* Entities = Slot->Readback.CpuAs<const uint32>();
+        const uint8*  Foliage  = Slot->FoliageReadback.CpuAs<const uint8>();
+        if (Depths == nullptr || Entities == nullptr || Foliage == nullptr)
+        {
+            return false;
+        }
+
+        const int32 Width  = (int32)Slot->Width;
+        const int32 Height = (int32)Slot->Height;
+
+        auto Unproject = [&](int32 LocalX, int32 LocalY, float Depth) -> FVector3
+        {
+            const float U = ((float)(Slot->OriginX + LocalX) + 0.5f) / (float)Slot->ImageWidth;
+            const float V = ((float)(Slot->OriginY + LocalY) + 0.5f) / (float)Slot->ImageHeight;
+            const FVector4 World = Slot->InverseViewProjection * FVector4(U * 2.0f - 1.0f, V * 2.0f - 1.0f, Depth, 1.0f);
+            return FVector3(World) / World.w;
+        };
+
+        // Reverse Z clears to zero, so sky has no depth, and foliage and the ignored entities are read through as if absent.
+        auto IsSurface = [&](int32 LocalX, int32 LocalY) -> bool
+        {
+            if (LocalX < 0 || LocalY < 0 || LocalX >= Width || LocalY >= Height)
+            {
+                return false;
+            }
+            const int32 Index = LocalY * Width + LocalX;
+            return Depths[Index] > 0.0f && Foliage[Index] == 0
+                && !Algo::Contains(Ignored, static_cast<ECS::FEntity>(Entities[Index]));
+        };
+
+        auto SurfaceAt = [&](int32 LocalX, int32 LocalY) -> FVector3
+        {
+            return Unproject(LocalX, LocalY, Depths[LocalY * Width + LocalX]);
+        };
+
+        // Each axis takes the neighbor nearer in depth, so a pixel on a silhouette does not borrow the surface behind it.
+        auto NormalAt = [&](int32 LocalX, int32 LocalY, const FVector3& Position) -> FVector3
+        {
+            auto Tangent = [&](int32 StepX, int32 StepY, FVector3& Out) -> bool
+            {
+                const bool bAhead  = IsSurface(LocalX + StepX, LocalY + StepY);
+                const bool bBehind = IsSurface(LocalX - StepX, LocalY - StepY);
+                const FVector3 Ahead  = bAhead  ? SurfaceAt(LocalX + StepX, LocalY + StepY) : Position;
+                const FVector3 Behind = bBehind ? SurfaceAt(LocalX - StepX, LocalY - StepY) : Position;
+                if (bAhead && (!bBehind || Math::Length(Ahead - Position) <= Math::Length(Position - Behind)))
+                {
+                    Out = Ahead - Position;
+                    return true;
+                }
+                if (bBehind)
+                {
+                    Out = Position - Behind;
+                    return true;
+                }
+                return false;
+            };
+
+            const FVector3 ToCamera = Math::Normalize(Slot->CameraLocation - Position);
+            FVector3 AlongX, AlongY;
+            if (!Tangent(1, 0, AlongX) || !Tangent(0, 1, AlongY))
+            {
+                return ToCamera;
+            }
+            const FVector3 Normal = Math::Normalize(Math::Cross(AlongX, AlongY));
+            return Math::Dot(Normal, ToCamera) < 0.0f ? -Normal : Normal;
+        };
+
+        const int32 CursorX = (int32)(Texel.x - Slot->OriginX);
+        const int32 CursorY = (int32)(Texel.y - Slot->OriginY);
+        if (IsSurface(CursorX, CursorY))
+        {
+            OutPosition = SurfaceAt(CursorX, CursorY);
+            OutNormal   = NormalAt(CursorX, CursorY, OutPosition);
+            return true;
+        }
+
+        // The cursor is over something that does not count, so the nearest surface that does is carried under it as a plane.
+        auto TryPlaneFrom = [&](int32 LocalX, int32 LocalY) -> bool
+        {
+            if (!IsSurface(LocalX, LocalY))
+            {
+                return false;
+            }
+            const FVector3 PlanePoint  = SurfaceAt(LocalX, LocalY);
+            const FVector3 PlaneNormal = NormalAt(LocalX, LocalY, PlanePoint);
+
+            // Two depths along the cursor's pixel give its ray for a perspective and an orthographic camera alike.
+            const FVector3 RayStart = Unproject(CursorX, CursorY, 1.0f);
+            const FVector3 RayDir   = Math::Normalize(Unproject(CursorX, CursorY, 0.5f) - RayStart);
+            const float    Facing   = Math::Dot(RayDir, PlaneNormal);
+            const float    Along    = Math::Abs(Facing) > 1e-4f ? Math::Dot(PlanePoint - RayStart, PlaneNormal) / Facing : -1.0f;
+
+            OutPosition = Along > 0.0f ? RayStart + RayDir * Along : PlanePoint;
+            OutNormal   = PlaneNormal;
+            return true;
+        };
+
+        // Bounded, since the snapshot spans the whole image and a cursor over open sky would otherwise search all of it.
+        constexpr int32 MaxSearchRadius = 32;
+        for (int32 Radius = 1; Radius <= MaxSearchRadius; ++Radius)
+        {
+            for (int32 Step = -Radius; Step <= Radius; ++Step)
+            {
+                if (TryPlaneFrom(CursorX + Step, CursorY - Radius) || TryPlaneFrom(CursorX + Step, CursorY + Radius)
+                    || TryPlaneFrom(CursorX - Radius, CursorY + Step) || TryPlaneFrom(CursorX + Radius, CursorY + Step))
+                {
+                    return true;
+                }
+            }
+        }
+        return false;
+    #else
+        (void)DisplayX;
+        (void)DisplayY;
+        (void)Ignored;
+        (void)OutPosition;
+        (void)OutNormal;
+        return false;
     #endif
     }
 
@@ -369,68 +509,120 @@ namespace Lumina
         PickerCursorPacked.store(Packed, std::memory_order_relaxed);
     }
 
-    void FDefaultSceneRenderer::IssuePickerReadback(RHI::FCmdListH CL)
+    void FDefaultSceneRenderer::RequestSurfaceSnapshot()
     {
-        const uint64 Packed = PickerCursorPacked.load(std::memory_order_relaxed);
-        const bool bOverViewport = (Packed & 1ull) != 0;
-        if (!bOverViewport)
+        bSurfaceSnapshotWanted.store(true, std::memory_order_release);
+        SurfaceSnapshotRequest.fetch_add(1, std::memory_order_acq_rel);
+    }
+
+    void FDefaultSceneRenderer::ReleaseSurfaceSnapshot()
+    {
+        bSurfaceSnapshotWanted.store(false, std::memory_order_release);
+    }
+
+    bool FDefaultSceneRenderer::IsSurfaceSnapshotReady() const
+    {
+        return bSurfaceSnapshotWanted.load(std::memory_order_acquire)
+            && SurfaceSnapshot.bPending
+            && SurfaceSnapshotServed == SurfaceSnapshotRequest.load(std::memory_order_acquire)
+            && PickerReadbackFrame - SurfaceSnapshot.SubmittedFrame > RHI::kFramesInFlight;
+    }
+
+    void FDefaultSceneRenderer::ReleasePickerSlot(FPickerReadbackSlot& Slot)
+    {
+        for (RHI::FGPUAllocation* Allocation : { &Slot.Readback, &Slot.DepthReadback, &Slot.FoliageReadback })
         {
-            // The cursor is not over the viewport, so no pick can happen and the copy is skipped.
-            return;
-        }
-
-        const FSceneImage& PickerImage = GetNamedImage(ENamedImage::Picker);
-        if (!PickerImage.IsValid())
-        {
-            return;
-        }
-
-        const uint32 ImgW = PickerImage.GetSizeX();
-        const uint32 ImgH = PickerImage.GetSizeY();
-        if (ImgW == 0 || ImgH == 0)
-        {
-            return;
-        }
-
-        const FPickerRegion Region = PickerCursorRegion(Packed, ImgW, ImgH, PickerRegionExtent);
-        const uint32 RegionW = Region.Width;
-        const uint32 RegionH = Region.Height;
-        const uint32 OriginX = Region.X;
-        const uint32 OriginY = Region.Y;
-
-        FPickerReadbackSlot& Slot = PickerReadbackRing[PickerReadbackWriteIndex];
-
-        if (Slot.Readback.Gpu == 0 || Slot.Width != RegionW || Slot.Height != RegionH)
-        {
-            if (Slot.Readback.Gpu != 0)
+            if (Allocation->Gpu != 0)
             {
-                DeferFree(Slot.Readback);
+                RHI::Retire(*Allocation);
             }
-            Slot.Readback = RHI::Malloc((uint64)RegionW * RegionH * sizeof(uint32), RHI::kDefaultAlign, RHI::EMemoryType::CPURead);
+        }
+        Slot = FPickerReadbackSlot{};
+    }
+
+    void FDefaultSceneRenderer::CopyPickerRegion(RHI::FCmdListH CL, FPickerReadbackSlot& Slot, uint32 OriginX, uint32 OriginY, uint32 Width, uint32 Height)
+    {
+        if (Slot.Readback.Gpu == 0 || Slot.Width != Width || Slot.Height != Height)
+        {
+            ReleasePickerSlot(Slot);
+            Slot.Readback = RHI::Malloc((uint64)Width * Height * sizeof(uint32), RHI::kDefaultAlign, RHI::EMemoryType::CPURead);
             RHI::SetDebugName(Slot.Readback.Gpu, "Readback.Picker");
-            Slot.Width = RegionW;
-            Slot.Height = RegionH;
+            Slot.DepthReadback = RHI::Malloc((uint64)Width * Height * sizeof(float), RHI::kDefaultAlign, RHI::EMemoryType::CPURead);
+            RHI::SetDebugName(Slot.DepthReadback.Gpu, "Readback.PickerDepth");
+            Slot.FoliageReadback = RHI::Malloc((uint64)Width * Height, RHI::kDefaultAlign, RHI::EMemoryType::CPURead);
+            RHI::SetDebugName(Slot.FoliageReadback.Gpu, "Readback.PickerFoliage");
+            Slot.Width = Width;
+            Slot.Height = Height;
         }
 
         RHI::FTextureSlice SrcSlice;
         SrcSlice.Offset = FUIntVector3(OriginX, OriginY, 0);
-        SrcSlice.Extent = FUIntVector3(RegionW, RegionH, 1);
+        SrcSlice.Extent = FUIntVector3(Width, Height, 1);
 
-        // Picker writes -> transfer read, then host read of the packed region.
+        // Picker and depth writes -> transfer read, then host read of the packed region.
         RHI::CmdBarrier(CL,
-            RHI::EStageFlags::RasterColorOut | RHI::EStageFlags::PixelShader, RHI::EAccessFlags::ShaderWrite | RHI::EAccessFlags::ColorWrite,
+            RHI::EStageFlags::RasterColorOut | RHI::EStageFlags::PixelShader | RHI::EStageFlags::FragmentTests,
+            RHI::EAccessFlags::ShaderWrite | RHI::EAccessFlags::ColorWrite | RHI::EAccessFlags::DepthStencilWrite,
             RHI::EStageFlags::Transfer,
             RHI::EAccessFlags::TransferRead | RHI::EAccessFlags::TransferWrite);
-        RHI::CmdCopyTextureToMemory(CL, PickerImage.Texture, SrcSlice, Slot.Readback, RegionW);
+
+        const FSceneImage& PickerImage = GetNamedImage(ENamedImage::Picker);
+        RHI::CmdCopyTextureToMemory(CL, PickerImage.Texture, SrcSlice, Slot.Readback, Width);
+        RHI::CmdCopyTextureToMemory(CL, GetNamedImage(ENamedImage::PickerFoliage).Texture, SrcSlice, Slot.FoliageReadback, Width);
+
+        // The depth image shares the picker's render resolution, so the same window lines up texel for texel.
+        const FSceneImage& DepthImage = GetNamedImage(ENamedImage::DepthAttachment);
+        if (DepthImage.IsValid() && DepthImage.GetSizeX() == PickerImage.GetSizeX() && DepthImage.GetSizeY() == PickerImage.GetSizeY())
+        {
+            RHI::CmdCopyTextureToMemory(CL, DepthImage.Texture, SrcSlice, Slot.DepthReadback, Width);
+        }
+
         RHI::CmdBarrier(CL,
             RHI::EStageFlags::Transfer, RHI::EAccessFlags::TransferWrite,
             RHI::EStageFlags::Host,
             RHI::EAccessFlags::HostRead);
 
-        Slot.OriginX = OriginX;
-        Slot.OriginY = OriginY;
-        Slot.SubmittedFrame = PickerReadbackFrame;
-        Slot.bPending = true;
+        const FCameraData& Camera  = RenderFrame->SceneGlobalData.CameraData;
+        Slot.InverseViewProjection = Camera.InverseView * Camera.InverseProjection;
+        Slot.InverseView           = Camera.InverseView;
+        Slot.CameraLocation        = FVector3(Camera.Location);
+        Slot.ImageWidth            = PickerImage.GetSizeX();
+        Slot.ImageHeight           = PickerImage.GetSizeY();
+        Slot.OriginX               = OriginX;
+        Slot.OriginY               = OriginY;
+        Slot.SubmittedFrame        = PickerReadbackFrame;
+        Slot.bPending              = true;
+    }
+
+    void FDefaultSceneRenderer::IssuePickerReadback(RHI::FCmdListH CL)
+    {
+        // Freed here rather than on release, since the game thread cannot know whether a copy into it is still in flight.
+        if (!bSurfaceSnapshotWanted.load(std::memory_order_acquire) && SurfaceSnapshot.Readback.Gpu != 0)
+        {
+            ReleasePickerSlot(SurfaceSnapshot);
+        }
+
+        const FSceneImage& PickerImage = GetNamedImage(ENamedImage::Picker);
+        if (!PickerImage.IsValid() || PickerImage.GetSizeX() == 0 || PickerImage.GetSizeY() == 0)
+        {
+            return;
+        }
+
+        if (bSurfaceSnapshotThisFrame)
+        {
+            bSurfaceSnapshotThisFrame = false;
+            CopyPickerRegion(CL, SurfaceSnapshot, 0, 0, PickerImage.GetSizeX(), PickerImage.GetSizeY());
+        }
+
+        const uint64 Packed = PickerCursorPacked.load(std::memory_order_relaxed);
+        if ((Packed & 1ull) == 0)
+        {
+            // The cursor is not over the viewport, so no pick can happen and the copy is skipped.
+            return;
+        }
+
+        const FPickerRegion Region = PickerCursorRegion(Packed, PickerImage.GetSizeX(), PickerImage.GetSizeY(), PickerRegionExtent);
+        CopyPickerRegion(CL, PickerReadbackRing[PickerReadbackWriteIndex], Region.X, Region.Y, Region.Width, Region.Height);
 
         ++PickerReadbackFrame;
         PickerReadbackWriteIndex = (PickerReadbackWriteIndex + 1) % PickerReadbackRingSize;

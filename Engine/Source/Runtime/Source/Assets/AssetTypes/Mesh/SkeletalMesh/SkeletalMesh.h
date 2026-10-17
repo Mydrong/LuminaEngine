@@ -2,6 +2,7 @@
 
 #include "Animation/BoneLOD.h"
 #include "Assets/AssetTypes/Mesh/Mesh.h"
+#include "Assets/AssetTypes/Mesh/MeshSocket.h"
 #include "Core/Threading/Thread.h"
 #include <atomic>
 #include "SkeletalMesh.generated.h"
@@ -25,6 +26,7 @@ namespace Lumina
         void PostPropertyChange(FProperty* ChangedProperty) override;
         bool IsAsset() const override { return true; }
         bool IsSkinned() const override { return true; }
+        SAABB GetCullBounds() const override;
 
         // Rewrites the joint indices into Skeleton's bone order, matching by name, after Skeleton is reassigned.
         void RemapJointIndicesToSkeleton();
@@ -32,8 +34,22 @@ namespace Lumina
         // The order this mesh's poses evaluate in against Skeleton, which bone LOD cuts; null without skin data. Safe from any thread.
         const BoneLOD::FBoneLODLayout* GetBoneLODLayout(const FSkeletonResource* Skeleton) const;
 
+        // This mesh's socket by that name, else the skeleton's, so a mesh socket overrides a skeleton one of the same name.
+        const SMeshSocket* FindSocket(const FName& SocketName) const;
+
+        // Every socket this mesh resolves, its own first, then the skeleton's that it does not override.
+        void CollectActiveSockets(TVector<const SMeshSocket*>& OutSockets) const;
+
+        // Bumped whenever this mesh's own sockets change; the skeleton keeps its own generation.
+        uint32 GetSocketGeneration() const { return OwnSocketGeneration.load(std::memory_order_relaxed); }
+        void BumpSocketGeneration() { OwnSocketGeneration.fetch_add(1, std::memory_order_relaxed); }
+
         PROPERTY(Editable, Category = "Skeleton")
         TStrongObjectPtr<CSkeleton> Skeleton;
+
+        /** Attach points for this mesh only. One named like a skeleton socket replaces it on this mesh. */
+        PROPERTY(Editable, Category = "Sockets")
+        TVector<SMeshSocket> Sockets;
 
         // What a runtime merge built this from, held so the parts stay loaded while anything wears it.
         TVector<TStrongObjectPtr<CSkeletalMesh>> MergeSources;
@@ -61,5 +77,7 @@ namespace Lumina
         mutable TVector<TUniquePtr<FBoneLODLayoutEntry>> BoneLODLayouts;
         mutable std::atomic<const FBoneLODLayoutEntry*>  ActiveBoneLODLayout{ nullptr };
         mutable FMutex                                   BoneLODMutex;
+
+        std::atomic<uint32> OwnSocketGeneration{ 1 };
     };
 }

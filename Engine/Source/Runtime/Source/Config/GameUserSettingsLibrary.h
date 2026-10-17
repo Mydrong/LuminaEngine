@@ -105,6 +105,47 @@ namespace Lumina
         FUNCTION()
         static EUpscaler GetAvailableUpscaler(int32 Index);
 
+        //~ Input, laid over the project's authored actions. Rebinding lives on CInputLibrary since it captures a key.
+
+        // A multiplier on mouse look, from 0.01 to 20.
+        FUNCTION()
+        static float GetMouseSensitivity();
+
+        FUNCTION()
+        static void SetMouseSensitivity(float Sensitivity);
+
+        // A multiplier on right stick look, from 0.01 to 20.
+        FUNCTION()
+        static float GetGamepadLookSensitivity();
+
+        FUNCTION()
+        static void SetGamepadLookSensitivity(float Sensitivity);
+
+        FUNCTION()
+        static bool GetInvertMouseY();
+
+        FUNCTION()
+        static void SetInvertMouseY(bool bInvert);
+
+        FUNCTION()
+        static bool GetInvertGamepadLookY();
+
+        FUNCTION()
+        static void SetInvertGamepadLookY(bool bInvert);
+
+        FUNCTION()
+        static bool GetRawMouseInput();
+
+        FUNCTION()
+        static void SetRawMouseInput(bool bRaw);
+
+        // A toggled digital action flips on each press instead of following the button, such as crouch or aim.
+        FUNCTION()
+        static bool IsActionToggled(const FName& Action);
+
+        FUNCTION()
+        static void SetActionToggled(const FName& Action, bool bToggled);
+
         FUNCTION()
         static void ApplySettings();
 

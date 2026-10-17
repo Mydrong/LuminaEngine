@@ -1,7 +1,7 @@
 ﻿#pragma once
 
 #include "World/ECS/Registry.h"
-#include "World/ECS/EventDispatcher.h"
+#include "World/ECS/EventQueue.h"
 #include "World/ECS/CommandBus.h"
 #include "GameplayTags/GameplayMessageBus.h"
 
@@ -118,7 +118,7 @@ namespace Lumina
         GENERATED_BODY()
         
         friend class FWorldManager;
-        friend struct FSystemContext;
+        friend struct SSystemContext;
         friend struct FWorldDebugInterface;
         friend struct SRenderComponent;
         friend ECS::FRegistry& ECS::GetWorldRegistry(CWorld&);
@@ -179,8 +179,7 @@ namespace Lumina
         // Steps physics. Game thread, between the DuringPhysics and PostPhysics stages.
         void TickPhysics();
 
-        // Drains the contact events the step queued (ECS::FEventDispatcher). Called by
-        // FWorldManager::TickPhysics right after the step; not a separate frame phase.
+        // Sends the contact events the step recorded into their queues, right after the step in FWorldManager::TickPhysics.
         void DispatchPhysicsEvents();
 
         // Read ECS to compute camera/post-process and populate the scene's per-frame state.
@@ -224,7 +223,7 @@ namespace Lumina
 
         EUpdateStage GetUpdateStage() const;
 
-        const FSystemContext& GetSystemContext() const { return SystemContext; }
+        const SSystemContext& GetSystemContext() const { return SystemContext; }
 
         /** Shorthand for GetWorldContext()->NetMode; returns Standalone when no context is set. */
         FUNCTION()
@@ -638,7 +637,6 @@ namespace Lumina
 
         ECS::FEntity GetActiveCameraEntity() const;
 
-        void OnChangeCameraEvent(const FSwitchActiveCameraEvent& Event);
 
         /** The rendered view, or null when nothing has resolved one this frame. */
         const FResolvedSceneView* GetResolvedView() const;
@@ -729,13 +727,13 @@ namespace Lumina
     private:
 
         // Raw registry handle. Intentionally private -- gameplay (C++/C#) and tooling use the typed wrappers
-        // above; engine internals reach it through friendship (FSystemContext, FWorldManager, ...).
+        // above; engine internals reach it through friendship (SSystemContext, FWorldManager, ...).
         ECS::FRegistry& GetEntityRegistry() { return EntityRegistry; }
         const ECS::FRegistry& GetEntityRegistry() const { return EntityRegistry; }
 
     private:
 
-        void TickSystems(FSystemContext& Context);
+        void TickSystems(SSystemContext& Context);
 
         // Rebuilds the per-stage slot lists and their parallel batches from the current Systems list.
         void RebuildSystemSchedule();
@@ -750,10 +748,13 @@ namespace Lumina
 
     public:
 
-        // Applies what systems, scripts and worker threads recorded on the command bus. Main thread, outside any batch.
+        // Commits sent events and applies recorded commands until both settle. Main thread, outside any batch.
         void FlushCommands();
 
         ECS::FCommandBus& GetCommandBus() { return CommandBus; }
+
+        // Every event queue this world owns, sent to from anywhere and read by systems and scripts.
+        ECS::FEventQueues& GetEvents() { return EventQueues; }
 
         FGameplayMessageBus& GetMessageBus() { return MessageBus; }
 
@@ -763,16 +764,18 @@ namespace Lumina
         
         ECS::FRegistry                                      RegistryPending;
         ECS::FRegistry                                      EntityRegistry;
-        ECS::FEventDispatcher                               SingletonDispatcher;
         ECS::FEntity                                        SingletonEntity;
 
         // After the registry it records against, before the context that hands it out.
         ECS::FCommandBus                                    CommandBus;
 
+        // After the registry its fan-outs deliver into, before the context that hands it out.
+        ECS::FEventQueues                                   EventQueues;
+
         // After the command bus, since a send from a parallel system is replayed at its flush.
         FGameplayMessageBus                                 MessageBus;
 
-        FSystemContext                                      SystemContext;
+        SSystemContext                                      SystemContext;
         
         TUniquePtr<IRenderScene>                            RenderScene;
         FRenderCallbackList                                 RenderCallbacks;

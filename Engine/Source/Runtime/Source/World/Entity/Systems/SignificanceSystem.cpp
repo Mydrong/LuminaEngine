@@ -51,16 +51,14 @@ namespace Lumina
         }
     }
 
-    void SSignificanceSystem::OnStartup()
+    void SSignificanceSystem::OnStartup(const SSystemContext& Context)
     {
-        const FSystemContext& Context = GetContext();
 
         Context.GetRegistry().Ctx().Emplace<FSignificanceState>();
     }
 
-    void SSignificanceSystem::OnUpdate()
+    void SSignificanceSystem::OnUpdate(const SSystemContext& Context)
     {
-        const FSystemContext& Context = GetContext();
 
         LUMINA_PROFILE_SCOPE();
 
@@ -185,7 +183,7 @@ namespace Lumina
 
     namespace Significance
     {
-        const FSignificanceState* GetState(const FSystemContext& Context)
+        const FSignificanceState* GetState(const SSystemContext& Context)
         {
             return Context.GetRegistry().Ctx().Find<FSignificanceState>();
         }

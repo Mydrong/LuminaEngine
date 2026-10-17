@@ -3,7 +3,7 @@
 #include <box3d/box3d.h>
 #include <box3d/collision.h>
 
-#include "Physics/CollisionShapeGen.h"
+#include "Physics/CollisionGen.h"
 
 namespace Lumina::Physics::CollisionGen
 {

@@ -5,6 +5,7 @@
 #include "Containers/Name.h"
 #include "Events/KeyCodes.h"
 #include "Events/MouseCodes.h"
+#include "Input/Gamepad.h"
 #include "Input/Input.h"
 #include "Input/InputAction.h"
 #include "Input/InputEvent.h"
@@ -14,6 +15,7 @@ namespace Lumina
 {
     class FEvent;
 
+    // One viewport's devices, mode and action states. Gated getters read zero in UI mode, and Raw ones are for the action map.
     class FInputContext
     {
     public:
@@ -26,7 +28,7 @@ namespace Lumina
         RUNTIME_API void       SetInputMode(EInputMode Mode) { InputMode = Mode; }
 
         RUNTIME_API EMouseMode GetMouseMode() const { return MouseMode; }
-        RUNTIME_API void       SetMouseMode(EMouseMode Mode);
+        RUNTIME_API void       SetMouseMode(EMouseMode Mode) { MouseMode = Mode; }
 
         void SetWindowRect(int MinX, int MinY, int MaxX, int MaxY);
         bool ContainsWindowPoint(int WindowX, int WindowY) const;
@@ -42,66 +44,82 @@ namespace Lumina
 
         RUNTIME_API bool OnEvent(FEvent& Event);
 
+        //~ Keyboard and mouse.
+
+        RUNTIME_API bool IsKeyDown(EKey K)     const { return !IsGameInputGated() && IsKeyDownRaw(K); }
+        RUNTIME_API bool IsKeyPressed(EKey K)  const { return !IsGameInputGated() && KeyStates[(uint32)K] == Input::EButtonState::Pressed; }
+        RUNTIME_API bool IsKeyReleased(EKey K) const { return !IsGameInputGated() && KeyStates[(uint32)K] == Input::EButtonState::Released; }
+
+        RUNTIME_API bool IsMouseButtonDown(EMouseKey M)     const { return !IsGameInputGated() && IsMouseButtonDownRaw(M); }
+        RUNTIME_API bool IsMouseButtonPressed(EMouseKey M)  const { return !IsGameInputGated() && MouseStates[(uint32)M] == Input::EButtonState::Pressed; }
+        RUNTIME_API bool IsMouseButtonReleased(EMouseKey M) const { return !IsGameInputGated() && MouseStates[(uint32)M] == Input::EButtonState::Released; }
+
         RUNTIME_API double GetMouseX()      const { return IsGameInputGated() ? 0.0 : MouseX; }
         RUNTIME_API double GetMouseY()      const { return IsGameInputGated() ? 0.0 : MouseY; }
         RUNTIME_API double GetMouseZ()      const { return IsGameInputGated() ? 0.0 : MouseZ; }
         RUNTIME_API double GetMouseDeltaX() const { return IsGameInputGated() ? 0.0 : MouseDeltaX; }
         RUNTIME_API double GetMouseDeltaY() const { return IsGameInputGated() ? 0.0 : MouseDeltaY; }
 
-        RUNTIME_API Input::EKeyState   GetKeyState(EKey K) const
-        {
-            return IsGameInputGated() ? Input::EKeyState::Up : KeyStates[(uint32)K];
-        }
-        RUNTIME_API Input::EMouseState GetMouseButtonState(EMouseKey M) const
-        {
-            return IsGameInputGated() ? Input::EMouseState::Up : MouseStates[(uint32)M];
-        }
+        bool IsKeyDownRaw(EKey K) const                 { return Input::IsDown(KeyStates[(uint32)K]); }
+        bool IsMouseButtonDownRaw(EMouseKey M) const    { return Input::IsDown(MouseStates[(uint32)M]); }
 
-        RUNTIME_API bool IsKeyDown(EKey K)     const { auto S = GetKeyState(K); return S == Input::EKeyState::Pressed || S == Input::EKeyState::Held || S == Input::EKeyState::Repeated; }
-        RUNTIME_API bool IsKeyUp(EKey K)       const { return GetKeyState(K) == Input::EKeyState::Up; }
-        RUNTIME_API bool IsKeyPressed(EKey K)  const { return GetKeyState(K) == Input::EKeyState::Pressed; }
-        RUNTIME_API bool IsKeyReleased(EKey K) const { return GetKeyState(K) == Input::EKeyState::Released; }
-        RUNTIME_API bool IsKeyRepeated(EKey K) const { return GetKeyState(K) == Input::EKeyState::Repeated; }
+        // Either side's key counts, read from key state so a chord works in every input mode.
+        bool IsCtrlDownRaw() const  { return IsKeyDownRaw(EKey::LeftControl) || IsKeyDownRaw(EKey::RightControl); }
+        bool IsShiftDownRaw() const { return IsKeyDownRaw(EKey::LeftShift) || IsKeyDownRaw(EKey::RightShift); }
+        bool IsAltDownRaw() const   { return IsKeyDownRaw(EKey::LeftAlt) || IsKeyDownRaw(EKey::RightAlt); }
 
-        RUNTIME_API bool IsMouseButtonDown(EMouseKey M)     const { auto S = GetMouseButtonState(M); return S == Input::EMouseState::Pressed || S == Input::EMouseState::Held; }
-        RUNTIME_API bool IsMouseButtonUp(EMouseKey M)       const { return GetMouseButtonState(M) == Input::EMouseState::Up; }
-        RUNTIME_API bool IsMouseButtonPressed(EMouseKey M)  const { return GetMouseButtonState(M) == Input::EMouseState::Pressed; }
-        RUNTIME_API bool IsMouseButtonReleased(EMouseKey M) const { return GetMouseButtonState(M) == Input::EMouseState::Released; }
-        RUNTIME_API float GetMouseButtonHeldTime(EMouseKey M) const { return IsGameInputGated() ? -1.0f : MouseKeyDownTimes[(uint32)M]; }
-
-        // Skips the UI-mode gate. Used by FInputActionMap, which gates per-action.
-        RUNTIME_API bool IsKeyDownRaw(EKey K) const
-        {
-            const Input::EKeyState S = KeyStates[(uint32)K];
-            return S == Input::EKeyState::Pressed || S == Input::EKeyState::Held || S == Input::EKeyState::Repeated;
-        }
-        RUNTIME_API bool IsMouseButtonDownRaw(EMouseKey M) const
-        {
-            const Input::EMouseState S = MouseStates[(uint32)M];
-            return S == Input::EMouseState::Pressed || S == Input::EMouseState::Held;
-        }
-
-        // The gated GetMouseX/Y return 0 in UI mode to hide the cursor from
-        // game-side queries; the RmlUi forwarder still needs the real position.
-        double GetMouseXRaw() const { return MouseX; }
-        double GetMouseYRaw() const { return MouseY; }
-
-        // Ungated motion, read by FInputActionMap: an action with bRunsInUI must still see the mouse.
+        // The game UI still needs the real cursor while the gated getters hide it from gameplay.
+        double GetMouseXRaw() const      { return MouseX; }
+        double GetMouseYRaw() const      { return MouseY; }
         double GetMouseDeltaXRaw() const { return MouseDeltaX; }
         double GetMouseDeltaYRaw() const { return MouseDeltaY; }
-        double GetMouseZRaw()      const { return MouseZ; }
+        double GetMouseZRaw() const      { return MouseZ; }
 
-        // This frame's evaluated action states, indexed like FInputActionMap::GetAllActions(). Sized and
-        // filled by FInputActionMap::UpdateContext once per frame; every query reads this snapshot.
+        // The first key or mouse button that went down this frame, for a rebind capture, or Num.
+        EKey      GetFirstPressedKey() const;
+        EMouseKey GetFirstPressedMouseButton() const;
+
+        //~ Gamepad. Only the receiving context is fed a pad, so every other context reads a disconnected one.
+
+        // Takes this frame's pad and queues an event for every button edge, so OnInput sees pad presses like key presses.
+        RUNTIME_API void SetGamepadState(const FGamepadState& State);
+
+        RUNTIME_API bool  IsGamepadConnected() const                        { return Gamepad.bConnected; }
+        RUNTIME_API bool  IsGamepadButtonDown(EGamepadButton B) const       { return !IsGameInputGated() && Gamepad.IsButtonDown(B); }
+        RUNTIME_API bool  IsGamepadButtonPressed(EGamepadButton B) const    { return !IsGameInputGated() && Gamepad.IsButtonPressed(B); }
+        RUNTIME_API bool  IsGamepadButtonReleased(EGamepadButton B) const   { return !IsGameInputGated() && Gamepad.IsButtonReleased(B); }
+        RUNTIME_API float GetGamepadAxis(EGamepadAxis Axis) const           { return IsGameInputGated() ? 0.0f : Gamepad.GetAxis(Axis); }
+
+        const FGamepadState& GetGamepadRaw() const { return Gamepad; }
+
+        // The device the player touched last, which prompts follow, and the label family of the pad in use.
+        RUNTIME_API EInputDevice   GetLastUsedDevice() const { return LastUsedDevice; }
+        RUNTIME_API EGamepadFamily GetGamepadFamily() const  { return Gamepad.Family; }
+
+        //~ Actions and layers.
+
+        // This frame's action states, indexed like FInputActionMap::GetAllActions() and filled once per frame by UpdateContext.
         const TVector<SInputActionState>& GetActionStates() const { return ActionStates; }
         TVector<SInputActionState>&       GetMutableActionStates() { return ActionStates; }
 
-        // Pushed mapping layers, innermost last. Names rather than resolved pointers, so re-authoring the
-        // settings cannot leave the stack pointing at freed entries.
+        // What the triggers carry between frames, parallel to the action states and never seen by scripts.
+        struct FActionTriggerState
+        {
+            bool  bRawDown = false;
+            bool  bToggledOn = false;
+            float SinceLastPress = -1.0f;
+            float RepeatTimer = 0.0f;
+            float BufferRemaining = 0.0f;
+        };
+        TVector<FActionTriggerState>& GetMutableTriggerStates() { return TriggerStates; }
+
+        // Clears a buffered press so it acts once, returning whether there was one.
+        RUNTIME_API bool ConsumeBufferedPress(int32 ActionIndex);
+
+        // Pushed mapping layers, innermost last, held by name so re-authoring the settings cannot leave a dangling entry.
         const TVector<FName>& GetInputLayers() const { return InputLayers; }
 
-        // Re-pushing a layer already on the stack moves it to the top rather than duplicating it, so a
-        // double push followed by one pop cannot leave it stuck on.
+        // Re-pushing a layer moves it to the top instead of stacking it, so a double push and one pop never leave it on.
         RUNTIME_API void PushInputLayer(FName Name);
         RUNTIME_API bool PopInputLayer(FName Name);
         RUNTIME_API bool HasInputLayer(FName Name) const;
@@ -111,21 +129,20 @@ namespace Lumina
         uint32 GetActionsSerial() const { return ActionsSerial; }
         void   SetActionsSerial(uint32 InSerial) { ActionsSerial = InSerial; }
 
-        // Discrete events that arrived this frame, in order. Populated by OnEvent, drained (read) by the
-        // script OnInput dispatch during the world update, cleared in EndFrame.
+        // This frame's discrete events in order, read by the script OnInput dispatch and cleared in EndFrame.
         const TVector<SInputEvent>& GetFrameEvents() const { return FrameEvents; }
 
-        RUNTIME_API void EndFrame(double DeltaSeconds);
+        RUNTIME_API void EndFrame();
 
         // Drops state when focus is taken so a release we never saw doesn't latch.
         RUNTIME_API void ResetState();
 
-        int  GetCachedModifierState() const { return CachedModifierState; }
-        void SetCachedModifierState(int Mods) { CachedModifierState = Mods; }
-
     private:
 
         bool IsGameInputGated() const { return InputMode == EInputMode::UI; }
+
+        // Mouse events carry no modifiers, so their chord comes from the keys held when they arrive.
+        void AddHeldModifiers(SInputEvent& Event) const;
 
         EInputMode  InputMode = EInputMode::Game;
         EMouseMode  MouseMode = EMouseMode::Normal;
@@ -136,7 +153,6 @@ namespace Lumina
         int32  RectMaxY = 0;
         uint32 RTWidth = 0;
         uint32 RTHeight = 0;
-        int    CachedModifierState = 0;
 
         double MouseX = 0.0;
         double MouseY = 0.0;
@@ -144,12 +160,15 @@ namespace Lumina
         double MouseDeltaX = 0.0;
         double MouseDeltaY = 0.0;
 
-        TArray<float, (uint32)EMouseKey::Num>               MouseKeyDownTimes = {};
-        TArray<Input::EKeyState, (uint32)EKey::Num>         KeyStates = {};
-        TArray<Input::EMouseState, (uint32)EMouseKey::Num>  MouseStates = {};
+        TArray<Input::EButtonState, (uint32)EKey::Num>      KeyStates = {};
+        TArray<Input::EButtonState, (uint32)EMouseKey::Num> MouseStates = {};
+
+        FGamepadState Gamepad;
+        EInputDevice  LastUsedDevice = EInputDevice::KeyboardMouse;
 
         TVector<FName>                 InputLayers;
         TVector<SInputActionState>     ActionStates;
+        TVector<FActionTriggerState>   TriggerStates;
         uint32                         ActionsSerial = 0;
         TVector<SInputEvent>           FrameEvents;
     };

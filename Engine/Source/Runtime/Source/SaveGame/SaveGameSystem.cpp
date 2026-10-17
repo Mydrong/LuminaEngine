@@ -6,72 +6,30 @@
 
 namespace Lumina
 {
-    namespace
-    {
-        ECS::FEventDispatcher* WorldDispatcher(CWorld* World)
-        {
-            if (World == nullptr)
-            {
-                return nullptr;
-            }
-            ECS::FEventDispatcher* const* Found = ECS::GetWorldRegistry(*World).Ctx().Find<ECS::FEventDispatcher*>();
-            return Found != nullptr ? *Found : nullptr;
-        }
-    }
-
     void SSaveGameSystem::Configure()
     {
         // Paused too, since a pause menu is where a player usually saves and loads.
         RequireUpdate(EUpdateStage::FrameEnd, EUpdatePriority::Low);
         RequireUpdate(EUpdateStage::Paused, EUpdatePriority::Low);
+        Requests = ReadsEvent<SSaveGameRequestEvent>();
+        SendsEvent<SSaveGameCompletedEvent>();
     }
 
-    void SSaveGameSystem::OnStartup()
+    bool SSaveGameSystem::HasWork(const SSystemContext& Context)
     {
-        if (ECS::FEventDispatcher* Dispatcher = WorldDispatcher(GetWorld()))
+        return Context.HasUnreadEvents(Requests);
+    }
+
+    void SSaveGameSystem::OnUpdate(const SSystemContext& Context)
+    {
+        // A restore spawns and destroys, but nothing commits until this update returns, so the range holds still.
+        for (const SSaveGameRequestEvent& Request : Context.ReadEvents(Requests))
         {
-            Dispatcher->Sink<SSaveGameRequestEvent>().Connect<&SSaveGameSystem::OnRequest>(this);
-            bConnected = true;
+            Run(Context, Request);
         }
     }
 
-    void SSaveGameSystem::OnTeardown()
-    {
-        if (ECS::FEventDispatcher* Dispatcher = bConnected ? WorldDispatcher(GetWorld()) : nullptr)
-        {
-            Dispatcher->Sink<SSaveGameRequestEvent>().Disconnect<&SSaveGameSystem::OnRequest>(this);
-        }
-        bConnected = false;
-        FScopeLock Lock(PendingLock);
-        Pending.clear();
-    }
-
-    bool SSaveGameSystem::HasWork(EUpdateStage Stage)
-    {
-        FScopeLock Lock(PendingLock);
-        return !Pending.empty();
-    }
-
-    void SSaveGameSystem::OnRequest(const SSaveGameRequestEvent& Request)
-    {
-        FScopeLock Lock(PendingLock);
-        Pending.push_back(Request);
-    }
-
-    void SSaveGameSystem::OnUpdate()
-    {
-        TVector<SSaveGameRequestEvent> Requests;
-        {
-            FScopeLock Lock(PendingLock);
-            Requests.swap(Pending);
-        }
-        for (const SSaveGameRequestEvent& Request : Requests)
-        {
-            Run(Request);
-        }
-    }
-
-    void SSaveGameSystem::Run(const SSaveGameRequestEvent& Request)
+    void SSaveGameSystem::Run(const SSystemContext& Context, const SSaveGameRequestEvent& Request)
     {
         CWorld* World = GetWorld();
 
@@ -99,9 +57,6 @@ namespace Lumina
             Done.bSucceeded = !Loaded->HasWorldState(World) || Loaded->RestoreWorld(World);
         }
 
-        if (ECS::FEventDispatcher* Dispatcher = WorldDispatcher(World))
-        {
-            Dispatcher->Trigger<SSaveGameCompletedEvent>(Done);
-        }
+        Context.SendEvent(Done);
     }
 }

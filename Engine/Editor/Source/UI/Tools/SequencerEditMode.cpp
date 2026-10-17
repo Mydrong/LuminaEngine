@@ -6,6 +6,7 @@
 #include "Core/Object/ObjectCore.h"
 #include "Core/Object/Package/Package.h"
 #include "Tools/UI/ImGui/ImGuiDesignIcons.h"
+#include "Tools/UI/ImGui/ImGuiDragDrop.h"
 #include "Tools/UI/ImGui/ImGuiX.h"
 #include "Assets/AssetTypes/Audio/SoundBase.h"
 #include "World/World.h"
@@ -14,6 +15,7 @@
 #include "World/Entity/Components/NameComponent.h"
 #include "World/Entity/Components/TransformComponent.h"
 #include "imgui.h"
+#include "imgui_internal.h"
 
 namespace Lumina
 {
@@ -308,14 +310,23 @@ namespace Lumina
     int32 FSequencerEditMode::AddBindingFromSelection(CWorld* World)
     {
         const ECS::FEntity Selected = FindSelectedEntity(World);
-        if (Selected == ECS::NullEntity || !Sequence.IsValid())
+        if (Selected == ECS::NullEntity)
         {
             ImGuiX::Notifications::NotifyWarning("Select an entity in the world to bind it.");
             return Constants::kIndexNone;
         }
+        return AddBinding(World, Selected);
+    }
+
+    int32 FSequencerEditMode::AddBinding(CWorld* World, ECS::FEntity Entity)
+    {
+        if (!Sequence.IsValid() || !World->IsValidEntity(Entity))
+        {
+            return Constants::kIndexNone;
+        }
 
         FName EntityName = "Entity";
-        if (const SNameComponent* NameComponent = World->TryGetComponent<SNameComponent>(Selected))
+        if (const SNameComponent* NameComponent = World->TryGetComponent<SNameComponent>(Entity))
         {
             EntityName = NameComponent->Name;
         }
@@ -942,6 +953,20 @@ namespace Lumina
             PendingRemoveTrack = Constants::kIndexNone;
         }
 
+        // An entity dragged from the outliner anywhere onto the panel becomes a binding, peeked first so asset drags do not highlight it.
+        const DragDrop::FPayload* Peek = DragDrop::PeekPayload();
+        if (Peek != nullptr && Peek->Kind == DragDrop::EPayloadKind::Entity
+            && ImGui::BeginDragDropTargetCustom(ImGui::GetCurrentWindow()->InnerRect, ImGui::GetID("##BindEntityDrop")))
+        {
+            CWorld* SourceWorld = nullptr;
+            ECS::FEntity Dropped = ECS::NullEntity;
+            if (DragDrop::AcceptEntity(&SourceWorld, &Dropped) && SourceWorld == World)
+            {
+                SelectedBinding = AddBinding(World, Dropped);
+            }
+            ImGui::EndDragDropTarget();
+        }
+
         ImGui::End();
     }
 
@@ -1299,7 +1324,7 @@ namespace Lumina
         {
             SelectedBinding = AddBindingFromSelection(World);
         }
-        ImGuiX::TextTooltip("Add the selected world entity as a possessed binding.");
+        ImGuiX::TextTooltip("Add the selected world entity as a possessed binding, or drag one from the outliner onto this panel.");
 
         ImGui::SameLine();
         ImGui::BeginDisabled(SelectedBinding == Constants::kIndexNone);

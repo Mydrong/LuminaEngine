@@ -14,9 +14,9 @@
 #include "Config/NavigationSettings.h"
 #include "World/Entity/Systems/SignificanceSystem.h"
 #include "Assets/AssetTypes/Mesh/StaticMesh/StaticMesh.h"
-#include "Assets/AssetTypes/Physics/CollisionShape.h"
+#include "Assets/AssetTypes/Mesh/MeshCollision.h"
 #include "Core/Console/ConsoleVariable.h"
-#include "Physics/CollisionShapeGen.h"
+#include "Physics/CollisionGen.h"
 #include "Renderer/MeshData.h"
 #include "Renderer/Vertex.h"
 #include "TaskSystem/TaskSystem.h"
@@ -43,7 +43,7 @@ namespace Lumina
         RequireUpdate(EUpdateStage::FrameStart);
         RequireUpdate(EUpdateStage::Paused);
         Writes<SNavMeshComponent>();
-        Reads<SRigidBodyComponent, SBoxColliderComponent, SSphereColliderComponent, SMeshColliderComponent, SCapsuleColliderComponent, SCylinderColliderComponent, SCharacterPhysicsComponent, STerrainColliderComponent, STerrainComponent, STransformComponent, SStaticMeshComponent, SDynamicMeshColliderComponent, SDynamicMeshComponent, SCompoundColliderComponent, SNavModifierComponent, SNavLinkComponent, SFoliageComponent, SCollisionShapeComponent>();
+        Reads<SRigidBodyComponent, SBoxColliderComponent, SSphereColliderComponent, SMeshColliderComponent, SCapsuleColliderComponent, SCylinderColliderComponent, SCharacterPhysicsComponent, STerrainColliderComponent, STerrainComponent, STransformComponent, SStaticMeshComponent, SDynamicMeshColliderComponent, SDynamicMeshComponent, SCompoundColliderComponent, SNavModifierComponent, SNavLinkComponent, SFoliageComponent>();
     }
 
     // NOLINTBEGIN(bugprone-throwing-static-initialization)
@@ -96,7 +96,7 @@ namespace Lumina
             }
         }
 
-        void DrawNavDebug(const FSystemContext& Context, SNavMeshComponent& Comp)
+        void DrawNavDebug(const SSystemContext& Context, SNavMeshComponent& Comp)
         {
             const FNavMesh& Mesh = *Comp.Runtime.Mesh;
             const FVector3 Lift(0.0f, CVarNavDebugLift.GetValue(), 0.0f);
@@ -274,7 +274,7 @@ namespace Lumina
         // Tag-bit packed into cache key so one entity may track one collider of each type.
         enum class ENavColliderType : uint8 { Box = 0, Sphere = 1, Mesh = 2, CharacterCapsule = 3, Capsule = 4, Cylinder = 5, Terrain = 6, TriangleSoup = 7, DynamicMesh = 8, AreaVolume = 9, OffMeshLink = 10, Foliage = 11 };
 
-        // Compound children reuse the primitive types, so their sub-indices sit above a collision shape asset's.
+        // Compound children reuse the primitive types, so their sub-indices sit above any mesh collision primitive's.
         constexpr uint32 CompoundSubIndexBase = 1u << 23;
 
         FORCEINLINE uint64 PackSourceKey(ECS::FEntity E, ENavColliderType T)
@@ -866,7 +866,7 @@ namespace Lumina
 
         // One source per collision piece, so nav sees the same decomposed shape physics does. Emit takes the key type and sub-index.
         template<typename FnEmit>
-        void ForEachCollisionShapePrim(const CCollisionShape& Asset, const FMatrix4& ColliderWorld, FnEmit&& Emit)
+        void ForEachMeshCollisionPrim(const SMeshCollision& Asset, const FMatrix4& ColliderWorld, FnEmit&& Emit)
         {
             if (Asset.IsConcave())
             {
@@ -983,9 +983,9 @@ namespace Lumina
             }
 
             auto Children = MakeShared<TVector<FNavSourcePrim>>();
-            if (const CCollisionShape* Shape = Type.GetDefaultCollisionShape())
+            if (const SMeshCollision* Shape = Type.GetCollision())
             {
-                ForEachCollisionShapePrim(*Shape, FMatrix4(1.0f), [&](ENavColliderType, uint32, FNavSourceEntry&& Entry)
+                ForEachMeshCollisionPrim(*Shape, FMatrix4(1.0f), [&](ENavColliderType, uint32, FNavSourceEntry&& Entry)
                 {
                     Template.LocalMin = Math::Min(Template.LocalMin, Entry.AABBMin);
                     Template.LocalMax = Math::Max(Template.LocalMax, Entry.AABBMax);
@@ -1019,7 +1019,7 @@ namespace Lumina
             for (const SFoliageType& Type : Foliage.Types)
             {
                 Hash::HashCombine(Seed, (size_t)Type.bEnableCollision);
-                const CCollisionShape* Shape = Type.GetDefaultCollisionShape();
+                const SMeshCollision* Shape = Type.GetCollision();
                 Hash::HashCombine(Seed, (size_t)(uintptr_t)Shape);
                 if (Shape != nullptr)
                 {
@@ -1114,7 +1114,7 @@ namespace Lumina
         // A null cache leaves foliage out, for the change scan that diffs it per entity instead.
         // Every source of one type, or only Only's, so the same per-type code serves a full walk and a single entity.
         template<typename TComponent, typename FnEmit>
-        void ForEachNavSource(const FSystemContext& Context, const ECS::FEntity* Only, FnEmit&& Emit)
+        void ForEachNavSource(const SSystemContext& Context, const ECS::FEntity* Only, FnEmit&& Emit)
         {
             if (Only != nullptr)
             {
@@ -1136,7 +1136,7 @@ namespace Lumina
         }
 
         template<typename FnEmit>
-        void ForEachFoliageSource(const FSystemContext& Context, const ECS::FEntity* Only, FnEmit&& Emit)
+        void ForEachFoliageSource(const SSystemContext& Context, const ECS::FEntity* Only, FnEmit&& Emit)
         {
             if (Only != nullptr)
             {
@@ -1154,7 +1154,7 @@ namespace Lumina
             }
         }
 
-        void CollectNavSources(const FSystemContext& Context, const FVector3& BakeMin, const FVector3& BakeMax, TVector<FNavSourceEntry>& Out, FNavFoliageCache* FoliageCache, const ECS::FEntity* Only = nullptr)
+        void CollectNavSources(const SSystemContext& Context, const FVector3& BakeMin, const FVector3& BakeMax, TVector<FNavSourceEntry>& Out, FNavFoliageCache* FoliageCache, const ECS::FEntity* Only = nullptr)
         {
 
             // A simulated body is loose debris rather than level geometry, and baking it would rebuild tiles every time it settles.
@@ -1197,32 +1197,6 @@ namespace Lumina
                 Out.push_back(std::move(Entry));
             });
 
-            // One source per collision piece, so nav sees the same decomposed shape physics does.
-            ForEachNavSource<SCollisionShapeComponent>(Context, Only, [&](ECS::FEntity E, SCollisionShapeComponent& CSC, STransformComponent& X)
-            {
-                if (!CSC.bAffectsNavigation || IsSimulated(E))
-                {
-                    return;
-                }
-
-                const CCollisionShape* Asset = CSC.CollisionShape.Get();
-                if (Asset == nullptr || !Asset->HasCollision())
-                {
-                    return;
-                }
-
-                const FMatrix4 ColliderWorld = ColliderToWorld(X,
-                                                               CSC.TranslationOffset, CSC.RotationOffset);
-
-                const uint64 AssetContentId = MakeContentId(Asset, Asset->TriangleIndices.size(), Asset->Primitives.size());
-                ForEachCollisionShapePrim(*Asset, ColliderWorld, [&](ENavColliderType KeyType, uint32 SubIndex, FNavSourceEntry&& Entry)
-                {
-                    Entry.Key = PackSourceKey(E, KeyType, SubIndex);
-                    Entry.ContentId = AssetContentId;
-                    Out.push_back(std::move(Entry));
-                });
-            });
-
             // Painted instances are world space, and erasing one shifts or swaps indices, which the detector sees as a move.
             if (FoliageCache != nullptr)
             {
@@ -1262,11 +1236,11 @@ namespace Lumina
                 if (!Mesh || Mesh->GetMeshResource().bSkinnedMesh) return;
 
                 // The mesh's simplified collision replaces its render triangles, as it does for the physics body.
-                if (const CCollisionShape* Asset = Mesh->GetDefaultCollisionShape())
+                if (const SMeshCollision* Collision = Mesh->GetCollision())
                 {
                     const FMatrix4 ColliderWorld = ColliderToWorld(X, MC.TranslationOffset, MC.RotationOffset);
-                    const uint64 AssetContentId = MakeContentId(Asset, Asset->TriangleIndices.size(), Asset->Primitives.size());
-                    ForEachCollisionShapePrim(*Asset, ColliderWorld, [&](ENavColliderType KeyType, uint32 SubIndex, FNavSourceEntry&& Entry)
+                    const uint64 AssetContentId = MakeContentId(Collision, Collision->TriangleIndices.size(), Collision->Primitives.size());
+                    ForEachMeshCollisionPrim(*Collision, ColliderWorld, [&](ENavColliderType KeyType, uint32 SubIndex, FNavSourceEntry&& Entry)
                     {
                         Entry.Key = PackSourceKey(E, KeyType, SubIndex);
                         Entry.ContentId = AssetContentId;
@@ -1576,7 +1550,7 @@ namespace Lumina
 
     namespace
     {
-        FNavSourceTracker* FindSourceTracker(const FSystemContext& Context)
+        FNavSourceTracker* FindSourceTracker(const SSystemContext& Context)
         {
             TUniquePtr<FNavSourceTracker>* Holder = Context.GetRegistry().Ctx().Find<TUniquePtr<FNavSourceTracker>>();
             return Holder != nullptr ? Holder->get() : nullptr;
@@ -1645,7 +1619,7 @@ namespace Lumina
             Sources.SweepCursor = 0;
         }
 
-        void SeedSources(const FSystemContext& Context, FNavSourceTracker& Sources)
+        void SeedSources(const SSystemContext& Context, FNavSourceTracker& Sources)
         {
             TVector<FNavSourceEntry> All;
             CollectNavSources(Context, FVector3(-kUnbounded), FVector3(kUnbounded), All, &Sources.Foliage);
@@ -1661,7 +1635,7 @@ namespace Lumina
         }
 
         // Diffs what the entity contributes now against what was recorded, and logs the footprint of anything that changed.
-        void RefreshSourceEntity(const FSystemContext& Context, FNavSourceTracker& Sources, ECS::FEntity Entity)
+        void RefreshSourceEntity(const SSystemContext& Context, FNavSourceTracker& Sources, ECS::FEntity Entity)
         {
             ++Sources.Refreshed;
             TVector<FNavSourceEntry>& Current = Sources.EntryScratch;
@@ -1744,7 +1718,7 @@ namespace Lumina
 
         // Spread over the workers since a streamed world carries tens of thousands, and only a version not seen last poll reaches IsStale.
         template<typename T, typename FnVersion, typename FnStale>
-        void QueueStaleSources(const FSystemContext& Context, FNavSourceTracker& Sources, TVector<FPolledVersion>& Polled, THashSet<ECS::FEntity>& Work,
+        void QueueStaleSources(const SSystemContext& Context, FNavSourceTracker& Sources, TVector<FPolledVersion>& Polled, THashSet<ECS::FEntity>& Work,
                                FnVersion&& Version, FnStale&& IsStale)
         {
             const ECS::TComponentStorage<T> Storage = Context.GetRegistry().FindStorage<T>();
@@ -1798,7 +1772,7 @@ namespace Lumina
         }
 
         // Content that changes without a move or a signal, a sculpted heightmap or a re-committed dynamic mesh, polled by version.
-        void QueueVersionedSources(const FSystemContext& Context, FNavSourceTracker& Sources, THashSet<ECS::FEntity>& Work)
+        void QueueVersionedSources(const SSystemContext& Context, FNavSourceTracker& Sources, THashSet<ECS::FEntity>& Work)
         {
             const ECS::FRegistry& Registry = Context.GetRegistry();
             auto RecordedContent = [&Sources](uint64 Key, uint64 ContentId)
@@ -1845,7 +1819,7 @@ namespace Lumina
                 });
         }
 
-        void UpdateSources(const FSystemContext& Context, FNavSourceTracker& Sources)
+        void UpdateSources(const SSystemContext& Context, FNavSourceTracker& Sources)
         {
             LUMINA_PROFILE_SCOPE();
             ECS::FRegistry& Registry = Context.GetRegistry();
@@ -1908,7 +1882,7 @@ namespace Lumina
         }
 
         // What lies under a box, read from the index, with terrain tessellated only inside it.
-        void GatherSourcePrims(const FSystemContext& Context, const FNavSourceTracker& Sources, const FVector3& Min, const FVector3& Max, float CellSize, TVector<FNavSourcePrim>& Out,
+        void GatherSourcePrims(const SSystemContext& Context, const FNavSourceTracker& Sources, const FVector3& Min, const FVector3& Max, float CellSize, TVector<FNavSourcePrim>& Out,
                                bool bAnnotationsOnly = false)
         {
             Sources.Octree.Query(Min, Max, [&](uint32 Index, const FVector3&, const FVector3&)
@@ -1946,7 +1920,7 @@ namespace Lumina
         FORCEINLINE uint64 PackTileKey(int32 TX, int32 TY) { return ((uint64)(uint32)TY << 32) | (uint32)TX; }
 
         // One walk feeds geometry and annotations, so a full bake and a hot rebake see the same authored set.
-        void SnapshotBuildInput(const FSystemContext& Context, const FNavSourceTracker& Sources, SNavMeshComponent& Comp, FNavBuildInput& Out, TVector<FNavSourcePrim>& OutPrims)
+        void SnapshotBuildInput(const SSystemContext& Context, const FNavSourceTracker& Sources, SNavMeshComponent& Comp, FNavBuildInput& Out, TVector<FNavSourcePrim>& OutPrims)
         {
             Out.Settings  = Comp.Settings;
             Out.BoundsMin = Comp.Center - Comp.GetWorldExtents();
@@ -1959,7 +1933,7 @@ namespace Lumina
             }
         }
 
-        void TickComponent(const FSystemContext& Context, ECS::FEntity Entity, SNavMeshComponent& Comp, FNavSourceTracker& Sources)
+        void TickComponent(const SSystemContext& Context, ECS::FEntity Entity, SNavMeshComponent& Comp, FNavSourceTracker& Sources)
         {
             // Held until the mesh can take them, so a change made while it baked or hydrated still rebakes its tiles.
             if (Comp.bDynamicRebuild && !Sources.Changes.empty())
@@ -2545,7 +2519,7 @@ namespace Lumina
             return Agent.IsNone() ? Fallback : nullptr;
         }
 
-        FNavMesh* FirstReadyNavMesh(const FSystemContext& Context, FName Agent = FName())
+        FNavMesh* FirstReadyNavMesh(const SSystemContext& Context, FName Agent = FName())
         {
             auto View = Context.CreateView<SNavMeshComponent>();
             return FindReadyNavMesh(View, Agent);
@@ -2565,9 +2539,8 @@ namespace Lumina
         }
     }
 
-    void SNavMeshSystem::OnStartup()
+    void SNavMeshSystem::OnStartup(const SSystemContext& Context)
     {
-        const FSystemContext& Context = GetContext();
 
         LUMINA_PROFILE_SCOPE();
 
@@ -2584,7 +2557,7 @@ namespace Lumina
         }
         WatchSourceComponents<SBoxColliderComponent, SSphereColliderComponent, SMeshColliderComponent, SCapsuleColliderComponent, SCylinderColliderComponent,
             SCharacterPhysicsComponent, STerrainColliderComponent, STerrainComponent, SStaticMeshComponent, SDynamicMeshColliderComponent, SDynamicMeshComponent,
-            SCompoundColliderComponent, SNavModifierComponent, SNavLinkComponent, SFoliageComponent, SCollisionShapeComponent, SRigidBodyComponent>(Registry);
+            SCompoundColliderComponent, SNavModifierComponent, SNavLinkComponent, SFoliageComponent, SRigidBodyComponent>(Registry);
 
         FNavSourceTracker& Sources = *FindSourceTracker(Context);
         UpdateSources(Context, Sources);
@@ -2596,9 +2569,8 @@ namespace Lumina
         }
     }
 
-    void SNavMeshSystem::OnUpdate()
+    void SNavMeshSystem::OnUpdate(const SSystemContext& Context)
     {
-        const FSystemContext& Context = GetContext();
 
         LUMINA_PROFILE_SCOPE();
         FNavSourceTracker* Sources = FindSourceTracker(Context);
@@ -2623,9 +2595,8 @@ namespace Lumina
         }
     }
 
-    void SNavMeshSystem::OnTeardown()
+    void SNavMeshSystem::OnTeardown(const SSystemContext& Context)
     {
-        const FSystemContext& Context = GetContext();
 
         LUMINA_PROFILE_SCOPE();
         auto View = Context.CreateView<SNavMeshComponent>();
@@ -2656,7 +2627,7 @@ namespace Lumina
         }
     }
 
-    void SNavMeshSystem::RequestBake(const FSystemContext& Context, SNavMeshComponent& Comp)
+    void SNavMeshSystem::RequestBake(const SSystemContext& Context, SNavMeshComponent& Comp)
     {
         if (Comp.Runtime.ActiveBake)
         {
@@ -2717,12 +2688,12 @@ namespace Lumina
 
     namespace Nav
     {
-        FNavMesh* GetReadyNavMesh(const FSystemContext& Context, FName Agent)
+        FNavMesh* GetReadyNavMesh(const SSystemContext& Context, FName Agent)
         {
             return FirstReadyNavMesh(Context, Agent);
         }
 
-        bool FindPath(const FSystemContext& Context, const FVector3& Start, const FVector3& End, const FNavQueryFilter& Filter, FNavPath& Out, FName Agent)
+        bool FindPath(const SSystemContext& Context, const FVector3& Start, const FVector3& End, const FNavQueryFilter& Filter, FNavPath& Out, FName Agent)
         {
             FNavMesh* Mesh = FirstReadyNavMesh(Context, Agent);
             if (!Mesh)
@@ -2735,13 +2706,13 @@ namespace Lumina
             return Mesh->FindPath(Start, End, Filter, Out);
         }
 
-        bool ProjectPoint(const FSystemContext& Context, const FVector3& World, const FVector3& Extents, const FNavQueryFilter& Filter, FVector3& Out, FName Agent)
+        bool ProjectPoint(const SSystemContext& Context, const FVector3& World, const FVector3& Extents, const FNavQueryFilter& Filter, FVector3& Out, FName Agent)
         {
             FNavMesh* Mesh = FirstReadyNavMesh(Context, Agent);
             return Mesh && Mesh->ProjectPoint(World, Extents, Filter, Out);
         }
 
-        bool Raycast(const FSystemContext& Context, const FVector3& Start, const FVector3& End, const FNavQueryFilter& Filter, SNavRaycastResult& Out, FName Agent)
+        bool Raycast(const SSystemContext& Context, const FVector3& Start, const FVector3& End, const FNavQueryFilter& Filter, SNavRaycastResult& Out, FName Agent)
         {
             FNavMesh* Mesh = FirstReadyNavMesh(Context, Agent);
             return Mesh && Mesh->Raycast(Start, End, Filter, Out);

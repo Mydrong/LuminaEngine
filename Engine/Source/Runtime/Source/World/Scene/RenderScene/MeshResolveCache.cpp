@@ -434,7 +434,7 @@ namespace Lumina
 
         const FMeshResource& Resource = Mesh->GetMeshResource();
 
-        const SAABB& LocalBounds = Mesh->GetAABB();
+        const SAABB LocalBounds = Mesh->GetCullBounds();
         Out.LocalCenter = (LocalBounds.Min + LocalBounds.Max) * 0.5f;
         // Degenerate bounds (geometry not resident) collapse to a zero sphere rather than a NaN radius.
         Out.LocalRadius = (LocalBounds.Max.x < LocalBounds.Min.x)

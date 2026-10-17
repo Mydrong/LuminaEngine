@@ -58,3 +58,4 @@
 
 // Tracy costs 165ms in any translation unit that reaches it, and 26 of 28 unity files do.
 #include "Core/Profiler/Profile.h"
+#include "Core/Object/ObjectCore.h"

@@ -262,7 +262,7 @@ TEST(ObjectReinstancer, AnOriginalWhoseOnlyHolderMovesDiesAfterTheWalk)
 
     FStrongTestProvider Provider;
     Provider.Held = NewObject(Old, nullptr, NAME_None, FGuid::New(), OF_Transient);
-    const FObjectHandle OriginalHandle = GObjectArray.GetHandleByObject(Provider.Held.Get());
+    const FObjectHandle OriginalHandle = Object::Internal::GetHandleByObject(Provider.Held.Get());
     *FindInt(Provider.Held.Get(), "Value") = 9;
     FObjectReferenceProviders::Register(&Provider);
 
@@ -277,7 +277,7 @@ TEST(ObjectReinstancer, AnOriginalWhoseOnlyHolderMovesDiesAfterTheWalk)
     ASSERT_NE(Provider.Held.Get(), nullptr);
     EXPECT_EQ(Provider.Held->GetClass(), New);
     EXPECT_EQ(*FindInt(Provider.Held.Get(), "Value"), 9);
-    EXPECT_EQ(GObjectArray.ResolveHandle(OriginalHandle), Provider.Held.Get()) << "the original handle redirects to the replacement";
+    EXPECT_EQ(Object::Internal::ResolveHandle(OriginalHandle), Provider.Held.Get()) << "the original handle redirects to the replacement";
 }
 
 extern "C" void* LuminaSharp_PinObject(void* Object);
@@ -307,7 +307,7 @@ TEST(ObjectReinstancer, AManagedPinMovesOntoTheReplacement)
     EXPECT_EQ(Held->Get()->GetClass(), New);
     EXPECT_EQ(*FindInt(Held->Get(), "Value"), 5);
 
-    const FObjectHandle Replacement = GObjectArray.GetHandleByObject(Held->Get());
+    const FObjectHandle Replacement = Object::Internal::GetHandleByObject(Held->Get());
     LuminaSharp_UnpinObject(Pin);
-    EXPECT_EQ(GObjectArray.ResolveHandle(Replacement), nullptr) << "the replacement outlived the only reference to it";
+    EXPECT_EQ(Object::Internal::ResolveHandle(Replacement), nullptr) << "the replacement outlived the only reference to it";
 }

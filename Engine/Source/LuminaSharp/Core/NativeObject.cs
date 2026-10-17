@@ -10,7 +10,7 @@ namespace LuminaSharp;
 public unsafe class NativeObject : IDisposable
 {
     private IntPtr RawHandle;            // pointer captured at construction; the fallback when untracked
-    private int ObjectIndex = -1;        // GObjectArray slot, or -1 if the object isn't array-tracked
+    private int ObjectIndex = -1;
     private int ObjectGeneration;        // slot generation at capture; a free/reuse bumps it -> stale
     private byte* EntryPtr;              // the slot's array entry, which outlives every object in it
     private ObjectReference? References; // set on the canonical wrapper, absent on a natively owned Scriptable

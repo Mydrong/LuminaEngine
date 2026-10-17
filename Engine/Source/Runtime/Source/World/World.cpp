@@ -3,7 +3,6 @@
 #include "World/ECS/Registry.h"
 #include "World/ECS/ECSReferenceProvider.h"
 #include "Networking/NetRealm.h"
-#include "World/ECS/EventDispatcher.h"
 #include <cmath>
 #include <utility>
 #include "WorldManager.h"
@@ -248,6 +247,7 @@ namespace Lumina
 
     CWorld::CWorld()
         : CommandBus(EntityRegistry)
+        , EventQueues(EntityRegistry)
         , MessageBus(EntityRegistry, CommandBus)
         , SystemContext(this)
         , LineBatcherComponent(nullptr)
@@ -362,8 +362,9 @@ namespace Lumina
 
         if (RegistryPending.NumEntities() != 0)
         {
-            // Pending commands name entities of the registry being swapped out.
+            // Pending commands and events name entities of the registry being swapped out.
             CommandBus.Discard();
+            EventQueues.Clear();
             EntityRegistry.Swap(RegistryPending);
         }
         RegistryPending = {};
@@ -393,7 +394,7 @@ namespace Lumina
             NetRuntime->OnWorldEntitiesLoaded(this);
         }
 
-        EntityRegistry.Ctx().Emplace<ECS::FEventDispatcher*>(&SingletonDispatcher);
+        EntityRegistry.Ctx().Emplace<ECS::FEventQueues*>(&EventQueues);
 
         ConnectComponentAccessValidators(EntityRegistry);
 
@@ -430,7 +431,7 @@ namespace Lumina
         }
         // Emplaced even when null so ctx().get consumers find the key and null-check it.
         EntityRegistry.Ctx().Emplace<Physics::IPhysicsScene*>(PhysicsScene.get());
-        EntityRegistry.Ctx().Emplace<FSystemContext*>(&SystemContext);
+        EntityRegistry.Ctx().Emplace<SSystemContext*>(&SystemContext);
         EntityRegistry.Ctx().Emplace<CWorld*>(this);
 
         // A world entity owns its subtree, so destroying one takes its descendants along.
@@ -479,7 +480,6 @@ namespace Lumina
         EntityRegistry.GetSignals<SEntityScriptComponent>().OnDestroy   .Connect<&ThisClass::OnCSharpScriptComponentDestroyed>(this);
         EntityRegistry.OnEntityDestroyed()                              .Connect<&ThisClass::OnCSharpScriptComponentDestroyed>(this);
         EntityRegistry.GetSignals<SWidgetComponent>().OnDestroy         .Connect<&ThisClass::OnWidgetComponentDestroyed>(this);
-        SystemContext.EventSink<FSwitchActiveCameraEvent>()             .Connect<&ThisClass::OnChangeCameraEvent>(this);
         EntityRegistry.GetSignals<SStaticMeshComponent>().OnConstruct   .Connect<&MarkMeshResolveDirty<SStaticMeshComponent>>();
         EntityRegistry.GetSignals<SStaticMeshComponent>().OnUpdate      .Connect<&MarkMeshResolveDirty<SStaticMeshComponent>>();
         EntityRegistry.GetSignals<SStaticMeshComponent>().OnDestroy     .Connect<&MarkMeshRemoved<SStaticMeshComponent>>();
@@ -532,7 +532,7 @@ namespace Lumina
         {
            if (Camera.bAutoActivate)
            {
-               SingletonDispatcher.Trigger<FSwitchActiveCameraEvent>(FSwitchActiveCameraEvent{Entity});
+               SetActiveCamera(Entity);
            }
         });
 
@@ -635,6 +635,9 @@ namespace Lumina
 
         if (Stage == EUpdateStage::FrameStart)
         {
+            // Before the pause check, so what was sent last frame still ages out while the game is paused.
+            EventQueues.Advance();
+
             RealDeltaTime = Context.GetDeltaTime();
             DeltaTime = RealDeltaTime * GetDefaultWorldSettings().DeltaTimeScale;
             TimeSinceCreation += DeltaTime;
@@ -1227,11 +1230,6 @@ namespace Lumina
         return SCameraSystem::GetActiveCameraEntity(const_cast<ECS::FRegistry&>(EntityRegistry));
     }
 
-    void CWorld::OnChangeCameraEvent(const FSwitchActiveCameraEvent& Event)
-    {
-        SetActiveCamera(Event.NewActiveEntity);
-    }
-
     void CWorld::SetTimeDilation(float Dilation)
     {
         GetDefaultWorldSettings().DeltaTimeScale = Math::Max(Dilation, 0.0f);
@@ -1585,6 +1583,12 @@ namespace Lumina
                 continue;
             }
 
+            // A declared event read means a consumer exists, so producers that skip unheard events keep filling that queue.
+            for (const uint32 TypeID : System->GetAccess().Reads)
+            {
+                EventQueues.AddInterest((ECS::FComponentTypeID)TypeID);
+            }
+
             const FUpdatePriorityList& Priorities = System->GetPriorities();
             for (uint8 i = 0; i < (uint8)EUpdateStage::Max; ++i)
             {
@@ -1917,7 +1921,7 @@ namespace Lumina
         EntityRegistry.EmplaceOrReplace<FNeedsTransformUpdate>(Entity);
     }
 
-    void CWorld::TickSystems(FSystemContext& Context)
+    void CWorld::TickSystems(SSystemContext& Context)
     {
         LUMINA_PROFILE_SCOPE();
 
@@ -1936,7 +1940,7 @@ namespace Lumina
             // A system that declared its access shares the frame, so its structural changes wait for the batch to end.
             const ECS::FCommandBus::FDeferScope Defer(!S.System->GetAccess().bExclusive);
             SetExecutingSystemAccess(&S.System->GetAccess());
-            S.System->OnUpdate();
+            S.System->OnUpdate(Context);
             SetExecutingSystemAccess(nullptr);
         };
 
@@ -1949,7 +1953,7 @@ namespace Lumina
         WithWork.resize(Stage.size(), 0);
         for (size_t Index = 0; Index < Stage.size(); ++Index)
         {
-            const uint8 bHasWork = Stage[Index].System->HasWork(StageId) ? 1 : 0;
+            const uint8 bHasWork = Stage[Index].System->HasWork(Context) ? 1 : 0;
             bWorkChanged |= WithWork[Index] != bHasWork;
             WithWork[Index] = bHasWork;
         }
@@ -1990,10 +1994,21 @@ namespace Lumina
 
     void CWorld::FlushCommands()
     {
-        if (CommandBus.HasPending())
+        // Events go first, so a fan-out still finds the entity a command recorded after the send is about to destroy.
+        for (int32 Round = 0; Round < 64; ++Round)
         {
-            LUMINA_PROFILE_SCOPE();
-            CommandBus.Flush();
+            const bool bEvents = EventQueues.Commit();
+            const bool bCommands = CommandBus.HasPending();
+            if (bCommands)
+            {
+                LUMINA_PROFILE_SCOPE();
+                CommandBus.Flush();
+            }
+
+            if (!bEvents && !bCommands)
+            {
+                return;
+            }
         }
     }
 }

@@ -61,9 +61,8 @@ namespace Lumina
         }
     }
 
-    void SCameraRigSystem::OnUpdate()
+    void SCameraRigSystem::OnUpdate(const SSystemContext& Context)
     {
-        const FSystemContext& Context = GetContext();
 
         LUMINA_PROFILE_SCOPE();
 

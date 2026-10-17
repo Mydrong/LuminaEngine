@@ -56,7 +56,7 @@ namespace Lumina
         }
 
         // Caller must flush dirty transforms before calling from a parallel body.
-        bool ResolveGoal(const FSystemContext& Context, SPathFollowComponent& Comp, FVector3& OutGoal)
+        bool ResolveGoal(const SSystemContext& Context, SPathFollowComponent& Comp, FVector3& OutGoal)
         {
             if (Comp.TargetEntity != ECS::NullEntity)
             {
@@ -168,9 +168,8 @@ namespace Lumina
         }
     }
 
-    void SPathFollowSystem::OnUpdate()
+    void SPathFollowSystem::OnUpdate(const SSystemContext& Context)
     {
-        const FSystemContext& Context = GetContext();
 
         LUMINA_PROFILE_SCOPE();
         

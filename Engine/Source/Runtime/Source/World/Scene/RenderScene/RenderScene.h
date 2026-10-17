@@ -65,6 +65,14 @@ namespace Lumina
 
         virtual ECS::FEntity GetEntityAtPixel(uint32 X, uint32 Y) const { return ECS::NullEntity; }
 
+        // The world-space surface and its normal under a pixel, read through foliage and Ignored. False when nothing near it counts.
+        virtual bool GetSurfaceAtPixel(uint32 X, uint32 Y, TSpan<const ECS::FEntity> Ignored, FVector3& OutPosition, FVector3& OutNormal) const { return false; }
+
+        // Copies the whole picker, depth and foliage images back once, which GetSurfaceAtPixel prefers while the camera holds still.
+        virtual void RequestSurfaceSnapshot() {}
+        virtual void ReleaseSurfaceSnapshot() {}
+        virtual bool IsSurfaceSnapshotReady() const { return false; }
+
         virtual void SetPickerCursor(uint32 X, uint32 Y, bool bOverViewport) {}
 
         //~ Scene-capture views -------------------------------------------------------------

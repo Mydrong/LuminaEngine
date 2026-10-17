@@ -31,6 +31,10 @@
 #include "Core/Object/InstancedStruct.h"
 #include "Scripting/ScriptDelegateTestTypes.h"
 #include "ScriptTestUtil.h"
+#include "SaveGame/SaveGameEvents.h"
+#include "World/ECS/EventQueue.h"
+#include "World/Entity/Components/CharacterComponent.h"
+#include "World/World.h"
 
 using namespace Lumina;
 
@@ -1086,8 +1090,8 @@ TEST_F(FFrameMarshalTest, AWrapperToADestroyedObjectStillThrows)
     EXPECT_EQ(Probe(Wrapper, &bValid), 1) << "a live object must read through the fast path";
     EXPECT_EQ(bValid, 1);
 
-    FScopedStaleReferenceTolerance Tolerance;
-    GObjectArray.ReleaseStrongRef(Doomed);
+    Object::Internal::FScopedStaleReferenceTolerance Tolerance;
+    Object::Internal::ReleaseStrongRef(Doomed);
     ASSERT_EQ(Owner.Get(), nullptr) << "the object under test was not actually freed";
 
     EXPECT_EQ(Probe(Wrapper, &bValid), -1) << "a destroyed object must throw, not hand back freed memory";
@@ -1649,4 +1653,44 @@ TEST_F(FFrameMarshalTest, ABlittableBroadcastReachesManagedWithoutAllocating)
     Release();
 
     EXPECT_EQ(After - Before, 0) << "256 broadcasts allocated " << (After - Before) << " managed bytes";
+}
+
+TEST_F(FFrameMarshalTest, ScriptsReadAndSendThroughTheWorldEventQueues)
+{
+    using FReadEngineFn = int32(*)(void*, int32*, int32*, int32*);
+    using FReadScriptFn = int32(*)(void*, double*);
+    auto* ReadEngine = (FReadEngineFn)DotNet::ResolveManagedExport("Test_EventsReadEngineAndSend");
+    auto* ReadScript = (FReadScriptFn)DotNet::ResolveManagedExport("Test_EventsReadScript");
+    ASSERT_NE(ReadEngine, nullptr);
+    ASSERT_NE(ReadScript, nullptr);
+
+    RegisterPendingTypes();
+    TStrongObjectPtr<CWorld> World(NewObject<CWorld>(nullptr, FName("EventQueueScriptWorld"), FGuid::New(), OF_Transient));
+    ECS::FEventQueues& Queues = World->GetEvents();
+
+    SCharacterJumpedEvent Jump;
+    Jump.JumpCount = 2;
+    ECS::SendEvent(Queues, Jump);
+    Jump.JumpCount = 5;
+    ECS::SendEvent(Queues, Jump);
+
+    SSaveGameCompletedEvent Completed;
+    Completed.SlotName = "a slot name long enough to live on the heap";
+    ECS::SendEvent(Queues, Completed);
+    World->FlushCommands();
+
+    int32 JumpSum = 0;
+    int32 SlotLength = 0;
+    int32 UnreadAfter = -1;
+    EXPECT_EQ(ReadEngine(World.Get(), &JumpSum, &SlotLength, &UnreadAfter), 2);
+    EXPECT_EQ(JumpSum, 7) << "the C# mirror must read the native layout in place";
+    EXPECT_EQ(SlotLength, (int32)Completed.SlotName.length()) << "a view must read the queued string, not a copy of its pointer";
+    EXPECT_EQ(UnreadAfter, 0);
+
+    double ScaleSum = 0.0;
+    EXPECT_EQ(ReadScript(World.Get(), &ScaleSum), 0) << "a script send waits for the sync point like a native one";
+
+    World->FlushCommands();
+    EXPECT_EQ(ReadScript(World.Get(), &ScaleSum), 6);
+    EXPECT_DOUBLE_EQ(ScaleSum, 0.5) << "the script event's stride and alignment must match its C# layout";
 }

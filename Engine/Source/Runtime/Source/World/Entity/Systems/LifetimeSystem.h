@@ -24,9 +24,8 @@ namespace Lumina
             Writes<SLifetimeComponent>();
         }
         
-        void OnUpdate() override
+        void OnUpdate(const SSystemContext& Context) override
         {
-            const FSystemContext& Context = GetContext();
 
             LUMINA_PROFILE_SCOPE();
             

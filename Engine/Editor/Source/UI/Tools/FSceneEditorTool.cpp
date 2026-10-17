@@ -21,14 +21,19 @@
 #include "World/Scene/RenderScene/RenderScene.h"
 #include "World/Scene/RenderScene/SceneRenderTypes.h"
 #include "World/Entity/Components/StaticMeshComponent.h"
+#include "World/Entity/Components/PhysicsComponent.h"
+#include "Assets/AssetTypes/Mesh/StaticMesh/StaticMesh.h"
 #include "World/Entity/Components/SkeletalMeshComponent.h"
 #include "Animation/SkeletalMeshUtils.h"
+#include "Assets/AssetTypes/Mesh/Mesh.h"
 #include "Assets/AssetTypes/Mesh/SkeletalMesh/SkeletalMesh.h"
 #include "Assets/AssetTypes/Mesh/Skeleton/Skeleton.h"
 #include "Tools/ComponentVisualizers/ComponentVisualizer.h"
 #include "Tools/Dialogs/Dialogs.h"
 #include "Tools/PrimitiveManager/PrimitiveManager.h"
 #include "Tools/UI/ImGui/ImGuiFonts.h"
+#include "Tools/UI/ImGui/ImGuiDragDrop.h"
+#include "imgui_internal.h"
 #include "Tools/UI/ImGui/ImGuiX.h"
 #include "Tools/UI/ImGui/EditorColors.h"
 #include "UI/Properties/PropertyEditContexts.h"
@@ -36,7 +41,10 @@
 #include "Scene/SceneOps.h"
 #include "Core/Serialization/ObjectArchiver.h"
 #include "Core/Serialization/MemoryArchiver.h"
+#include "UI/Tools/EditorAssetDropHandlers.h"
 #include "UI/Tools/EditorEntityUtils.h"
+#include "UI/Widgets/EntityScriptPicker.h"
+#include "FileSystem/FileSystem.h"
 #include "World/Entity/Components/EditorComponent.h"
 #include "World/Entity/Components/EntityTags.h"
 #include "World/Entity/Components/NameComponent.h"
@@ -49,6 +57,7 @@
 #include "World/Entity/EntityUtils.h"
 #include "World/World.h"
 #include "World/Entity/Components/LightComponent.h"
+#include "Containers/Algorithm.h"
 #include "Containers/StringFormat.h"
 
 namespace Lumina
@@ -101,6 +110,386 @@ namespace Lumina
         {
             Package->MarkDirty();
         }
+    }
+
+    namespace
+    {
+        // The ops a picked component list entry creates through, resolved by name since the list hands out its reflected struct.
+        const FComponentOps* ResolveCreatableComponentOps(const CStruct* Component)
+        {
+            if (Component == nullptr)
+            {
+                return nullptr;
+            }
+            CStruct* ComponentType = SceneOps::ResolveComponentType(FStringView(Component->GetName().c_str()));
+            return ComponentType != nullptr ? ComponentType->GetComponentOps() : nullptr;
+        }
+    }
+
+    namespace
+    {
+        // True for a drag that creates something with no target to act on, which the viewport places as a live preview.
+        bool PayloadPlacesEntity(const DragDrop::FPayload& Payload)
+        {
+            return Payload.Kind == DragDrop::EPayloadKind::NewEntity
+                || (Payload.Kind == DragDrop::EPayloadKind::Asset && FEditorAssetDropRegistry::Get().PlacesEntity(Payload.AssetClassName));
+        }
+    }
+
+    void FSceneEditorTool::AcceptContentBrowserPayload(ECS::FEntity DropTarget, bool bAttachToTarget)
+    {
+        const DragDrop::FPayload* Peek = DragDrop::PeekPayload();
+        if (Peek == nullptr)
+        {
+            return;
+        }
+
+        if (Peek->Kind == DragDrop::EPayloadKind::File)
+        {
+            FFixedString ScriptPath;
+            if (DragDrop::AcceptFile("cs", ScriptPath))
+            {
+                HandleScriptSourceDrop(FStringView(ScriptPath.c_str(), ScriptPath.size()), DropTarget);
+            }
+            return;
+        }
+
+        if (Peek->Kind == DragDrop::EPayloadKind::NewEntity && DragDrop::IsDelivered())
+        {
+            HandleNewEntityDrop(*Peek, DropTarget, bAttachToTarget);
+            return;
+        }
+
+        if (Peek->Kind == DragDrop::EPayloadKind::Asset && DragDrop::IsDelivered())
+        {
+            HandlePrefabContentDrop(FStringView(Peek->AssetPath.c_str(), Peek->AssetPath.size()), DropTarget, bAttachToTarget);
+        }
+    }
+
+    bool FSceneEditorTool::DrawViewportDropTarget()
+    {
+        const DragDrop::FPayload* Peek = DragDrop::PeekPayload();
+        const ImRect ViewportRect(ViewportScreenMin, ImVec2(ViewportScreenMin.x + ViewportScreenSize.x, ViewportScreenMin.y + ViewportScreenSize.y));
+        if (Peek == nullptr || World == nullptr || !ImGui::BeginDragDropTargetCustom(ViewportRect, ImGui::GetCurrentWindow()->ID))
+        {
+            // The drag left the viewport or ended elsewhere, so whatever it was showing goes with it.
+            DestroyPlacementPreview();
+            return false;
+        }
+
+        // A drag owns the mouse, so the viewport stops reporting hover and the drop keeps the readback window under the cursor itself.
+        uint32 PixelX = 0;
+        uint32 PixelY = 0;
+        if (ScreenToPickerPixel(ImGui::GetMousePos(), PixelX, PixelY))
+        {
+            World->GetRenderer()->SetPickerCursor(PixelX, PixelY, true);
+        }
+
+        FViewportHit Hit;
+        if (!PayloadPlacesEntity(*Peek))
+        {
+            if (TraceViewportPlacement(ImGui::GetMousePos(), Hit))
+            {
+                DrawDropPlacementMarker(Hit);
+            }
+            AcceptContentBrowserPayload(Hit.Entity, /*bAttachToTarget*/ false);
+            ImGui::EndDragDropTarget();
+            return true;
+        }
+
+        // Each drag starts upright at its authored size, keeping only which of the two the wheel was adjusting.
+        if (!bPlacementSnapshotRequested)
+        {
+            bPlacementSnapshotRequested = true;
+            PlacementYawDegrees = 0.0f;
+            PlacementScale      = 1.0f;
+            PlacementWheelCarry = 0.0f;
+            World->GetRenderer()->RequestSurfaceSnapshot();
+        }
+
+        // The preview waits for the snapshot, which has to be taken before there is anything of its own to cover the scene.
+        if (!bPlacementPreviewAttempted && World->GetRenderer()->IsSurfaceSnapshotReady())
+        {
+            bPlacementPreviewAttempted = true;
+            SpawnPlacementPreview(*Peek);
+        }
+
+        HandlePlacementInput();
+        FTransform Placement = GetCameraSpawnTransform();
+        if (TraceViewportPlacement(ImGui::GetMousePos(), Hit, PlacementPreviewEntities))
+        {
+            Placement = PlaceOnHit(Hit, PlacementPreviewAsset, GetPlacementRotation(), PlacementScale);
+            if (ECS::GetWorldRegistry(*World).IsValid(PlacementPreview))
+            {
+                World->SetEntityTransform(PlacementPreview, Placement);
+            }
+            DrawDropPlacementMarker(Hit);
+            DrawPlacementAdjustment(Hit);
+        }
+
+        // The preview was never transacted, so the release swaps it for the same drop made the undoable way.
+        if (DragDrop::IsDelivered())
+        {
+            const DragDrop::FPayload Payload = *Peek;
+            DestroyPlacementPreview();
+            if (Payload.Kind == DragDrop::EPayloadKind::NewEntity)
+            {
+                HandleNewEntityDrop(Payload, ECS::NullEntity, /*bAttachToTarget*/ false, &Placement);
+            }
+            else
+            {
+                HandlePrefabContentDrop(FStringView(Payload.AssetPath.c_str(), Payload.AssetPath.size()), ECS::NullEntity, /*bAttachToTarget*/ false, &Placement);
+            }
+        }
+
+        ImGui::EndDragDropTarget();
+        return true;
+    }
+
+    void FSceneEditorTool::HandleNewEntityDrop(const DragDrop::FPayload& Payload, ECS::FEntity DropTarget, bool bAttachToTarget, const FTransform* SpawnTransform)
+    {
+        const FTransform At       = SpawnTransform != nullptr ? *SpawnTransform : GetDropSpawnTransform(Payload.AssetObject);
+        ECS::FRegistry&  Registry = ECS::GetWorldRegistry(*World);
+
+        SpawnEntityTransacted(Payload.EntityName, "Place Entity", [&](ECS::FEntity Created)
+        {
+            DecorateNewEntity(Payload, Created);
+            SceneOps::AddPlacementCollision(Registry, Created);
+            if (bAttachToTarget && Registry.IsValid(DropTarget))
+            {
+                ECS::Utils::ReparentEntity(Registry, Created, DropTarget);
+            }
+            OnDropSpawnedEntity(Created);
+        }, &At);
+
+        OutlinerListView.MarkTreeDirty();
+    }
+
+    void FSceneEditorTool::DecorateNewEntity(const DragDrop::FPayload& Payload, ECS::FEntity Entity)
+    {
+        ECS::FRegistry& Registry = ECS::GetWorldRegistry(*World);
+        if (const FComponentOps* Ops = ResolveCreatableComponentOps(Payload.ComponentType))
+        {
+            Ops->EmplaceDefault(Registry, Entity);
+        }
+        if (CStaticMesh* Mesh = Cast<CStaticMesh>(Payload.AssetObject))
+        {
+            Registry.Emplace<SStaticMeshComponent>(Entity).SetStaticMesh(Mesh);
+        }
+    }
+
+    void FSceneEditorTool::SpawnPlacementPreview(const DragDrop::FPayload& Payload)
+    {
+        ECS::FRegistry& Registry = ECS::GetWorldRegistry(*World);
+        if (Payload.Kind == DragDrop::EPayloadKind::NewEntity)
+        {
+            PlacementPreview      = World->ConstructEntity(Payload.EntityName, FTransform());
+            PlacementPreviewAsset = Payload.AssetObject;
+            DecorateNewEntity(Payload, PlacementPreview);
+        }
+        else if (Payload.Kind == DragDrop::EPayloadKind::Asset && FEditorAssetDropRegistry::Get().PlacesEntity(Payload.AssetClassName))
+        {
+            PlacementPreviewAsset = LoadDroppedAsset(FStringView(Payload.AssetPath.c_str(), Payload.AssetPath.size()));
+            if (PlacementPreviewAsset != nullptr)
+            {
+                PlacementPreview = FEditorAssetDropRegistry::Get().Drop(World.Get(), PlacementPreviewAsset, FTransform(), ECS::NullEntity, /*bAttachToTarget*/ false);
+            }
+        }
+
+        if (!Registry.IsValid(PlacementPreview))
+        {
+            PlacementPreview      = ECS::NullEntity;
+            PlacementPreviewAsset = nullptr;
+            return;
+        }
+
+        // Kept out of the outliner, and read through by the placement trace so it never lands on itself.
+        PlacementPreviewEntities.clear();
+        PlacementPreviewEntities.push_back(PlacementPreview);
+        Registry.GetHierarchy().ForEachDescendant(PlacementPreview, [this](ECS::FEntity Descendant)
+        {
+            PlacementPreviewEntities.push_back(Descendant);
+        });
+        for (ECS::FEntity Entity : PlacementPreviewEntities)
+        {
+            Registry.EmplaceOrReplace<FHideInSceneOutliner>(Entity);
+        }
+        OutlinerListView.MarkTreeDirty();
+    }
+
+    FQuat FSceneEditorTool::GetPlacementRotation() const
+    {
+        return FQuat(Math::Radians(FVector3(0.0f, PlacementYawDegrees, 0.0f)));
+    }
+
+    void FSceneEditorTool::HandlePlacementInput()
+    {
+        const ImGuiIO& IO = ImGui::GetIO();
+        if (ImGui::IsKeyPressed(ImGuiKey_Tab, false))
+        {
+            bPlacementScaling   = !bPlacementScaling;
+            PlacementWheelCarry = 0.0f;
+        }
+
+        PlacementWheelCarry += IO.MouseWheel;
+        while (Math::Abs(PlacementWheelCarry) >= 1.0f)
+        {
+            const float Notch = PlacementWheelCarry > 0.0f ? 1.0f : -1.0f;
+            PlacementWheelCarry -= Notch;
+
+            if (bPlacementScaling)
+            {
+                // Scale steps multiply, so a notch reads the same at a tenth of the size as at ten times it.
+                const float Step = IO.KeyCtrl ? 1.25f : 1.05f;
+                PlacementScale = Math::Clamp(Notch > 0.0f ? PlacementScale * Step : PlacementScale / Step, 0.01f, 100.0f);
+                continue;
+            }
+
+            PlacementYawDegrees += Notch * (IO.KeyCtrl ? 15.0f : 1.0f);
+            if (PlacementYawDegrees >= 360.0f)
+            {
+                PlacementYawDegrees -= 360.0f;
+            }
+            else if (PlacementYawDegrees < 0.0f)
+            {
+                PlacementYawDegrees += 360.0f;
+            }
+        }
+    }
+
+    void FSceneEditorTool::DrawPlacementAdjustment(const FViewportHit& Hit) const
+    {
+        IPrimitiveDrawInterface* Draw = World->GetDebugInterface();
+
+        // Sized from the mesh's footprint so the ring sits just outside it, with a floor for things too small to see.
+        const CMesh*   Mesh     = Cast<CMesh>(PlacementPreviewAsset);
+        const FVector3 Half     = Mesh != nullptr ? (Mesh->GetAABB().Max - Mesh->GetAABB().Min) * 0.5f : FVector3(0.25f);
+        const float    Footprint = Math::Max(Math::Sqrt(Half.x * Half.x + Half.z * Half.z) * 1.2f, 0.3f);
+        const FVector3 Up(0.0f, 1.0f, 0.0f);
+        const FVector3 Center = Hit.Location + Hit.Normal * 0.01f;
+
+        const FVector4 Active = bPlacementScaling ? FVector4(0.45f, 1.0f, 0.55f, 1.0f) : FVector4(1.0f, 0.7f, 0.25f, 1.0f);
+        const FVector4 Faint(Active.x, Active.y, Active.z, 0.35f);
+
+        // The same turn the preview takes, so the drawing can never disagree with the mesh.
+        auto PointAt = [&](float Degrees, float Distance)
+        {
+            return Center + FQuat(Math::Radians(FVector3(0.0f, Degrees, 0.0f))) * FVector3(Distance, 0.0f, 0.0f);
+        };
+
+        if (bPlacementScaling)
+        {
+            // The faint ring is the authored size, so the gap to the bright one is the scale.
+            const float Scaled = Footprint * PlacementScale;
+            Draw->DrawCircle(Center, Up, Footprint, Faint, 48, 1.0f, false);
+            Draw->DrawCircle(Center, Up, Scaled, Active, 48, 2.0f, false);
+            for (float Degrees = 0.0f; Degrees < 360.0f; Degrees += 90.0f)
+            {
+                const FVector3 Outward = Math::Normalize(PointAt(PlacementYawDegrees + Degrees, 1.0f) - Center);
+                Draw->DrawLine(Center + Outward * Footprint, Center + Outward * Scaled, Active, 2.0f, false);
+            }
+        }
+        else
+        {
+            Draw->DrawCircle(Center, Up, Footprint, Faint, 48, 1.0f, false);
+            Draw->DrawLine(Center, PointAt(0.0f, Footprint), Faint, 1.0f, false);
+
+            const int32 Segments = Math::Max((int32)(PlacementYawDegrees / 5.0f), 1);
+            for (int32 Segment = 0; Segment < Segments; ++Segment)
+            {
+                const float From = PlacementYawDegrees * (float)Segment / (float)Segments;
+                const float To   = PlacementYawDegrees * (float)(Segment + 1) / (float)Segments;
+                Draw->DrawLine(PointAt(From, Footprint), PointAt(To, Footprint), Active, 3.0f, false);
+            }
+            Draw->DrawLine(Center, PointAt(PlacementYawDegrees, Footprint * 1.15f), Active, 2.0f, false);
+        }
+
+        // Read beside the cursor, above the drag's own label, so the number is where the eye already is.
+        const FString Value = bPlacementScaling
+            ? Format("{}  {:.2f}x", LE_ICON_ARROW_TOP_RIGHT_BOTTOM_LEFT, PlacementScale)
+            : Format("{}  {:.0f}\xc2\xb0", LE_ICON_ROTATE_360, PlacementYawDegrees);
+        const char* Hint = bPlacementScaling
+            ? "Wheel scales, Ctrl for 25%, Tab to rotate"
+            : "Wheel rotates, Ctrl for 15\xc2\xb0, Tab to scale";
+
+        const ImGuiStyle& Style   = ImGui::GetStyle();
+        const ImVec2      Mouse   = ImGui::GetMousePos();
+        const ImVec2      ValueSize = ImGui::CalcTextSize(Value.c_str());
+        const ImVec2      HintSize  = ImGui::CalcTextSize(Hint);
+        const ImVec2      Padding   = Style.FramePadding;
+        const ImVec2      Min(Mouse.x + 18.0f, Mouse.y - ValueSize.y - HintSize.y - Padding.y * 3.0f - 12.0f);
+        const ImVec2      Max(Min.x + Math::Max(ValueSize.x, HintSize.x) + Padding.x * 2.0f, Mouse.y - 12.0f);
+
+        ImDrawList* List = ImGui::GetWindowDrawList();
+        List->AddRectFilled(Min, Max, IM_COL32(20, 22, 26, 220), Style.FrameRounding);
+        List->AddRect(Min, Max, ImGui::ColorConvertFloat4ToU32(ImVec4(Active.x, Active.y, Active.z, 0.8f)), Style.FrameRounding);
+        List->AddText(ImVec2(Min.x + Padding.x, Min.y + Padding.y), ImGui::ColorConvertFloat4ToU32(ImVec4(Active.x, Active.y, Active.z, 1.0f)), Value.c_str());
+        List->AddText(ImVec2(Min.x + Padding.x, Min.y + Padding.y * 2.0f + ValueSize.y), ImGui::GetColorU32(ImGuiCol_TextDisabled), Hint);
+    }
+
+    void FSceneEditorTool::DestroyPlacementPreview()
+    {
+        if (bPlacementSnapshotRequested && World != nullptr)
+        {
+            World->GetRenderer()->ReleaseSurfaceSnapshot();
+        }
+        bPlacementSnapshotRequested = false;
+        bPlacementPreviewAttempted = false;
+        PlacementPreviewAsset      = nullptr;
+        PlacementPreviewEntities.clear();
+        if (PlacementPreview == ECS::NullEntity)
+        {
+            return;
+        }
+
+        ECS::FRegistry& Registry = ECS::GetWorldRegistry(*World);
+        if (Registry.IsValid(PlacementPreview))
+        {
+            ECS::Utils::DestroyEntityHierarchy(Registry, PlacementPreview);
+        }
+        PlacementPreview = ECS::NullEntity;
+        OutlinerListView.MarkTreeDirty();
+    }
+
+    void FSceneEditorTool::HandleScriptSourceDrop(FStringView VirtualPath, ECS::FEntity DropTarget)
+    {
+        CClass* ScriptClass = EntityScriptPicker::FindScriptClassForSource(VirtualPath);
+        if (ScriptClass == nullptr)
+        {
+            ImGuiX::Notifications::NotifyWarning("\"{}\" declares no entity script to attach.", VFS::FileName(VirtualPath));
+            return;
+        }
+
+        ECS::FRegistry& Registry = GetSceneRegistry();
+        if (!Registry.IsValid(DropTarget))
+        {
+            const FString ClassName = ScriptClass->GetName().ToString();
+            SpawnEntityTransacted(FName(EntityScriptPicker::ShortTypeName(ClassName)), "Drop Script", [&](ECS::FEntity Created)
+            {
+                EntityScripts::Attach(Registry, Created, ScriptClass);
+                OnDropSpawnedEntity(Created);
+            });
+            OutlinerListView.MarkTreeDirty();
+            return;
+        }
+
+        // Attach appends, so a second drop of the same file would stack a duplicate script.
+        const SEntityScriptComponent* Scripts = Registry.TryGet<SEntityScriptComponent>(DropTarget);
+        const bool bAlreadyAttached = Scripts != nullptr && Algo::AnyOf(Scripts->Scripts, [ScriptClass](const TStrongObjectPtr<CEntityScript>& Script)
+        {
+            return Script.Get() != nullptr && Script->GetClass() == ScriptClass;
+        });
+        if (!bAlreadyAttached)
+        {
+            BeginComponentTransaction({ DropTarget }, SEntityScriptComponent::StaticStruct());
+            EntityScripts::Attach(Registry, DropTarget, ScriptClass);
+            EndTransaction("Drop Script");
+            MarkSceneDirty();
+        }
+
+        SetSingleSelectedEntity(DropTarget);
+        bDetailsDirty = true;
+        OutlinerListView.MarkTreeDirty();
     }
 
     void FSceneEditorTool::SetSingleSelectedEntity(ECS::FEntity Entity)
@@ -476,6 +865,75 @@ namespace Lumina
         }
     }
 
+    void FSceneEditorTool::AddMeshCollisionTransacted(const TVector<ECS::FEntity>& Entities)
+    {
+        BeginComponentTransaction(Entities, SMeshColliderComponent::StaticStruct());
+        RecordComponentSnapshot(Entities, SRigidBodyComponent::StaticStruct());
+        RecordPrefabOverrideSnapshot(Entities);
+        for (ECS::FEntity Entity : Entities)
+        {
+            SceneOps::AddMeshCollision(GetSceneRegistry(), Entity);
+        }
+        EndTransaction("Add Collision");
+
+        MarkSceneDirty();
+        OutlinerListView.MarkTreeDirty();
+        bDetailsDirty = true;
+    }
+
+    void FSceneEditorTool::DrawAddCollisionMenuItem(ECS::FEntity Entity)
+    {
+        TVector<ECS::FEntity> Targets = GetComponentEditTargets(Entity);
+        const ECS::FRegistry& Registry = GetSceneRegistry();
+        Targets.erase(Algo::RemoveIf(Targets, [&Registry](ECS::FEntity Target) { return !SceneOps::CanAddMeshCollision(Registry, Target); }), Targets.end());
+        if (Targets.empty())
+        {
+            return;
+        }
+
+        if (ImGui::MenuItem(LE_ICON_CUBE_OUTLINE " Add Collision"))
+        {
+            AddMeshCollisionTransacted(Targets);
+        }
+        ImGuiX::TextTooltip("{}", "A static body colliding with the mesh's own collision, or its triangles when it has none.");
+    }
+
+    void FSceneEditorTool::DrawStaticMeshCollisionHint(ECS::FEntity Entity, const SStaticMeshComponent& MeshComponent)
+    {
+        CStaticMesh* Mesh = MeshComponent.StaticMesh.Get();
+        if (Mesh == nullptr || SceneOps::HasCollider(GetSceneRegistry(), Entity))
+        {
+            return;
+        }
+
+        ImGui::Spacing();
+        ImGui::TextColored(EditorColors::Warning(), LE_ICON_CUBE_OFF_OUTLINE " No collision");
+        ImGuiX::TextTooltip("{}", "Nothing collides with this entity in game.");
+        ImGui::SameLine();
+
+        if (Mesh->Collision.HasCollision())
+        {
+            if (ImGui::SmallButton(LE_ICON_PLUS " Add Collision"))
+            {
+                AddMeshCollisionTransacted({ Entity });
+            }
+            ImGuiX::TextTooltip("{}", "Use the collision authored on this mesh, as a static body. Set the Rigid Body to Dynamic for a prop that should move.");
+            return;
+        }
+
+        if (ImGui::SmallButton(LE_ICON_PENCIL " Make Collision"))
+        {
+            ToolContext->OpenAssetEditor(Mesh->GetGUID());
+        }
+        ImGuiX::TextTooltip("{}", "This mesh has no collision yet. Opens the mesh, where its Collision tab adds some.");
+        ImGui::SameLine();
+        if (ImGui::SmallButton(LE_ICON_VECTOR_TRIANGLE " Use Mesh Triangles"))
+        {
+            AddMeshCollisionTransacted({ Entity });
+        }
+        ImGuiX::TextTooltip("{}", "Collide against the mesh's exact triangles. Right for static level geometry, but it can never move.");
+    }
+
     void FSceneEditorTool::DrawComponentHeader(FComponentTableEntry& Entry, ECS::FEntity Entity)
     {
         // Existence check via meta; drop this row if the entity no longer holds the component.
@@ -613,6 +1071,11 @@ namespace Lumina
             Entry.Table->SetContext(&PropertyContext);
             Entry.Table->DrawTree();
 
+            if (Type == SStaticMeshComponent::StaticStruct() && Data != nullptr)
+            {
+                DrawStaticMeshCollisionHint(Entity, *static_cast<const SStaticMeshComponent*>(Data));
+            }
+
             ImGui::Unindent(8.0f);
 
             ImGui::PopStyleColor(2);
@@ -638,9 +1101,11 @@ namespace Lumina
         {
             if (CSkeleton* Skeleton = SkeletalUtils::GetSkeletonAsset(*SkeletalMesh))
             {
-                for (const SMeshSocket& Socket : Skeleton->Sockets)
+                TVector<const SMeshSocket*> Sockets;
+                SkeletalMesh->SkeletalMesh->CollectActiveSockets(Sockets);
+                for (const SMeshSocket* Socket : Sockets)
                 {
-                    Out.Sockets.push_back(Socket.SocketName);
+                    Out.Sockets.push_back(Socket->SocketName);
                 }
                 Out.Skeleton = Skeleton->GetSkeletonResource();
             }
@@ -2331,11 +2796,11 @@ namespace Lumina
     }
 
     ECS::FEntity FSceneEditorTool::SpawnEntityTransacted(FName Name, FName TransactionLabel,
-        const TFunction<void(ECS::FEntity)>& Decorate)
+        const TFunction<void(ECS::FEntity)>& Decorate, const FTransform* SpawnTransform)
     {
         BeginCreationTransaction();
 
-        const ECS::FEntity Created = World->ConstructEntity(Name, GetNewEntitySpawnTransform());
+        const ECS::FEntity Created = World->ConstructEntity(Name, SpawnTransform != nullptr ? *SpawnTransform : GetNewEntitySpawnTransform());
         if (Created != ECS::NullEntity)
         {
             if (Decorate)
@@ -2364,13 +2829,7 @@ namespace Lumina
 
     void FSceneEditorTool::CreateEntityWithComponent(const CStruct* Component)
     {
-        if (Component == nullptr)
-        {
-            return;
-        }
-
-        CStruct* ComponentType = SceneOps::ResolveComponentType(FStringView(Component->GetName().c_str()));
-        const FComponentOps* Ops = ComponentType != nullptr ? ComponentType->GetComponentOps() : nullptr;
+        const FComponentOps* Ops = ResolveCreatableComponentOps(Component);
         if (Ops == nullptr)
         {
             return;
@@ -2393,6 +2852,7 @@ namespace Lumina
         SpawnEntityTransacted(DisplayName, "New Primitive", [this, PrimitiveMesh](ECS::FEntity Created)
         {
             GetSceneRegistry().Emplace<SStaticMeshComponent>(Created).SetStaticMesh(PrimitiveMesh);
+            SceneOps::AddPlacementCollision(GetSceneRegistry(), Created);
         });
     }
 
@@ -2526,8 +2986,8 @@ namespace Lumina
             return bOpen;
         }
 
-        // Expects to be called between BeginTable and EndTable on a two-column table.
-        bool DrawPickerRow(const void* ID, const char* Icon, const char* Label)
+        // Expects to be called between BeginTable and EndTable on a two-column table. SetDragPayload makes the row a drag source.
+        bool DrawPickerRow(const void* ID, const char* Icon, const char* Label, const TFunction<void()>& SetDragPayload = {})
         {
             ImGui::PushID(ID);
             ImGui::TableNextRow();
@@ -2535,6 +2995,13 @@ namespace Lumina
 
             const bool bClicked = ImGui::Selectable("##sel", false,
                 ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowOverlap);
+
+            if (SetDragPayload && ImGui::BeginDragDropSource())
+            {
+                SetDragPayload();
+                ImGui::Text("%s  %s", Icon, Label);
+                ImGui::EndDragDropSource();
+            }
 
             ImGui::SameLine();
             // A soft slate tone keeps the icon column a rail rather than an accent stripe down a long list.
@@ -2550,7 +3017,7 @@ namespace Lumina
         }
     }
 
-    bool FSceneEditorTool::DrawAddableComponentList(const ImGuiTextFilter& Filter, const TVector<ECS::FEntity>& Targets, CStruct*& OutMetaType, CStruct*& OutStruct)
+    bool FSceneEditorTool::DrawAddableComponentList(const ImGuiTextFilter& Filter, const TVector<ECS::FEntity>& Targets, CStruct*& OutMetaType, CStruct*& OutStruct, bool* OutDragging)
     {
         struct FComponentEntry
         {
@@ -2662,7 +3129,16 @@ namespace Lumina
 
                         // The entry list is rebuilt every frame, and an unstable ID breaks press and release matching.
                         FFixedString DisplayName = Entry.Struct->MakeDisplayName();
-                        if (DrawPickerRow((void*)Entry.Struct, CategoryIcon, DisplayName.c_str()))
+                        TFunction<void()> SetDragPayload;
+                        if (OutDragging != nullptr)
+                        {
+                            SetDragPayload = [OutDragging, &DisplayName, &Entry]
+                            {
+                                DragDrop::SetNewEntityPayload(FName(DisplayName.c_str()), Entry.Struct);
+                                *OutDragging = true;
+                            };
+                        }
+                        if (DrawPickerRow((void*)Entry.Struct, CategoryIcon, DisplayName.c_str(), SetDragPayload))
                         {
                             OutMetaType = Entry.MetaType;
                             OutStruct   = Entry.Struct;
@@ -4116,6 +4592,9 @@ namespace Lumina
             ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(10.0f, 8.0f));
             ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(4.0f, 4.0f));
 
+            // Set by whichever row is being dragged, so the menu can step aside once the drag leaves it.
+            bool bDraggingOut = false;
+
             if (ImGui::BeginChild("TemplateList", ImVec2(0, -35.0f), true))
             {
                 const bool bFiltering = AddEntityComponentFilter.IsActive();
@@ -4164,7 +4643,12 @@ namespace Lumina
 
                                 for (FAssetData* Data : FilteredPrefabs)
                                 {
-                                    if (DrawPickerRow(Data, LE_ICON_PACKAGE_VARIANT_CLOSED, Data->AssetName.c_str()))
+                                    const TFunction<void()> SetDragPayload = [Data, &bDraggingOut]
+                                    {
+                                        DragDrop::SetAssetPayload(*Data);
+                                        bDraggingOut = true;
+                                    };
+                                    if (DrawPickerRow(Data, LE_ICON_PACKAGE_VARIANT_CLOSED, Data->AssetName.c_str(), SetDragPayload))
                                     {
                                         HandlePrefabContentDrop(FStringView(Data->Path.c_str()), ECS::NullEntity, /*bAttachToTarget*/ false);
                                         ImGui::CloseCurrentPopup();
@@ -4218,7 +4702,17 @@ namespace Lumina
 
                             for (const FPrimitiveEntry* Entry : FilteredPrimitives)
                             {
-                                if (DrawPickerRow(Entry, Entry->Icon, Entry->Name))
+                                // Dragging out only makes sense when creating, since adding a mesh to an entity has nowhere to place.
+                                TFunction<void()> SetDragPayload;
+                                if (Entity == ECS::NullEntity)
+                                {
+                                    SetDragPayload = [Entry, &bDraggingOut]
+                                    {
+                                        DragDrop::SetNewEntityPayload(FName(Entry->Name), nullptr, Entry->GetMesh());
+                                        bDraggingOut = true;
+                                    };
+                                }
+                                if (DrawPickerRow(Entry, Entry->Icon, Entry->Name, SetDragPayload))
                                 {
                                     CStaticMesh* PrimitiveMesh = Entry->GetMesh();
                                     if (GetSceneRegistry().IsValid(Entity))
@@ -4259,7 +4753,7 @@ namespace Lumina
                 // Resolved before the list is drawn so it can gray out what these targets already have.
                 TVector<ECS::FEntity> Targets = GetComponentEditTargets(Entity);
 
-                if (DrawAddableComponentList(AddEntityComponentFilter, Targets, PickedMetaType, PickedStruct))
+                if (DrawAddableComponentList(AddEntityComponentFilter, Targets, PickedMetaType, PickedStruct, Targets.empty() ? &bDraggingOut : nullptr))
                 {
                     if (!Targets.empty())
                     {
@@ -4301,13 +4795,30 @@ namespace Lumina
                     }
                     ImGui::PopStyleColor();
 
+                    if (ImGui::BeginDragDropSource())
+                    {
+                        DragDrop::SetNewEntityPayload(FName("Entity"));
+                        ImGui::Text("%s", LE_ICON_CUBE " Empty Entity");
+                        ImGui::EndDragDropSource();
+                        bDraggingOut = true;
+                    }
+
                     if (ImGui::IsItemHovered())
                     {
-                        ImGui::SetTooltip("Create entity without any components");
+                        ImGui::SetTooltip("Create entity without any components, or drag it into the viewport");
                     }
                 }
             }
             ImGui::EndGroup();
+
+            // The menu covers the viewport, so a drag that leaves it closes the menu and carries on without it.
+            if (bDraggingOut && !ImGui::IsMouseHoveringRect(ImGui::GetWindowPos(),
+                ImVec2(ImGui::GetWindowPos().x + ImGui::GetWindowSize().x, ImGui::GetWindowPos().y + ImGui::GetWindowSize().y), false))
+            {
+                DragDrop::MarkSourceClosed();
+                ImGui::CloseCurrentPopup();
+                AddEntityComponentFilter.Clear();
+            }
 
             ImGui::EndPopup();
         }

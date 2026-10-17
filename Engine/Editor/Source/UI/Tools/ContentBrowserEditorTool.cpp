@@ -291,6 +291,8 @@ namespace Lumina
             ImU32       Accent;
         };
 
+        constexpr const char* kMissingTypeTag = "MISSING TYPE";
+
         FTypeStyle StyleForType(FStringView TypeTag)
         {
             struct FEntry { const char* Tag; const char* Glyph; ImU32 Accent; };
@@ -314,6 +316,7 @@ namespace Lumina
                 { "CS",               LE_ICON_LANGUAGE_CSHARP,     IM_COL32(160, 200, 130, 255) },
                 { "RML",              LE_ICON_XML,                 IM_COL32(200, 180, 140, 255) },
                 { "RCSS",             LE_ICON_LANGUAGE_CSS3,       IM_COL32(150, 190, 230, 255) },
+                { kMissingTypeTag,    LE_ICON_FILE_ALERT_OUTLINE,  IM_COL32(235, 95, 90, 255) },
             };
 
             for (const FEntry& Entry : kEntries)
@@ -777,6 +780,12 @@ namespace Lumina
             ImGui::TextUnformatted(Data->AssetClass.IsNone() ? "Asset" : Data->AssetClass.c_str());
             ImGui::PopStyleColor();
 
+            if (Data->IsClassMissing())
+            {
+                ImGui::TextColored(EditorColors::Danger(), LE_ICON_FILE_ALERT_OUTLINE " The type '%s' no longer exists.", Data->AssetClass.c_str());
+                ImGui::TextColored(kMenuTextDim, "This asset cannot be loaded or opened. Delete it, or restore the type or the plugin that defines it.");
+            }
+
             if (!Data->OwningPlugin.IsNone())
             {
                 ImGui::TextColored(kMenuTextDim, "Plugin: %s", Data->OwningPlugin.c_str());
@@ -1117,6 +1126,11 @@ namespace Lumina
                 }
             case EIconKind::Asset:
                 {
+                    if (ContentItem->IsMissingType())
+                    {
+                        break;
+                    }
+
                     // RESIDENT ONLY, since loading here would race the editor's loader on a non-atomic object.
                     FStringView AssetPath = ContentItem->GetVirtualPath();
                     if (const FAssetData* Data = FAssetRegistry::Get().GetAssetByPath(AssetPath))
@@ -1182,6 +1196,12 @@ namespace Lumina
             else if (bDrawTypeCard)
             {
                 DrawTypeCard(*DrawList, BodyMin, BodyMax, ContentItem->GetTypeLabel());
+            }
+
+            if (ContentItem->IsMissingType())
+            {
+                DrawList->AddRect(Pos, ImVec2(Pos.x + Size.x + 8, Pos.y + Size.y + 8),
+                    ImGui::ColorConvertFloat4ToU32(EditorColors::Danger()), 8.0f, 1.5f);
             }
 
             if (ImGui::IsItemHovered())
@@ -1360,6 +1380,7 @@ namespace Lumina
                 }
 
                 // A folder repeats a handful of classes thousands of times, so each label is built and interned once.
+                const FName MissingTypeLabel(kMissingTypeTag);
                 THashMap<FName, FName> ClassLabels;
                 for (FListingEntry& Entry : Listing)
                 {
@@ -1376,10 +1397,16 @@ namespace Lumina
                     auto Cached = ClassLabels.find(Entry.AssetClass);
                     if (Cached == ClassLabels.end())
                     {
-                        const FFixedString Label = UpperTypeTag(Entry.AssetClass);
-                        Cached = ClassLabels.emplace(Entry.AssetClass, Label.empty() ? NAME_None : FName(Label.c_str())).first;
+                        FName ClassLabel = MissingTypeLabel;
+                        if (FindObject<CClass>(Entry.AssetClass) != nullptr)
+                        {
+                            const FFixedString Label = UpperTypeTag(Entry.AssetClass);
+                            ClassLabel = Label.empty() ? NAME_None : FName(Label.c_str());
+                        }
+                        Cached = ClassLabels.emplace(Entry.AssetClass, ClassLabel).first;
                     }
                     Entry.TypeLabel = Cached->second;
+                    Entry.bMissingType = Cached->second == MissingTypeLabel;
                 }
 
                 Task::ParallelSort(Listing.begin(), Listing.end(), [](const FListingEntry& LHS, const FListingEntry& RHS)
@@ -1424,7 +1451,7 @@ namespace Lumina
                 }
 
                 const bool bProtected = AssetOps::IsProtectedRoot(FStringView(Entry.Info.VirtualPath.c_str(), Entry.Info.VirtualPath.size()));
-                FContentBrowserTileViewItem* NewItem = ContentBrowserTileView.AddItemToTree<FContentBrowserTileViewItem>(nullptr, Entry.Info, bProtected, Entry.TypeLabel);
+                FContentBrowserTileViewItem* NewItem = ContentBrowserTileView.AddItemToTree<FContentBrowserTileViewItem>(nullptr, Entry.Info, bProtected, Entry.TypeLabel, Entry.bMissingType);
 
                 const FStringView ItemPath = VFS::RemoveExtension(NewItem->GetVirtualPath());
                 if (!BrowseTarget.empty() && ItemPath == BrowseTarget)

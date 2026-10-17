@@ -6,6 +6,7 @@
 #include "Core/Object/Object.h"
 #include "Core/Object/ObjectMacros.h"
 #include "Core/Windows/WindowMode.h"
+#include "Input/InputAction.h"
 #include "GameUserSettings.generated.h"
 
 namespace Lumina
@@ -71,6 +72,10 @@ namespace Lumina
         PROPERTY(Hidden)
         float ScreenPercentage = 100.0f;
 
+        // Sensitivity, invert, toggles and rebinds, laid over the project's authored input actions.
+        PROPERTY(Hidden)
+        SPlayerInputSettings Input;
+
         // Loaded on first use, so every caller sees what is on disk without asking.
         static CGameUserSettings& Get();
 
@@ -84,6 +89,15 @@ namespace Lumina
         // Window, vsync and frame limit apply only in a game, since the editor owns its own window.
         void Apply();
         void ApplyQuality();
+
+        // Input applies in the editor too, so a play session runs with the player's bindings.
+        void ApplyInput();
+
+        // Replaces any earlier rebind of the same slot and applies it at once, since a rebind menu shows the new key straight away.
+        void SetBindingOverride(FName Action, int32 BindingIndex, const SKey& Key);
+
+        // Drops the player's rebinds of Action, or of every action when it is none, and applies the authored keys again.
+        void ResetBindingOverrides(FName Action);
 
         void ResetToDefaults();
 

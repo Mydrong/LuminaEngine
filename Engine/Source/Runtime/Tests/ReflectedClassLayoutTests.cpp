@@ -28,7 +28,7 @@ namespace
         RegisterPendingTypes();
 
         TVector<CStruct*> Structs;
-        GObjectArray.ForEachObject([&Structs](CObjectBase* Object, int32)
+        ForEachObject([&Structs](CObjectBase* Object, int32)
         {
             if (Object != nullptr && Object->IsA<CStruct>())
             {

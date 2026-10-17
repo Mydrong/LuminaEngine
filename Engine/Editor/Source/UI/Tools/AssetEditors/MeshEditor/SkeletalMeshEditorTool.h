@@ -8,6 +8,7 @@
 #include "ImGuizmo.h"
 #include "MeshUVViewer.h"
 #include "UI/Tools/AssetEditors/AssetEditorTool.h"
+#include "SocketHierarchy.h"
 #include "UI/Tools/AssetEditors/Animation/AnimPreview.h"
 
 namespace Lumina
@@ -65,6 +66,7 @@ namespace Lumina
         FStringView UVViewerName = "UVs";
         FStringView SkinningName = "Skinning";
         FStringView AnimationPreviewName = "Animation";
+        FStringView HierarchyName = "Bone Hierarchy";
 
         LUMINA_EDITOR_TOOL(FSkeletalMeshEditorTool)
 
@@ -88,6 +90,7 @@ namespace Lumina
         void DrawViewportOverlayElements(const FUpdateContext& UpdateContext, ImTextureRef ViewportTexture, ImVec2 ViewportSize) override;
         void OnAssetDataChangedExternally() override;
         void OnPropertyEditFinished(const FPropertyChangedEvent& Event) override;
+        void OnPostUndoRedo() override;
         void CreatePreviewMeshEntity();
         void InitializeDockingLayout(ImGuiID InDockspaceID, const ImVec2& InDockspaceSize) const override;
         bool ShouldGenerateThumbnailOnSave() const override { return true; }
@@ -117,6 +120,9 @@ namespace Lumina
         void  BuildBonePoseTransforms(TVector<FMatrix4>& OutTransforms) const;
 
         FSkinningAnalysis Skinning;
+
+        // Rebound whenever the mesh's Skeleton changes, since its rows are that skeleton's bones.
+        FSocketHierarchy SocketHierarchy;
 
         // -1 = none. Drives the viewport bone highlight and the influenced-vertex overlay.
         int32 SelectedBoneIndex = -1;

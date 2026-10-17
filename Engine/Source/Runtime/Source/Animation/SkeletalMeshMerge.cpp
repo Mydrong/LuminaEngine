@@ -467,6 +467,21 @@ namespace Lumina::SkeletalMeshMerge
 
         CSkeletalMesh* OutMesh = NewObject<CSkeletalMesh>(nullptr, MeshName, FGuid::New(), OF_Transient);
         OutMesh->Skeleton  = OutSkeleton;
+
+        // Mesh sockets stay on the mesh, so they keep overriding the skeleton's after the merge.
+        if (Settings.bMergeSockets)
+        {
+            for (const CSkeletalMesh* Source : Sources)
+            {
+                for (const SMeshSocket& Socket : Source->Sockets)
+                {
+                    if (FindSocketByName(OutMesh->Sockets, Socket.SocketName) == nullptr)
+                    {
+                        OutMesh->Sockets.push_back(Socket);
+                    }
+                }
+            }
+        }
         OutMesh->Materials = MergedMaterials;
         OutMesh->MergeSources.reserve(Sources.size());
         for (CSkeletalMesh* Source : Sources)

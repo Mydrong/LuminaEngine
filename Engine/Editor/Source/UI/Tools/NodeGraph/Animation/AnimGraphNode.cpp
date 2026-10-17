@@ -113,7 +113,7 @@ namespace Lumina
             return;
         }
 
-        // A cycle button, since imgui-node-editor does not host popup windows reliably inside a node.
+        // The list is drawn by the graph, since imgui-node-editor does not host popup windows reliably inside a node.
         Pin->InlineEditor = [this, Items, Get, Set]()
         {
             const int Count = (int)Items.size();
@@ -136,10 +136,19 @@ namespace Lumina
                 ImVec2(Max.x - 14.0f, Min.y + ImGui::GetStyle().FramePadding.y),
                 ImGui::GetColorU32(ImGuiCol_TextDisabled), LE_ICON_MENU_DOWN);
 
-            if (bClicked)
+            if (bClicked && GetOwningGraph() != nullptr)
             {
-                Set((Current + 1) % Count);
-                MarkGraphDirty();
+                TVector<FString> Choices;
+                Choices.reserve(Count);
+                for (const char* Item : Items)
+                {
+                    Choices.emplace_back(Item);
+                }
+                GetOwningGraph()->OpenChoicePopup(this, std::move(Choices), Current, [this, Set](int32 Chosen)
+                {
+                    Set(Chosen);
+                    MarkGraphDirty();
+                });
             }
         };
     }

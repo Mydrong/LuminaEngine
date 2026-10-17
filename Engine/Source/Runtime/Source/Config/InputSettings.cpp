@@ -7,17 +7,10 @@ namespace Lumina
 {
     void CInputSettings::PostInitSettings()
     {
-        // The same fold happens in RebuildFromSettings, covering action lists that never come through here.
+        // On the default object too, so the Input settings panel shows the migrated type.
         for (SInputAction& Action : Actions)
         {
-            if (Action.bAxis)
-            {
-                if (Action.Type == EInputActionType::Digital)
-                {
-                    Action.Type = EInputActionType::Axis1D;
-                }
-                Action.bAxis = false;
-            }
+            Action.FoldLegacyAxisFlag();
         }
 
         FInputActionMap::Get().RebuildFromSettings();

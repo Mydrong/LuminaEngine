@@ -17,8 +17,8 @@ namespace Lumina
         // (Audio::Context()) is a process singleton, but this is the only system that touches it within a world,
         // so within-world batching is safe. Defined in the .cpp.
 
-        void OnStartup() override;
-        void OnUpdate() override;
-        void OnTeardown() override;
+        void OnStartup(const SSystemContext& Context) override;
+        void OnUpdate(const SSystemContext& Context) override;
+        void OnTeardown(const SSystemContext& Context) override;
     };
 }

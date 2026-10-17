@@ -60,13 +60,12 @@ namespace Lumina
         Reads<SSocketAttachmentComponent, SSkeletalMeshComponent, SStaticMeshComponent, SystemResource::Hierarchy>();
     }
 
-    void SSocketAttachmentSystem::OnUpdate()
+    void SSocketAttachmentSystem::OnUpdate(const SSystemContext& Context)
     {
-        const FSystemContext& SystemContext = GetContext();
 
         LUMINA_PROFILE_SCOPE();
 
-        auto View = SystemContext.CreateView<SSocketAttachmentComponent, STransformComponent>(ECS::TExclude<SDisabledTag>{});
+        auto View = Context.CreateView<SSocketAttachmentComponent, STransformComponent>(ECS::TExclude<SDisabledTag>{});
 
         // Sized before the fan-out so every worker writes only its own entities' slots; any included pool bounds the view.
         const ECS::FSparseSet* Driver = View.GetDriver();
@@ -77,11 +76,11 @@ namespace Lumina
         }
 
         // Editing a socket in the editor changes nothing the cache keys on, so a paused world resolves every update.
-        const bool bAlwaysResolve = SystemContext.GetUpdateStage() == EUpdateStage::Paused;
+        const bool bAlwaysResolve = Context.GetUpdateStage() == EUpdateStage::Paused;
 
         const auto Attach = [&](ECS::FEntity Entity, const SSocketAttachmentComponent& Attachment, STransformComponent& Transform)
         {
-            const ECS::FEntity Parent = SystemContext.GetHierarchy().GetParent(Entity);
+            const ECS::FEntity Parent = Context.GetHierarchy().GetParent(Entity);
             if (Parent == ECS::NullEntity)
             {
                 return;
@@ -95,7 +94,7 @@ namespace Lumina
             }
 
             FMatrix4 SocketTransform;
-            if (const SSkeletalMeshComponent* SkeletalMesh = SystemContext.TryGet<SSkeletalMeshComponent>(Parent))
+            if (const SSkeletalMeshComponent* SkeletalMesh = Context.TryGet<SSkeletalMeshComponent>(Parent))
             {
                 const FSkeletonResource* Skeleton = SkeletalUtils::GetSkeleton(*SkeletalMesh);
                 if (Skeleton == nullptr)
@@ -128,7 +127,7 @@ namespace Lumina
                 Entry.PoseSerial = SkeletalMesh->PoseSerial;
                 SocketTransform = bPosed ? SkeletalMesh->BoneTransforms[Entry.Bone] * Entry.Post : Entry.Post;
             }
-            else if (const SStaticMeshComponent* StaticMesh = SystemContext.TryGet<SStaticMeshComponent>(Parent))
+            else if (const SStaticMeshComponent* StaticMesh = Context.TryGet<SStaticMeshComponent>(Parent))
             {
                 const void* Source = StaticMesh->StaticMesh.Get();
                 const bool bStale = bAlwaysResolve || !Entry.bResolved || Entry.Parent != Parent || Entry.Source != Source
@@ -164,6 +163,6 @@ namespace Lumina
         };
 
         // Each attachment writes only its own transform and cache slot, and SetLocalTransform is safe from any thread for disjoint entities.
-        SystemContext.ParallelForEachView(View, Attach, kSocketParallelGrain, kSocketParallelGrain * 2);
+        Context.ParallelForEachView(View, Attach, kSocketParallelGrain, kSocketParallelGrain * 2);
     }
 }

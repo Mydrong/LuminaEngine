@@ -15,12 +15,12 @@ namespace Lumina
     {
         RequireUpdate(EUpdateStage::PrePhysics);
         Writes<SProjectileComponent, STransformComponent>();
+        SendsEvent<SProjectileHitEvent>();
         Reads<SystemResource::PhysicsQuery>();
     }
 
-    void SProjectileSystem::OnUpdate()
+    void SProjectileSystem::OnUpdate(const SSystemContext& Context)
     {
-        const FSystemContext& Context = GetContext();
 
         LUMINA_PROFILE_SCOPE();
 
@@ -101,14 +101,8 @@ namespace Lumina
                 Event.Normal = Hit->Normal;
                 Event.Damage = Projectile.Damage;
 
-                // Listeners may change the world, so they run at the sync point, before the deferred destroy below.
-                Context.GetCommandBus().Enqueue([Entity, Event](ECS::FRegistry& Registry)
-                {
-                    if (SProjectileComponent* HitProjectile = Registry.IsValid(Entity) ? Registry.TryGet<SProjectileComponent>(Entity) : nullptr)
-                    {
-                        HitProjectile->OnHit.Broadcast(Event);
-                    }
-                });
+                // Committed ahead of the deferred destroy below, so OnHit still reaches the projectile.
+                Context.SendEvent(Event);
 
                 Projectile.bHasHit = true;
                 Projectile.Velocity = FVector3(0.0f);

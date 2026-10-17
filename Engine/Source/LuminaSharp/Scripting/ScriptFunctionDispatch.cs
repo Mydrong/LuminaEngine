@@ -91,7 +91,7 @@ public static unsafe class ScriptFunctionDispatch
             FCacheLine? Line = Cache[LineOf(Function)];
             if (Line != null && Line.Function == Function && ReferenceEquals(Line.Type, Owner) && Line.Bound.Invoker != 0)
             {
-                ((delegate* managed<nint, nint, int*, void>)Line.Bound.Invoker)(
+                ((delegate* unmanaged<nint, nint, int*, void>)Line.Bound.Invoker)(
                     Instance, Frame, Line.Bound.Offsets);
                 return;
             }
@@ -103,7 +103,7 @@ public static unsafe class ScriptFunctionDispatch
 
             if (Bound.Invoker != 0)
             {
-                ((delegate* managed<nint, nint, int*, void>)Bound.Invoker)(Instance, Frame, Bound.Offsets);
+                ((delegate* unmanaged<nint, nint, int*, void>)Bound.Invoker)(Instance, Frame, Bound.Offsets);
                 return;
             }
 

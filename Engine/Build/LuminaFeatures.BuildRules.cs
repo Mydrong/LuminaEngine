@@ -26,6 +26,8 @@ public static class LuminaFeatures
 
     public const string ForceInlineHint = "ForceInlineHint";
 
+    public const string DevUI = "DevUI";
+
     public static bool IsActive(TargetInfo Target, string Feature)
     {
         switch (Target.Options.GetMode(Feature))
@@ -74,6 +76,9 @@ public static class LuminaFeatures
 
             // TRACE, DEBUG and INFO compile to nothing when off; WARN and above always stay.
             VerboseLogging => bNonShipping,
+
+            // The in-game ImGui overlay and console. A server has no window, and Shipping links no-op stubs instead.
+            DevUI => Target.Type == TargetType.Editor || (Target.Type == TargetType.Game && bNonShipping),
 
             // Editor only, never Game: a game built on Lumina must not report to the engine's database.
             BugSplat => Target.Type == TargetType.Editor && Target.Platform == BuildPlatform.Windows64,
@@ -142,5 +147,8 @@ public static class LuminaFeatures
         {
             Definitions.Add("WITH_BUGSPLAT");
         }
+
+        // Always defined, valued 0 or 1, so code tests it with USING(WITH_DEV_UI) like WITH_EDITOR.
+        Definitions.Add(IsActive(Target, DevUI) ? "WITH_DEV_UI=1" : "WITH_DEV_UI=0");
     }
 }

@@ -18,9 +18,8 @@ namespace Lumina
         Writes<SystemResource::PhysicsQuery>();
     }
 
-    void SBuoyancySystem::OnStartup()
+    void SBuoyancySystem::OnStartup(const SSystemContext& Context)
     {
-        const FSystemContext& Context = GetContext();
 
         (void)Context.CreateView<SWaterComponent, STransformComponent>();
     }
@@ -74,9 +73,8 @@ namespace Lumina
         return Math::Normalize(FVector3(-dHdx, 1.0f, -dHdz));
     }
 
-    void SBuoyancySystem::OnUpdate()
+    void SBuoyancySystem::OnUpdate(const SSystemContext& Context)
     {
-        const FSystemContext& Context = GetContext();
 
         LUMINA_PROFILE_SCOPE();
 

@@ -1704,7 +1704,7 @@ namespace Lumina
             }
         }
 
-        void SendFrame(CWorld* World, ECS::FRegistry& Registry, FNetWorldState& State, const FSystemContext& Context, bool bServer)
+        void SendFrame(CWorld* World, ECS::FRegistry& Registry, FNetWorldState& State, const SSystemContext& Context, bool bServer)
         {
             LUMINA_PROFILE_SCOPE();
             if (bServer)
@@ -1810,14 +1810,13 @@ namespace Lumina
         RequireUpdate(EUpdateStage::FrameEnd, EUpdatePriority::Low);
     }
 
-    bool SNetworkSystem::HasWork(EUpdateStage)
+    bool SNetworkSystem::HasWork(const SSystemContext& Context)
     {
         return GetWorld() != nullptr && GetWorld()->GetNetMode() != ENetMode::Standalone;
     }
 
-    void SNetworkSystem::OnUpdate()
+    void SNetworkSystem::OnUpdate(const SSystemContext& Context)
     {
-        const FSystemContext& Context = GetContext();
 
         LUMINA_PROFILE_SCOPE();
         

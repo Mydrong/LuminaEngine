@@ -1609,6 +1609,7 @@ namespace Lumina
 
             HandleRenameShortcut();
             HandleCommentShortcut();
+            DrawChoicePopup();
         
             if (NodeEditor::BeginShortcut())
             {
@@ -2098,6 +2099,64 @@ namespace Lumina
                 GetPackage()->MarkDirty();
             }
             ImGui::CloseCurrentPopup();
+        }
+
+        ImGui::EndPopup();
+    }
+
+    void CEdNodeGraph::OpenChoicePopup(CEdGraphNode* Node, TVector<FString> InChoices, int32 Current, TFunction<void(int32)> OnChosen)
+    {
+        if (Node == nullptr || InChoices.empty())
+        {
+            return;
+        }
+
+        // The item rect is in canvas space here, so it is moved to the screen before the canvas is suspended.
+        const ImVec2 Min = ax::NodeEditor::CanvasToScreen(ImGui::GetItemRectMin());
+        const ImVec2 Max = ax::NodeEditor::CanvasToScreen(ImGui::GetItemRectMax());
+
+        ChoiceNodeID     = Node->GetNodeID();
+        ChoiceCurrent    = Current;
+        ChoiceAnchor     = ImVec2(Min.x, Max.y);
+        ChoiceWidth      = Max.x - Min.x;
+        Choices          = std::move(InChoices);
+        OnChoiceChosen   = std::move(OnChosen);
+        bOpenChoicePopup = true;
+    }
+
+    void CEdNodeGraph::DrawChoicePopup()
+    {
+        if (bOpenChoicePopup)
+        {
+            bOpenChoicePopup = false;
+            ImGui::OpenPopup("##NodeChoice");
+        }
+
+        if (!ImGui::IsPopupOpen("##NodeChoice"))
+        {
+            return;
+        }
+
+        ImGui::SetNextWindowPos(ChoiceAnchor, ImGuiCond_Appearing);
+        ImGui::SetNextWindowSizeConstraints(ImVec2(ChoiceWidth, 0.0f), ImVec2(FLT_MAX, FLT_MAX));
+        if (!ImGui::BeginPopup("##NodeChoice"))
+        {
+            return;
+        }
+
+        for (int32 Index = 0; Index < (int32)Choices.size(); ++Index)
+        {
+            if (ImGui::Selectable(Choices[Index].c_str(), Index == ChoiceCurrent))
+            {
+                if (FindNode(ChoiceNodeID) != nullptr && OnChoiceChosen)
+                {
+                    OnChoiceChosen(Index);
+                }
+            }
+            if (Index == ChoiceCurrent && ImGui::IsWindowAppearing())
+            {
+                ImGui::SetItemDefaultFocus();
+            }
         }
 
         ImGui::EndPopup();

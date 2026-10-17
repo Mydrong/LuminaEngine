@@ -62,9 +62,9 @@ namespace Lumina
         // Writes only its own ctx singleton and reads the camera's resolved view, so it never conflicts
         // with a component-touching system. Defined in the .cpp.
 
-        void OnStartup() override;
-        void OnUpdate() override;
-        void OnTeardown() override;
+        void OnStartup(const SSystemContext& Context) override;
+        void OnUpdate(const SSystemContext& Context) override;
+        void OnTeardown(const SSystemContext& Context) override;
     };
 
     namespace DebugDraw

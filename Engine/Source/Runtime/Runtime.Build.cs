@@ -78,6 +78,12 @@ public class Runtime : LuminaModuleRules
             PrivateDependencyModuleNames.Add("BugSplat");
         }
 
+        // The ImGui widgets, renderer and backends only serve the developer UI, and the stubs that replace ImGui there cover its public API alone.
+        if (!LuminaFeatures.IsActive(Target, LuminaFeatures.DevUI))
+        {
+            ExcludedSourceDirectories.Add(System.IO.Path.Combine(ModuleDirectory, "Source", "Tools", "UI", "ImGui"));
+        }
+
         // Shadowed locals and unreferenced formal parameters have caused real bugs in this module.
         Warnings.Set(WarningSeverity.Fatal,
             CompilerWarning.ShadowLocal,

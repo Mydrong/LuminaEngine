@@ -10,6 +10,7 @@
 #include "Core/Object/Class.h"
 #include "Core/Object/Object.h"
 #include "Core/Object/ObjectCore.h"
+#include "Core/Object/ObjectHandleTyped.h"
 #include "Core/Object/Package/Package.h"
 #include "FileSystem/FileSystem.h"
 #include "Memory/SmartPtr.h"
@@ -282,6 +283,17 @@ namespace Lumina::ReplaceReferences
 
                 TVector<CObject*> Objects;
                 GetObjectsWithPackage(Package, Objects);
+
+                // Pinned until the save, since clearing a reference can cascade-free an owned object before its package is written.
+                TVector<TStrongObjectPtr<CObject>> KeepAlive;
+                for (CObject* Object : Objects)
+                {
+                    if (Object != nullptr && !Object->HasAnyFlag(OF_MarkedDestroy) && Object->GetStrongRefCount() > 0)
+                    {
+                        KeepAlive.emplace_back(Object);
+                    }
+                }
+
                 for (CObject* Object : Objects)
                 {
                     if (Object == nullptr || Object == Package || Object->HasAnyFlag(OF_MarkedDestroy))

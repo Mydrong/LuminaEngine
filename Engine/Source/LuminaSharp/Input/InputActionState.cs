@@ -8,4 +8,7 @@ public partial struct SInputActionState
     public bool IsReleased => (Flags & 4u) != 0;
     public bool IsHeld => (Flags & 8u) != 0;
     public bool IsTapped => (Flags & 16u) != 0;
+    public bool IsDoubleTapped => (Flags & 32u) != 0;
+    public bool IsRepeated => (Flags & 64u) != 0;
+    public bool IsBuffered => (Flags & 128u) != 0;
 }

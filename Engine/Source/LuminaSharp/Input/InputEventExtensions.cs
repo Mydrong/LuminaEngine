@@ -17,6 +17,8 @@ public static class InputEventExtensions
 
     public static bool IsMouse(this Lumina.SInputEvent Event) => Event.Device == Lumina.EKeyDevice.Mouse;
 
+    public static bool IsGamepad(this Lumina.SInputEvent Event) => Event.Device == Lumina.EKeyDevice.Gamepad;
+
     public static bool IsKeyDown(this Lumina.SInputEvent Event, Lumina.EKey Key)
         => Event.Type == Lumina.EInputEventType.KeyDown && Event.Device == Lumina.EKeyDevice.Keyboard && Event.Key == Key;
 
@@ -28,4 +30,10 @@ public static class InputEventExtensions
 
     public static bool IsMouseUp(this Lumina.SInputEvent Event, Lumina.EMouseKey Button)
         => Event.Type == Lumina.EInputEventType.MouseUp && Event.Device == Lumina.EKeyDevice.Mouse && Event.Button == Button;
+
+    public static bool IsGamepadDown(this Lumina.SInputEvent Event, Lumina.EGamepadButton Button)
+        => Event.Type == Lumina.EInputEventType.GamepadDown && Event.Device == Lumina.EKeyDevice.Gamepad && Event.GamepadButton == Button;
+
+    public static bool IsGamepadUp(this Lumina.SInputEvent Event, Lumina.EGamepadButton Button)
+        => Event.Type == Lumina.EInputEventType.GamepadUp && Event.Device == Lumina.EKeyDevice.Gamepad && Event.GamepadButton == Button;
 }

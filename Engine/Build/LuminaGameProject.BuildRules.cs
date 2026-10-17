@@ -19,6 +19,9 @@ public abstract class LuminaGameModuleRules : LuminaModuleRules
             PublicDependencyModuleNames.Add("Editor");
         }
 
+        // IMPLEMENT_MODULE reads this to export the hook that shares the engine's ImGui context with this module.
+        PrivateDefinitions.Add("LUMINA_GAME_MODULE=1");
+
         // The minimum set a game translation unit needs for the engine's template instantiations.
         PrivateDependencyModuleNames.AddRange(new[]
         {

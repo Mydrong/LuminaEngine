@@ -60,11 +60,10 @@ namespace Lumina
         return Mesh.Commit();
     }
 
-    void SBlockoutSystem::OnUpdate()
+    void SBlockoutSystem::OnUpdate(const SSystemContext& Context)
     {
         LUMINA_PROFILE_SCOPE();
 
-        const FSystemContext& Context = GetContext();
 
         TVector<ECS::FEntity> Dirty;
         for (auto&& [Entity, Shape, Mesh] : Context.CreateView<SBlockoutComponent, SDynamicMeshComponent>().Each())

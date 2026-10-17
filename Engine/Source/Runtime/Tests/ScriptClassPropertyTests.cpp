@@ -800,7 +800,7 @@ TEST(ScriptClassReload, AReshapeLeavesTheOldClassWithNoInstances)
     auto CountInstancesOf = [](const CClass* Class)
     {
         size_t Count = 0;
-        GObjectArray.ForEachObject([&](CObjectBase* Base, int32)
+        ForEachObject([&](CObjectBase* Base, int32)
         {
             if (Base != nullptr && Base->GetClass() == Class
                 && !Base->HasAnyFlag(OF_MarkedDestroy) && !Base->HasAnyFlag(OF_DefaultObject))

@@ -345,6 +345,34 @@ namespace Lumina
         return Scene ? Scene->GetAngularVelocity(Entity) : FVector3(0.0f);
     }
 
+    SPhysicsBodyTarget CPhysicsLibrary::GetRagdollBody(CWorld* World, ECS::FEntity Entity, FName Bone)
+    {
+        Physics::IPhysicsScene* Scene = SceneOf(World);
+        return Scene ? Scene->GetRagdollBoneTarget(Entity, Bone) : SPhysicsBodyTarget();
+    }
+
+    void CPhysicsLibrary::AddImpulseToBody(CWorld* World, SPhysicsBodyTarget Body, FVector3 Impulse, FVector3 Position)
+    {
+        if (Physics::IPhysicsScene* Scene = SceneOf(World)) { Scene->AddImpulseAtTarget(Body, Impulse, Position); }
+    }
+
+    void CPhysicsLibrary::SetBodyLinearVelocity(CWorld* World, SPhysicsBodyTarget Body, FVector3 Velocity)
+    {
+        if (Physics::IPhysicsScene* Scene = SceneOf(World)) { Scene->SetTargetLinearVelocity(Body, Velocity); }
+    }
+
+    void CPhysicsLibrary::SetBodyAngularVelocity(CWorld* World, SPhysicsBodyTarget Body, FVector3 Velocity)
+    {
+        if (Physics::IPhysicsScene* Scene = SceneOf(World)) { Scene->SetTargetAngularVelocity(Body, Velocity); }
+    }
+
+    FVector3 CPhysicsLibrary::GetBodyLinearVelocity(CWorld* World, SPhysicsBodyTarget Body)
+    {
+        Physics::FPhysicsBodyState State;
+        Physics::IPhysicsScene* Scene = SceneOf(World);
+        return Scene && Scene->TryGetTargetState(Body, State) ? State.LinearVelocity : FVector3(0.0f);
+    }
+
     FVector3 CPhysicsLibrary::GetVelocityAtPoint(CWorld* World, ECS::FEntity Entity, FVector3 Point)
     {
         Physics::IPhysicsScene* Scene = SceneOf(World);

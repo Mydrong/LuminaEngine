@@ -18,6 +18,6 @@ namespace Lumina
         // collision sweep) via the PhysicsQuery resource. Runs before SCameraSystem in the same stage; the
         // shared STransformComponent write keeps that ordering. Defined in the .cpp.
 
-        void OnUpdate() override;
+        void OnUpdate(const SSystemContext& Context) override;
     };
 }

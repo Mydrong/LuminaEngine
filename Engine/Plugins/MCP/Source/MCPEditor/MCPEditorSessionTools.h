@@ -134,6 +134,22 @@ namespace Lumina
         /** Path of the world the editor has open. */
         PROPERTY()
         FString World;
+
+        // Detached to the editor's free camera with F8 while the game keeps running.
+        PROPERTY()
+        bool bEjected = false;
+
+        // False after Shift+F1 hands input back to the editor.
+        PROPERTY()
+        bool bGameInputFocused = false;
+
+        // The cursor the active window shows, Normal, Hidden or Captured.
+        PROPERTY()
+        FString MouseMode;
+
+        // The active viewport's input mode, Game, UI or GameAndUI.
+        PROPERTY()
+        FString InputMode;
     };
 
     REFLECT()

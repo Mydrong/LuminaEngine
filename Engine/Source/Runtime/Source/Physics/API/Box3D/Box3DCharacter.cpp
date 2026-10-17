@@ -410,7 +410,7 @@ namespace Lumina::Physics
                 return;
             }
 
-            CharacterWorkScratch.push_back({ &Physics, &Movement });
+            CharacterWorkScratch.push_back({ &Physics, &Movement, Entity });
         });
 
         const uint32 WorkCount = (uint32)CharacterWorkScratch.size();
@@ -423,7 +423,7 @@ namespace Lumina::Physics
 
         for (FCharacterPushBucket& Bucket : CharacterPushScratch)
         {
-            Bucket.Pushes.clear();
+            Bucket.Clear();
         }
 
         if (WorkCount > kCharacterParallelThreshold)
@@ -455,9 +455,17 @@ namespace Lumina::Physics
                     b3Body_ApplyLinearImpulse(Push.Body, Push.Impulse, Push.Point, true);
                 }
             }
+            DeliverCharacterEvents(Bucket);
         }
 
         LUMINA_PROFILE_VALUE("Physics/RestingCharacters", RestingCount);
+    }
+
+    void FBox3DPhysicsScene::DeliverCharacterEvents(const FCharacterPushBucket& Bucket)
+    {
+        ECS::FEventQueues& Events = World->GetEvents();
+        ECS::SendEvents(Events, TSpan<const SCharacterLandedEvent>(Bucket.Landings.data(), Bucket.Landings.size()));
+        ECS::SendEvents(Events, TSpan<const SCharacterJumpedEvent>(Bucket.Jumps.data(), Bucket.Jumps.size()));
     }
 
     bool FBox3DPhysicsScene::ResolveCharacterPreStep(ECS::FEntity Entity, SCharacterPhysicsComponent& Physics, SCharacterMovementComponent& Movement)
@@ -534,6 +542,9 @@ namespace Lumina::Physics
                 Character.Position = SeatedPosition;
                 Character.Velocity = FVector3(0.0f);
                 Movement.Velocity = FVector3(0.0f);
+
+                // Placed on the ground rather than arriving there, so its first step does not report a landing.
+                Character.bGrounded = true;
             }
             else
             {
@@ -646,12 +657,12 @@ namespace Lumina::Physics
             {
                 CharacterPushScratch.resize(1);
             }
-            CharacterPushScratch[0].Pushes.clear();
+            CharacterPushScratch[0].Clear();
 
-            StepCharacter(FCharacterWork{ Physics, Movement }, FixedDt, 0);
+            StepCharacter(FCharacterWork{ Physics, Movement, Entity }, FixedDt, 0);
             DriveProxy(*Physics->Character, FixedDt);
 
-            // A replay re-walks steps whose pushes already happened, so applying them again would shove twice.
+            // A replay re-walks steps whose pushes and landings already happened, so repeating them would shove and announce twice.
             if (!bReplay)
             {
                 for (const FPendingCharacterPush& Push : CharacterPushScratch[0].Pushes)
@@ -661,8 +672,9 @@ namespace Lumina::Physics
                         b3Body_ApplyLinearImpulse(Push.Body, Push.Impulse, Push.Point, true);
                     }
                 }
+                DeliverCharacterEvents(CharacterPushScratch[0]);
             }
-            CharacterPushScratch[0].Pushes.clear();
+            CharacterPushScratch[0].Clear();
         }
 
         Movement->MoveSpeed = AuthoredSpeed;
@@ -767,6 +779,11 @@ namespace Lumina::Physics
                 Movement.Velocity.y = Movement.JumpSpeed;
                 ++Movement.JumpCount;
                 bJumpedThisStep = true;
+
+                SCharacterJumpedEvent& Jumped = CharacterPushScratch[ThreadSlot].Jumps.emplace_back();
+                Jumped.Entity    = Work.Entity;
+                Jumped.JumpCount = Movement.JumpCount;
+                Jumped.Velocity  = Movement.Velocity;
             }
         }
 
@@ -795,6 +812,7 @@ namespace Lumina::Physics
 
         Character.Rotation = TargetRotation;
         Character.Velocity = Movement.Velocity;
+        const float FallSpeed = Math::Max(-Character.Velocity.y, 0.0f);
 
         const b3Capsule Mover = Character.MakeMoverCapsule();
 
@@ -957,7 +975,8 @@ namespace Lumina::Physics
         const bool bNowGrounded = GroundPlane != Constants::kIndexNone && !bJumpedThisStep;
 
         // The landing edge is only visible here, where this step's ground has been resolved against the last one.
-        if (bNowGrounded && !bWasGrounded)
+        const bool bLanded = bNowGrounded && !bWasGrounded;
+        if (bLanded)
         {
             Movement.JumpCount = 0;
         }
@@ -980,6 +999,15 @@ namespace Lumina::Physics
             Character.GroundNormal = FVector3(0.0f, 1.0f, 0.0f);
             Character.GroundEntity = ECS::NullEntity;
             Character.GroundVelocity = FVector3(0.0f);
+        }
+
+        if (bLanded)
+        {
+            SCharacterLandedEvent& Landed = CharacterPushScratch[ThreadSlot].Landings.emplace_back();
+            Landed.Entity       = Work.Entity;
+            Landed.ImpactSpeed  = FallSpeed;
+            Landed.GroundNormal = Character.GroundNormal;
+            Landed.GroundEntity = Character.GroundEntity;
         }
 
         // Rest is only safe against things that cannot move on their own. A neighboring character proxy

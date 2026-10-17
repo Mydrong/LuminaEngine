@@ -553,6 +553,16 @@ namespace Lumina
             DrawAnimationPreviewPanel();
         });
 
+        CreateToolWindow(HierarchyName, [&](bool bFocused)
+        {
+            SocketHierarchy.DrawTree();
+        });
+
+        CSkeletalMesh* SocketMesh = CastAsserted<CSkeletalMesh>(Asset.Get());
+        SocketHierarchy.Initialize(SocketMesh->Skeleton.Get(), SocketMesh, &GetTransactionManager());
+        SocketHierarchy.OnSocketsEdited = [this]() { PropertyTable.MarkDirty(); };
+        SocketHierarchy.OnBoneSelected = [this](int32 BoneIndex) { SelectedBoneIndex = BoneIndex; };
+
         CreateToolWindow(MeshPropertiesName, [&](bool bFocused)
         {
             CSkeletalMesh* SkeletalMesh = CastAsserted<CSkeletalMesh>(Asset.Get());
@@ -1145,25 +1155,11 @@ namespace Lumina
             }
         }
 
+        // Fed the live pose, so a socket placed during a playing clip lands where the clip puts the bone.
+        SocketHierarchy.SetBoneWorldTransforms(BoneWorld);
         if (bShowSockets)
         {
-            for (const SMeshSocket& Socket : SkeletalMesh->Skeleton->Sockets)
-            {
-                const int32 BoneIndex = SkeletonResource->FindBoneIndex(Socket.BoneName);
-                if (BoneIndex == Constants::kIndexNone || BoneIndex >= (int32)BoneWorld.size())
-                {
-                    continue;
-                }
-
-                const FMatrix4 SocketMatrix = BoneWorld[BoneIndex] * Socket.RelativeTransform.GetMatrix();
-                const FVector3 Position = FVector3(SocketMatrix[3]);
-                const float AxisLength = BoneRadius * 5.0f;
-
-                World->GetDebugInterface()->DrawSphere(Position, BoneRadius * 0.9f, FVector4(1.0f, 0.82f, 0.4f, 1.0f), 12, 2.5f, false);
-                World->GetDebugInterface()->DrawLine(Position, Position + Math::Normalize(FVector3(SocketMatrix[0])) * AxisLength, FVector4(1.0f, 0.2f, 0.2f, 1.0f), 3.0f, false);
-                World->GetDebugInterface()->DrawLine(Position, Position + Math::Normalize(FVector3(SocketMatrix[1])) * AxisLength, FVector4(0.2f, 1.0f, 0.2f, 1.0f), 3.0f, false);
-                World->GetDebugInterface()->DrawLine(Position, Position + Math::Normalize(FVector3(SocketMatrix[2])) * AxisLength, FVector4(0.2f, 0.4f, 1.0f, 1.0f), 3.0f, false);
-            }
+            SocketHierarchy.DrawSocketMarkers(World.Get(), BoneRadius * 0.9f);
         }
     }
 
@@ -1173,7 +1169,19 @@ namespace Lumina
 
     void FSkeletalMeshEditorTool::DrawViewportOverlayElements(const FUpdateContext& UpdateContext, ImTextureRef ViewportTexture, ImVec2 ViewportSize)
     {
+        const ImVec2 ViewportOrigin = ViewportScreenMin;
         DrawCameraModeSelector();
+        SocketHierarchy.TickViewport(World.Get(), ViewportOrigin, ViewportSize, GuizmoOp, bViewportHovered, ShouldSuppressViewportClickInput(), GetBoneDrawRadius() * 0.9f);
+    }
+
+    void FSkeletalMeshEditorTool::OnPostUndoRedo()
+    {
+        FAssetEditorTool::OnPostUndoRedo();
+
+        // Undo can put a different Skeleton back, so the rows are rebound before they rebuild.
+        CSkeletalMesh* SkeletalMesh = CastAsserted<CSkeletalMesh>(Asset.Get());
+        SocketHierarchy.Initialize(SkeletalMesh->Skeleton.Get(), SkeletalMesh, &GetTransactionManager());
+        SocketHierarchy.OnUndoRedo();
     }
 
     void FSkeletalMeshEditorTool::OnAssetLoadFinished()
@@ -1192,6 +1200,9 @@ namespace Lumina
         SelectedBonePoints.clear();
         SelectedSurfaceIndex = -1;
         PreviewLODIndex = -1;
+
+        CSkeletalMesh* SkeletalMesh = CastAsserted<CSkeletalMesh>(Asset.Get());
+        SocketHierarchy.Initialize(SkeletalMesh->Skeleton.Get(), SkeletalMesh, &GetTransactionManager());
     }
 
     void FSkeletalMeshEditorTool::OnPropertyEditFinished(const FPropertyChangedEvent& Event)
@@ -1204,6 +1215,15 @@ namespace Lumina
 
         // The property table never calls PostPropertyChange, so a Skeleton swap would leave the indices behind.
         SkeletalMesh->RemapJointIndicesToSkeleton();
+
+        if (Event.PropertyName == "Skeleton")
+        {
+            SocketHierarchy.Initialize(SkeletalMesh->Skeleton.Get(), SkeletalMesh, &GetTransactionManager());
+        }
+        else
+        {
+            SocketHierarchy.Refresh();
+        }
 
         // The scene claims a primitive's bone range only when it is new, so a reused preview keeps the old skeleton.
         if (Event.PropertyName == "Skeleton" && MeshEntity != ECS::NullEntity)
@@ -1224,6 +1244,10 @@ namespace Lumina
             "Joint indices address the skeleton's bone array by position, so a mesh only works with the "
             "skeleton it was imported against. To bind it to another, reimport with that Target Skeleton "
             "set; the importer rewrites the indices by bone name.");
+        DrawHelpTextRow("Sockets",
+            "The Bone Hierarchy lists gold skeleton sockets, shared by every mesh on the skeleton, and teal "
+            "mesh sockets that only this mesh has. A mesh socket replaces a skeleton socket of the same name. "
+            "Right-click a bone to add either kind and a socket to copy, promote or delete it; select one to move it.");
         DrawHelpTextRow("LODs",
             "The Preview LOD picker forces a level so you can inspect its geometry; Automatic returns to "
             "distance-based selection.");
@@ -1266,8 +1290,8 @@ namespace Lumina
             if (Skeleton != nullptr && Skeleton->GetSkeletonResource() != nullptr)
             {
                 ImGuiX::Text("{0}", Skeleton->GetName().c_str());
-                ImGuiX::Text("{0} bones, {1} sockets",
-                             Skeleton->GetSkeletonResource()->GetNumBones(), (int32)Skeleton->Sockets.size());
+                ImGuiX::Text("{0} bones, {1} skeleton sockets, {2} mesh sockets",
+                             Skeleton->GetSkeletonResource()->GetNumBones(), (int32)Skeleton->Sockets.size(), (int32)SkeletalMesh->Sockets.size());
             }
             else
             {
@@ -1304,8 +1328,9 @@ namespace Lumina
     {
         ImGui::DockBuilderRemoveNodeChildNodes(InDockspaceID);
 
-        ImGuiID leftDockID = 0, rightDockID = 0;
+        ImGuiID leftDockID = 0, rightDockID = 0, hierarchyDockID = 0;
         ImGui::DockBuilderSplitNode(InDockspaceID, ImGuiDir_Right, 0.3f, &rightDockID, &leftDockID);
+        ImGui::DockBuilderSplitNode(leftDockID, ImGuiDir_Left, 0.25f, &hierarchyDockID, &leftDockID);
 
         ImGui::DockBuilderDockWindow(GetToolWindowName(ViewportWindowName).c_str(), leftDockID);
         // The unwrap wants the same large canvas, and this is an inspect-one-then-the-other workflow.
@@ -1313,5 +1338,6 @@ namespace Lumina
         ImGui::DockBuilderDockWindow(GetToolWindowName(MeshPropertiesName.data()).c_str(), rightDockID);
         ImGui::DockBuilderDockWindow(GetToolWindowName(SkinningName.data()).c_str(), rightDockID);
         ImGui::DockBuilderDockWindow(GetToolWindowName(AnimationPreviewName.data()).c_str(), rightDockID);
+        ImGui::DockBuilderDockWindow(GetToolWindowName(HierarchyName.data()).c_str(), hierarchyDockID);
     }
 }

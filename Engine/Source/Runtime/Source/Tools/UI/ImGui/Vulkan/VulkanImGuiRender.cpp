@@ -43,13 +43,19 @@ namespace Lumina
         LUMINA_PROFILE_SCOPE();
 
         ImGui_ImplGlfw_InitForVulkan(Windowing::GetPrimaryWindowHandle()->GetWindow(), true);
-        ImGuiX::NativeFrames::Install();
+        if (!bOverlay)
+        {
+            ImGuiX::NativeFrames::Install();
+        }
 
         ImGuiIO& IO = ImGui::GetIO();
         IO.BackendRendererName = "Lumina_RHI";
         IO.BackendFlags |= ImGuiBackendFlags_RendererHasVtxOffset;  // 16-bit indices + VtxOffset for >64K meshes
         IO.BackendFlags |= ImGuiBackendFlags_RendererHasTextures;   // ImTextureData create/update/destroy path
-        IO.BackendFlags |= ImGuiBackendFlags_RendererHasViewports;  // we drive secondary-window swapchains
+        if (!bOverlay)
+        {
+            IO.BackendFlags |= ImGuiBackendFlags_RendererHasViewports;
+        }
 
         // Secondary viewports render here, so the default platform-window render is intentionally unused.
         ImGuiPlatformIO& PlatformIO = ImGui::GetPlatformIO();
@@ -182,10 +188,10 @@ namespace Lumina
             NewPipeline = RHI::CreateGraphicsPipeline("ImGuiVert.slang", "ImGuiPixel.slang", RasterDesc);
         }
 
-        // Always begin/end the pass so the swapchain image is cleared even with no draws.
+        // Always begin/end the pass so the swapchain image is cleared even with no draws; an overlay keeps the game image under it.
         RHI::FRenderAttachment Color;
         Color.Texture  = Target;
-        Color.LoadOp   = RHI::ELoadOp::Clear;
+        Color.LoadOp   = bOverlay ? RHI::ELoadOp::Load : RHI::ELoadOp::Clear;
         Color.StoreOp  = RHI::EStoreOp::Store;
         Color.Color[0] = Color.Color[1] = Color.Color[2] = 0.0f;
         Color.Color[3] = 1.0f;

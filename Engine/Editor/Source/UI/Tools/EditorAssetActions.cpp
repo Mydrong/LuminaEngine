@@ -10,8 +10,6 @@
 #include "Assets/AssetTypes/Material/MaterialInstance.h"
 #include "Assets/AssetTypes/Mesh/Animation/Animation.h"
 #include "Assets/AssetTypes/Mesh/StaticMesh/StaticMesh.h"
-#include "Assets/AssetTypes/Physics/CollisionShape.h"
-#include "Physics/CollisionShapeGen.h"
 #include "Assets/Factories/Factory.h"
 #include "Assets/Factories/AnimationMontageFactory/AnimationMontageFactory.h"
 #include "Core/Object/Cast.h"
@@ -241,54 +239,6 @@ namespace Lumina
             }
         }
 
-        void CreateCollisionShapeFrom(const FAssetActionContext& Context)
-        {
-            CStaticMesh* Mesh = Cast<CStaticMesh>(LoadObject<CObject>(Context.Asset->AssetGUID));
-            if (Mesh == nullptr)
-            {
-                ImGuiX::Notifications::NotifyError("Could not load '{0}' to build collision for it.", Context.Asset->Path);
-                return;
-            }
-
-            const FFixedString NewPath = MakeSiblingAssetPath(
-                FStringView(Context.Asset->Path.c_str(), Context.Asset->Path.size()), "_Collision");
-
-            CCollisionShape* Shape = CFactory::CreateNewOf<CCollisionShape>(NewPath);
-            if (Shape == nullptr)
-            {
-                ImGuiX::Notifications::NotifyError("Failed to create a collision shape at '{0}'.", NewPath);
-                return;
-            }
-
-            // The only place SourceMesh is assigned, since hulls baked against one mesh are meaningless on another.
-            Shape->SourceMesh = Mesh;
-
-            // A single hull is the safest default, always convex, so it works on dynamic bodies immediately.
-            if (!Physics::CollisionGen::GenerateSingleHull(Mesh, Shape))
-            {
-                ImGuiX::Notifications::NotifyWarning("'{0}' produced no hull; the collision shape was created empty.",
-                                                     Context.Asset->AssetName);
-            }
-
-            if (!CPackage::SavePackage(Shape->GetPackage(), NewPath))
-            {
-                ImGuiX::Notifications::NotifyError("Failed to save '{0}'.", NewPath);
-                return;
-            }
-
-            FAssetRegistry::Get().AssetCreated(Shape);
-
-            ImGuiX::Notifications::NotifySuccess("Created '{0}'.", NewPath);
-
-            if (Context.ToolContext != nullptr)
-            {
-                if (const FAssetData* NewData = FAssetRegistry::Get().GetAssetByPath(FStringView(NewPath.c_str(), NewPath.size())))
-                {
-                    Context.ToolContext->OpenAssetEditor(NewData->AssetGUID);
-                }
-            }
-        }
-
         void CreateMontageFrom(const FAssetActionContext& Context)
         {
             CAnimation* Clip = Cast<CAnimation>(LoadObject<CObject>(Context.Asset->AssetGUID));
@@ -364,12 +314,6 @@ namespace Lumina
         {
             .Label   = LE_ICON_CONTENT_DUPLICATE " Create Material Instance",
             .Execute = &CreateMaterialInstanceFrom,
-        });
-
-        Registry.RegisterAction(CStaticMesh::StaticClass(), FAssetAction
-        {
-            .Label   = LE_ICON_CUBE_OUTLINE " Create Collision Shape",
-            .Execute = &CreateCollisionShapeFrom,
         });
 
         Registry.RegisterAction(CAnimation::StaticClass(), FAssetAction

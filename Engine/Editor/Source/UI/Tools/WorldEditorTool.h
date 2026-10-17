@@ -80,8 +80,6 @@ namespace Lumina
         void DrawViewportToolbarModeSelector(float ButtonSize) override;
         void DrawViewModeExtraItems() override;
 
-        void PushAddComponentModal(ECS::FEntity Entity);
-
         // GetComponentEditTargets / ApplyAddComponentToTargets / DrawAddableComponentList and the
         // CreateEntity* helpers now live in FSceneEditorTool.
         void PushSaveAsAssetModal();
@@ -100,6 +98,9 @@ namespace Lumina
         // Script context-menu helpers, shared between the outliner and viewport menus. The inline
         // assign/change dropdown is always offered; "Remove Script" only when one is present.
         void DrawScriptAttachMenuItems(ECS::FEntity Entity);
+
+        // The Add Component submenu, filed by where each component comes from the way the script submenu is.
+        void DrawAddComponentMenu(ECS::FEntity Entity);
         void AttachScriptToEntity(ECS::FEntity Entity, const FString& ScriptClass);  // C# class name; attaches or swaps
         void RemoveScriptFromEntity(ECS::FEntity Entity);
 
@@ -252,9 +253,6 @@ namespace Lumina
         /** Gameplay quit (Game.Quit): raised mid-world-tick, so only flag it; Update ends PIE at FrameStart. */
         void OnGameQuitRequested() { bGameQuitRequested = true; }
 
-        /** Accept a content-browser drag payload in the current scope and, if it's a prefab, instantiate it under DropTarget. */
-        void AcceptContentBrowserPrefabPayload(ECS::FEntity DropTarget, bool bAttachToTarget);
-
         // The Scene Graph panel + shared Add menu + filter UI + the incremental outliner engine now
         // live in FSceneEditorTool. The world editor supplies the empty-area drop + prefab instantiation
         // hooks and drives the tree via its registry observers below.
@@ -267,7 +265,8 @@ namespace Lumina
 
         /** Drop onto a folder row: file entities, reparent a folder, or spawn a dropped asset into it. */
         void HandleFolderDragDrop(uint32 FolderID);
-        void HandlePrefabContentDrop(FStringView VirtualPath, ECS::FEntity DropTarget, bool bAttachToTarget) override;
+        void HandlePrefabContentDrop(FStringView VirtualPath, ECS::FEntity DropTarget, bool bAttachToTarget, const FTransform* SpawnTransform = nullptr) override;
+        void OnDropSpawnedEntity(ECS::FEntity Entity) override;
 
         void DrawWorldSettings(bool bFocused);
         void DrawSystemsPanel(bool bFocused);
@@ -291,7 +290,13 @@ namespace Lumina
          *  clears any half-finished gizmo / vertex-snap state from the prior mode. */
         void SetActiveMode(int32 NewIndex);
 
+        // Copies every entity that is not a locked prefab child as one undo step, then selects the copies.
+        void DuplicateAndSelect(TSpan<const ECS::FEntity> Entities);
+
     private:
+
+        // How far a Shift drag has carried the camera, taken back off the gizmo's target.
+        FVector3 GizmoFollowOffset = FVector3(0.0f);
 
         struct FSelectionBox
         {
@@ -359,6 +364,7 @@ namespace Lumina
 
         // The outliner's Attach Script submenu, which keeps its open categories between uses.
         FCategorizedPicker                      ScriptAttachPicker;
+        FCategorizedPicker                      ComponentAttachPicker;
 
         TVector<TUniquePtr<IWorldEditorMode>>   EditorModes;
         int32                                   ActiveModeIndex = 0;
@@ -393,13 +399,6 @@ namespace Lumina
         // since stopping tears down the PIE world and shouldn't run mid-dispatch.
         bool                                    bStopPlayRequested = false;
 
-        // Who owns the mouse/keyboard while playing.
-        enum class EInputFocus                  : uint8 { Editor, Game };
-        EInputFocus                             InputFocus = EInputFocus::Editor;
-        
-        void ApplyInputFocus();
-        void SetInputFocus(EInputFocus NewFocus);
-        
         bool                                    bGameViewMode = false;
         bool                                    bSavedWorldGridEnabled = true;
         bool                                    bSavedShowComponentVisualizers = true;

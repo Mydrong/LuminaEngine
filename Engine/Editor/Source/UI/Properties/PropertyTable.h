@@ -1,5 +1,6 @@
 ﻿#pragma once
 #include "Containers/HashTable.h"
+#include "Containers/Optional.h"
 #include "Containers/Vector.h"
 #include "Containers/Function.h"
 #include "Containers/String.h"
@@ -33,6 +34,9 @@ namespace Lumina
 {
 
     using FPropertyChangedEventFn = TFunction<void(const FPropertyChangedEvent&)>;
+
+    // Which rows of a subtree are open, keyed by their path below the row that captured it.
+    using FRowExpansionState = THashMap<FString, bool>;
 
     struct FPropertyChangedEventCallbacks
     {
@@ -128,6 +132,16 @@ namespace Lumina
 
         // False while an unmet EditCondition tagged EditConditionHides keeps this row out of the table.
         bool IsVisible() const;
+
+        // Opens or closes this row and everything under it, for the Expand All and Collapse All menu items.
+        virtual void SetExpandedRecursive(bool bExpand);
+
+        // Lets a rebuild put back what the user had opened and closed, matching rows by path rather than identity.
+        void CaptureExpansion(FRowExpansionState& Out, const FString& Path = FString()) const;
+        void RestoreExpansion(const FRowExpansionState& In, const FString& Path = FString());
+
+        // This row's segment of that path, an element index, a category or a property name.
+        virtual FString GetExpansionKey() const;
 
         void SetIsArrayElement(bool bTrue) { bArrayElement = bTrue; }
         bool IsArrayElementProperty() const { return bArrayElement; }
@@ -238,6 +252,7 @@ namespace Lumina
         float GetExtraControlsSectionWidth() override;
         void DrawExtraControlsSection() override;
         void OnValueResetToDefault() override { RebuildChildren(); }
+        void SetExpandedRecursive(bool bExpand) override;
         TSharedPtr<FPropertyHandle> GetPropertyHandle() const { return PropertyHandle; }
 
         bool IsInnerFixedHeight() const;
@@ -250,6 +265,11 @@ namespace Lumina
         // Defer a structural change to next frame's Update: a reallocating mutation
         // invalidates every child's cached ContainerPtr, so reading mid-frame is UB.
         void QueueMutation(TFunction<void()> Mutation);
+
+        // Called from inside a queued mutation, so an element's open rows travel with it when it moves or goes.
+        void SwapElementExpansion(int64 A, int64 B);
+        void RemoveElementExpansion(int64 Index);
+        void ClearElementExpansion() { ElementStates.clear(); }
 
         FArrayProperty*             ArrayProperty = nullptr;
 
@@ -265,6 +285,12 @@ namespace Lumina
         void CoverElements(int32 Begin, int32 End);
 
         TVector<TFunction<void()>>  PendingMutations;
+
+        // The last Expand All or Collapse All, so element rows the window creates later open the same way.
+        TOptional<bool>             ElementExpansion;
+
+        // Each element's open rows as of the last structural edit, indexed like the array and applied as rows are created.
+        TVector<FRowExpansionState> ElementStates;
         bool                        bShowAllElements = false;
         int32                       WindowBegin = 0;
         int32                       LastVisibleBegin = 0;
@@ -424,6 +450,7 @@ namespace Lumina
         FCategoryPropertyRow* FindOrCreateChildCategory(const FName& InCategory);
 
         FName GetCategoryName() const { return Category; }
+        FString GetExpansionKey() const override { return Category.ToString(); }
         FStringView GetFilterLabel() const override;
         bool IsCategory() const override { return true; }
 

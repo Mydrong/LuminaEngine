@@ -64,13 +64,13 @@ namespace Lumina
         // PrePhysics, not PostPhysics, so SAnimationSystem reads this the same frame it is written.
         void Configure() override;
 
-        void OnStartup() override;
-        void OnUpdate() override;
+        void OnStartup(const SSystemContext& Context) override;
+        void OnUpdate(const SSystemContext& Context) override;
     };
 
     namespace Kinematics
     {
-        RUNTIME_API const FKinematicsState* GetState(const FSystemContext& Context);
+        RUNTIME_API const FKinematicsState* GetState(const SSystemContext& Context);
         RUNTIME_API const FKinematicsState* GetState(CWorld* World);
 
         // Zero for an untracked entity, which is what an entity that never moves would report anyway.

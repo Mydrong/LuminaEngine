@@ -66,7 +66,7 @@ namespace Lumina
             {
                 CObject* Object = nullptr;
                 *this << Object;
-                Value = GObjectArray.GetHandleByObject(Object);
+                Value = Object::Internal::GetHandleByObject(Object);
                 return *this;
             }
 

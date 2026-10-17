@@ -91,6 +91,10 @@ namespace Lumina
             }
         };
 
+        // Clearing a reference can free Object itself through a cycle, such as a skeleton and its preview mesh owning each other.
+        const FObjectHandle Handle = Object::Internal::GetHandleByObject(Object);
+        auto IsAlive = [&Handle]() { return Object::Internal::ResolveHandle(Handle) != nullptr; };
+
         if (SoftEntries.empty())
         {
             FObjectReferenceVisitor::VisitStruct(Object->GetClass(), Object, Hard);
@@ -100,10 +104,13 @@ namespace Lumina
             FObjectReferenceVisitor::VisitStructWithSoft(Object->GetClass(), Object, Hard, Soft);
         }
 
-        Object->VisitAdditionalObjectReferences(Hard);
+        if (IsAlive())
+        {
+            Object->VisitAdditionalObjectReferences(Hard);
+        }
 
         const uint32 Replaced = NumReplaced - Before;
-        if (Replaced > 0)
+        if (Replaced > 0 && IsAlive())
         {
             Object->OnReferencesReplaced();
         }
@@ -123,17 +130,17 @@ namespace Lumina
         // a handle resolves to null once that happens instead of handing back freed memory. Taking a strong
         // reference instead would be worse, since releasing one an object never had destroys it outright.
         TVector<FObjectHandle> Live;
-        GObjectArray.ForEachObject([&](CObjectBase* Base, int32)
+        ForEachObject([&](CObjectBase* Base, int32)
         {
             if (Base != nullptr && !Base->HasAnyFlag(OF_MarkedDestroy))
             {
-                Live.push_back(GObjectArray.GetHandleByObject(Base));
+                Live.push_back(Object::Internal::GetHandleByObject(Base));
             }
         });
 
         for (const FObjectHandle& Handle : Live)
         {
-            if (CObjectBase* Object = GObjectArray.ResolveHandle(Handle))
+            if (CObjectBase* Object = Object::Internal::ResolveHandle(Handle))
             {
                 ApplyTo(static_cast<CObject*>(Object));
             }

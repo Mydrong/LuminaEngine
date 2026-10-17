@@ -1,7 +1,6 @@
 #pragma once
 
 #include "World/ECS/Registry.h"
-#include "World/ECS/EventDispatcher.h"
 
 #include "PhysicsTypes.h"
 #include "Core/Templates/Optional.h"
@@ -20,7 +19,7 @@ namespace Lumina
 {
     class CPhysicsAsset;
     class CMesh;
-    class CCollisionShape;
+    struct SMeshCollision;
     class CPhysicsMaterial;
     struct FSkeletonResource;
     struct FPhysicsRagdollHandle;
@@ -113,14 +112,14 @@ namespace Lumina::Physics
 
     };
 
-    // One static collision instance with no entity of its own (foliage). World space; Shape wins over Mesh.
+    // One static collision instance with no entity of its own (foliage), in world space, built from Collision when set and Mesh otherwise.
     struct FStaticInstanceDesc
     {
         FVector3                Position = FVector3(0.0f);
         FQuat                   Rotation = FQuat::Identity();
         FVector3                Scale = FVector3(1.0f);
         const CMesh*            Mesh = nullptr;
-        const CCollisionShape*  Shape = nullptr;
+        const SMeshCollision*   Collision = nullptr;
         const CPhysicsMaterial* Material = nullptr;
         bool                    bConvex = true;
     };
@@ -204,7 +203,7 @@ namespace Lumina::Physics
         virtual void Simulate() = 0;
         virtual void StopSimulate() = 0;
 
-        // Game-thread drain of step-side events (ECS::FEventDispatcher). Pair with Update.
+        // Game-thread send of what the step recorded into the world's event queues. Pair with Update.
         virtual void DispatchPendingEvents() {}
         
         virtual void DeactivateBody(ECS::FEntity Entity) = 0;
@@ -218,6 +217,9 @@ namespace Lumina::Physics
         virtual bool TryGetBodyState(ECS::FEntity Entity, FPhysicsBodyState& Out) const = 0;
         virtual bool TryGetTargetState(const SPhysicsBodyTarget& Target, FPhysicsBodyState& Out) const = 0;
         virtual void AddForceAtTarget(const SPhysicsBodyTarget& Target, const FVector3& Force, const FVector3& Point) = 0;
+        virtual void AddImpulseAtTarget(const SPhysicsBodyTarget& Target, const FVector3& Impulse, const FVector3& Point) = 0;
+        virtual void SetTargetLinearVelocity(const SPhysicsBodyTarget& Target, const FVector3& Velocity) = 0;
+        virtual void SetTargetAngularVelocity(const SPhysicsBodyTarget& Target, const FVector3& Velocity) = 0;
         
         virtual TOptional<SRayResult> CastRay(const SRayCastSettings& Settings) = 0;
 
@@ -271,7 +273,8 @@ namespace Lumina::Physics
         {
             return OverlapShape(SQueryShape::Box(HalfExtents, Rotation), Center, ECollisionProfiles::All, IgnoreEntities, OutEntities);
         }
-        
+
+        // An entity whose ragdoll is simulating takes these as one whole ragdoll, pushes shared out by limb mass.
         virtual void AddForce(ECS::FEntity Entity, const FVector3& Force) = 0;
         virtual void AddImpulse(ECS::FEntity Entity, const FVector3& Impulse) = 0;
         virtual void AddTorque(ECS::FEntity Entity, const FVector3& Torque) = 0;
@@ -322,6 +325,9 @@ namespace Lumina::Physics
 
         // Remove a ragdoll's bodies + constraints from the scene. Safe with a null/empty handle.
         virtual void DestroyRagdoll(const TSharedPtr<FPhysicsRagdollHandle>& Handle) = 0;
+
+        // The limb simulating Bone, or its nearest ancestor with a body. Unset until the entity's ragdoll is simulating.
+        virtual SPhysicsBodyTarget GetRagdollBoneTarget(ECS::FEntity Entity, FName Bone) const = 0;
 
         // World-space transform of the ragdoll's root body (used to drive the owning entity so culling tracks it).
         virtual void GetRagdollRootTransform(const FPhysicsRagdollHandle& Handle, FVector3& OutPosition, FQuat& OutRotation) = 0;

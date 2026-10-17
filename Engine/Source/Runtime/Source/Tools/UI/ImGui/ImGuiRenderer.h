@@ -18,7 +18,8 @@ namespace Lumina
     {
     public:
 
-        IImGuiRenderer()            = default;
+        // An overlay draws over the game image and keeps to the game window, where the editor's owns the whole swapchain.
+        explicit IImGuiRenderer(bool bInOverlay = false) : bOverlay(bInOverlay) {}
         virtual ~IImGuiRenderer()   = default;
         LE_NO_COPYMOVE(IImGuiRenderer);
 
@@ -48,6 +49,10 @@ namespace Lumina
         virtual ImTextureID GetOrCreateImTexture(FStringView Path) = 0;
 
         RUNTIME_API ImGuiContext* GetImGuiContext() const { return Context; }
+
+        // Between NewFrame and Render, the only window in which a widget call is legal.
+        RUNTIME_API bool IsFrameOpen() const { return bFrameOpen; }
+        bool IsOverlay() const { return bOverlay; }
         RUNTIME_API ImPlotContext* GetImPlotContext() const { return PlotContext; }
 
     protected:
@@ -57,5 +62,8 @@ namespace Lumina
 
         // ImGui keeps only a pointer to the layout path, so the renderer owns the string.
         FString LayoutFilePath;
+
+        bool bOverlay = false;
+        bool bFrameOpen = false;
     };
 }

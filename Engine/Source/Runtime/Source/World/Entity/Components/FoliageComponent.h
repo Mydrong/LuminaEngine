@@ -17,7 +17,7 @@ namespace Lumina
     struct FPropertyChangedEvent;
 
     class CWorld;
-    class CCollisionShape;
+    struct SMeshCollision;
     class CPhysicsMaterial;
 
     // One painted foliage instance in WORLD space, with Rotation a quaternion laid out as (x, y, z, w).
@@ -113,11 +113,7 @@ namespace Lumina
         PROPERTY(Editable, Category = "Collision")
         bool bEnableCollision = false;
 
-        /** Authored collision used per instance; null falls back to collision built from the mesh. */
-        PROPERTY(Editable, Category = "Collision")
-        TStrongObjectPtr<CCollisionShape> CollisionShape;
-
-        /** Mesh fallback only: true builds a convex hull, false a concave triangle mesh. */
+        // For a mesh with no collision of its own, true builds a convex hull and false a concave triangle mesh.
         PROPERTY(Editable, Category = "Collision")
         bool bConvexCollision = true;
 
@@ -125,8 +121,8 @@ namespace Lumina
         PROPERTY(Editable, Category = "Collision")
         TStrongObjectPtr<CPhysicsMaterial> PhysicsMaterial;
 
-        // The type's own shape when it holds collision, else the mesh's loaded default, else null.
-        CCollisionShape* GetDefaultCollisionShape() const;
+        // The mesh's own collision when it has any, else null so the render mesh is used.
+        const SMeshCollision* GetCollision() const;
 
         // Transient resolve cache (not serialized); refreshed by ResolveDirtyMeshComponents.
         uint32          CachedMeshletHeaderSlot = 0;

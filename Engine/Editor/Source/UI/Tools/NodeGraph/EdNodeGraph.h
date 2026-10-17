@@ -309,6 +309,9 @@ namespace Lumina
         // Opens the rename box for Node on the next frame, when it has a renamable name.
         void BeginRenameNode(CEdGraphNode* Node);
 
+        // Must run inside DrawGraph's suspended region, since a popup opened inside a node lands in the zoomed canvas.
+        void DrawChoicePopup();
+
         // Draws a pin's live debug value inline in the pin row when the debug context supplies one.
         void DrawPinDebugValue(CEdNodeGraphPin* Pin);
 
@@ -372,6 +375,15 @@ namespace Lumina
         bool           bOpenRenamePopup = false;
         int64          RenameNodeID     = 0;
         char           RenameBuffer[128] = {};
+
+        // A node's dropdown, held here because the node only requests it while the canvas is drawing.
+        bool                     bOpenChoicePopup = false;
+        int64                    ChoiceNodeID     = 0;
+        int32                    ChoiceCurrent    = 0;
+        ImVec2                   ChoiceAnchor;
+        float                    ChoiceWidth      = 0.0f;
+        TVector<FString>         Choices;
+        TFunction<void(int32)>   OnChoiceChosen;
         
     public:
 
@@ -429,6 +441,9 @@ namespace Lumina
         bool                                            bDebug = false;
         
         ax::NodeEditor::EditorContext* GetEditorContext() const { return Context; }
+
+        // Lists Choices under the item just drawn in Node, and OnChosen gets the picked index if Node still exists.
+        void OpenChoicePopup(CEdGraphNode* Node, TVector<FString> Choices, int32 Current, TFunction<void(int32)> OnChosen);
 
     private:
 

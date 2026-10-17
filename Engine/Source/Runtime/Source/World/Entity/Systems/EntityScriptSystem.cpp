@@ -64,9 +64,8 @@ namespace Lumina
         RequireUpdate(EUpdateStage::PostPhysics);
     }
 
-    void SEntityScriptSystem::OnUpdate()
+    void SEntityScriptSystem::OnUpdate(const SSystemContext& Context)
     {
-        const FSystemContext& Context = GetContext();
 
         LUMINA_PROFILE_SCOPE();
 

@@ -71,7 +71,7 @@ namespace Lumina::MCP
                 Out.ManagedHeapMB = (int32)(Managed.ManagedHeapBytes / (int64)Constants::kMiB);
             }
 
-            Out.LiveObjects = GObjectArray.GetNumAliveObjects();
+            Out.LiveObjects = Object::Internal::GetNumAliveObjects();
             Out.ManagedBindings = (int32)GetLiveManagedBindingCount();
 
             if (GWorldManager != nullptr)

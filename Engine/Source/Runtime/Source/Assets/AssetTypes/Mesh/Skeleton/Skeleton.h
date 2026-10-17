@@ -40,7 +40,7 @@ namespace Lumina
         // Bumped whenever the sockets or the bones change, so anything built around the socket bones knows to rebuild.
         uint32 GetSocketGeneration() const { return SocketGeneration.load(std::memory_order_relaxed); }
 
-        void CollectSocketBones(TVector<int32>& OutBones) const;
+        void BumpSocketGeneration() { SocketGeneration.fetch_add(1, std::memory_order_relaxed); }
 
         PROPERTY(Editable, Category = "Preview")
         TStrongObjectPtr<CSkeletalMesh> PreviewMesh;
@@ -50,8 +50,6 @@ namespace Lumina
         TVector<SMeshSocket> Sockets;
 
     private:
-
-        void BumpSocketGeneration() { SocketGeneration.fetch_add(1, std::memory_order_relaxed); }
 
         TUniquePtr<FSkeletonResource> SkeletonResource;
 

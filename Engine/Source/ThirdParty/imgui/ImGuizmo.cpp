@@ -712,6 +712,7 @@ namespace IMGUIZMO_NAMESPACE
       vec_t mTranslationPlanOrigin;
       vec_t mMatrixOrigin;
       vec_t mTranslationLastDelta;
+      vec_t mTranslationOffset = makeVect(0.f, 0.f, 0.f);
 
       // rotation
       vec_t mRotationVectorSource;
@@ -1049,6 +1050,11 @@ namespace IMGUIZMO_NAMESPACE
          return true;
       }
       return false;
+   }
+
+   void SetTranslationOffset(const float* offset)
+   {
+      gContext.mTranslationOffset = makeVect(offset[0], offset[1], offset[2]);
    }
 
    void Enable(bool enable)
@@ -2164,7 +2170,7 @@ namespace IMGUIZMO_NAMESPACE
          const vec_t newPos = gContext.mRayOrigin + gContext.mRayVector * len;
 
          // compute delta
-         const vec_t newOrigin = newPos - gContext.mRelativeOrigin * gContext.mScreenFactor;
+         const vec_t newOrigin = newPos - gContext.mRelativeOrigin * gContext.mScreenFactor - gContext.mTranslationOffset;
          vec_t delta = newOrigin - gContext.mModel.v.position;
 
          // 1 axis constraint
@@ -2259,6 +2265,7 @@ namespace IMGUIZMO_NAMESPACE
             gContext.mMatrixOrigin = gContext.mModel.v.position;
 
             gContext.mRelativeOrigin = (gContext.mTranslationPlanOrigin - gContext.mModel.v.position) * (1.f / gContext.mScreenFactor);
+            gContext.mTranslationOffset = makeVect(0.f, 0.f, 0.f);
          }
       }
       return modified;

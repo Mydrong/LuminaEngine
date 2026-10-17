@@ -67,6 +67,8 @@ namespace Lumina
         void EvaluateAt(CWorld* World, float NewTime, bool bJumped);
 
         int32 AddBindingFromSelection(CWorld* World);
+        // Binds Entity by name as a possessed binding, returning the existing index when one already has that name.
+        int32 AddBinding(CWorld* World, ECS::FEntity Entity);
         ECS::FEntity FindSelectedEntity(CWorld* World) const;
 
         CSequenceTrack_Transform* FindOrCreateTransformTrack(int32 BindingIndex);

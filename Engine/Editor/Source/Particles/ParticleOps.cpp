@@ -7,7 +7,7 @@
 #include "Containers/StringFormat.h"
 #include "Core/Object/Cast.h"
 #include "Core/Object/Class.h"
-#include "Core/Object/ObjectArray.h"
+#include "Core/Object/ObjectIteration.h"
 #include "Core/Object/Package/Package.h"
 #include "FileSystem/FileSystem.h"
 #include "Renderer/ShaderCompiler.h"
@@ -220,7 +220,7 @@ namespace Lumina::ParticleOps
         TVector<CClass*> Types;
         CClass* BaseClass = CParticleModule::StaticClass();
 
-        GObjectArray.ForEachObject([&](CObjectBase* Object, int32)
+        ForEachObject([&](CObjectBase* Object, int32)
         {
             if (Object == nullptr || !Object->IsA<CClass>())
             {

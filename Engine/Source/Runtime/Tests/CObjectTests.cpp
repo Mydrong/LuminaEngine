@@ -30,7 +30,7 @@ namespace
 // The shape before the fix, kept so the pinned test above cannot pass vacuously.
 TEST(CObjectLifetime, DestroyingAnUnpinnedListFreesAnEntryBeforeItsTurn)
 {
-    FScopedStaleReferenceTolerance Tolerance;
+    Object::Internal::FScopedStaleReferenceTolerance Tolerance;
 
     CObject* Child = nullptr;
     CObjectRefTest* Parent = NewParentOwningChild(Child);
@@ -38,9 +38,22 @@ TEST(CObjectLifetime, DestroyingAnUnpinnedListFreesAnEntryBeforeItsTurn)
 
     TWeakObjectPtr<CObject> WeakChild = Child;
 
-    EXPECT_TRUE(GObjectArray.ConditionalDestroy(Parent));
+    EXPECT_TRUE(Object::Internal::ConditionalDestroy(Parent));
     EXPECT_FALSE(WeakChild.IsValid()) << "releasing the parent already freed the child";
-    EXPECT_FALSE(GObjectArray.ConditionalDestroy(Child)) << "the child's own turn lands on a freed slot";
+    EXPECT_FALSE(Object::Internal::ConditionalDestroy(Child)) << "the child's own turn lands on a freed slot";
+}
+
+TEST(CObjectLifetime, ForEachObjectStopsWhenCallbackReturnsFalse)
+{
+    CObject* Object = NewTransientTestObject();
+    int32 Visits = 0;
+    ForEachObject([&](CObjectBase*, int32)
+    {
+        ++Visits;
+        return false;
+    });
+    EXPECT_EQ(Visits, 1);
+    Object->ConditionalBeginDestroy();
 }
 
 // The import teardown shape, where a later entry holds the only other reference to an earlier one.
@@ -145,7 +158,7 @@ TEST(CObjectLifetime, AStrongReferenceKeepsItsObjectAlive)
 // The unbalanced release below used to reach ConditionalDestroy with a freed pointer and fault there.
 TEST(CObjectLifetime, AStaleStrongReferenceReadsAsNull)
 {
-    FScopedStaleReferenceTolerance Tolerance;
+    Object::Internal::FScopedStaleReferenceTolerance Tolerance;
 
     CObject* Doomed = NewTransientTestObject();
     ASSERT_NE(Doomed, nullptr);
@@ -154,7 +167,7 @@ TEST(CObjectLifetime, AStaleStrongReferenceReadsAsNull)
     ASSERT_EQ(Stale.Get(), Doomed);
 
     // Stands in for the extra release a lifetime bug elsewhere would perform.
-    GObjectArray.ReleaseStrongRef(Doomed);
+    Object::Internal::ReleaseStrongRef(Doomed);
 
     EXPECT_EQ(Stale.Get(), nullptr) << "a reference that outlived its object must not hand back freed memory";
     EXPECT_FALSE(Stale.IsValid());
@@ -165,13 +178,13 @@ TEST(CObjectLifetime, AStaleStrongReferenceReadsAsNull)
 
 TEST(CObjectLifetime, ReleasingAStaleReferenceLeavesOtherObjectsAlone)
 {
-    FScopedStaleReferenceTolerance Tolerance;
+    Object::Internal::FScopedStaleReferenceTolerance Tolerance;
 
     CObject* Doomed = NewTransientTestObject();
     ASSERT_NE(Doomed, nullptr);
 
     TStrongObjectPtr<CObject> Stale(Doomed);
-    GObjectArray.ReleaseStrongRef(Doomed);
+    Object::Internal::ReleaseStrongRef(Doomed);
 
     TStrongObjectPtr<CObject> Bystander(NewTransientTestObject());
     ASSERT_TRUE(Bystander.IsValid());
@@ -200,13 +213,13 @@ TEST(CObjectLifetime, AFreedSlotIsNotImmediatelyReissued)
 
 TEST(CObjectLifetime, CopyingAStaleReferenceYieldsNull)
 {
-    FScopedStaleReferenceTolerance Tolerance;
+    Object::Internal::FScopedStaleReferenceTolerance Tolerance;
 
     CObject* Doomed = NewTransientTestObject();
     ASSERT_NE(Doomed, nullptr);
 
     TStrongObjectPtr<CObject> Stale(Doomed);
-    GObjectArray.ReleaseStrongRef(Doomed);
+    Object::Internal::ReleaseStrongRef(Doomed);
 
     TStrongObjectPtr<CObject> Reused(NewTransientTestObject());
     ASSERT_TRUE(Reused.IsValid());
@@ -257,12 +270,12 @@ TEST(CObjectLifetime, MarkingForDestroyDoesNotBlockTheActualDestroy)
 
     auto* Object = NewObject<CDestroyCountTest>(nullptr, NAME_None, FGuid::New(), OF_Transient);
     ASSERT_NE(Object, nullptr);
-    const FObjectHandle Handle = GObjectArray.GetHandleByObject(Object);
+    const FObjectHandle Handle = Object::Internal::GetHandleByObject(Object);
 
     // What DestroyPackage and the failed-cook path do to take an asset out of identity lookups early.
     Object->SetFlag(OF_MarkedDestroy);
     Object->ConditionalBeginDestroy();
 
     EXPECT_EQ(CDestroyCountTest::DestroyCount, 1) << "a pre-marked object must still be torn down";
-    EXPECT_EQ(GObjectArray.ResolveHandle(Handle), nullptr) << "and its slot must be released";
+    EXPECT_EQ(Object::Internal::ResolveHandle(Handle), nullptr) << "and its slot must be released";
 }

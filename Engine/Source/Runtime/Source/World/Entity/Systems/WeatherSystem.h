@@ -17,9 +17,9 @@ namespace Lumina
     public:
 
         void Configure() override;
-        void OnStartup() override;
-        void OnUpdate() override;
-        bool HasWork(EUpdateStage Stage) override;
+        void OnStartup(const SSystemContext& Context) override;
+        void OnUpdate(const SSystemContext& Context) override;
+        bool HasWork(const SSystemContext& Context) override;
 
     private:
 

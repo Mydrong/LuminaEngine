@@ -19,12 +19,87 @@ namespace Lumina
         SkeletonJointIndicesAddress = Skeleton;
     }
 
+    // A rig can bake an axis change into its bind pose, so the vertex box is carried through each skinning bone's bind matrix.
+    SAABB CSkeletalMesh::GetCullBounds() const
+    {
+        const SAABB& Local = GetAABB();
+        const FSkeletonResource* Resource = Skeleton.IsValid() ? Skeleton->GetSkeletonResource() : nullptr;
+        if (!Local.IsValid() || Resource == nullptr || Resource->GetNumBones() == 0)
+        {
+            return Local;
+        }
+
+        TVector<FMatrix4> BindSkinning;
+        Skeleton->ComputeBindPoseSkinningMatrices(BindSkinning);
+
+        TVector<uint8> Visited(BindSkinning.size(), 0u);
+        SAABB Posed;
+        bool bAny = false;
+        const auto Grow = [&](uint32 Bone)
+        {
+            if (Bone >= (uint32)BindSkinning.size() || Visited[Bone])
+            {
+                return;
+            }
+            Visited[Bone] = 1u;
+
+            const SAABB Box = Local.ToWorld(BindSkinning[Bone]);
+            Posed.Min = bAny ? Math::Min(Posed.Min, Box.Min) : Box.Min;
+            Posed.Max = bAny ? Math::Max(Posed.Max, Box.Max) : Box.Max;
+            bAny = true;
+        };
+
+        // Only the bones a meshlet palette names move vertices, so an unweighted bone's bind cannot inflate the box.
+        for (uint32 Bone : GetMeshResource().MeshletData.MeshletBoneIndices)
+        {
+            Grow(Bone);
+        }
+        if (!bAny)
+        {
+            for (uint32 Bone = 0; Bone < (uint32)BindSkinning.size(); ++Bone)
+            {
+                Grow(Bone);
+            }
+        }
+        return bAny ? Posed : Local;
+    }
+
     void CSkeletalMesh::PostPropertyChange(FProperty* ChangedProperty)
     {
         CMesh::PostPropertyChange(ChangedProperty);
 
         // Undo restores Skeleton alone, so the indices have to follow it back from here.
         RemapJointIndicesToSkeleton();
+        BumpSocketGeneration();
+    }
+
+    const SMeshSocket* CSkeletalMesh::FindSocket(const FName& SocketName) const
+    {
+        if (const SMeshSocket* Socket = FindSocketByName(Sockets, SocketName))
+        {
+            return Socket;
+        }
+        return Skeleton.IsValid() ? Skeleton->FindSocket(SocketName) : nullptr;
+    }
+
+    void CSkeletalMesh::CollectActiveSockets(TVector<const SMeshSocket*>& OutSockets) const
+    {
+        OutSockets.clear();
+        for (const SMeshSocket& Socket : Sockets)
+        {
+            OutSockets.push_back(&Socket);
+        }
+
+        if (Skeleton.IsValid())
+        {
+            for (const SMeshSocket& Socket : Skeleton->Sockets)
+            {
+                if (FindSocketByName(Sockets, Socket.SocketName) == nullptr)
+                {
+                    OutSockets.push_back(&Socket);
+                }
+            }
+        }
     }
 
     const BoneLOD::FBoneLODLayout* CSkeletalMesh::GetBoneLODLayout(const FSkeletonResource* InSkeleton) const
@@ -38,7 +113,8 @@ namespace Lumina
         const uint64 LayoutKey = InSkeleton->BoneLayoutHash != 0 ? InSkeleton->BoneLayoutHash : InSkeleton->ComputeBoneLayoutHash();
         const size_t PaletteEntries = Resource->MeshletData.MeshletBoneIndices.size();
         const CSkeleton* SkeletonAsset = Skeleton.Get();
-        const uint32 SocketGeneration = SkeletonAsset != nullptr ? SkeletonAsset->GetSocketGeneration() : 0u;
+        // Both generations only grow, so their sum changes whenever either set of sockets does.
+        const uint32 SocketGeneration = GetSocketGeneration() + (SkeletonAsset != nullptr ? SkeletonAsset->GetSocketGeneration() : 0u);
 
         const FBoneLODLayoutEntry* Active = ActiveBoneLODLayout.load(std::memory_order_acquire);
         if (Active != nullptr && Active->Matches(LayoutKey, Resource, PaletteEntries, SocketGeneration))
@@ -60,7 +136,16 @@ namespace Lumina
         TVector<int32> SocketBones;
         if (SkeletonAsset != nullptr && SkeletonAsset->GetSkeletonResource() == InSkeleton)
         {
-            SkeletonAsset->CollectSocketBones(SocketBones);
+            TVector<const SMeshSocket*> ActiveSockets;
+            CollectActiveSockets(ActiveSockets);
+            for (const SMeshSocket* Socket : ActiveSockets)
+            {
+                const int32 Bone = InSkeleton->FindBoneIndex(Socket->BoneName);
+                if (Bone != Constants::kIndexNone)
+                {
+                    SocketBones.push_back(Bone);
+                }
+            }
         }
 
         TUniquePtr<FBoneLODLayoutEntry> Entry = MakeUnique<FBoneLODLayoutEntry>();

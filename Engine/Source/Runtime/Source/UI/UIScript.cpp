@@ -4,7 +4,7 @@
 #include "Core/Engine/GameLibrary.h"
 #include "Core/Object/Cast.h"
 #include "Core/Object/Class.h"
-#include "Core/Object/ObjectArray.h"
+#include "Core/Object/ObjectIteration.h"
 #include "Core/Object/ScriptClass.h"
 #include "Core/Reflection/PropertyText.h"
 #include "Core/Reflection/Type/Function.h"
@@ -89,7 +89,7 @@ namespace Lumina::UIBinding
         void ForEachClass(TVisitor&& Visitor)
         {
             TVector<CClass*> Classes;
-            GObjectArray.ForEachObject([&Classes](CObjectBase* Object, int32)
+            ForEachObject([&Classes](CObjectBase* Object, int32)
             {
                 if (Object != nullptr && Object->IsA<CClass>())
                 {

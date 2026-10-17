@@ -44,15 +44,4 @@ namespace Lumina
         float                   Strength    = 1.0f;         // noise loudness (radius scale) or damage amount.
         SGameplayTagContainer   Tags;                       // optional affiliation override (empty => look up Instigator).
     };
-
-    // In-ECS dispatcher event mirrored by the C# EntityScript callbacks; native systems can subscribe via
-    // Context.EventSink<FPerceptionUpdatedEvent>() without coupling to the perception system's delegates.
-    struct FPerceptionUpdatedEvent
-    {
-        ECS::FEntity    Perceiver = ECS::NullEntity;
-        ECS::FEntity    Target    = ECS::NullEntity;
-        EAISenseChannel Sense     = EAISenseChannel::Sight;
-        FVector3        Location  = FVector3(0.0f);
-        bool            bSensed   = true;   // true = perceived, false = lost.
-    };
 }

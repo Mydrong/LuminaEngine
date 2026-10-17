@@ -26,19 +26,17 @@ namespace Lumina
         #endif
     }
 
-    void SDebugDrawSystem::OnStartup()
+    void SDebugDrawSystem::OnStartup(const SSystemContext& Context)
     {
         #if !defined(LE_SHIPPING)
-        const FSystemContext& Context = GetContext();
 
         Context.GetRegistry().Ctx().Emplace<FDebugDrawState>();
         #endif
     }
 
-    void SDebugDrawSystem::OnUpdate()
+    void SDebugDrawSystem::OnUpdate(const SSystemContext& Context)
     {
         #if !defined(LE_SHIPPING)
-        const FSystemContext& Context = GetContext();
 
         FDebugDrawState& State = Context.GetRegistry().Ctx().Get<FDebugDrawState>();
 
@@ -76,10 +74,9 @@ namespace Lumina
         #endif
     }
 
-    void SDebugDrawSystem::OnTeardown()
+    void SDebugDrawSystem::OnTeardown(const SSystemContext& Context)
     {
         #if !defined(LE_SHIPPING)
-        const FSystemContext& Context = GetContext();
 
         Context.GetRegistry().Ctx().Erase<FDebugDrawState>();
         #endif

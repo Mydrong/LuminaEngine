@@ -371,7 +371,7 @@ namespace Lumina
         // Detach from resize events before teardown so a late resize can't enqueue work.
         FWindow::OnWindowResized.Remove(WindowResizedHandle);
 
-        #if WITH_EDITOR
+        #if USING(WITH_DEV_UI)
         ImGuiRenderer->Deinitialize();
         Memory::Delete(ImGuiRenderer);
         ImGuiRenderer = nullptr;
@@ -508,8 +508,9 @@ namespace Lumina
 
         RenderBootMark("Material managers");
 
-#if WITH_EDITOR
-        ImGuiRenderer = Memory::New<FVulkanImGuiRender>();
+#if USING(WITH_DEV_UI)
+        // A game draws its developer overlay over the game image, while the editor's UI owns the whole window.
+        ImGuiRenderer = Memory::New<FVulkanImGuiRender>(!WITH_EDITOR);
         ImGuiRenderer->Initialize();
 #endif
         RenderBootMark("ImGuiRenderer");
@@ -528,7 +529,7 @@ namespace Lumina
     {
         LUMINA_PROFILE_SCOPE();
 
-        #if WITH_EDITOR
+        #if USING(WITH_DEV_UI)
         ImGuiRenderer->StartFrame(UpdateContext);
         #endif
         
@@ -542,7 +543,7 @@ namespace Lumina
         CurrentFrameIndex = (CurrentFrameIndex + 1) % RHI::kFramesInFlight;
 
         [[maybe_unused]] ImDrawData* ImGuiDrawData = nullptr;
-        #if WITH_EDITOR
+        #if USING(WITH_DEV_UI)
         ImGuiDrawData = ImGuiRenderer->BuildFrame();
         #endif
 
@@ -594,15 +595,6 @@ namespace Lumina
             }
             #endif
 
-            #if WITH_EDITOR
-            {
-                LUMINA_PROFILE_SECTION_COLORED("ImGui Record", tracy::Color::SlateBlue3);
-                RHI::CmdBeginMarker(CL, "ImGui");
-                ImGuiRenderer->OnEndFrame(CL, SwapImage, Extent, ImGuiDrawData);
-                RHI::CmdEndMarker(CL);
-            }
-            #endif
-
             #if !WITH_EDITOR
             {
                 LUMINA_PROFILE_SECTION_COLORED("Game Composite", tracy::Color::ForestGreen);
@@ -624,6 +616,16 @@ namespace Lumina
             }
             #endif
 
+            // After the game composite, so a game's developer overlay lands on top of the image it covers.
+            #if USING(WITH_DEV_UI)
+            {
+                LUMINA_PROFILE_SECTION_COLORED("ImGui Record", tracy::Color::SlateBlue3);
+                RHI::CmdBeginMarker(CL, "ImGui");
+                ImGuiRenderer->OnEndFrame(CL, SwapImage, Extent, ImGuiDrawData);
+                RHI::CmdEndMarker(CL);
+            }
+            #endif
+
             RecordWindowCapture(CL, SwapImage, Extent, ThisFrameIndex);
 
             RHI::CmdEndMarker(CL);
@@ -634,7 +636,7 @@ namespace Lumina
                 SwapchainTarget.PresentAsync(CL);
             }
 
-            #if WITH_EDITOR
+            #if USING(WITH_DEV_UI)
             {
                 // Renders and presents each dragged-out tool window into its own swapchain.
                 LUMINA_PROFILE_SECTION_COLORED("ImGui Secondary Viewports", tracy::Color::SlateBlue4);

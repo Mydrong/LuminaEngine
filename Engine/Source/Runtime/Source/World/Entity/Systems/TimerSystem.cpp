@@ -12,9 +12,8 @@ namespace Lumina
         Writes<SystemResource::Timers>();
     }
 
-    void STimerSystem::OnUpdate()
+    void STimerSystem::OnUpdate(const SSystemContext& Context)
     {
-        const FSystemContext& Context = GetContext();
 
         LUMINA_PROFILE_SCOPE();
         Context.GetRegistry().Ctx().Get<FTimerManager>().Tick((float)Context.GetDeltaTime(), &Context.GetCommandBus());

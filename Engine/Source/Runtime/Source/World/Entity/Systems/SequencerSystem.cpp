@@ -12,7 +12,7 @@ namespace Lumina
         RequireUpdate(EUpdateStage::PrePhysics, EUpdatePriority::High);
     }
 
-    bool SSequencerSystem::HasWork(EUpdateStage)
+    bool SSequencerSystem::HasWork(const SSystemContext& Context)
     {
         CWorld* World = GetWorld();
         const ECS::TComponentStorage<SSequencePlayerComponent> Players = World != nullptr
@@ -21,13 +21,12 @@ namespace Lumina
         return Players && !Players.IsEmpty();
     }
 
-    void SSequencerSystem::OnUpdate()
+    void SSequencerSystem::OnUpdate(const SSystemContext& Context)
     {
-        const FSystemContext& SystemContext = GetContext();
 
         LUMINA_PROFILE_SCOPE();
 
-        CWorld* World = SystemContext.GetWorld();
+        CWorld* World = Context.GetWorld();
         if (World == nullptr)
         {
             return;
@@ -36,7 +35,7 @@ namespace Lumina
         // Real time, so a time dilation track slows the action on screen without stretching the edit.
         const float DeltaTime = (float)World->GetRealDeltaTime();
 
-        auto View = SystemContext.CreateView<SSequencePlayerComponent>();
+        auto View = Context.CreateView<SSequencePlayerComponent>();
         for (ECS::FEntity Entity : View)
         {
             SSequencePlayerComponent& Player = View.Get<SSequencePlayerComponent>(Entity);

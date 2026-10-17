@@ -76,7 +76,7 @@ namespace Lumina
         Ar << Index;
 
         CObject* Object = Package->IndexToObject(Index);
-        Value = GObjectArray.GetHandleByObject(Object);
+        Value = Object::Internal::GetHandleByObject(Object);
         Package->LoadObject(Object);
         
         return Ar;    

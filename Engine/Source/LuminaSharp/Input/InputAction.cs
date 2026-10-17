@@ -133,6 +133,12 @@ public sealed class SInputAction : SInputBinding
     /// <summary>Raised on the frame a press shorter than the action's TapTime is released.</summary>
     public event Action? Tapped;
 
+    // Raised on a second press within the action's DoubleTapTime.
+    public event Action? DoubleTapped;
+
+    // Raised on the press and again each RepeatInterval while held, as a menu scrolls.
+    public event Action? Repeated;
+
     /// <summary>True while the action is down.</summary>
     public bool IsDown => State.IsDown;
 
@@ -172,6 +178,14 @@ public sealed class SInputAction : SInputBinding
         if (Current.IsTapped)
         {
             Tapped?.Invoke();
+        }
+        if (Current.IsDoubleTapped)
+        {
+            DoubleTapped?.Invoke();
+        }
+        if (Current.IsRepeated)
+        {
+            Repeated?.Invoke();
         }
     }
 }

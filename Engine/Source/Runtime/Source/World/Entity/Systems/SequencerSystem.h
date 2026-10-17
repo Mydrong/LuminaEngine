@@ -18,7 +18,7 @@ namespace Lumina
 
     public:
 
-        void OnUpdate() override;
-        bool HasWork(EUpdateStage Stage) override;
+        void OnUpdate(const SSystemContext& Context) override;
+        bool HasWork(const SSystemContext& Context) override;
     };
 }

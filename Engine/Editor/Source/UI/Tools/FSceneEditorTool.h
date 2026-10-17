@@ -10,6 +10,11 @@
 #include "Tools/UI/ImGui/Widgets/TreeListView.h"
 #include "UI/Properties/PropertyEditContexts.h"
 
+namespace Lumina::DragDrop
+{
+    struct FPayload;
+}
+
 namespace Lumina
 {
     class CWorld;
@@ -20,6 +25,7 @@ namespace Lumina
     class IRenderScene;
     class CComponentVisualizer;
     struct SSceneFolderComponent;
+    struct SStaticMeshComponent;
     struct FPropertyChangedEvent;
 
     class EDITOR_API FSceneEditorTool : public FAssetEditorTool, public IComponentVisualizerHost
@@ -294,7 +300,37 @@ namespace Lumina
         ImGuiTextFilter AddEntityComponentFilter;
 
         virtual void HandleOutlinerEmptyAreaDrop() {}
-        virtual void HandlePrefabContentDrop(FStringView VirtualPath, ECS::FEntity DropTarget, bool bAttachToTarget) {}
+        virtual void HandlePrefabContentDrop(FStringView VirtualPath, ECS::FEntity DropTarget, bool bAttachToTarget, const FTransform* SpawnTransform = nullptr) {}
+
+        // Routes a drag landing here, an asset to HandlePrefabContentDrop, a .cs file to HandleScriptSourceDrop and a create-menu entry to HandleNewEntityDrop.
+        void AcceptContentBrowserPayload(ECS::FEntity DropTarget, bool bAttachToTarget);
+
+        // The viewport as one drop target, moving a live preview of what a drag places. True while a drag hovers it.
+        bool DrawViewportDropTarget();
+
+        // Creates the entity a create-menu drag describes, under DropTarget when attaching, at the cursor unless SpawnTransform says.
+        void HandleNewEntityDrop(const DragDrop::FPayload& Payload, ECS::FEntity DropTarget, bool bAttachToTarget, const FTransform* SpawnTransform = nullptr);
+
+        // Gives a new entity what a create-menu payload names, a component or a primitive mesh.
+        void DecorateNewEntity(const DragDrop::FPayload& Payload, ECS::FEntity Entity);
+
+        // Spawns what Payload places as an untransacted preview, when it places anything without a target.
+        void SpawnPlacementPreview(const DragDrop::FPayload& Payload);
+        void DestroyPlacementPreview();
+
+        // Tab switches the wheel between turning and scaling the placement preview, Ctrl taking coarser steps.
+        void HandlePlacementInput();
+
+        // Shows the preview's turn or scale around its base and beside the cursor.
+        void DrawPlacementAdjustment(const FViewportHit& Hit) const;
+
+        NODISCARD FQuat GetPlacementRotation() const;
+
+        // Attaches the script a .cs file declares to DropTarget, or to a new entity when there is none.
+        virtual void HandleScriptSourceDrop(FStringView VirtualPath, ECS::FEntity DropTarget);
+
+        // Lets a tool file an entity a drop created, such as into the folder row it landed on.
+        virtual void OnDropSpawnedEntity(ECS::FEntity Entity) {}
 
         struct FEntityListFilterState
         {
@@ -307,6 +343,19 @@ namespace Lumina
         bool                                bOutlinerActive = false;
 
         FTreeListView                       OutlinerListView;
+
+        // What a viewport drag is placing, spawned outside any transaction and replaced by a transacted drop on release.
+        ECS::FEntity                        PlacementPreview = ECS::NullEntity;
+        CObject*                            PlacementPreviewAsset = nullptr;
+        TVector<ECS::FEntity>               PlacementPreviewEntities;
+        bool                                bPlacementPreviewAttempted = false;
+        // The renderer's copy of the scene from before the preview existed, which the placement reads under it.
+        bool                                bPlacementSnapshotRequested = false;
+        float                               PlacementYawDegrees = 0.0f;
+        float                               PlacementScale = 1.0f;
+        // Smooth trackpads report fractions of a notch, kept here until they add up to one.
+        float                               PlacementWheelCarry = 0.0f;
+        bool                                bPlacementScaling = false;
         FTreeListViewContext                OutlinerContext;
         THashMap<ECS::FEntity, FTreeNodeID> EntityToTreeNode;
         TVector<ECS::FEntity>               PendingOutlinerAdds;
@@ -344,6 +393,13 @@ namespace Lumina
 
         ImGuiTextFilter DetailsFilter;
         void DrawComponentHeader(FComponentTableEntry& Entry, ECS::FEntity Entity);
+
+        // Under a static mesh with nothing to collide with, the one-click ways to give it collision.
+        void DrawStaticMeshCollisionHint(ECS::FEntity Entity, const SStaticMeshComponent& MeshComponent);
+        void AddMeshCollisionTransacted(const TVector<ECS::FEntity>& Entities);
+
+        // Right-click entry that gives the entity, or every selected one, collision from its static mesh.
+        void DrawAddCollisionMenuItem(ECS::FEntity Entity);
         // Sockets/bones on Entity's parent's mesh, for SocketPicker FName properties in the details.
         void BuildSocketPickerData(ECS::FEntity Entity, FSocketEditContext& Out);
 
@@ -382,7 +438,7 @@ namespace Lumina
         
         // Wraps the transaction, the creation hook, selection and dirty marking that every spawn shares.
         ECS::FEntity SpawnEntityTransacted(FName Name, FName TransactionLabel,
-            const TFunction<void(ECS::FEntity)>& Decorate);
+            const TFunction<void(ECS::FEntity)>& Decorate, const FTransform* SpawnTransform = nullptr);
 
         void CreateEntity();
         void CreateEntityWithComponent(const CStruct* Component);
@@ -395,7 +451,8 @@ namespace Lumina
         void ApplyAddComponentToTargets(const TVector<ECS::FEntity>& Targets, CStruct* PickedMetaType);
         // Filterable, categorized list of addable reflected components.
         // Fills OutMetaType/OutStruct and returns true on click.
-        bool DrawAddableComponentList(const ImGuiTextFilter& Filter, const TVector<ECS::FEntity>& Targets, CStruct*& OutMetaType, CStruct*& OutStruct);
+        // With OutDragging set, rows also drag out as new entities, and it reports whether one is being dragged.
+        bool DrawAddableComponentList(const ImGuiTextFilter& Filter, const TVector<ECS::FEntity>& Targets, CStruct*& OutMetaType, CStruct*& OutStruct, bool* OutDragging = nullptr);
         
         virtual void OnEntityCreatedInScene(ECS::FEntity Entity) {}
         virtual FTransform GetNewEntitySpawnTransform() const;

@@ -122,13 +122,13 @@ namespace Lumina::NavTest
             System = NewObject<SNavMeshSystem>(nullptr, NAME_None, FGuid::New(), OF_Transient);
             System->SetOwningWorld(World);
             World->Systems.push_back(System);
-            System->OnStartup();
+            System->OnStartup(World->GetSystemContext());
             if (bWithPathFollow)
             {
                 Follow = NewObject<SPathFollowSystem>(nullptr, NAME_None, FGuid::New(), OF_Transient);
                 Follow->SetOwningWorld(World);
                 World->Systems.push_back(Follow);
-                Follow->OnStartup();
+                Follow->OnStartup(World->GetSystemContext());
             }
         }
 
@@ -136,12 +136,12 @@ namespace Lumina::NavTest
         {
             if (Follow != nullptr)
             {
-                Follow->OnTeardown();
+                Follow->OnTeardown(World->GetSystemContext());
                 Follow = nullptr;
             }
             if (System != nullptr)
             {
-                System->OnTeardown();
+                System->OnTeardown(World->GetSystemContext());
                 System = nullptr;
             }
         }
@@ -149,14 +149,14 @@ namespace Lumina::NavTest
         double TickFollow()
         {
             PlatformTime::FStopwatch Watch;
-            Follow->OnUpdate();
+            Follow->OnUpdate(World->GetSystemContext());
             return Watch.ElapsedMilliseconds();
         }
 
         double Tick()
         {
             PlatformTime::FStopwatch Watch;
-            System->OnUpdate();
+            System->OnUpdate(World->GetSystemContext());
             return Watch.ElapsedMilliseconds();
         }
 

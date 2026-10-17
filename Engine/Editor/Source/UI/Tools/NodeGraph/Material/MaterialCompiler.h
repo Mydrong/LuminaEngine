@@ -526,6 +526,9 @@ namespace Lumina
         FInputValue GetTypedInputValue(CMaterialInput* Input, float DefaultValue = 0.0f);
         FInputValue GetTypedInputValue(CMaterialInput* Input, const FString& DefaultValueStr);
 
+        // An unconnected input falling back to a varying alias such as UV0 takes the gradient pair its pixel template declares, not a literal's zero.
+        void ApplyFallbackAliasDeriv(FInputValue& Value) const;
+
         // Emit "<TypeStr> <NodeID> = <FetchExpr>;", or an alias to the first variable that already holds
         // <FetchExpr> in this stage. Material parameters are loop- and pixel-invariant, so a repeat fetch is
         // pure redundant load traffic; the alias is a register copy the backend coalesces away.
