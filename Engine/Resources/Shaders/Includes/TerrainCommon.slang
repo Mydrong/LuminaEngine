@@ -60,7 +60,7 @@ struct FTerrainVisibleMeshlet
 // One push range shared by the terrain VS and PS, and the PS never dereferences the cull pointers.
 struct FTerrainPushConstants
 {
-    uint64_t                        Params;      // FTerrainRenderParams, see LoadBlock
+    Ptr<FTerrainRenderParams>       Params;
     GPUSpan<FTerrainChunkInfo>      Chunks;
     GPUSpan<FTerrainMeshletInfo>    Meshlets;
     GPUSpan<FTerrainVisibleMeshlet> Visible;

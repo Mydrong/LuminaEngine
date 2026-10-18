@@ -189,7 +189,7 @@ namespace Lumina
         {
             if (World.IsGameWorld() && !World.IsSuspended())
             {
-                EntityScripts::DebugGui(ECS::GetWorldRegistry(World));
+                EntityScripts::DebugGui(World.GetEntityRegistry());
             }
         });
     }

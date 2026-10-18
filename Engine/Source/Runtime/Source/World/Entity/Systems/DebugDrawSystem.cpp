@@ -92,7 +92,7 @@ namespace Lumina
                 return nullptr;
             }
 
-            return ECS::GetWorldRegistry(*World).Ctx().Find<FDebugDrawState>();
+            return World->GetEntityRegistry().Ctx().Find<FDebugDrawState>();
             #else
             return nullptr;
             #endif

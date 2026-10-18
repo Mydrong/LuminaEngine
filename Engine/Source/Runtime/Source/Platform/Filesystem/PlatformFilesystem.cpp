@@ -42,6 +42,17 @@ namespace Lumina::Filesystem
             Result.append(".tmp");
             return Result;
         }
+
+        // Read-only marks a file someone means to keep as it is, so it is never replaced until made writable.
+        bool RefuseReadOnlyTarget(FStringView Path)
+        {
+            if (!Stat(Path).IsReadOnly())
+            {
+                return false;
+            }
+            LOG_ERROR("{0} is read-only, so it was not replaced. Make it writable to save over it.", Path);
+            return true;
+        }
     }
 
     const char* ToString(EResult Result)
@@ -350,6 +361,11 @@ namespace Lumina::Filesystem
             return false;
         }
 
+        if (RefuseReadOnlyTarget(Path))
+        {
+            return false;
+        }
+
         MakeParentDirectoryTree(Path);
 
         const FString TempPath = MakeTempSibling(Path);
@@ -386,6 +402,11 @@ namespace Lumina::Filesystem
                                 TSpan<const uint8> Suffix)
     {
         if (Path.empty() || SrcPath.empty())
+        {
+            return false;
+        }
+
+        if (RefuseReadOnlyTarget(Path))
         {
             return false;
         }

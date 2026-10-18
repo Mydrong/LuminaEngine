@@ -18,6 +18,15 @@ namespace Lumina::Filesystem
         constexpr uint32 kMaxIoChunk        = uint32(32 * Constants::kMiB);
         constexpr int32 kLongPathThreshold  = 248;
 
+        // Antivirus, search indexers and sync clients open a freshly written file for a moment, which fails a rename meanwhile.
+        constexpr int32 kMoveAttempts       = 8;
+        constexpr DWORD kMoveBackoffMs      = 25;
+
+        bool IsTransientDenial(DWORD Error)
+        {
+            return Error == ERROR_ACCESS_DENIED || Error == ERROR_SHARING_VIOLATION || Error == ERROR_LOCK_VIOLATION;
+        }
+
         EResult TranslateError(DWORD Error)
         {
             switch (Error)
@@ -793,20 +802,33 @@ namespace Lumina::Filesystem
             Flags |= MOVEFILE_REPLACE_EXISTING;
         }
 
-        if (::MoveFileExW(WideFrom.Get(), WideTo.Get(), Flags))
+        for (int32 Attempt = 1; ; ++Attempt)
         {
-            RecordSuccess();
-            return true;
-        }
+            if (::MoveFileExW(WideFrom.Get(), WideTo.Get(), Flags))
+            {
+                RecordSuccess();
+                return true;
+            }
+            const DWORD Error = ::GetLastError();
 
-        if (bReplaceExisting && RenameByHandle(WideFrom.Get(), WideTo.Get(), WideTo.Size()))
-        {
-            RecordSuccess();
-            return true;
-        }
+            if (bReplaceExisting && RenameByHandle(WideFrom.Get(), WideTo.Get(), WideTo.Size()))
+            {
+                RecordSuccess();
+                return true;
+            }
 
-        RecordLastError();
-        return false;
+            // A read-only target refuses every attempt, and waiting cannot change that.
+            const DWORD TargetAttributes = bReplaceExisting ? ::GetFileAttributesW(WideTo.Get()) : INVALID_FILE_ATTRIBUTES;
+            const bool bTargetReadOnly = TargetAttributes != INVALID_FILE_ATTRIBUTES && (TargetAttributes & FILE_ATTRIBUTE_READONLY);
+            if (!IsTransientDenial(Error) || bTargetReadOnly || Attempt >= kMoveAttempts)
+            {
+                ::SetLastError(Error);
+                RecordLastError();
+                return false;
+            }
+
+            ::Sleep(kMoveBackoffMs * static_cast<DWORD>(Attempt));
+        }
     }
 
     bool Copy(FStringView From, FStringView To, bool bReplaceExisting)

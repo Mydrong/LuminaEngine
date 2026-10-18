@@ -11,7 +11,7 @@ struct FWaterUnderwaterParams
 
 struct FUnderwaterPC
 {
-    uint64_t   Params;       // FWaterUnderwaterParams, see LoadBlock
+    Ptr<FWaterUnderwaterParams> Params;
     FTexture2D SceneColor;   // composited HDR scene copy
     FTexture2D SceneDepth;   // opaque depth (raw reverse-Z NDC)
 };
@@ -26,7 +26,7 @@ struct PSInput
 [shader("fragment")]
 float4 FragmentMain(PSInput Input) : SV_Target0
 {
-    FWaterUnderwaterParams P = LoadBlock<FWaterUnderwaterParams>(Pass().Params);
+    FWaterUnderwaterParams P = *Pass().Params;
 
     float2 UV       = Input.UV;
     float  RawDepth = Pass().SceneDepth.SampleLevel(Samplers::PointClamp, UV, 0.0).r;

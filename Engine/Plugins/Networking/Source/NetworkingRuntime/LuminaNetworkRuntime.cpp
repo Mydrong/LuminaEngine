@@ -45,7 +45,7 @@ namespace Lumina
             return;
         }
 
-        ECS::FRegistry& Registry = ECS::GetWorldRegistry(*World);
+        ECS::FRegistry& Registry = World->GetEntityRegistry();
 
         // Collected first, since destroying while iterating the view it came from is the hazard.
         TVector<ECS::FEntity> ServerOnly;
@@ -76,7 +76,7 @@ namespace Lumina
             return;
         }
 
-        ECS::FRegistry& Registry = ECS::GetWorldRegistry(*World);
+        ECS::FRegistry& Registry = World->GetEntityRegistry();
         if (Registry.HasAll<SNetworkComponent>(Entity))
         {
             Registry.EmplaceOrReplace<FNetDirty>(Entity);
@@ -93,7 +93,7 @@ namespace Lumina
 
         ECS::FRegistry& RegistryOf(const CWorld* World)
         {
-            return ECS::GetWorldRegistry(*const_cast<CWorld*>(World));
+            return const_cast<CWorld*>(World)->GetEntityRegistry();
         }
 
         FNetWorldState* StateOf(const CWorld* World)

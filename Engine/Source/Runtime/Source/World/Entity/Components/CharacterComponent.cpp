@@ -7,6 +7,14 @@
 namespace Lumina
 {
     SCharacterPhysicsComponent::SCharacterPhysicsComponent() = default;
+
+    void SCharacterPhysicsComponent::GetActiveCapsule(const SCharacterMovementComponent* Movement, float& OutHalfHeight, float& OutCenterDrop) const
+    {
+        // Crouching shrinks from the top, so the center drops by the height lost and the feet stay put.
+        const bool bCrouched = Movement != nullptr && Movement->bIsCrouched;
+        OutHalfHeight = bCrouched ? Math::Min(Movement->CrouchHalfHeight, HalfHeight) : HalfHeight;
+        OutCenterDrop = HalfHeight - OutHalfHeight;
+    }
     SCharacterPhysicsComponent::~SCharacterPhysicsComponent() = default;
     SCharacterPhysicsComponent::SCharacterPhysicsComponent(const SCharacterPhysicsComponent&) = default;
     SCharacterPhysicsComponent& SCharacterPhysicsComponent::operator=(const SCharacterPhysicsComponent&) = default;

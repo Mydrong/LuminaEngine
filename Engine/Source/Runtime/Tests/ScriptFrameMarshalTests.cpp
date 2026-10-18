@@ -33,8 +33,13 @@
 #include "ScriptTestUtil.h"
 #include "SaveGame/SaveGameEvents.h"
 #include "World/ECS/EventQueue.h"
+#include "World/Entity/Components/BuoyancyComponent.h"
 #include "World/Entity/Components/CharacterComponent.h"
+#include "World/Entity/Components/TransformComponent.h"
+#include "Assets/AssetTypes/Prefabs/Prefab.h"
+#include "Assets/AssetTypes/Prefabs/PrefabComponents.h"
 #include "World/World.h"
+#include "World/Subsystems/TweenManager.h"
 
 using namespace Lumina;
 
@@ -802,6 +807,7 @@ TEST_F(FFrameMarshalTest, InstancedStructGetThrowsAndTryGetReportsAMismatch)
     auto* Run = (int32(*)(void*, float))DotNet::ResolveManagedExport("Test_InstancedStructGetTryGet");
     ASSERT_NE(Run, nullptr);
 
+    RegisterPendingTypes();
     FInstancedStruct Instanced;
     CStruct* Opaque = FindObject<CStruct>(FName("SInteropOpaqueStruct"));
     ASSERT_NE(Opaque, nullptr);
@@ -1613,6 +1619,10 @@ TEST_F(FFrameMarshalTest, AManagedHandlerReceivesEveryDelegateArgument)
     const int32 Seen = Flags();
     Release();
 
+    EXPECT_FALSE(Host.OnOneString.HasManagedBindings()) << "-= left the one-argument handler bound";
+    EXPECT_FALSE(Host.OnTwo.HasManagedBindings()) << "-= left the two-argument handler bound";
+    EXPECT_FALSE(Host.OnThree.HasManagedBindings()) << "-= left the three-argument handler bound";
+
     EXPECT_EQ(Seen & 1,  1)  << "the one-argument handler never ran";
     EXPECT_EQ(Seen & 2,  2)  << "the lone string argument did not arrive";
     EXPECT_EQ(Seen & 4,  4)  << "the two-argument handler never ran";
@@ -1655,6 +1665,22 @@ TEST_F(FFrameMarshalTest, ABlittableBroadcastReachesManagedWithoutAllocating)
     EXPECT_EQ(After - Before, 0) << "256 broadcasts allocated " << (After - Before) << " managed bytes";
 }
 
+// -= follows C# event rules, removing one matching handler per call and ignoring one that was never added.
+TEST_F(FFrameMarshalTest, ScriptEventRemoveTakesOneMatchingHandler)
+{
+    using FAddRemoveFn = void(*)(void*);
+    auto* AddRemove = (FAddRemoveFn)DotNet::ResolveManagedExport("Test_DelegateArgsAddTwiceRemoveOnce");
+    ASSERT_NE(AddRemove, nullptr);
+
+    RegisterPendingTypes();
+
+    SDelegateTestHost Host;
+    AddRemove(&Host);
+
+    EXPECT_EQ(Host.OnTwo.GetManagedBindingCount(), 1u);
+    EXPECT_EQ(Host.OnOneString.GetManagedBindingCount(), 0u);
+}
+
 TEST_F(FFrameMarshalTest, ScriptsReadAndSendThroughTheWorldEventQueues)
 {
     using FReadEngineFn = int32(*)(void*, int32*, int32*, int32*);
@@ -1693,4 +1719,177 @@ TEST_F(FFrameMarshalTest, ScriptsReadAndSendThroughTheWorldEventQueues)
     World->FlushCommands();
     EXPECT_EQ(ReadScript(World.Get(), &ScaleSum), 6);
     EXPECT_DOUBLE_EQ(ScaleSum, 0.5) << "the script event's stride and alignment must match its C# layout";
+}
+
+// Rows removed mid-loop are skipped, rows added mid-loop are not visited, and later rows still read live memory after the pool grows.
+TEST_F(FFrameMarshalTest, ScriptViewSurvivesMidLoopStructuralChanges)
+{
+    using FMutateFn = int32(*)(void*, uint32*, int32, uint32*, int32, uint32*, double*);
+    auto* Mutate = (FMutateFn)DotNet::ResolveManagedExport("Test_ViewMutatesMidLoop");
+    ASSERT_NE(Mutate, nullptr);
+
+    RegisterPendingTypes();
+    TStrongObjectPtr<CWorld> World(NewObject<CWorld>(nullptr, FName("ScriptViewMutationWorld"), FGuid::New(), OF_Transient));
+    ECS::FRegistry& Registry = World->GetEntityRegistry();
+
+    constexpr int32 kMembers = 64;
+    TVector<uint32> Members;
+    for (int32 i = 0; i < kMembers; ++i)
+    {
+        const ECS::FEntity Entity = Registry.Create();
+        Registry.Emplace<STransformComponent>(Entity);
+        Registry.Emplace<SBuoyancyComponent>(Entity).Buoyancy = (float)(i + 1);
+        Members.push_back((uint32)Entity);
+    }
+
+    TVector<uint32> Joiners;
+    for (int32 i = 0; i < 256; ++i)
+    {
+        const ECS::FEntity Entity = Registry.Create();
+        Registry.Emplace<STransformComponent>(Entity);
+        Joiners.push_back((uint32)Entity);
+    }
+
+    TVector<uint32> Doomed;
+    for (int32 i = 0; i < kMembers; i += 4)
+    {
+        Doomed.push_back(Members[i]);
+    }
+
+    uint32 First = 0;
+    double Sum = 0.0;
+    const int32 Visited = Mutate(World.Get(), Doomed.data(), (int32)Doomed.size(), Joiners.data(), (int32)Joiners.size(), &First, &Sum);
+
+    double Expected = 0.0;
+    int32 ExpectedVisits = 0;
+    for (int32 i = 0; i < kMembers; ++i)
+    {
+        const bool bDoomed = (i % 4) == 0 && Members[i] != First;
+        if (!bDoomed)
+        {
+            Expected += (double)(i + 1);
+            ++ExpectedVisits;
+        }
+    }
+
+    EXPECT_EQ(Visited, ExpectedVisits);
+    EXPECT_DOUBLE_EQ(Sum, Expected);
+}
+
+// C# reads a table of derived rows through the base row type and still refuses the reverse.
+TEST_F(FFrameMarshalTest, ScriptReadsDerivedRowsThroughTheirBase)
+{
+    using FRowFn = int32(*)(void*, void*);
+    auto* ReadAsBase = (FRowFn)DotNet::ResolveManagedExport("Test_ReadRowAsBase");
+    auto* RefusesDerived = (FRowFn)DotNet::ResolveManagedExport("Test_RefusesRowAsDerived");
+    ASSERT_NE(ReadAsBase, nullptr);
+    ASSERT_NE(RefusesDerived, nullptr);
+
+    TStrongObjectPtr<CDataTable> Derived(NewObject<CDataTable>(nullptr, NAME_None, FGuid::New(), OF_Transient));
+    Derived->SetRowStruct(SInteropTestDerivedRow::StaticStruct());
+    Derived->AddRow(FName("Row"));
+    const_cast<SInteropTestDerivedRow*>(FindDataTableRow<SInteropTestDerivedRow>(Derived.Get(), FName("Row")))->BaseValue = 42;
+    SDataTableRowHandle DerivedHandle;
+    DerivedHandle.DataTable = Derived;
+    DerivedHandle.RowName = FName("Row");
+    EXPECT_EQ(ReadAsBase(Derived.Get(), &DerivedHandle), 42);
+
+    TStrongObjectPtr<CDataTable> Base(NewObject<CDataTable>(nullptr, NAME_None, FGuid::New(), OF_Transient));
+    Base->SetRowStruct(SInteropTestRow::StaticStruct());
+    Base->AddRow(FName("Row"));
+    SDataTableRowHandle BaseHandle;
+    BaseHandle.DataTable = Base;
+    BaseHandle.RowName = FName("Row");
+    EXPECT_EQ(RefusesDerived(Base.Get(), &BaseHandle), 1);
+}
+
+// A script holding a loaded prefab spawns it placed and parented, with no path lookup.
+TEST_F(FFrameMarshalTest, ScriptSpawnsALoadedPrefab)
+{
+    using FSpawnFn = uint32(*)(void*, void*, uint32);
+    auto* Spawn = (FSpawnFn)DotNet::ResolveManagedExport("Test_SpawnLoadedPrefab");
+    ASSERT_NE(Spawn, nullptr);
+
+    RegisterPendingTypes();
+    TStrongObjectPtr<CWorld> World(NewObject<CWorld>(nullptr, FName("ScriptPrefabWorld"), FGuid::New(), OF_Transient));
+    TStrongObjectPtr<CPrefab> Prefab(NewObject<CPrefab>(nullptr, NAME_None, FGuid::New(), OF_Transient));
+
+    const ECS::FEntity PrefabRoot = Prefab->Registry.Create();
+    Prefab->Registry.Emplace<SPrefabComponent>(PrefabRoot).StableID = FName("root");
+    Prefab->Registry.Emplace<STransformComponent>(PrefabRoot);
+
+    ECS::FRegistry& Registry = World->GetEntityRegistry();
+    const ECS::FEntity Holder = Registry.Create();
+    Registry.Emplace<STransformComponent>(Holder);
+
+    const ECS::FEntity Root(Spawn(World.Get(), Prefab.Get(), (uint32)Holder));
+    ASSERT_TRUE(Registry.IsValid(Root));
+    EXPECT_EQ(Registry.GetHierarchy().GetParent(Root), Holder);
+    EXPECT_FLOAT_EQ(Registry.Get<STransformComponent>(Root).GetLocalLocation().y, 4.0f);
+}
+
+// A script builds a tween with the fluent API, and native ticking it drives every kind of step and event.
+TEST_F(FFrameMarshalTest, ScriptTweenBuilderDrivesEveryStepKind)
+{
+    using FBuildFn = int32(*)(void*, uint32, float*);
+    using FReadFn = void(*)(float*, int32*, int32*);
+    auto* Build = (FBuildFn)DotNet::ResolveManagedExport("Test_TweenBuild");
+    auto* Read = (FReadFn)DotNet::ResolveManagedExport("Test_TweenRead");
+    ASSERT_NE(Build, nullptr);
+    ASSERT_NE(Read, nullptr);
+
+    RegisterPendingTypes();
+    TStrongObjectPtr<CWorld> World(NewObject<CWorld>(nullptr, FName("ScriptTweenWorld"), FGuid::New(), OF_Transient));
+    ECS::FRegistry& Registry = World->GetEntityRegistry();
+
+    // The world's initialization makes this, and a bare test world never runs it.
+    FTweenManager& Manager = Registry.Ctx().Emplace<FTweenManager>();
+    Manager.SetWorldRegistry(&Registry);
+
+    const ECS::FEntity Entity = Registry.Create();
+    Registry.Emplace<STransformComponent>(Entity);
+    Registry.Emplace<SBuoyancyComponent>(Entity).Buoyancy = 2.0f;
+
+    float Duration = 0.0f;
+    ASSERT_EQ(Build(World.Get(), (uint32)Entity, &Duration), 1);
+    EXPECT_NEAR(Duration, 0.6f, 1e-4f);
+
+    float Value[3] = {};
+    int32 Finished = 0;
+    int32 Loops = 0;
+
+    for (int32 i = 0; i < 2; ++i)
+    {
+        Manager.Tick(0.1f);
+    }
+    Read(Value, &Finished, &Loops);
+    EXPECT_NEAR(Registry.Get<STransformComponent>(Entity).GetLocalLocation().x, 3.0f, 1e-3f);
+    EXPECT_NEAR(Value[1], 2.0f, 1e-3f);
+
+    for (int32 i = 0; i < 2; ++i)
+    {
+        Manager.Tick(0.1f);
+    }
+    EXPECT_NEAR(Registry.Get<SBuoyancyComponent>(Entity).Buoyancy, 5.0f, 1e-3f);
+
+    for (int32 i = 0; i < 10; ++i)
+    {
+        Manager.Tick(0.1f);
+    }
+    Read(Value, &Finished, &Loops);
+    EXPECT_EQ(Loops, 1);
+    EXPECT_EQ(Finished, 1);
+    EXPECT_NEAR(Registry.Get<STransformComponent>(Entity).GetLocalLocation().x, 0.0f, 1e-3f) << "the yoyo pass brings it home";
+    EXPECT_NEAR(Registry.Get<SBuoyancyComponent>(Entity).Buoyancy, 2.0f, 1e-3f);
+    EXPECT_NEAR(Registry.Get<STransformComponent>(Entity).GetLocalScale().x, 1.0f, 1e-3f) << "the punch settles";
+    EXPECT_NEAR(Value[2], 0.0f, 1e-3f);
+}
+
+// A C# struct cannot inherit, so a strategy is picked by the interface it implements and called through it.
+TEST_F(FFrameMarshalTest, ScriptStructStrategiesDispatchThroughTheirInterface)
+{
+    using FProbeFn = int32(*)();
+    auto* Probe = (FProbeFn)DotNet::ResolveManagedExport("Test_ScriptStructStrategies");
+    ASSERT_NE(Probe, nullptr);
+    EXPECT_EQ(Probe(), 0);
 }

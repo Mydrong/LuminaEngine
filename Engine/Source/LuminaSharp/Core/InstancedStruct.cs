@@ -35,6 +35,21 @@ public readonly unsafe struct FInstancedStruct
         return Is<T>() ? NativeStructs.FromAddressOrNull<T>(Native.InstancedStructGetMemory(Address)) : null;
     }
 
+    // The stored script struct seen through an interface it implements, throwing when it implements none such.
+    public TInterface As<TInterface>() where TInterface : class
+        => TryAs<TInterface>() ?? throw NotA(typeof(TInterface).Name);
+
+    // Null when nothing is stored or the stored struct does not implement TInterface.
+    public TInterface? TryAs<TInterface>() where TInterface : class
+    {
+        if (!IsBound)
+        {
+            return null;
+        }
+        nint Memory = Native.InstancedStructGetMemory(Address);
+        return Memory == 0 ? null : Host.Library?.ViewScriptStruct(TypeName, Memory) as TInterface;
+    }
+
     private InvalidOperationException NotA(string Expected)
     {
         string Held = TypeName;
@@ -87,6 +102,10 @@ public readonly unsafe struct TInstancedStruct<TBase> where TBase : struct, INat
     public string TypeName => Inner.TypeName;
 
     public TBase Get() => Inner.Get<TBase>();
+
+    public TInterface As<TInterface>() where TInterface : class => Inner.As<TInterface>();
+
+    public TInterface? TryAs<TInterface>() where TInterface : class => Inner.TryAs<TInterface>();
 
     public TBase? TryGet() => Inner.TryGet<TBase>();
 

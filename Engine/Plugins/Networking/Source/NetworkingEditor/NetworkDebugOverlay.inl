@@ -4,7 +4,7 @@
         {
             return;
         }
-        FNetWorldState* Net = ECS::GetWorldRegistry(*World).Ctx().Find<FNetWorldState>();
+        FNetWorldState* Net = World->GetEntityRegistry().Ctx().Find<FNetWorldState>();
         if (Net == nullptr)
         {
             return; // world isn't networked
@@ -69,7 +69,7 @@
             FVector4(0.30f, 1.0f, 0.45f, 1.0f), // Far
             FVector4(0.5f,  0.5f,  0.5f,  1.0f), // Cull (shouldn't appear)
         };
-        ECS::FRegistry& Registry = ECS::GetWorldRegistry(*World);
+        ECS::FRegistry& Registry = World->GetEntityRegistry();
         for (const auto& CVKV : Net->ClientViews)
         {
             const FNetClientView& CV = CVKV.second;

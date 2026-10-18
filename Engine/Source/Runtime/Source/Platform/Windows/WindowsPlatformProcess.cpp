@@ -469,6 +469,18 @@ namespace Lumina::Platform
         }
     }
 
+    bool IsProcessForeground()
+    {
+        const HWND Foreground = GetForegroundWindow();
+        if (Foreground == nullptr)
+        {
+            return false;
+        }
+        DWORD Owner = 0;
+        GetWindowThreadProcessId(Foreground, &Owner);
+        return Owner == GetCurrentProcessId();
+    }
+
     bool FocusProcessWindow(uint32 ProcessId)
     {
         struct FSearch

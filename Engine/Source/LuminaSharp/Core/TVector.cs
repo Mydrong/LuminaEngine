@@ -55,7 +55,17 @@ public readonly unsafe struct TVector<T> : IList<T>
     public int Count
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        get => IsValid ? (int)(*(uint*)((byte*)Vector + OpsPtr->CountOffset) / OpsPtr->CountDivisor) : 0;
+        get
+        {
+            if (!IsValid)
+            {
+                return 0;
+            }
+            uint Raw = *(uint*)((byte*)Vector + OpsPtr->CountOffset);
+            uint Divisor = OpsPtr->CountDivisor;
+            // A native vector counts elements, so its divisor is one and the divide is skipped.
+            return (int)(Divisor == 1u ? Raw : Raw / Divisor);
+        }
     }
 
     private byte* Data

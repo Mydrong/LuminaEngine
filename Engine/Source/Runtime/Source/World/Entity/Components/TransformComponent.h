@@ -130,13 +130,14 @@ namespace Lumina
         // Writes nothing and takes no lock, so any thread may read a world transform between propagations.
         FTransform ComputeWorldTransform() const
         {
-            if (bIsFlat)
+            // A transform never bound to a registry has no hierarchy, so its world transform is its local one.
+            if (bIsFlat || Registry == nullptr)
             {
                 return LocalTransform;
             }
 
             // Nothing has moved since the last propagation in the common case, so the cached value is exact.
-            if (Registry == nullptr || (DirtyState != nullptr && !DirtyState->bAnyDirty.load(std::memory_order_acquire)))
+            if (DirtyState != nullptr && !DirtyState->bAnyDirty.load(std::memory_order_acquire))
             {
                 return WorldTransform;
             }
@@ -189,6 +190,13 @@ namespace Lumina
         FQuat    GetWorldRotationCached() const { return GetWorldTransformCached().GetRotation(); }
         FVector3 GetWorldScaleCached()    const { return GetWorldTransformCached().GetScale(); }
         FMatrix4 GetWorldMatrixCached()   const { return GetWorldTransformCached().GetMatrix(); }
+
+        // The largest world scale axis, which is what physics sizes a sphere, capsule or cylinder by.
+        float GetWorldMaxScaleCached() const
+        {
+            const FVector3 S = GetWorldScaleCached();
+            return Math::Max(S.x, Math::Max(S.y, S.z));
+        }
 
         FUNCTION(NoSuppressGCTransition)
         void SetWorldTransform(const FTransform& InTransform)
@@ -307,21 +315,6 @@ namespace Lumina
             MarkMoved(false);
         }
 
-        // For a parallel writer that batches the dirty enqueue itself; true when this entity still has to be queued.
-        bool SetFromPhysicsUnqueued(const FVector3& Location, const FQuat& Rotation)
-        {
-            if (bIsFlat)
-            {
-                SetFromPhysics(Location, Rotation);
-                return false;
-            }
-            LocalTransform.SetLocation(Location);
-            LocalTransform.SetRotation(Rotation);
-            const bool bNeedsQueue = !bWorldDirty;
-            bWorldDirty = true;
-            return bNeedsQueue;
-        }
-
         void SetRaw(const FVector3& Location, const FQuat& Rotation, const FVector3& Scale)
         {
             LocalTransform.SetLocation(Location);
@@ -376,7 +369,8 @@ namespace Lumina
         
         void MarkDirty()
         {
-            MarkMoved(bHasPhysicsBody && !bBodyDirtyQueued);
+            // An entity in a hierarchy may carry bodied descendants, which have to follow it.
+            MarkMoved((bHasPhysicsBody || !bIsFlat) && !bBodyDirtyQueued);
         }
 
         void MarkMoved(bool bQueueBody)

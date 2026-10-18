@@ -585,6 +585,12 @@ LUMINA_DOTNET_EXPORT(void, DelegateUnbind)(void* DelegatePtr, uint64 Handle)
     FScriptDelegateBase::UnbindManagedAnywhere(DelegatePtr, Handle);
 }
 
+// What -= on a script event searches, since only the managed side can compare two handlers.
+LUMINA_DOTNET_EXPORT(int32, DelegateManagedListeners)(void* DelegatePtr, uint64* OutIds, uint64* OutTokens, int32 Capacity)
+{
+    return DelegatePtr != nullptr ? static_cast<FScriptDelegateBase*>(DelegatePtr)->GetManagedListeners(OutIds, OutTokens, Capacity) : 0;
+}
+
 LUMINA_DOTNET_SIGNATURES(
     LUMINA_DOTNET_SIG(FindProperty),
     LUMINA_DOTNET_SIG(PropertyOffset),
@@ -631,6 +637,7 @@ LUMINA_DOTNET_SIGNATURES(
     LUMINA_DOTNET_SIG(PropMapOps),
     LUMINA_DOTNET_SIG(DelegateBind),
     LUMINA_DOTNET_SIG(DelegateUnbind),
+    LUMINA_DOTNET_SIG(DelegateManagedListeners),
     LUMINA_DOTNET_SIG(DelegateArgCount),
     LUMINA_DOTNET_SIG(DelegateArgProperty)
 );

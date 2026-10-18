@@ -214,7 +214,7 @@ namespace Lumina
             {
                 return nullptr;
             }
-            return ECS::GetWorldRegistry(*World).Ctx().Find<FKinematicsState>();
+            return World->GetEntityRegistry().Ctx().Find<FKinematicsState>();
         }
     }
 }

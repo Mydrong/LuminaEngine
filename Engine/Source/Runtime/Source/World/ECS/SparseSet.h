@@ -124,6 +124,7 @@ namespace Lumina::ECS
         NODISCARD FORCEINLINE bool IsInPlaceDelete() const { return bInPlaceDelete; }
         NODISCARD FORCEINLINE uint32 GetPayloadPageSize() const { return PayloadPageMask + 1u; }
         NODISCARD FORCEINLINE bool IsTagOnly() const { return ElementSize == 0; }
+        NODISCARD FORCEINLINE uint32 GetElementSize() const { return ElementSize; }
 
         class FIterator
         {

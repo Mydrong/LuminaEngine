@@ -101,7 +101,7 @@ namespace Lumina
         NODISCARD bool IsInspectingForeignWorld() const { return ObservedWorld != nullptr && ObservedWorld != World.Get(); }
 
         // The registry holding the scene's entities (the observed world's registry).
-        NODISCARD ECS::FRegistry& GetSceneRegistry() const { return ECS::GetWorldRegistry(*GetObservedWorld()); }
+        NODISCARD ECS::FRegistry& GetSceneRegistry() const { return GetObservedWorld()->GetEntityRegistry(); }
 
     public:
 
@@ -119,6 +119,15 @@ namespace Lumina
 
         // A copy of Source and its children as this editor's Duplicate makes it, such as with fresh prefab stable IDs.
         virtual ECS::FEntity DuplicateEntityForScene(ECS::FEntity Source);
+
+        // Whether Duplicate may copy the entity, which a locked prefab child or a prefab root may not.
+        virtual bool CanDuplicateEntity(ECS::FEntity Entity) const { return true; }
+
+        // Copies every entity Duplicate may copy as one undo step, then selects the copies.
+        void DuplicateAndSelect(TSpan<const ECS::FEntity> Entities, FName Label = "Duplicate");
+
+        // Alt pressed on the gizmo copies the selection first, so the drag moves the copies. True while Alt holds the gizmo.
+        bool HandleAltDragCopy(bool bInputTaken);
 
         // Makes a spawned subtree belong to this scene as a content drop would; the prefab editor copies it in unlinked.
         virtual void AdoptSpawnedSubtree(ECS::FEntity Root) {}

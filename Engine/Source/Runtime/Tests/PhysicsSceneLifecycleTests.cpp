@@ -2,6 +2,7 @@
 #include "Core/Object/ObjectCore.h"
 #include "Physics/API/Box3D/Box3DPhysicsScene.h"
 #include "Physics/API/Box3D/Box3DRagdollHandle.h"
+#include "Physics/API/Box3D/Box3DCharacterHandle.h"
 #include "Renderer/SkeletonResource.h"
 #include "World/World.h"
 #include "World/Entity/Components/CharacterComponent.h"
@@ -20,7 +21,7 @@ namespace
         {
             RegisterPendingTypes();
             World = NewObject<CWorld>(nullptr, NAME_None, FGuid::New(), OF_Transient);
-            Registry = &ECS::GetWorldRegistry(*World);
+            Registry = &World->GetEntityRegistry();
             Scene = MakeUnique<Physics::FBox3DPhysicsScene>(World);
             Scene->Simulate();
             Dt = 1.0f / Math::Max(10.0f, World->GetDefaultWorldSettings().PhysicsHz);
@@ -493,4 +494,124 @@ TEST_F(PhysicsSceneLifecycle, CharacterSpawnedOnTheFloorDoesNotReportALanding)
 
     EXPECT_TRUE(Registry->Get<SCharacterMovementComponent>(Character).bGrounded);
     EXPECT_EQ(Counter.Landings, 0) << "a character placed on the ground never arrived there";
+}
+
+namespace
+{
+    // The lowest point of the character's capsule, which crouching and standing must leave where it is.
+    float CapsuleBottom(const SCharacterPhysicsComponent& Physics)
+    {
+        const FPhysicsCharacterHandle& Character = *Physics.Character;
+        return Character.Position.y + Character.TranslationOffset.y - Character.CrouchDrop - Character.HalfHeight - Character.Radius;
+    }
+}
+
+// Crouching keeps the feet down, and standing waits under a low ceiling until the ceiling is gone.
+TEST_F(PhysicsSceneLifecycle, CrouchKeepsTheFeetAndWaitsForRoomToStand)
+{
+    const ECS::FEntity Floor = Registry->Create();
+    Registry->Emplace<STransformComponent>(Floor).SetLocation(FVector3(0.0f, -0.5f, 0.0f));
+    Registry->Emplace<SRigidBodyComponent>(Floor).BodyType = EBodyType::Static;
+    Registry->Emplace<SBoxColliderComponent>(Floor).HalfExtent = FVector3(20.0f, 0.5f, 20.0f);
+
+    const ECS::FEntity Character = Registry->Create();
+    Registry->Emplace<STransformComponent>(Character).SetLocation(FVector3(0.0f, 1.0f, 0.0f));
+    Registry->Emplace<SCharacterPhysicsComponent>(Character);
+    Registry->Emplace<SCharacterMovementComponent>(Character);
+
+    int32 Crouches = 0;
+    int32 Stands = 0;
+    Registry->Get<SCharacterMovementComponent>(Character).OnCrouchChanged.AddLambda([&](const SCharacterCrouchEvent& Event)
+    {
+        EXPECT_EQ(Event.Entity, Character);
+        (Event.bCrouched ? Crouches : Stands) += 1;
+    });
+
+    auto Step = [&](int32 Steps)
+    {
+        for (int32 Index = 0; Index < Steps; ++Index)
+        {
+            Scene->Update(Dt);
+            World->FlushCommands();
+            World->GetEvents().Advance();
+        }
+    };
+
+    Step(90);
+    const SCharacterPhysicsComponent& Physics = Registry->Get<SCharacterPhysicsComponent>(Character);
+    ASSERT_TRUE(Physics.Character);
+    const float Feet = CapsuleBottom(Physics);
+    const float StandingTop = Feet + 2.0f * (Physics.HalfHeight + Physics.Radius);
+
+    Registry->Get<SCharacterMovementComponent>(Character).bWantsToCrouch = true;
+    Step(2);
+    const SCharacterMovementComponent& Movement = Registry->Get<SCharacterMovementComponent>(Character);
+    EXPECT_TRUE(Movement.bIsCrouched);
+    EXPECT_FLOAT_EQ(Physics.Character->HalfHeight, Movement.CrouchHalfHeight);
+    EXPECT_NEAR(CapsuleBottom(Physics), Feet, 0.01f) << "the capsule shrinks from the top, so the feet stay on the floor";
+    EXPECT_EQ(Crouches, 1);
+
+    // A ceiling between the crouched head and where a standing head would be.
+    const float CrouchedTop = Feet + 2.0f * (Movement.CrouchHalfHeight + Physics.Radius);
+    const ECS::FEntity Ceiling = Registry->Create();
+    Registry->Emplace<STransformComponent>(Ceiling).SetLocation(FVector3(0.0f, (CrouchedTop + StandingTop) * 0.5f + 0.25f, 0.0f));
+    Registry->Emplace<SRigidBodyComponent>(Ceiling).BodyType = EBodyType::Static;
+    Registry->Emplace<SBoxColliderComponent>(Ceiling).HalfExtent = FVector3(5.0f, 0.25f, 5.0f);
+    Step(2);
+
+    Registry->Get<SCharacterMovementComponent>(Character).bWantsToCrouch = false;
+    Step(10);
+    EXPECT_TRUE(Movement.bIsCrouched) << "there is no room to stand under the ceiling";
+    EXPECT_EQ(Stands, 0);
+
+    Registry->Destroy(Ceiling);
+    Step(10);
+    EXPECT_FALSE(Movement.bIsCrouched) << "with the ceiling gone the character stands";
+    EXPECT_FLOAT_EQ(Physics.Character->HalfHeight, Physics.HalfHeight);
+    EXPECT_NEAR(CapsuleBottom(Physics), Feet, 0.01f);
+    EXPECT_EQ(Stands, 1);
+}
+
+// A runtime resize reaches the running character and its proxy shape without rebuilding it.
+TEST_F(PhysicsSceneLifecycle, ResizingACharacterAppliesInPlace)
+{
+    const ECS::FEntity Character = Registry->Create();
+    Registry->Emplace<STransformComponent>(Character).SetLocation(FVector3(0.0f, 2.0f, 0.0f));
+    Registry->Emplace<SCharacterPhysicsComponent>(Character);
+    Registry->Emplace<SCharacterMovementComponent>(Character);
+    Scene->Update(Dt);
+
+    const SCharacterPhysicsComponent& Physics = Registry->Get<SCharacterPhysicsComponent>(Character);
+    ASSERT_TRUE(Physics.Character);
+    const FPhysicsCharacterHandle* Before = Physics.Character.Handle.get();
+
+    World->SetCapsuleSize(Character, 0.5f, 0.8f);
+    Scene->Update(Dt);
+
+    EXPECT_EQ(Physics.Character.Handle.get(), Before) << "the same character carries on, only resized";
+    EXPECT_FLOAT_EQ(Physics.Character->Radius, 0.5f);
+    EXPECT_FLOAT_EQ(Physics.Character->HalfHeight, 0.8f);
+
+    // Above the old capsule's top but inside the new one, so only the resized proxy can stop this ray.
+    const FVector3 Center = Physics.Character->Position + Physics.Character->TranslationOffset;
+    SRayCastSettings Query;
+    Query.Start = Center + FVector3(-3.0f, 1.1f, 0.0f);
+    Query.End   = Center + FVector3(3.0f, 1.1f, 0.0f);
+    const TOptional<SRayResult> Hit = Scene->CastRay(Query);
+    ASSERT_TRUE(Hit.has_value()) << "the proxy body other queries see is still the old size";
+    EXPECT_EQ(Hit->Entity, (uint32)Character);
+}
+
+// Rebuilding a moving body for a new size keeps it moving rather than stopping it dead.
+TEST_F(PhysicsSceneLifecycle, ARebuiltBodyKeepsItsVelocity)
+{
+    const ECS::FEntity Ball = Spawn();
+    Scene->Update(Dt);
+    Scene->SetLinearVelocity(Ball, FVector3(3.0f, 0.0f, 0.0f));
+    Scene->Update(Dt);
+
+    World->SetSphereRadius(Ball, 1.0f);
+    Scene->Update(Dt);
+
+    EXPECT_NEAR(Scene->GetLinearVelocity(Ball).x, 3.0f, 0.05f);
 }

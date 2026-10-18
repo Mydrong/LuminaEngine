@@ -278,6 +278,14 @@ namespace Lumina::ECS
             AssureStorage<T>().Reserve(Count);
         }
 
+        // Room for one more T per entity holding TFor, so adding a T to each inside a view of TFor never grows the pool.
+        template<CComponent T, CComponent TFor>
+        void ReserveComponentsFor()
+        {
+            const TComponentStorage<T> Storage = AssureStorage<T>();
+            Storage.Reserve(Storage.GetDenseSize() + AssureStorage<TFor>().GetDenseSize());
+        }
+
 
         //~ Storages
 

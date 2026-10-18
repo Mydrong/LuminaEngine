@@ -54,6 +54,9 @@ namespace Lumina
         // Drops every listener, native and managed alike.
         RUNTIME_API void RemoveAll();
 
+        // Fills the id and callback token of each live managed listener, oldest first, and returns how many there are.
+        RUNTIME_API int32 GetManagedListeners(uint64* OutIds, uint64* OutTokens, int32 Capacity) const;
+
         RUNTIME_API bool   HasManagedBindings() const;
         RUNTIME_API size_t GetManagedBindingCount() const;
 

@@ -29,7 +29,7 @@ namespace Lumina::Physics
 
     void FBox3DPhysicsScene::Simulate()
     {
-        ECS::FRegistry& Registry = ECS::GetWorldRegistry(*World);
+        ECS::FRegistry& Registry = World->GetEntityRegistry();
 
         BulkCreateRigidBodies(Registry);
 
@@ -44,6 +44,8 @@ namespace Lumina::Physics
 
         Registry.GetSignals<SCharacterPhysicsComponent>().OnConstruct.Connect<&FBox3DPhysicsScene::OnCharacterComponentConstructed>(this);
         Registry.GetSignals<SCharacterPhysicsComponent>().OnDestroy.Connect<&FBox3DPhysicsScene::OnCharacterComponentDestroyed>(this);
+        Registry.GetSignals<SCharacterPhysicsComponent>().OnUpdate.Connect<&FBox3DPhysicsScene::OnCharacterComponentUpdated>(this);
+        Registry.GetSignals<SCharacterMovementComponent>().OnUpdate.Connect<&FBox3DPhysicsScene::OnCharacterComponentUpdated>(this);
 
         Registry.GetSignals<SSphereColliderComponent>().OnConstruct.Connect<&FBox3DPhysicsScene::OnColliderComponentAdded>(this);
         Registry.GetSignals<SSphereColliderComponent>().OnUpdate.Connect<&FBox3DPhysicsScene::OnColliderComponentAdded>(this);
@@ -95,10 +97,12 @@ namespace Lumina::Physics
 
     void FBox3DPhysicsScene::StopSimulate()
     {
-        ECS::FRegistry& Registry = ECS::GetWorldRegistry(*World);
+        ECS::FRegistry& Registry = World->GetEntityRegistry();
 
         Registry.GetSignals<SCharacterPhysicsComponent>().OnConstruct.Disconnect<&FBox3DPhysicsScene::OnCharacterComponentConstructed>(this);
         Registry.GetSignals<SCharacterPhysicsComponent>().OnDestroy.Disconnect<&FBox3DPhysicsScene::OnCharacterComponentDestroyed>(this);
+        Registry.GetSignals<SCharacterPhysicsComponent>().OnUpdate.Disconnect<&FBox3DPhysicsScene::OnCharacterComponentUpdated>(this);
+        Registry.GetSignals<SCharacterMovementComponent>().OnUpdate.Disconnect<&FBox3DPhysicsScene::OnCharacterComponentUpdated>(this);
 
         Registry.GetSignals<SSphereColliderComponent>().OnConstruct.Disconnect<&FBox3DPhysicsScene::OnColliderComponentAdded>(this);
         Registry.GetSignals<SSphereColliderComponent>().OnUpdate.Disconnect<&FBox3DPhysicsScene::OnColliderComponentAdded>(this);
@@ -174,7 +178,7 @@ namespace Lumina::Physics
     {
         LUMINA_PROFILE_SCOPE();
 
-        ECS::FRegistry& Registry = ECS::GetWorldRegistry(*World);
+        ECS::FRegistry& Registry = World->GetEntityRegistry();
         ECS::Utils::FlushDirtyPhysicsBodies(Registry);
 
         auto BodySyncView = Registry.View<SRigidBodyComponent, FNeedsPhysicsBodyUpdate>();
@@ -201,9 +205,9 @@ namespace Lumina::Physics
                 continue;
             }
 
-            const STransformComponent& Transform = Registry.Get<STransformComponent>(Entity);
-            const FVector3 TargetLocation = Transform.GetLocation();
-            const FQuat TargetRotation = Transform.GetRotation();
+            const FTransform BodyPose = Registry.Get<STransformComponent>(Entity).ComputeWorldTransform();
+            const FVector3 TargetLocation = BodyPose.GetLocation();
+            const FQuat TargetRotation = BodyPose.GetRotation();
             if (!Box3DUtils::IsSafePose(TargetLocation, TargetRotation))
             {
                 static TAtomic<bool> bWarned{ false };
@@ -365,7 +369,7 @@ namespace Lumina::Physics
 
         DropCharacterInterpSlots();
 
-        ECS::FRegistry& Registry = ECS::GetWorldRegistry(*World);
+        ECS::FRegistry& Registry = World->GetEntityRegistry();
         auto RigidStorage = Registry.GetStorage<SRigidBodyComponent>();
         const float KillHeight = World->GetDefaultWorldSettings().WorldKillHeight;
 
@@ -512,7 +516,7 @@ namespace Lumina::Physics
     {
         LUMINA_PROFILE_SCOPE();
 
-        ECS::FRegistry& Registry = ECS::GetWorldRegistry(*World);
+        ECS::FRegistry& Registry = World->GetEntityRegistry();
         const float KillHeight = World->GetDefaultWorldSettings().WorldKillHeight;
 
         DropCharacterInterpSlots();
@@ -624,7 +628,7 @@ namespace Lumina::Physics
     {
         LUMINA_PROFILE_SCOPE();
 
-        ECS::FRegistry& Registry = ECS::GetWorldRegistry(*World);
+        ECS::FRegistry& Registry = World->GetEntityRegistry();
 
         const uint32 Count = (uint32)InterpStaging.Entities.size();
         if (Count == 0)
@@ -698,101 +702,107 @@ namespace Lumina::Physics
             }
         }
 
-        // Deferred is set for a parented pose written in parallel, which collects its dirty enqueue for one bulk call.
-        auto WritePose = [&](uint32 i, TVector<ECS::FEntity>* Deferred = nullptr)
+        const ECS::FHierarchy& Hierarchy = Registry.GetHierarchy();
+
+        // The body pose is world space, so a parented entity takes it relative to where its parent now is.
+        auto WritePose = [&](uint32 i)
         {
             const ECS::FEntity Entity = InterpStaging.Entities[i];
             STransformComponent& Transform = TransformStorage.Get(Entity);
-            const auto SetPose = [&](const FVector3& Location, const FQuat& Rotation)
-            {
-                if (Deferred == nullptr)
-                {
-                    Transform.SetFromPhysics(Location, Rotation);
-                }
-                else if (Transform.SetFromPhysicsUnqueued(Location, Rotation))
-                {
-                    Deferred->push_back(Entity);
-                }
-            };
+
             const FQuat Previous(InterpStaging.PrevQw[i], InterpStaging.PrevQx[i], InterpStaging.PrevQy[i], InterpStaging.PrevQz[i]);
             const FQuat Current(InterpStaging.CurrQw[i], InterpStaging.CurrQx[i], InterpStaging.CurrQy[i], InterpStaging.CurrQz[i]);
+            const bool bResting = InterpStaging.PrevPos[i] == InterpStaging.CurrPos[i] && Previous == Current;
 
-            // A resting body or idle character would otherwise mark itself and its whole hierarchy moved every frame.
-            if (InterpStaging.PrevPos[i] == InterpStaging.CurrPos[i] && Previous == Current)
+            FVector3 Location = bResting ? InterpStaging.CurrPos[i] : InterpStaging.LerpPos[i];
+            FQuat    Rotation = bResting ? Current
+                                         : FQuat(InterpStaging.LerpQw[i], InterpStaging.LerpQx[i], InterpStaging.LerpQy[i], InterpStaging.LerpQz[i]);
+
+            const ECS::FEntity Parent = Transform.bIsFlat ? ECS::NullEntity : Hierarchy.GetParent(Entity);
+            if (!Parent.IsNull() && Registry.IsValid(Parent))
             {
-                if (Transform.LocalTransform.GetLocation() != InterpStaging.CurrPos[i] || Transform.LocalTransform.GetRotation() != Current)
-                {
-                    SetPose(InterpStaging.CurrPos[i], Current);
-                }
-                return;
+                const FTransform ParentWorld = ECS::Utils::ComputeWorldTransform(Registry, Parent);
+                const FQuat ToParent = Math::Inverse(ParentWorld.GetRotation());
+                Location = Math::Rotate(ToParent, Location - ParentWorld.GetLocation()) / ParentWorld.GetScale();
+                Rotation = Math::Normalize(ToParent * Rotation);
             }
 
-            SetPose(InterpStaging.LerpPos[i],
-                FQuat(InterpStaging.LerpQw[i], InterpStaging.LerpQx[i], InterpStaging.LerpQy[i], InterpStaging.LerpQz[i]));
+            // A resting body or idle character would otherwise mark itself and its whole hierarchy moved every frame.
+            if (bResting && Transform.LocalTransform.GetLocation() == Location && Transform.LocalTransform.GetRotation() == Rotation)
+            {
+                return;
+            }
+            Transform.SetFromPhysics(Location, Rotation);
         };
 
         if (bAnyKill)
         {
-            const uint32 FlatCount = (uint32)InterpApplied.size();
-            const auto WriteFlat = [&](uint32 Index)
-            {
-                WritePose(InterpApplied[Index]);
-            };
-            if (FlatCount > InterpParallelThreshold)
-            {
-                Task::ParallelFor(FlatCount, WriteFlat);
-            }
-            else
-            {
-                for (uint32 Index = 0; Index < FlatCount; ++Index)
-                {
-                    WriteFlat(Index);
-                }
-            }
-            for (uint32 i : InterpAppliedParented)
+            for (uint32 i : InterpApplied)
             {
                 WritePose(i);
             }
         }
         else if (Count > InterpParallelThreshold)
         {
-            const uint32 ThreadSlots = Math::Max(GTaskSystem->GetNumTaskThreads(), 1u);
-            if ((uint32)InterpDeferred.size() < ThreadSlots)
-            {
-                InterpDeferred.resize(ThreadSlots);
-            }
-            for (FInterpDeferBucket& Bucket : InterpDeferred)
-            {
-                Bucket.Entities.clear();
-            }
-
-            Task::ParallelFor(Count, [&](uint32 i, uint32 Thread)
+            Task::ParallelFor(Count, [&](uint32 i)
             {
                 if (InterpCategory[i] == kInterpFlat)
                 {
                     WritePose(i);
                 }
-                else if (InterpCategory[i] == kInterpParented)
-                {
-                    WritePose(i, &InterpDeferred[Thread].Entities);
-                }
             });
-
-            ECS::Utils::FTransformDirtyGate* Gate = ECS::Utils::EnsureTransformDirtyGate(Registry);
-            for (const FInterpDeferBucket& Bucket : InterpDeferred)
-            {
-                ECS::Utils::QueueDirtyTransforms(Gate, Bucket.Entities.data(), Bucket.Entities.size());
-            }
         }
         else
         {
             for (uint32 i = 0; i < Count; ++i)
             {
-                if (InterpCategory[i] == kInterpFlat || InterpCategory[i] == kInterpParented)
+                if (InterpCategory[i] == kInterpFlat)
                 {
                     WritePose(i);
                 }
             }
+        }
+
+        if (!bAnyKill)
+        {
+            for (uint32 i = 0; i < Count; ++i)
+            {
+                if (InterpCategory[i] == kInterpParented)
+                {
+                    InterpAppliedParented.push_back(i);
+                }
+            }
+        }
+        if (InterpAppliedParented.empty())
+        {
+            return;
+        }
+
+        // Parents first, so a child converts against the pose its parent was just given.
+        Hierarchy.EnsureOrder();
+        Algo::Sort(InterpAppliedParented, [&](uint32 A, uint32 B)
+        {
+            return Hierarchy.GetSlot(InterpStaging.Entities[A]) < Hierarchy.GetSlot(InterpStaging.Entities[B]);
+        });
+
+        auto BodyStorage = Registry.GetStorage<SRigidBodyComponent>();
+        for (uint32 i : InterpAppliedParented)
+        {
+            const ECS::FEntity Entity = InterpStaging.Entities[i];
+            if (!Registry.IsValid(Entity))
+            {
+                continue;
+            }
+            WritePose(i);
+
+            // A static or kinematic body under a simulated one rides along, while a simulated descendant keeps its own motion.
+            Hierarchy.ForEachDescendant(Entity, [&](ECS::FEntity Descendant)
+            {
+                if (BodyStorage.Contains(Descendant) && BodyStorage.Get(Descendant).BodyType != EBodyType::Dynamic)
+                {
+                    Registry.EmplaceOrReplace<FNeedsPhysicsBodyUpdate>(Descendant);
+                }
+            });
         }
     }
 
@@ -800,7 +810,7 @@ namespace Lumina::Physics
     {
         LUMINA_PROFILE_SCOPE();
 
-        RebuildStaleDynamicMeshBodies(ECS::GetWorldRegistry(*World));
+        RebuildStaleDynamicMeshBodies(World->GetEntityRegistry());
         SynchronizeBodies();
 
         const Lumina::SDefaultWorldSettings& WorldSettings = World->GetDefaultWorldSettings();

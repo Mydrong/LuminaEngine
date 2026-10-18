@@ -39,7 +39,7 @@ namespace Lumina
         PresentBefore.assign(Entities.size(), 0u);
         if (CWorld* W = World.Get(); W != nullptr && Ops != nullptr)
         {
-            ECS::FRegistry& Registry = ECS::GetWorldRegistry(*W);
+            ECS::FRegistry& Registry = W->GetEntityRegistry();
             for (SIZE_T i = 0; i < Entities.size(); ++i)
             {
                 PresentBefore[i] = Registry.IsValid(Entities[i]) && Ops->Has(Registry, Entities[i]) != 0;
@@ -59,7 +59,7 @@ namespace Lumina
         }
 
         // Every component edit records its prefab override here, so no caller can forget and lose it on the next refresh.
-        ECS::FRegistry& Registry = ECS::GetWorldRegistry(*W);
+        ECS::FRegistry& Registry = W->GetEntityRegistry();
         for (SIZE_T i = 0; i < Entities.size(); ++i)
         {
             const ECS::FEntity Entity = Entities[i];
@@ -104,7 +104,7 @@ namespace Lumina
             return;
         }
 
-        ECS::FRegistry& Registry = ECS::GetWorldRegistry(*W);
+        ECS::FRegistry& Registry = W->GetEntityRegistry();
 
         FMemoryWriter Writer(Out);
         FObjectProxyArchiver Ar(Writer, false);
@@ -150,7 +150,7 @@ namespace Lumina
             return;
         }
 
-        ECS::FRegistry& Registry = ECS::GetWorldRegistry(*W);
+        ECS::FRegistry& Registry = W->GetEntityRegistry();
 
         FMemoryReader Reader(In);
         FObjectProxyArchiver Ar(Reader, true);

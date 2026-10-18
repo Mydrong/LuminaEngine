@@ -587,6 +587,7 @@ namespace Lumina
 
         ImGui::Spacing();
         ImGui::SeparatorText("Shapes");
+        ImGui::Checkbox("Draw Solid", &CollisionEditing->bDrawSolid);
         CollisionEditing->DrawShapeList();
 
         if (CollisionEditing->HasSelection())

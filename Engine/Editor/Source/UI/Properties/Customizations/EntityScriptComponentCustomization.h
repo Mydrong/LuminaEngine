@@ -10,6 +10,7 @@
 namespace Lumina
 {
     class CEntityScript;
+    struct SEntityScriptComponent;
     class FFunction;
     class FPropertyTable;
 
@@ -36,6 +37,9 @@ namespace Lumina
         void HandleExternalUpdate(const TSharedPtr<FPropertyHandle>& Property) override;
 
     private:
+
+        // Queues moving one script to another slot, which is also the order they attach, ready and update in.
+        void QueueMove(SEntityScriptComponent* Component, int32 From, int32 To);
 
         // Per-script value editor. Rebuilt ONLY when that slot's script object or its class changes -- never
         // per frame, or every widget inside it loses its in-progress state and nothing can be edited.

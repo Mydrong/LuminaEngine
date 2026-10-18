@@ -1143,16 +1143,22 @@ namespace Lumina::Reflection
                 }
                 case EBind::Delegate:
                 {
+                    // An event, so scripts subscribe with += and -=; the view underneath does the native binding.
+                    const std::string ViewName = "__delegate_" + Member;
                     if (B.CSharp.empty())
                     {
-                        Writer.Linef("public global::LuminaSharp.ScriptDelegate %s => new global::LuminaSharp.ScriptDelegate((void*)(global::LuminaSharp.NativeBindings.FieldAt(Self, %s)));",
-                            PropName.c_str(), OffName.c_str());
+                        Writer.Linef("public event global::System.Action %s { add => %s.Bind(value); remove => %s.Remove(value); }",
+                            PropName.c_str(), ViewName.c_str(), ViewName.c_str());
+                        Writer.Linef("private global::LuminaSharp.ScriptDelegate %s => new global::LuminaSharp.ScriptDelegate((void*)(global::LuminaSharp.NativeBindings.FieldAt(Self, %s)));",
+                            ViewName.c_str(), OffName.c_str());
                     }
                     else
                     {
                         // The property token is what the argument slots are resolved from, once per signature.
-                        Writer.Linef("public global::LuminaSharp.ScriptDelegate<%s> %s => new global::LuminaSharp.ScriptDelegate<%s>((void*)(global::LuminaSharp.NativeBindings.FieldAt(Self, %s)), %s);",
-                            CS, PropName.c_str(), CS, OffName.c_str(), PropFieldName.c_str());
+                        Writer.Linef("public event global::System.Action<%s> %s { add => %s.Bind(value); remove => %s.Remove(value); }",
+                            CS, PropName.c_str(), ViewName.c_str(), ViewName.c_str());
+                        Writer.Linef("private global::LuminaSharp.ScriptDelegate<%s> %s => new global::LuminaSharp.ScriptDelegate<%s>((void*)(global::LuminaSharp.NativeBindings.FieldAt(Self, %s)), %s);",
+                            CS, ViewName.c_str(), CS, OffName.c_str(), PropFieldName.c_str());
                         EmitTokenField(Writer, PropFieldName, TypeName, Member);
                     }
                     EmitOffsetField(Writer, OffName, Prop, TypeName);

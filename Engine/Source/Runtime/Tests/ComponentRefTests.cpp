@@ -24,7 +24,7 @@ namespace
 
         // InitializeWorld is what registers the world with its registry, and a bare test world never runs it.
         CWorld* World = NewObject<CWorld>(nullptr, NAME_None, FGuid::New(), OF_Transient);
-        ECS::GetWorldRegistry(*World).Ctx().Emplace<CWorld*>(World);
+        World->GetEntityRegistry().Ctx().Emplace<CWorld*>(World);
         return World;
     }
 
@@ -38,7 +38,7 @@ namespace
 TEST(ComponentRef, AttachAddsAndBindsBeforeOnAttach)
 {
     CWorld* World = NewRefTestWorld();
-    ECS::FRegistry& Registry = ECS::GetWorldRegistry(*World);
+    ECS::FRegistry& Registry = World->GetEntityRegistry();
     const ECS::FEntity Entity = Registry.Create();
 
     CComponentRefScriptTest* Script = AttachRefScript(Registry, Entity);
@@ -54,7 +54,7 @@ TEST(ComponentRef, AttachAddsAndBindsBeforeOnAttach)
 TEST(ComponentRef, GetLeavesAMissingComponentAlone)
 {
     CWorld* World = NewRefTestWorld();
-    ECS::FRegistry& Registry = ECS::GetWorldRegistry(*World);
+    ECS::FRegistry& Registry = World->GetEntityRegistry();
     const ECS::FEntity Entity = Registry.Create();
 
     CComponentRefScriptTest* Script = AttachRefScript(Registry, Entity);
@@ -71,11 +71,28 @@ TEST(ComponentRef, GetLeavesAMissingComponentAlone)
     EXPECT_EQ(Found->Name.Get(), Registry.TryGet<SNameComponent>(Named));
 }
 
+// A Get reference made before the component exists finds it once something adds it, as a prefab can after the script attaches.
+TEST(ComponentRef, GetFindsAComponentAddedAfterTheBind)
+{
+    CWorld* World = NewRefTestWorld();
+    ECS::FRegistry& Registry = World->GetEntityRegistry();
+    const ECS::FEntity Entity = Registry.Create();
+
+    CComponentRefScriptTest* Script = AttachRefScript(Registry, Entity);
+    ASSERT_NE(Script, nullptr);
+    EXPECT_EQ(Script->Name.Get(), nullptr);
+    EXPECT_FALSE(Script->Name.IsBound());
+
+    Registry.Emplace<SNameComponent>(Entity);
+    EXPECT_EQ(Script->Name.Get(), Registry.TryGet<SNameComponent>(Entity));
+    EXPECT_TRUE(Script->Name.IsBound());
+}
+
 // Another entity losing the component changes the pool's layout epoch, and the reference has to find its own again rather than give up.
 TEST(ComponentRef, FindsTheComponentAgainAfterThePoolChanges)
 {
     CWorld* World = NewRefTestWorld();
-    ECS::FRegistry& Registry = ECS::GetWorldRegistry(*World);
+    ECS::FRegistry& Registry = World->GetEntityRegistry();
     const ECS::FEntity Other = Registry.Create();
     Registry.Emplace<STransformComponent>(Other);
     const ECS::FEntity Entity = Registry.Create();
@@ -98,7 +115,7 @@ TEST(ComponentRef, FindsTheComponentAgainAfterThePoolChanges)
 TEST(ComponentRef, ResolvesToNothingOnceTheComponentIsRemoved)
 {
     CWorld* World = NewRefTestWorld();
-    ECS::FRegistry& Registry = ECS::GetWorldRegistry(*World);
+    ECS::FRegistry& Registry = World->GetEntityRegistry();
     const ECS::FEntity Entity = Registry.Create();
 
     CComponentRefScriptTest* Script = AttachRefScript(Registry, Entity);

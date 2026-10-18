@@ -253,8 +253,8 @@ namespace Lumina
 
         ResetPass_Extract();
 
-        ExtractReflectionProbes(ECS::GetWorldRegistry(*World), Frame);
-        ExtractSplines(ECS::GetWorldRegistry(*World), Frame);
+        ExtractReflectionProbes(World->GetEntityRegistry(), Frame);
+        ExtractSplines(World->GetEntityRegistry(), Frame);
 
         for (int32 i = 1; i < (int32)SceneViews.size(); ++i)
         {
@@ -680,7 +680,7 @@ namespace Lumina
     {
         LUMINA_PROFILE_SCOPE();
 
-        ECS::FRegistry& Registry = ECS::GetWorldRegistry(*World);
+        ECS::FRegistry& Registry = World->GetEntityRegistry();
 
         // The bounds build reads the retained slots this sync rewrites.
         JoinInstanceBlockBounds();
@@ -1160,7 +1160,7 @@ namespace Lumina
 
         const uint32 TableGenerationBefore = Cache.GetTableGeneration();
 
-        ECS::FRegistry& Registry = ECS::GetWorldRegistry(*World);
+        ECS::FRegistry& Registry = World->GetEntityRegistry();
 
         TVector<CMaterialInterface*>& Scratch = ResolveOverrideScratch;
         FRenderDirtyTracker& Tracker = FRenderDirtyTracker::Ensure(Registry);
@@ -1235,7 +1235,7 @@ namespace Lumina
         LUMINA_MEMORY_SCOPE("Render Scene");
 
         FFrameData&     Frame    = *ExtractFrame;
-        ECS::FRegistry& Registry = ECS::GetWorldRegistry(*World);
+        ECS::FRegistry& Registry = World->GetEntityRegistry();
         auto            TransformStorage = Registry.GetStorage<STransformComponent>();
         TAtomic<uint32> LightCount{0};
 
@@ -2556,7 +2556,7 @@ namespace Lumina
             BoneSliceBorrowed.resize(NumPrimitives, 0u);
         }
 
-        ECS::FRegistry& Registry = ECS::GetWorldRegistry(*World);
+        ECS::FRegistry& Registry = World->GetEntityRegistry();
         auto FollowerStorage = Registry.GetStorage<SFollowerPoseComponent>();
 
         SkinnedCandidateCount = Math::Min(SkinnedCandidateCursor.load(std::memory_order_relaxed),
@@ -2701,7 +2701,7 @@ namespace Lumina
         const uint32                NumSurfaceDescs  = ScenePrimitives.GetSurfaceDescCount();
         FScenePrimitive*            MutablePrims = ScenePrimitives.GetMutablePrimitives();
 
-        ECS::FRegistry& Registry = ECS::GetWorldRegistry(*World);
+        ECS::FRegistry& Registry = World->GetEntityRegistry();
         auto SkeletalStorage = Registry.GetStorage<SSkeletalMeshComponent>();
 
         // Sized by LayoutSkinnedBoneSlices before this pass runs, and every slice below is disjoint.
@@ -3062,7 +3062,7 @@ namespace Lumina
             }
         }
 
-        ECS::FRegistry& Registry = ECS::GetWorldRegistry(*World);
+        ECS::FRegistry& Registry = World->GetEntityRegistry();
 
         // First enabled directional light wins (matches ProcessDirectionalLight).
         auto DirectionalView = Registry.View<SDirectionalLightComponent>(ECS::TExclude<SDisabledTag>{});

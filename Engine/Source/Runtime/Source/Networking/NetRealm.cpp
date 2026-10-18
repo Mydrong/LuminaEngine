@@ -6,6 +6,15 @@
 
 namespace Lumina::NetRealm
 {
+    namespace
+    {
+        // A process with no world yet still has presentation unless it is headless.
+        bool HasPresentation(const CWorld* World)
+        {
+            return World != nullptr ? World->HasPresentation() : !CGameLibrary::IsHeadless();
+        }
+    }
+
     ENetRealm Of(const CClass* Class)
     {
         static const FName HostOnlyName("HostOnly");
@@ -46,12 +55,12 @@ namespace Lumina::NetRealm
         {
             return false;
         }
-        return !EnumHasAnyFlags(Realm, ENetRealm::Cosmetic) || CGameLibrary::HasPresentation(World);
+        return !EnumHasAnyFlags(Realm, ENetRealm::Cosmetic) || HasPresentation(World);
     }
 
     uint32 KeyOf(CWorld* World)
     {
         const ENetMode Mode = World != nullptr ? World->GetNetMode() : ENetMode::Standalone;
-        return static_cast<uint32>(Mode) | (CGameLibrary::HasPresentation(World) ? 0x100u : 0u);
+        return static_cast<uint32>(Mode) | (HasPresentation(World) ? 0x100u : 0u);
     }
 }

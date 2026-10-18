@@ -14,12 +14,13 @@ namespace Lumina
         // The component, or null when unbound or once the component is removed.
         NODISCARD void* Resolve() const;
 
-        // Points at Entity's component of the Ops type in World, adding one first when bAdd, and stays unbound when there is none.
+        // Points at Entity's component of the Ops type in World, adding one first when bAdd, and otherwise finds one added later.
         void Bind(CWorld& InWorld, ECS::FEntity InEntity, const FComponentOps& InOps, bool bAdd);
 
         void Reset() { *this = FComponentRef(); }
 
-        NODISCARD bool IsBound() const { return EpochSlot != nullptr; }
+        // Whether the reference reaches a live component right now.
+        NODISCARD bool IsBound() const { return Resolve() != nullptr; }
         NODISCARD ECS::FEntity GetEntity() const { return ECS::FEntity(Entity); }
 
     private:

@@ -36,7 +36,7 @@ namespace Lumina
 
         FMemoryWriter Writer(Out);
         FObjectProxyArchiver Ar(Writer, false);
-        ECS::Utils::SerializeRegistry(Ar, ECS::GetWorldRegistry(*W));
+        ECS::Utils::SerializeRegistry(Ar, W->GetEntityRegistry());
     }
 
     void FEcsRegistrySnapshotCommand::Restore(const TVector<uint8>& In) const
@@ -49,7 +49,7 @@ namespace Lumina
             return;
         }
 
-        ECS::FRegistry& Registry = ECS::GetWorldRegistry(*W);
+        ECS::FRegistry& Registry = W->GetEntityRegistry();
 
         // Clearing the registry drops the last reference to every asset only this world holds, which would free and reload each one.
         TVector<TStrongObjectPtr<CObject>> Pinned;

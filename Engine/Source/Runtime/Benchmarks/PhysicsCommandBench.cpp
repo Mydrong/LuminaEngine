@@ -56,7 +56,7 @@ namespace
         {
             RegisterPendingTypes();
             World = NewObject<CWorld>(nullptr, NAME_None, FGuid::New(), OF_Transient);
-            Registry = &ECS::GetWorldRegistry(*World);
+            Registry = &World->GetEntityRegistry();
             Scene = MakeUnique<Physics::FBox3DPhysicsScene>(World);
             Scene->Simulate();
             Dt = 1.0f / Math::Max(10.0f, World->GetDefaultWorldSettings().PhysicsHz);

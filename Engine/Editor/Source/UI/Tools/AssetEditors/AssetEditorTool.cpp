@@ -1,5 +1,6 @@
 ﻿#include "Containers/StringFormat.h"
 #include "AssetEditorTool.h"
+#include "UI/Tools/EditorToolContext.h"
 #include "Core/CoreEditorDelegates.h"
 #include "Assets/AssetEvents.h"
 #include "Core/Object/Package/Package.h"
@@ -274,6 +275,11 @@ namespace Lumina
 
         CPackage* Package = Asset->GetPackage();
         if (Package == nullptr || !Package->IsDirty())
+        {
+            return;
+        }
+
+        if (!ToolContext->ConfirmWritable({ FString(Package->GetPackagePath().c_str()) }, [this] { OnSave(); }))
         {
             return;
         }

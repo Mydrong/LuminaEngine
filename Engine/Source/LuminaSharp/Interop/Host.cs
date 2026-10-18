@@ -10,12 +10,15 @@ namespace LuminaSharp;
 public static unsafe partial class Host
 {
     // Must equal Lumina::DotNet::GAbiVersion. Bump on ABI breaks.
-    private const int AbiVersion = 16;
+    private const int AbiVersion = 17;
 
     // Logical name for the engine module hosting this assembly (Runtime); resolved to a native handle via ModuleHandle.
     public const string NativeLibrary = "LuminaNative";
 
     private static ScriptManager? Scripts;
+
+    // The loaded generation's types, for code that turns a runtime type name back into a C# type.
+    internal static TypeLibrary? Library => Scripts?.Library;
 
     // A reload compiling on a worker thread, which the game thread swaps in once it finishes.
     private static System.Threading.Tasks.Task<FCompiledGeneration?>? PendingCompile;

@@ -219,7 +219,7 @@ namespace Lumina
         if (TraceViewportPlacement(ImGui::GetMousePos(), Hit, PlacementPreviewEntities))
         {
             Placement = PlaceOnHit(Hit, PlacementPreviewAsset, GetPlacementRotation(), PlacementScale);
-            if (ECS::GetWorldRegistry(*World).IsValid(PlacementPreview))
+            if (World->GetEntityRegistry().IsValid(PlacementPreview))
             {
                 World->SetEntityTransform(PlacementPreview, Placement);
             }
@@ -249,7 +249,7 @@ namespace Lumina
     void FSceneEditorTool::HandleNewEntityDrop(const DragDrop::FPayload& Payload, ECS::FEntity DropTarget, bool bAttachToTarget, const FTransform* SpawnTransform)
     {
         const FTransform At       = SpawnTransform != nullptr ? *SpawnTransform : GetDropSpawnTransform(Payload.AssetObject);
-        ECS::FRegistry&  Registry = ECS::GetWorldRegistry(*World);
+        ECS::FRegistry&  Registry = World->GetEntityRegistry();
 
         SpawnEntityTransacted(Payload.EntityName, "Place Entity", [&](ECS::FEntity Created)
         {
@@ -267,7 +267,7 @@ namespace Lumina
 
     void FSceneEditorTool::DecorateNewEntity(const DragDrop::FPayload& Payload, ECS::FEntity Entity)
     {
-        ECS::FRegistry& Registry = ECS::GetWorldRegistry(*World);
+        ECS::FRegistry& Registry = World->GetEntityRegistry();
         if (const FComponentOps* Ops = ResolveCreatableComponentOps(Payload.ComponentType))
         {
             Ops->EmplaceDefault(Registry, Entity);
@@ -280,7 +280,7 @@ namespace Lumina
 
     void FSceneEditorTool::SpawnPlacementPreview(const DragDrop::FPayload& Payload)
     {
-        ECS::FRegistry& Registry = ECS::GetWorldRegistry(*World);
+        ECS::FRegistry& Registry = World->GetEntityRegistry();
         if (Payload.Kind == DragDrop::EPayloadKind::NewEntity)
         {
             PlacementPreview      = World->ConstructEntity(Payload.EntityName, FTransform());
@@ -442,7 +442,7 @@ namespace Lumina
             return;
         }
 
-        ECS::FRegistry& Registry = ECS::GetWorldRegistry(*World);
+        ECS::FRegistry& Registry = World->GetEntityRegistry();
         if (Registry.IsValid(PlacementPreview))
         {
             ECS::Utils::DestroyEntityHierarchy(Registry, PlacementPreview);
@@ -704,7 +704,7 @@ namespace Lumina
 
         if (CWorld* Observed = GetObservedWorld())
         {
-            ECS::FRegistry& Registry = ECS::GetWorldRegistry(*Observed);
+            ECS::FRegistry& Registry = Observed->GetEntityRegistry();
             Registry.ClearComponent<FSelectedInEditorComponent>();
             Registry.ClearComponent<FLastSelectedTag>();
         }
@@ -1130,6 +1130,53 @@ namespace Lumina
             World->DuplicateEntity(Copy, Source, &EditorEntityUtils::DefaultDuplicateFilter);
         }
         return Copy;
+    }
+
+    void FSceneEditorTool::DuplicateAndSelect(TSpan<const ECS::FEntity> Entities, FName Label)
+    {
+        BeginCreationTransaction();
+
+        TFixedVector<ECS::FEntity, 64> Duplicates;
+        for (ECS::FEntity Entity : Entities)
+        {
+            if (!GetSceneRegistry().IsValid(Entity) || !CanDuplicateEntity(Entity))
+            {
+                continue;
+            }
+            const ECS::FEntity New = DuplicateEntityForScene(Entity);
+            if (New != ECS::NullEntity)
+            {
+                Duplicates.push_back(New);
+            }
+        }
+
+        if (Duplicates.empty())
+        {
+            AbortTransaction();
+            return;
+        }
+
+        // Selecting the copies is what lets a second Ctrl+D, or an Alt drag, move the new ones.
+        ClearSelectedEntities();
+        for (ECS::FEntity New : Duplicates)
+        {
+            AddSelectedEntity(New, false);
+        }
+        EndTransaction(Label);
+        MarkSceneDirty();
+        OutlinerListView.MarkTreeDirty();
+    }
+
+    bool FSceneEditorTool::HandleAltDragCopy(bool bInputTaken)
+    {
+        const bool bAltGrabsGizmo = ImGui::GetIO().KeyAlt && GetCameraState().bGizmoHovered && !bImGuizmoUsedOnce && !bInputTaken;
+        if (bAltGrabsGizmo && bViewportHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+        {
+            const TVector<ECS::FEntity> ToCopy(SelectedEntities.begin(), SelectedEntities.end());
+            DuplicateAndSelect(TSpan<const ECS::FEntity>(ToCopy.data(), ToCopy.size()));
+        }
+        GetCameraState().bGizmoHovered = false;
+        return bAltGrabsGizmo;
     }
 
     void FSceneEditorTool::RemoveComponent(ECS::FEntity Entity, const CStruct* ComponentType)
@@ -2206,7 +2253,7 @@ namespace Lumina
         }
 
         // The folder table lives on the world's singleton entity, which has no public accessor.
-        for (ECS::FEntity Entity : ECS::GetWorldRegistry(*World).View<FSingletonEntityTag>())
+        for (ECS::FEntity Entity : World->GetEntityRegistry().View<FSingletonEntityTag>())
         {
             return Entity;
         }
@@ -3546,7 +3593,7 @@ namespace Lumina
         }
 
         // A foreign observed world's selection has nothing to render, and a running game never previews.
-        ECS::FRegistry& Registry = ECS::GetWorldRegistry(*World);
+        ECS::FRegistry& Registry = World->GetEntityRegistry();
         const ECS::FEntity Selected = GetLastSelectedEntity();
         const bool bWantPreview =
             AllowCameraPreview() &&

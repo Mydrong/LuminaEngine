@@ -237,6 +237,26 @@ namespace Lumina
         return Id;
     }
 
+    int32 FScriptDelegateBase::GetManagedListeners(uint64* OutIds, uint64* OutTokens, int32 Capacity) const
+    {
+        int32 Count = 0;
+        for (const FListener& Listener : Listeners)
+        {
+            // Only a token-backed listener can be resolved by the managed side; a test thunk's context is not a GCHandle.
+            if (Listener.Thunk != &InvokeManagedListener)
+            {
+                continue;
+            }
+            if (Count < Capacity)
+            {
+                OutIds[Count]    = Listener.Id;
+                OutTokens[Count] = reinterpret_cast<uint64>(Listener.Context);
+            }
+            ++Count;
+        }
+        return Count;
+    }
+
     bool FScriptDelegateBase::UnbindManaged(uint64 Id)
     {
         if (Id == 0)

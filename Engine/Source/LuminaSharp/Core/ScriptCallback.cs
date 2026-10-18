@@ -45,6 +45,9 @@ internal sealed class ActionClosure : ScriptClosure
             case Action<float> OnFloat:
                 OnFloat(BitConverter.Int32BitsToSingle(unchecked((int)(uint)Payload)));
                 break;
+            case Action<int> OnInt:
+                OnInt(unchecked((int)(uint)Payload));
+                break;
         }
         return 0;
     }
@@ -69,6 +72,12 @@ public static class ScriptCallback
 
     // The payload is a float packed by Scripting::PackFloatPayload, such as a tween's value.
     public static SScriptCallback OfFloat(Action<float> Handler)
+    {
+        return Bind(new ActionClosure(Handler));
+    }
+
+    // The payload is a count or an index, such as a tween's completed loops.
+    public static SScriptCallback OfInt(Action<int> Handler)
     {
         return Bind(new ActionClosure(Handler));
     }

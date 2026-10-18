@@ -185,6 +185,18 @@ namespace Lumina::VFS
     }
 
     // Overlay mounts win; with nothing on disk the topmost candidate answers "where would this go".
+    bool IsReadOnlyOnDisk(FStringView Path)
+    {
+        const FPathString Disk = ResolvePath(Path);
+        return !Disk.empty() && Filesystem::Stat(FStringView(Disk.c_str(), Disk.size())).IsReadOnly();
+    }
+
+    bool MakeWritable(FStringView Path)
+    {
+        const FPathString Disk = ResolvePath(Path);
+        return !Disk.empty() && Filesystem::SetReadOnly(FStringView(Disk.c_str(), Disk.size()), false);
+    }
+
     FPathString ResolvePath(FStringView Path)
     {
         Detail::FMountList* List = Detail::FindMountList(Path);

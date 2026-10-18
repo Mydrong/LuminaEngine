@@ -829,7 +829,13 @@ namespace Lumina
 
         int32 MaxFrameRate = GetMaxFrameRate();
         
-        if (!GIsHeadless && Windowing::GetPrimaryWindowHandle()->IsWindowMinimized())
+        // The editor also slows down when another app has focus, while a game only slows down minimized, since two game windows side by side are a normal way to test.
+        bool bInBackground = !GIsHeadless && Windowing::GetPrimaryWindowHandle()->IsWindowMinimized();
+        #if USING(WITH_EDITOR)
+        bInBackground |= !GIsHeadless && !Platform::IsProcessForeground();
+        #endif
+        // A capture or benchmark set its own rate on purpose, so it keeps it with the window in the background.
+        if (bInBackground && FrameRateCapOverride < 0)
         {
             const int32 BackgroundFrameRate = GetDefault<CEditorSettings>()->MaxBackgroundFPS;
 

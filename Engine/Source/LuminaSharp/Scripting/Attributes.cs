@@ -265,7 +265,7 @@ public enum EComponentBind
 {
     None,
 
-    // Finds the entity's component, leaving the reference unbound when it has none.
+    // Finds the entity's component, including one added after the script attaches.
     Get,
 
     // Adds the component first when the entity has none.
@@ -322,6 +322,9 @@ public sealed class PropertyAttribute : Attribute
     public string? Bundle { get; set; }
 
     public string? Group { get; set; }
+
+    // On an instanced struct, limits the type picker to script structs that implement this interface.
+    public Type? Implements { get; set; }
 
     public EComponentBind Component { get; set; }
 

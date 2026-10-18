@@ -74,6 +74,10 @@ namespace Lumina::VFS
 
     RUNTIME_API bool Exists(FStringView Path);
 
+    // Whether the file is marked read-only on disk, which saving, renaming, moving and deleting refuse until it is made writable.
+    RUNTIME_API bool IsReadOnlyOnDisk(FStringView Path);
+    RUNTIME_API bool MakeWritable(FStringView Path);
+
     RUNTIME_API bool HasExtension(FStringView Path, FStringView Ext);
 
     // Best-effort conversion of any editor path into VFS form: '/'-prefixed inputs are normalized as-is,

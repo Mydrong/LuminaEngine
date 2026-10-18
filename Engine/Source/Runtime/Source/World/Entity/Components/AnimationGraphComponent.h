@@ -9,6 +9,8 @@
 #include "Core/Object/ObjectMacros.h"
 #include "Core/Object/ObjectHandleTyped.h"
 #include "Containers/Algorithm.h"
+#include "Core/Delegates/ScriptDelegate.h"
+#include "World/ECS/EventMeta.h"
 #include "AnimationGraphComponent.generated.h"
 
 namespace Lumina
@@ -16,6 +18,52 @@ namespace Lumina
     class CAnimationGraph;
 
     // Drives a skeletal mesh from a compiled animation graph.
+    // A montage began playing, queued for systems and fanned out to the graph component's OnMontageStarted.
+    REFLECT(Event)
+    struct RUNTIME_API SAnimMontageStartedEvent
+    {
+        GENERATED_BODY()
+
+        PROPERTY(Hidden)
+        ECS::FEntity Entity = ECS::NullEntity;
+
+        PROPERTY(Hidden)
+        TStrongObjectPtr<CAnimationMontage> Montage;
+    };
+
+    // A montage started fading out, the moment to queue what plays next. Fanned out to OnMontageBlendingOut.
+    REFLECT(Event)
+    struct RUNTIME_API SAnimMontageBlendingOutEvent
+    {
+        GENERATED_BODY()
+
+        PROPERTY(Hidden)
+        ECS::FEntity Entity = ECS::NullEntity;
+
+        PROPERTY(Hidden)
+        TStrongObjectPtr<CAnimationMontage> Montage;
+
+        // Stopped or cut off by another montage on its slot, rather than played through to its end.
+        PROPERTY(Hidden)
+        bool bInterrupted = false;
+    };
+
+    // A montage finished and no longer affects the pose. Fanned out to OnMontageEnded.
+    REFLECT(Event)
+    struct RUNTIME_API SAnimMontageEndedEvent
+    {
+        GENERATED_BODY()
+
+        PROPERTY(Hidden)
+        ECS::FEntity Entity = ECS::NullEntity;
+
+        PROPERTY(Hidden)
+        TStrongObjectPtr<CAnimationMontage> Montage;
+
+        PROPERTY(Hidden)
+        bool bInterrupted = false;
+    };
+
     REFLECT(Component, Category = "Animation")
     struct RUNTIME_API SAnimationGraphComponent
     {
@@ -83,6 +131,16 @@ namespace Lumina
 
         // Montages playing on this entity, layered into the graph by its Slot nodes. Transient.
         FAnimMontagePlayer Montages;
+
+        // Systems that hear every entity's montages read the SAnimMontage event queues instead.
+        PROPERTY(Hidden)
+        TScriptDelegate<SAnimMontageStartedEvent> OnMontageStarted;
+
+        PROPERTY(Hidden)
+        TScriptDelegate<SAnimMontageBlendingOutEvent> OnMontageBlendingOut;
+
+        PROPERTY(Hidden)
+        TScriptDelegate<SAnimMontageEndedEvent> OnMontageEnded;
 
         /** Plays a montage on the slots its tracks name, blending out anything already on them. */
         FUNCTION()
@@ -198,4 +256,13 @@ namespace Lumina
         // yet, so a script or the system can set parameters before the VM's first tick.
         void EnsureStateInitialized();
     };
+
+    template<>
+    struct TEventFanOut<SAnimMontageStartedEvent> : TEntityDelegateFanOut<SAnimMontageStartedEvent, &SAnimationGraphComponent::OnMontageStarted> {};
+
+    template<>
+    struct TEventFanOut<SAnimMontageBlendingOutEvent> : TEntityDelegateFanOut<SAnimMontageBlendingOutEvent, &SAnimationGraphComponent::OnMontageBlendingOut> {};
+
+    template<>
+    struct TEventFanOut<SAnimMontageEndedEvent> : TEntityDelegateFanOut<SAnimMontageEndedEvent, &SAnimationGraphComponent::OnMontageEnded> {};
 }

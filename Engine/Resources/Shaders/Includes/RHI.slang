@@ -42,13 +42,7 @@ public Ptr<T> GetSceneDataPointer<T>()  { return (T*)Root.SceneData; }
 public Ptr<T> GetInstancesPointer<T>()  { return (T*)Root.Instances; }
 public Ptr<T> GetLightsPointer<T>()     { return (T*)Root.Lights; }
 
-// GPU-AV instruments a typed pointer load with a null of pointer type, which SPIR-V forbids, so nested addresses stay uint64_t.
-public T LoadBlock<T>(uint64_t Address)
-{
-    return ((T*)Address)[0];
-}
-
-// Mirror of RHI::TGPUSpan<T>, holding a raw address so it is an ordinary value Slang may copy into a local.
+// Mirror of RHI::TGPUSpan<T>, holding an address because Slang emits a copied Ptr<T> local without the AliasedPointer spirv-val requires.
 public struct GPUSpan<T>
 {
     internal uint64_t Address;
@@ -58,8 +52,8 @@ public struct GPUSpan<T>
     public bool IsEmpty()               { return Count == 0u; }
     public bool Contains(uint Index)    { return Index < Count; }
 
-    // Unchecked, for atomics, in-place field writes and narrow field reads, so bound the index first.
-    public Ptr<T> At(uint Index)        { return (T*)Address + Index; }
+    // Unchecked, so bound the index first. Byte math because AMD resolves indexing of float3 structs to element 0.
+    public Ptr<T> At(uint Index)        { return (T*)(Address + uint64_t(Index) * uint64_t(sizeof(T))); }
 
     // Reads past the end resolve to zero rather than to whatever the allocator has since put there.
     public T Get(uint Index)
@@ -69,7 +63,7 @@ public struct GPUSpan<T>
             T Zero = {};
             return Zero;
         }
-        return ((T*)Address)[Index];
+        return *At(Index);
     }
 
     public T GetAligned(uint Index)
@@ -79,7 +73,7 @@ public struct GPUSpan<T>
             T Zero = {};
             return Zero;
         }
-        return loadAligned<16>((T*)Address + Index);
+        return loadAligned<16>(At(Index));
     }
 
     // A dropped store is a missing draw, where an unchecked one is a device loss.
@@ -87,7 +81,7 @@ public struct GPUSpan<T>
     {
         if (Index < Count)
         {
-            ((T*)Address)[Index] = Value;
+            *At(Index) = Value;
         }
     }
 }

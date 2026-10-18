@@ -22,7 +22,7 @@ public unsafe partial class CDataTable
         }
     }
 
-    // A live view of the row named RowName, throwing when it is absent or T is not the table's row type exactly.
+    // A live view of the row named RowName, throwing when it is absent or the rows are neither T nor derived from it.
     public T GetRow<T>(string RowName) where T : struct, INativeStruct<T>
         => TryGetRow<T>(RowName) ?? throw new InvalidOperationException($"DataTable has no {T.NativeName} row named '{RowName}'.");
 
@@ -39,10 +39,10 @@ public unsafe partial class CDataTable
         return RowTypeIs<T>() ? NativeStructs.FromAddressOrNull<T>(GetRowMemoryAt(Index)) : null;
     }
 
-    // Exact match, mirroring the C++ FindDataTableRow bound, so a near-miss type cannot reinterpret fields.
-    private bool RowTypeIs<T>() where T : struct, INativeStruct<T>
+    // A derived row starts with its base, so it reads as any struct it derives from and as nothing else.
+    internal bool RowTypeIs<T>() where T : struct, INativeStruct<T>
     {
-        return string.Equals(RowStructName, T.NativeName, StringComparison.Ordinal);
+        return string.Equals(RowStructName, T.NativeName, StringComparison.Ordinal) || RowsAreNamed(T.NativeName);
     }
 }
 
@@ -55,12 +55,11 @@ public readonly unsafe partial struct SDataTableRowHandle
     public T Get<T>() where T : struct, INativeStruct<T>
         => TryGet<T>() ?? throw new InvalidOperationException($"Row handle does not resolve to a {T.NativeName}.");
 
-    // Null when the handle is empty, the name is not in the table, or the table's rows are not T.
+    // Null when the handle is empty, the name is not in the table, or the rows are neither T nor derived from it.
     public T? TryGet<T>() where T : struct, INativeStruct<T>
     {
         IntPtr Row = GetRowMemory();
-        if (Row == IntPtr.Zero || DataTable is not { } Table
-            || !string.Equals(Table.RowStructName, T.NativeName, StringComparison.Ordinal))
+        if (Row == IntPtr.Zero || DataTable is not { } Table || !Table.RowTypeIs<T>())
         {
             return null;
         }

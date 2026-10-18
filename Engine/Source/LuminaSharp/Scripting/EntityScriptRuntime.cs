@@ -51,7 +51,7 @@ internal sealed class EntityScriptRuntime
         // Every destruction path releases the handle here, so this is where the script's awaits learn it is gone.
         if (Handle.Target is Lumina.CEntityScript Script)
         {
-            Script.CancelDestroyToken();
+            Script.ReleaseLifetime();
         }
     }
 
@@ -71,7 +71,7 @@ internal sealed class EntityScriptRuntime
             // driver delivers OnReloaded once the next generation is live.
             if (Handle.Target is Lumina.CEntityScript Script)
             {
-                Script.CancelDestroyToken();
+                Script.ReleaseLifetime();
             }
 
             // Not freed here; the native instance table owns these handles and frees them as it drains.

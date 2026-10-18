@@ -2,7 +2,7 @@ using Lumina;
 
 namespace LuminaSharp;
 
-/// A live joint connecting two rigid bodies, or a body to the world, created by the CPhysicsLibrary Create*Constraint calls. A lightweight value of world plus native id, safe to copy and store. Game thread only.
+/// A live joint connecting two rigid bodies, or a body to the world, created by the World.Create*Constraint calls. A lightweight value of world plus native id, safe to copy and store. Game thread only.
 public readonly struct FPhysicsConstraint
 {
     private readonly CWorld World;
@@ -24,7 +24,7 @@ public readonly struct FPhysicsConstraint
     {
         if (Id != 0)
         {
-            CPhysicsLibrary.DestroyConstraint(World, Id);
+            World.DestroyConstraint(Id);
         }
     }
 
@@ -33,7 +33,7 @@ public readonly struct FPhysicsConstraint
     {
         if (Id != 0)
         {
-            CPhysicsLibrary.SetConstraintEnabled(World, Id, Enabled);
+            World.SetConstraintEnabled(Id, Enabled);
         }
     }
 
@@ -42,7 +42,7 @@ public readonly struct FPhysicsConstraint
     {
         if (Id != 0)
         {
-            CPhysicsLibrary.SetConstraintMotor(World, Id, Lumina.Physics.EConstraintMotorMode.Velocity, Target);
+            World.SetConstraintMotor(Id, Lumina.Physics.EConstraintMotorMode.Velocity, Target);
         }
     }
 
@@ -51,7 +51,7 @@ public readonly struct FPhysicsConstraint
     {
         if (Id != 0)
         {
-            CPhysicsLibrary.SetConstraintMotor(World, Id, Lumina.Physics.EConstraintMotorMode.Position, Target);
+            World.SetConstraintMotor(Id, Lumina.Physics.EConstraintMotorMode.Position, Target);
         }
     }
 
@@ -60,13 +60,13 @@ public readonly struct FPhysicsConstraint
     {
         if (Id != 0)
         {
-            CPhysicsLibrary.SetConstraintMotor(World, Id, Lumina.Physics.EConstraintMotorMode.Off, 0.0f);
+            World.SetConstraintMotor(Id, Lumina.Physics.EConstraintMotorMode.Off, 0.0f);
         }
     }
 
     /// True once a breakable joint exceeded its break force and was auto-disabled.
-    public bool IsBroken => Id != 0 && CPhysicsLibrary.IsConstraintBroken(World, Id);
+    public bool IsBroken => Id != 0 && World.IsConstraintBroken(Id);
 
     /// A hinge's angle in radians or a slider's position in meters. Zero for the types without one.
-    public float CurrentValue => Id != 0 ? CPhysicsLibrary.GetConstraintValue(World, Id) : 0.0f;
+    public float CurrentValue => Id != 0 ? World.GetConstraintValue(Id) : 0.0f;
 }

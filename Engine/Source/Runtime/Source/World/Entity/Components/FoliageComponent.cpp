@@ -158,8 +158,7 @@ namespace Lumina
         // A type owns its own mesh reference, so nothing else bumps the generation this resolve needs.
         FMeshResolveCache::MarkPendingWork();
 
-        // ECS::GetWorldRegistry is the sanctioned accessor, so callers never need a registry.
-        ECS::FRegistry& Registry = ECS::GetWorldRegistry(World);
+        ECS::FRegistry& Registry = World.GetEntityRegistry();
 
         // Membership as well as Data, because painting changes the instance COUNT the set keys on.
         FRenderDirtyTracker::Ensure(Registry).Mark(Entity, EPrimitiveSource::Foliage,

@@ -137,12 +137,12 @@ public unsafe partial class CWorld
             }
             return null;
         }
-        return AsScript<T>(CEntityScriptLibrary.FindScript(this, Entity, ScriptClass));
+        return AsScript<T>(FindEntityScript(Entity, ScriptClass));
     }
 
     private CEntityScript[] FindScriptsOfAbstract(FEntity Entity)
     {
-        return CEntityScriptLibrary.FindScripts(this, Entity, ClassOf<CEntityScript>());
+        return FindEntityScripts(Entity, ClassOf<CEntityScript>());
     }
 
     private static T? AsScript<T>(CEntityScript? Script) where T : class
@@ -163,7 +163,7 @@ public unsafe partial class CWorld
 
         TSubclassOf<CEntityScript> ScriptClass = ScriptClassOf<T>();
         CEntityScript[] Scripts = ScriptClass.IsValid
-            ? CEntityScriptLibrary.FindScripts(this, Entity, ScriptClass)
+            ? FindEntityScripts(Entity, ScriptClass)
             : FindScriptsOfAbstract(Entity);
         var Result = new List<T>(Scripts.Length);
         foreach (CEntityScript Script in Scripts)
@@ -178,23 +178,13 @@ public unsafe partial class CWorld
 
     public T? AddScript<T>(FEntity Entity) where T : CEntityScript
     {
-        return AsScript<T>(CEntityScriptLibrary.AddScript(this, Entity, ClassOf<T>()));
-    }
-
-    public CEntityScript? AddScript(FEntity Entity, TSubclassOf<CEntityScript> ScriptClass)
-    {
-        return CEntityScriptLibrary.AddScript(this, Entity, ScriptClass) as CEntityScript;
-    }
-
-    public CEntityScript? AddScript(FEntity Entity, string ClassName)
-    {
-        return AddScript(Entity, TSubclassOf<CEntityScript>.FromName(ClassName));
+        return AsScript<T>(AddEntityScript(Entity, ClassOf<T>()));
     }
 
     public bool RemoveScript<T>(FEntity Entity) where T : class
     {
         CEntityScript? Script = GetScript<T>(Entity) as CEntityScript;
-        return Script is not null && CEntityScriptLibrary.RemoveScript(this, Entity, Script);
+        return Script is not null && RemoveEntityScript(Entity, Script);
     }
 
     public bool HasScript<T>(FEntity Entity) where T : class

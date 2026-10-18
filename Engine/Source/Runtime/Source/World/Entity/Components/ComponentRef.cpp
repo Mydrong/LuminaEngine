@@ -14,7 +14,7 @@ namespace Lumina
         {
             return nullptr;
         }
-        if (*EpochSlot == Epoch)
+        if (*EpochSlot == Epoch && Address != nullptr)
         {
             return Address;
         }
@@ -24,7 +24,7 @@ namespace Lumina
         }
 
         // The pool moved or lost a member, so the component is found again and its new address kept.
-        ECS::FRegistry& Registry = ECS::GetWorldRegistry(*reinterpret_cast<CWorld*>(World));
+        ECS::FRegistry& Registry = reinterpret_cast<CWorld*>(World)->GetEntityRegistry();
         void* Found = Ops->Get(Registry, ECS::FEntity(Entity));
         if (Found == nullptr)
         {
@@ -39,16 +39,14 @@ namespace Lumina
     {
         Reset();
 
-        ECS::FRegistry& Registry = ECS::GetWorldRegistry(InWorld);
+        ECS::FRegistry& Registry = InWorld.GetEntityRegistry();
         void* Found = bAdd ? InOps.Emplace(Registry, InEntity) : InOps.Get(Registry, InEntity);
-        const ECS::FSparseSet* Pool = Found != nullptr ? Registry.FindStorage(static_cast<uint32>(InOps.TypeId)) : nullptr;
-        if (Pool == nullptr)
-        {
-            return;
-        }
+
+        // Tracked even while missing, so a component a prefab or sibling adds after the bind is found on the next read.
+        const ECS::FSparseSet& Pool = Registry.AssureStorage(InOps.GetTypeID());
 
         Address   = Found;
-        EpochSlot = Pool->GetLayoutEpoch();
+        EpochSlot = Pool.GetLayoutEpoch();
         Epoch     = *EpochSlot;
         World     = reinterpret_cast<uint64>(&InWorld);
         Ops       = &InOps;

@@ -629,6 +629,7 @@ namespace Lumina
 
         bool                                bViewportFocused = false;
         bool                                bViewportHovered = false;
+        bool                                bAssetReadOnlyOnDisk = false;
         // The ortho toggle sits in the gizmo cluster, so it suppresses viewport clicks the same way.
         bool                                bViewGizmoOrthoHovered = false;
 

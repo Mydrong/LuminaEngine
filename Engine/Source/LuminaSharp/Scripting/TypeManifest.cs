@@ -70,6 +70,11 @@ internal static class TypeManifest
             {
                 Meta.Add(new("Component", ""));
             }
+            string Implemented = TypeLibrary.ImplementedInterfaces(Pair.Value.Description.Type);
+            if (Implemented.Length > 0)
+            {
+                Meta.Add(new("Implements", Implemented));
+            }
             WriteType(Writer, ScriptStruct, Pair.Key, Pair.Value.NativeBase, 0, Array.Empty<string>(), Meta, Serializer.WriteSchema(Pair.Value.Description));
         }
 

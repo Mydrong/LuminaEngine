@@ -32,7 +32,7 @@ namespace
         RegisterPendingTypes();
 
         CWorld* World = NewObject<CWorld>(nullptr, NAME_None, FGuid::New(), OF_Transient);
-        ECS::GetWorldRegistry(*World).Ctx().Emplace<CWorld*>(World);
+        World->GetEntityRegistry().Ctx().Emplace<CWorld*>(World);
         return World;
     }
 
@@ -52,7 +52,7 @@ namespace
 TEST(EditorAssetDrop, FieldFallbackSetsTheOnlyMatchingField)
 {
     CWorld* World = NewDropTestWorld();
-    ECS::FRegistry& Registry = ECS::GetWorldRegistry(*World);
+    ECS::FRegistry& Registry = World->GetEntityRegistry();
     const ECS::FEntity Entity = World->ConstructEntity("Crate");
     Registry.Emplace<SBoxColliderComponent>(Entity);
 
@@ -69,7 +69,7 @@ TEST(EditorAssetDrop, FieldFallbackSetsTheOnlyMatchingField)
 TEST(EditorAssetDrop, FieldFallbackFillsEmptyFieldsThenRefuses)
 {
     CWorld* World = NewDropTestWorld();
-    ECS::FRegistry& Registry = ECS::GetWorldRegistry(*World);
+    ECS::FRegistry& Registry = World->GetEntityRegistry();
     const ECS::FEntity Entity = World->ConstructEntity("Compound");
     Registry.Emplace<SBoxColliderComponent>(Entity);
     Registry.Emplace<SSphereColliderComponent>(Entity);
@@ -104,7 +104,7 @@ TEST(EditorAssetDrop, FieldFallbackWithNoTargetDoesNothing)
 TEST(EditorAssetDrop, SequenceSpawnsThenRetargets)
 {
     CWorld* World = NewDropTestWorld();
-    ECS::FRegistry& Registry = ECS::GetWorldRegistry(*World);
+    ECS::FRegistry& Registry = World->GetEntityRegistry();
 
     CSequence* Intro = NewTransientAsset<CSequence>("DropIntro");
     const ECS::FEntity Player = Drop(World, Intro, ECS::NullEntity);
@@ -120,7 +120,7 @@ TEST(EditorAssetDrop, SequenceSpawnsThenRetargets)
 TEST(EditorAssetDrop, WeatherSwapsTheExistingPreset)
 {
     CWorld* World = NewDropTestWorld();
-    ECS::FRegistry& Registry = ECS::GetWorldRegistry(*World);
+    ECS::FRegistry& Registry = World->GetEntityRegistry();
 
     CWeatherPreset* Rain = NewTransientAsset<CWeatherPreset>("DropRain");
     const ECS::FEntity Weather = Drop(World, Rain, ECS::NullEntity);
@@ -137,7 +137,7 @@ TEST(EditorAssetDrop, WeatherSwapsTheExistingPreset)
 TEST(EditorAssetDrop, SpriteSheetSpawnsADrawingSprite)
 {
     CWorld* World = NewDropTestWorld();
-    ECS::FRegistry& Registry = ECS::GetWorldRegistry(*World);
+    ECS::FRegistry& Registry = World->GetEntityRegistry();
 
     CSpriteSheet* Sheet = NewTransientAsset<CSpriteSheet>("DropSheet");
     Sheet->HFrames = 4;
@@ -159,7 +159,7 @@ TEST(EditorAssetDrop, PlacedStaticMeshGetsCollisionWhenTheProjectAsksForIt)
     SRigidBodyComponent::StaticStruct();
     CPlacementSettings::StaticClass();
     CWorld* World = NewDropTestWorld();
-    ECS::FRegistry& Registry = ECS::GetWorldRegistry(*World);
+    ECS::FRegistry& Registry = World->GetEntityRegistry();
 
     CPlacementSettings* Settings = GetMutableDefault<CPlacementSettings>();
     ASSERT_NE(Settings, nullptr);

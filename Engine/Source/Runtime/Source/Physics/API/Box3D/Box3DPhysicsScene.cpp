@@ -128,7 +128,7 @@ namespace Lumina::Physics
 
         ApplyWorldSettings(InitSettings);
 
-        ECS::FRegistry& Registry = ECS::GetWorldRegistry(*World);
+        ECS::FRegistry& Registry = World->GetEntityRegistry();
 
         Registry.GetSignals<SSphereColliderComponent>().OnConstruct.Connect<&ECS::FRegistry::GetOrEmplace<SRigidBodyComponent>>();
         Registry.GetSignals<SBoxColliderComponent>().OnConstruct.Connect<&ECS::FRegistry::GetOrEmplace<SRigidBodyComponent>>();
@@ -148,7 +148,7 @@ namespace Lumina::Physics
         DestroyAllConstraints();
         DestroyAllStaticBodyGroups();
 
-        ECS::FRegistry& Registry = ECS::GetWorldRegistry(*World);
+        ECS::FRegistry& Registry = World->GetEntityRegistry();
 
         Registry.GetSignals<SSphereColliderComponent>().OnConstruct.Disconnect<&ECS::FRegistry::GetOrEmplace<SRigidBodyComponent>>();
         Registry.GetSignals<SBoxColliderComponent>().OnConstruct.Disconnect<&ECS::FRegistry::GetOrEmplace<SRigidBodyComponent>>();

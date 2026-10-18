@@ -1,5 +1,6 @@
 ﻿#include "EditorUI.h"
 #include "World/WorldContext.h"
+#include "Containers/Algorithm.h"
 #include "Core/Console/ConsoleVariable.h"
 #include "Platform/Time/PlatformTime.h"
 #include <string>
@@ -1174,6 +1175,84 @@ namespace Lumina
     void FEditorUI::PushModal(const FString& Title, ImVec2 Size, TMoveOnlyFunction<bool()> DrawFunction)
     {
         ModalManager.CreateDialogue(Title, Size, Move(DrawFunction));
+    }
+
+    bool FEditorUI::ConfirmWritable(TVector<FString> VirtualPaths, TMoveOnlyFunction<void()> Then, bool bThenSaves)
+    {
+        TVector<FString> ReadOnly;
+        for (FString& Path : VirtualPaths)
+        {
+            if (VFS::IsReadOnlyOnDisk(FStringView(Path.c_str(), Path.size())))
+            {
+                ReadOnly.push_back(Move(Path));
+            }
+        }
+        if (ReadOnly.empty())
+        {
+            return true;
+        }
+
+        ModalManager.CreateDialogue("Read-Only Files", ImVec2(620, 340),
+            [ReadOnly = Move(ReadOnly), Then = Move(Then), bSaves = bThenSaves]() mutable -> bool
+        {
+            ImGuiX::Font::PushFont(ImGuiX::Font::EFont::MediumBold);
+            ImGui::PushStyleColor(ImGuiCol_Text, kProjDialogAccentGold);
+            ImGui::TextUnformatted(LE_ICON_LOCK "  Read-only on disk");
+            ImGui::PopStyleColor();
+            ImGuiX::Font::PopFont();
+
+            ImGui::Spacing();
+            ImGui::Separator();
+            ImGui::Spacing();
+
+            ImGui::PushStyleColor(ImGuiCol_Text, kProjDialogTextDim);
+            ImGui::TextWrapped("%s", bSaves
+                ? "These files are read-only on disk, so they cannot be saved. Make them writable to save, or cancel to leave them as they are."
+                : "These files are read-only on disk, so they cannot be changed, renamed, moved or deleted. Make them writable first, or cancel to leave them as they are.");
+            ImGui::PopStyleColor();
+
+            ImGui::Spacing();
+            const float BtnH = 34.0f;
+            const float ListH = ImGui::GetContentRegionAvail().y - BtnH - ImGui::GetStyle().ItemSpacing.y * 2.0f;
+            if (ImGui::BeginChild("##ReadOnlyFiles", ImVec2(0.0f, Math::Max(ListH, 40.0f)), ImGuiChildFlags_Borders))
+            {
+                for (const FString& Path : ReadOnly)
+                {
+                    ImGui::TextUnformatted(Path.c_str());
+                }
+            }
+            ImGui::EndChild();
+
+            ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 4.0f);
+            const float Gap  = 8.0f;
+            const float BtnW = (ImGui::GetContentRegionAvail().x - Gap) * 0.5f;
+
+            bool bShouldClose = false;
+            if (SchemeButton("Cancel", ImVec2(BtnW, BtnH), kButtonNeutral))
+            {
+                bShouldClose = true;
+            }
+            ImGui::SameLine(0.0f, Gap);
+            if (SchemeButton(bSaves ? LE_ICON_LOCK_OPEN_VARIANT "  Make Writable and Save" : LE_ICON_LOCK_OPEN_VARIANT "  Make Writable", ImVec2(BtnW, BtnH), kButtonDanger))
+            {
+                for (const FString& Path : ReadOnly)
+                {
+                    if (!VFS::MakeWritable(FStringView(Path.c_str(), Path.size())))
+                    {
+                        ImGuiX::Notifications::NotifyError("Could not make \"{0}\" writable.", Path.c_str());
+                    }
+                }
+                // Saving can open tools and modals of its own, which must not happen inside this popup.
+                if (Then)
+                {
+                    MainThread::Enqueue(Move(Then));
+                }
+                bShouldClose = true;
+            }
+            ImGui::PopStyleVar();
+            return bShouldClose;
+        });
+        return false;
     }
 
     namespace
@@ -2463,6 +2542,9 @@ namespace Lumina
         ImVec4 NotVisibleColor = ImVec4(0.4f, 0.4f, 0.4f, 1.0f);
 
         ImGui::PushStyleColor(ImGuiCol_Text, bVisible ? VisibleColor : NotVisibleColor);
+        // Read when the window begins, so the toolbar sits flat on the window with only a hairline beneath it.
+        ImGui::PushStyleColor(ImGuiCol_MenuBarBg, EditorColors::WindowBg());
+        ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 1.0f);
         ImGui::SetNextWindowSizeConstraints(ImVec2(128, 128), ImVec2(FLT_MAX, FLT_MAX));
         ImGui::SetNextWindowSize(ImVec2(1024, 768), ImGuiCond_FirstUseEver);
 
@@ -2484,8 +2566,8 @@ namespace Lumina
 
         ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.5f);
         ImGui::Begin(EditorTool->GetToolName().c_str(), bIsToolOpen, WindowFlags);
-        ImGui::PopStyleVar();
-        ImGui::PopStyleColor();
+        ImGui::PopStyleVar(2);
+        ImGui::PopStyleColor(2);
         
         if (ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows | ImGuiFocusedFlags_DockHierarchy))
         {
@@ -2767,7 +2849,7 @@ namespace Lumina
             ToolWorld->SetUpdateInterval(GetToolWorldUpdateInterval(ToolWorld, bIsLastFocusedTool));
 
             // Tool->Update just flew the camera, and SCameraSystem runs a stage too late for the overlays below.
-            SCameraSystem::ResolveActiveCameraView(ECS::GetWorldRegistry(*ToolWorld));
+            SCameraSystem::ResolveActiveCameraView(ToolWorld->GetEntityRegistry());
         }
         
         if (!bVisible)
@@ -2786,13 +2868,16 @@ namespace Lumina
         
         if (Tool->HasFlag(EEditorToolFlags::Tool_WantsToolbar))
         {
-            ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(8, 16));
+            // Dropdowns open inside this scope, so they inherit the same menu look as the bar.
+            ImGuiX::PushMenuWindowStyle();
+            ImGuiX::PushMenuItemStyle();
             if (ImGui::BeginMenuBar())
             {
                 Tool->DrawMainToolbar(UpdateContext);
                 ImGui::EndMenuBar();
             }
-            ImGui::PopStyleVar();
+            ImGuiX::PopMenuItemStyle();
+            ImGuiX::PopMenuWindowStyle();
         }
 
         if (Tool->IsSingleWindowTool())
@@ -2885,7 +2970,12 @@ namespace Lumina
                                 ImVec2 ViewportMin;
                                 ImVec2 ViewportAvail;
                                 FEditorTool::GetViewportImageRect(ViewportMin, ViewportAvail);
-                                SceneRenderer->SetPrimaryViewSize(FUIntVector2((uint32)ViewportAvail.x, (uint32)ViewportAvail.y));
+                                uint32 RecordingWidth = 0;
+                                uint32 RecordingHeight = 0;
+                                const bool bRecording = MovieCapture::GetRecordingSize(SceneRenderer, RecordingWidth, RecordingHeight);
+                                SceneRenderer->SetPrimaryViewSize(bRecording
+                                    ? FUIntVector2(RecordingWidth, RecordingHeight)
+                                    : FUIntVector2((uint32)ViewportAvail.x, (uint32)ViewportAvail.y));
 
                                 ViewportTexture = ImGuiX::ToImTextureRef(SceneRenderer->GetDisplayResourceID());
                             }
@@ -2918,7 +3008,12 @@ namespace Lumina
                                 ImVec2 ViewportMin;
                                 ImVec2 ViewportAvail;
                                 FEditorTool::GetViewportImageRect(ViewportMin, ViewportAvail);
-                                SceneRenderer->SetPrimaryViewSize(FUIntVector2((uint32)ViewportAvail.x, (uint32)ViewportAvail.y));
+                                uint32 RecordingWidth = 0;
+                                uint32 RecordingHeight = 0;
+                                const bool bRecording = MovieCapture::GetRecordingSize(SceneRenderer, RecordingWidth, RecordingHeight);
+                                SceneRenderer->SetPrimaryViewSize(bRecording
+                                    ? FUIntVector2(RecordingWidth, RecordingHeight)
+                                    : FUIntVector2((uint32)ViewportAvail.x, (uint32)ViewportAvail.y));
 
                                 ViewportTexture = ImGuiX::ToImTextureRef(SceneRenderer->GetDisplayResourceID());
                             }
@@ -3375,6 +3470,17 @@ namespace Lumina
             return;
         }
 
+        TVector<FString> Paths;
+        Paths.reserve(DirtyPackages.size());
+        for (CPackage* Package : DirtyPackages)
+        {
+            Paths.emplace_back(Package->GetPackagePath().c_str());
+        }
+        if (!ConfirmWritable(Move(Paths), [this] { SaveAllDirtyPackages(); }))
+        {
+            return;
+        }
+
         // A tool's OnSave carries thumbnail capture and registry notification a raw package write skips.
         THashSet<CPackage*> HandledByTool;
         for (const auto& [Asset, Tool] : ActiveAssetTools)
@@ -3450,10 +3556,18 @@ namespace Lumina
 
     void FEditorUI::OpenUnsavedChangesDialog(TVector<CPackage*> Packages)
     {
-        enum class ESaveState : uint8 { Pending, Saved, Failed };
+        enum class ESaveState : uint8 { Pending, ReadOnly, Saved, Failed };
 
         TVector<bool>       Selection(Packages.size(), true);
         TVector<ESaveState> States(Packages.size(), ESaveState::Pending);
+        for (size_t Index = 0; Index < Packages.size(); ++Index)
+        {
+            const FFixedString Path = Packages[Index]->GetPackagePath();
+            if (VFS::IsReadOnlyOnDisk(FStringView(Path.c_str(), Path.size())))
+            {
+                States[Index] = ESaveState::ReadOnly;
+            }
+        }
 
         ModalManager.CreateDialogue("Unsaved Changes", ImVec2(560, 380),
             [this, Packages = Move(Packages), Selection = Move(Selection), States = Move(States)]() mutable -> bool
@@ -3476,6 +3590,10 @@ namespace Lumina
             ImGui::PushStyleColor(ImGuiCol_Text, EditorColors::TextDim());
             ImGui::TextUnformatted("Save them before the editor closes?");
             ImGui::PopStyleColor();
+            if (Algo::AnyOf(States, [](ESaveState State) { return State == ESaveState::ReadOnly; }))
+            {
+                ImGui::TextColored(EditorColors::Warning(), LE_ICON_LOCK " Read-only files cannot be saved until they are made writable.");
+            }
             ImGui::Spacing();
 
             const float FooterHeight = ImGui::GetFrameHeight() + ImGui::GetStyle().ItemSpacing.y * 2.0f;
@@ -3487,7 +3605,7 @@ namespace Lumina
                 ImGui::TableSetupScrollFreeze(0, 1);
                 ImGui::TableSetupColumn("##Select", ImGuiTableColumnFlags_WidthFixed | ImGuiTableColumnFlags_NoResize, ImGui::GetFrameHeight());
                 ImGui::TableSetupColumn("Package",  ImGuiTableColumnFlags_WidthStretch);
-                ImGui::TableSetupColumn("Status",   ImGuiTableColumnFlags_WidthFixed, ImGuiX::ButtonWidth(LE_ICON_CHECK " Modified"));
+                ImGui::TableSetupColumn("Status",   ImGuiTableColumnFlags_WidthFixed, ImGuiX::ButtonWidth(LE_ICON_LOCK_OPEN_VARIANT " Make Writable"));
 
                 ImGui::TableNextRow(ImGuiTableRowFlags_Headers);
                 ImGui::TableSetColumnIndex(0);
@@ -3510,7 +3628,7 @@ namespace Lumina
                 for (uint32 Index = 0; Index < NumPackages; ++Index)
                 {
                     CPackage* Package = Packages[Index];
-                    const bool bLocked = States[Index] != ESaveState::Pending;
+                    const bool bLocked = States[Index] == ESaveState::Saved || States[Index] == ESaveState::Failed;
 
                     ImGui::TableNextRow();
                     ImGui::PushID((int)Index);
@@ -3541,6 +3659,17 @@ namespace Lumina
                         break;
                     case ESaveState::Failed:
                         ImGui::TextColored(EditorColors::Danger(), LE_ICON_ALERT_CIRCLE_OUTLINE " Failed");
+                        break;
+                    case ESaveState::ReadOnly:
+                        if (ImGui::SmallButton(LE_ICON_LOCK_OPEN_VARIANT " Make Writable"))
+                        {
+                            const FFixedString Path = Package->GetPackagePath();
+                            if (VFS::MakeWritable(FStringView(Path.c_str(), Path.size())))
+                            {
+                                States[Index] = ESaveState::Pending;
+                            }
+                        }
+                        ImGuiX::TextTooltip("{}", "Read-only on disk, so it cannot be saved. Click to make it writable.");
                         break;
                     default:
                         ImGui::TextColored(EditorColors::TextMuted(), "Modified");
@@ -3585,6 +3714,11 @@ namespace Lumina
                 {
                     if (!Selection[Index] || States[Index] == ESaveState::Saved)
                     {
+                        continue;
+                    }
+                    if (States[Index] == ESaveState::ReadOnly)
+                    {
+                        bAllSaved = false;
                         continue;
                     }
                     const bool bSaved = CPackage::SavePackage(Packages[Index], Packages[Index]->GetPackagePath());

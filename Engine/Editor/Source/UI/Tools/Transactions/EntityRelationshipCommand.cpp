@@ -68,7 +68,7 @@ namespace Lumina
             return;
         }
 
-        ECS::FRegistry& Registry = ECS::GetWorldRegistry(*W);
+        ECS::FRegistry& Registry = W->GetEntityRegistry();
 
         for (SIZE_T i = 0; i < Entities.size(); ++i)
         {
@@ -94,7 +94,7 @@ namespace Lumina
             return;
         }
 
-        ECS::FRegistry& Registry = ECS::GetWorldRegistry(*W);
+        ECS::FRegistry& Registry = W->GetEntityRegistry();
 
         // Every sibling of each affected parent is in the set, so detaching them all and reattaching by index reproduces the image.
         ECS::Utils::FParentLinks Links;

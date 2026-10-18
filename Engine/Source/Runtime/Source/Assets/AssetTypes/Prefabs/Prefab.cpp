@@ -594,7 +594,7 @@ namespace Lumina
 
         LUMINA_PROFILE_SCOPE();
 
-        ECS::FRegistry& WorldRegistry = ECS::GetWorldRegistry(*TargetWorld);
+        ECS::FRegistry& WorldRegistry = TargetWorld->GetEntityRegistry();
         
         TVector<ECS::FEntity> PrefabRoots;
         PrefabRoots.reserve(2);
@@ -730,7 +730,7 @@ namespace Lumina
             return;
         }
 
-        ECS::FRegistry& WorldRegistry = ECS::GetWorldRegistry(*World);
+        ECS::FRegistry& WorldRegistry = World->GetEntityRegistry();
         if (!WorldRegistry.IsValid(InstanceRoot))
         {
             return;
@@ -1228,7 +1228,7 @@ namespace Lumina
         if (World != nullptr)
         {
             // InitializeWorld culls the pending set pre-swap, but other paths reach this without that step.
-            CullOrphanedInstances(ECS::GetWorldRegistry(*World));
+            CullOrphanedInstances(World->GetEntityRegistry());
         }
         RefreshInstancesInWorld(World, /*bOnlyStale*/ false);
     }
@@ -1241,7 +1241,7 @@ namespace Lumina
         }
 
         // Gathered first, since a refresh adds and destroys instance entities.
-        ECS::FRegistry& WorldRegistry = ECS::GetWorldRegistry(*World);
+        ECS::FRegistry& WorldRegistry = World->GetEntityRegistry();
         TVector<ECS::FEntity> Roots;
         WorldRegistry.View<SPrefabInstanceComponent>().ForEach([&](ECS::FEntity E, const SPrefabInstanceComponent& Inst)
         {
@@ -1277,7 +1277,7 @@ namespace Lumina
                 continue;
             }
 
-            ECS::FRegistry& WorldRegistry = ECS::GetWorldRegistry(*World);
+            ECS::FRegistry& WorldRegistry = World->GetEntityRegistry();
 
             TVector<ECS::FEntity> Roots;
             WorldRegistry.View<SPrefabInstanceComponent>().ForEach([&](ECS::FEntity E, const SPrefabInstanceComponent& Inst)
@@ -1349,7 +1349,7 @@ namespace Lumina
                 continue;
             }
 
-            ECS::FRegistry& WorldRegistry = ECS::GetWorldRegistry(*World);
+            ECS::FRegistry& WorldRegistry = World->GetEntityRegistry();
 
             // A detached subtree has no instance component, so it is not matched and survives.
             TVector<ECS::FEntity> Matching;
@@ -1379,7 +1379,7 @@ namespace Lumina
             return false;
         }
 
-        ECS::FRegistry& WorldRegistry = ECS::GetWorldRegistry(*World);
+        ECS::FRegistry& WorldRegistry = World->GetEntityRegistry();
         if (!WorldRegistry.IsValid(InstanceRoot))
         {
             return false;
@@ -1423,7 +1423,7 @@ namespace Lumina
             return;
         }
 
-        ECS::FRegistry& WorldRegistry = ECS::GetWorldRegistry(*SourceWorld);
+        ECS::FRegistry& WorldRegistry = SourceWorld->GetEntityRegistry();
         if (!WorldRegistry.IsValid(RootEntity))
         {
             return;

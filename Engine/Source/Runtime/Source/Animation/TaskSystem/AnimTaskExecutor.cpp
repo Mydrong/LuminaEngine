@@ -319,8 +319,9 @@ namespace Lumina
             In.Trans.Resize(N);
             In.Scale.Resize(N);
 
-            const bool  bSrc  = Source.GetNumBones() == N;
-            const bool  bVel  = bHasVel && Dt > 1e-6f && bSrc && SourcePrev.GetNumBones() == N;
+            // Bone LOD keeps the active bones as a prefix of a full pose, so a longer source still covers them.
+            const bool  bSrc  = Source.GetNumBones() >= N;
+            const bool  bVel  = bHasVel && Dt > 1e-6f && bSrc && SourcePrev.GetNumBones() >= N;
             const float InvDt = bVel ? 1.0f / Dt : 0.0f;
 
             // SourcePrev is an empty pose until two frames of history exist, so bVel gates every read of it.

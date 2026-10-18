@@ -801,6 +801,11 @@ namespace Lumina::Platform
         return false;
     }
 
+    bool IsProcessForeground()
+    {
+        return true;
+    }
+
     int LaunchProcess(const TCHAR* URL, const TCHAR* Params, bool bLaunchDetached)
     {
         if (URL == nullptr)

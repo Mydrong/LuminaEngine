@@ -25,6 +25,28 @@ namespace Lumina
     static const FVector4 ShapeDropColor = FVector4(0.45f, 1.00f, 0.55f, 1.0f);
     static const FVector4 TriMeshColor  = FVector4(0.55f, 1.00f, 0.60f, 1.0f);
 
+    // Light enough that the mesh and the outlines stay readable through the fill.
+    static constexpr float SolidFillOpacity = 0.3f;
+
+    // Drawn through the mesh like the outlines, since a collider usually sits inside the surface it wraps.
+    static void DrawSolidMesh(FWorldDebugInterface& Debug, const TVector<FVector3>& Vertices, const TVector<uint32>& Indices,
+                              const FMatrix4& Matrix, const FVector4& Color)
+    {
+        TVector<FSimpleElementVertex> Triangles;
+        Triangles.reserve(Indices.size());
+        const uint32 Packed = PackColor(Color);
+        for (uint32 Index : Indices)
+        {
+            Triangles.push_back({ FVector3(Matrix * FVector4(Vertices[Index], 1.0f)), Packed });
+        }
+        Debug.DrawSolidTriangles(Move(Triangles), ESolidDrawMode::XRay);
+    }
+
+    static FVector4 FillColor(const FVector4& Color)
+    {
+        return FVector4(Color.x, Color.y, Color.z, Color.w * SolidFillOpacity);
+    }
+
     // Names the palette on the drag-drop channel, so only collision targets react to these tiles.
     static const FName CollisionPaletteName("MeshCollision");
 
@@ -369,20 +391,22 @@ namespace Lumina
 
     void FMeshCollisionEditing::RebuildHullWireframes()
     {
-        HullWireframes.clear();
+        HullDrawData.clear();
         const SMeshCollision* Collision = GetCollision();
         if (Collision == nullptr)
         {
             return;
         }
 
-        HullWireframes.resize(Collision->Primitives.size());
+        HullDrawData.resize(Collision->Primitives.size());
         for (int32 i = 0; i < (int32)Collision->Primitives.size(); ++i)
         {
             const SCollisionPrimitive& Primitive = Collision->Primitives[i];
             if (Primitive.Type == ECollisionPrimitiveType::ConvexHull)
             {
-                Physics::CollisionGen::BuildHullWireframe(Primitive.HullPoints, HullWireframes[i].Vertices, HullWireframes[i].Edges);
+                FHullDrawData& Hull = HullDrawData[i];
+                Physics::CollisionGen::BuildHullWireframe(Primitive.HullPoints, Hull.Vertices, Hull.Edges);
+                Physics::CollisionGen::BuildHullTriangles(Primitive.HullPoints, Hull.SolidVertices, Hull.SolidIndices);
             }
         }
     }
@@ -681,38 +705,59 @@ namespace Lumina
     {
         const FMatrix4 Matrix = GetPrimitiveMatrix(Primitive);
         const FVector3 Center = Primitive.Center;
+        FWorldDebugInterface& Debug = *World->GetDebugInterface();
 
         switch (Primitive.Type)
         {
         case ECollisionPrimitiveType::Box:
-            World->GetDebugInterface()->DrawBox(Center, Primitive.HalfExtent, FQuat(Math::Radians(Primitive.Rotation)), Color, Thickness, false);
+            {
+                const FQuat Rotation(Math::Radians(Primitive.Rotation));
+                Debug.DrawBox(Center, Primitive.HalfExtent, Rotation, Color, Thickness, false);
+                if (bDrawSolid)
+                {
+                    Debug.DrawSolidBox(Center, Primitive.HalfExtent, Rotation, FillColor(Color), EDebugFillMode::XRay);
+                }
+            }
             break;
 
         case ECollisionPrimitiveType::Sphere:
-            World->GetDebugInterface()->DrawSphere(Center, Primitive.Radius, Color, 16, Thickness, false);
+            Debug.DrawSphere(Center, Primitive.Radius, Color, 16, Thickness, false);
+            if (bDrawSolid)
+            {
+                Debug.DrawSolidSphere(Center, Primitive.Radius, FillColor(Color), EDebugFillMode::XRay);
+            }
             break;
 
         case ECollisionPrimitiveType::Capsule:
             {
-                const FVector3 Axis = Math::Normalize(FVector3(Matrix[1]));
-                World->GetDebugInterface()->DrawCapsule(Center - Axis * Primitive.HalfHeight, Center + Axis * Primitive.HalfHeight,
-                                                        Primitive.Radius, Color, 16, Thickness, false);
+                const FVector3 Axis  = Math::Normalize(FVector3(Matrix[1]));
+                const FVector3 Start = Center - Axis * Primitive.HalfHeight;
+                const FVector3 End   = Center + Axis * Primitive.HalfHeight;
+                Debug.DrawCapsule(Start, End, Primitive.Radius, Color, 16, Thickness, false);
+                if (bDrawSolid)
+                {
+                    Debug.DrawSolidCapsule(Start, End, Primitive.Radius, FillColor(Color), EDebugFillMode::XRay);
+                }
             }
             break;
 
         case ECollisionPrimitiveType::ConvexHull:
             {
-                if (Index < 0 || Index >= (int32)HullWireframes.size())
+                if (Index < 0 || Index >= (int32)HullDrawData.size())
                 {
                     break;
                 }
 
-                const FHullWireframe& Wire = HullWireframes[Index];
-                for (SIZE_T e = 0; e + 1 < Wire.Edges.size(); e += 2)
+                const FHullDrawData& Hull = HullDrawData[Index];
+                for (SIZE_T e = 0; e + 1 < Hull.Edges.size(); e += 2)
                 {
-                    const FVector3 A = FVector3(Matrix * FVector4(Wire.Vertices[Wire.Edges[e]], 1.0f));
-                    const FVector3 B = FVector3(Matrix * FVector4(Wire.Vertices[Wire.Edges[e + 1]], 1.0f));
-                    World->GetDebugInterface()->DrawLine(A, B, Color, Thickness, false);
+                    const FVector3 A = FVector3(Matrix * FVector4(Hull.Vertices[Hull.Edges[e]], 1.0f));
+                    const FVector3 B = FVector3(Matrix * FVector4(Hull.Vertices[Hull.Edges[e + 1]], 1.0f));
+                    Debug.DrawLine(A, B, Color, Thickness, false);
+                }
+                if (bDrawSolid)
+                {
+                    DrawSolidMesh(Debug, Hull.SolidVertices, Hull.SolidIndices, Matrix, FillColor(Color));
                 }
             }
             break;
@@ -734,6 +779,11 @@ namespace Lumina
                 World->GetDebugInterface()->DrawLine(A, B, TriMeshColor, 1.0f, false);
                 World->GetDebugInterface()->DrawLine(B, C, TriMeshColor, 1.0f, false);
                 World->GetDebugInterface()->DrawLine(C, A, TriMeshColor, 1.0f, false);
+            }
+            if (bDrawSolid)
+            {
+                DrawSolidMesh(*World->GetDebugInterface(), Collision->TriangleVertices, Collision->TriangleIndices,
+                              FMatrix4(1.0f), FillColor(TriMeshColor));
             }
             return;
         }
@@ -778,14 +828,14 @@ namespace Lumina
 
             case ECollisionPrimitiveType::ConvexHull:
                 {
-                    if (i >= (int32)HullWireframes.size() || HullWireframes[i].Vertices.empty())
+                    if (i >= (int32)HullDrawData.size() || HullDrawData[i].Vertices.empty())
                     {
                         break;
                     }
 
-                    FVector3 Min = HullWireframes[i].Vertices[0];
+                    FVector3 Min = HullDrawData[i].Vertices[0];
                     FVector3 Max = Min;
-                    for (const FVector3& P : HullWireframes[i].Vertices)
+                    for (const FVector3& P : HullDrawData[i].Vertices)
                     {
                         Min = Math::Min(Min, P);
                         Max = Math::Max(Max, P);
@@ -1016,6 +1066,7 @@ namespace Lumina
     void FMeshCollisionEditing::DrawViewMenuItems()
     {
         ImGui::MenuItem(LE_ICON_CUBE_OUTLINE " Show Collision", nullptr, &bDrawShapes);
+        ImGui::MenuItem(LE_ICON_CUBE " Solid Shapes", nullptr, &bDrawSolid);
 
         if (ImGui::MenuItem("Move Shape", "Space", GizmoOp == ImGuizmo::TRANSLATE))
         {

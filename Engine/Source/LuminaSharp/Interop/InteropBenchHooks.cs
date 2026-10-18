@@ -283,6 +283,246 @@ internal static unsafe partial class InteropBenchHooks
         return Seen > 0 ? PerIterationNanos(Elapsed, Ticks * Seen) : 0.0;
     }
 
+    // Two includes, so each row pays the per-include pool check twice.
+    [ManagedExport]
+    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
+    public static double Bench_SystemViewWalkTwo(nint World, int Ticks, int* OutEntities)
+    {
+        var Registry = Wrapper<Lumina.CWorld>.ForObject(World)!;
+
+        int Seen = 0;
+        float Total = 0.0f;
+        long Start = Stopwatch.GetTimestamp();
+        for (int Tick = 0; Tick < Ticks; ++Tick)
+        {
+            Seen = 0;
+            foreach (var Row in Registry.View<Lumina.STransformComponent, Lumina.SBuoyancyComponent>().Each())
+            {
+                Total += Row.First.LocalTransform.Location.X * Row.Second.Buoyancy;
+                ++Seen;
+            }
+        }
+        long Elapsed = Stopwatch.GetTimestamp() - Start;
+        Sink = (int)Total;
+        *OutEntities = Seen;
+        return Seen > 0 ? PerIterationNanos(Elapsed, Ticks * Seen) : 0.0;
+    }
+
+    // The native half of a view alone, so the snapshot and the chunk gather can be split from the managed cursor.
+    [ManagedExport]
+    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
+    public static double Bench_ViewGatherOnly(nint World, int Ticks, int bBeginOnly)
+    {
+        IntPtr* Include = stackalloc IntPtr[1];
+        Include[0] = ComponentOps<Lumina.STransformComponent>.Token;
+        uint* Entities = stackalloc uint[1024];
+        IntPtr* Pointers = stackalloc IntPtr[1024];
+
+        int Seen = 0;
+        long Start = Stopwatch.GetTimestamp();
+        for (int Tick = 0; Tick < Ticks; ++Tick)
+        {
+            IntPtr State = Native.ViewBegin((ulong)World, Include, 1, null, 0);
+            Seen = 0;
+            if (bBeginOnly == 0)
+            {
+                int Count;
+                while ((Count = Native.ViewNextChunk(State, Entities, Pointers, 1024, 1)) > 0)
+                {
+                    Seen += Count;
+                }
+            }
+            Native.ViewEnd(State);
+        }
+        long Elapsed = Stopwatch.GetTimestamp() - Start;
+        return PerIterationNanos(Elapsed, Ticks * 10000);
+    }
+
+    // Per-entity gets on a component small enough to stay in cache, so the interop cost is not hidden behind memory.
+    [ManagedExport]
+    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
+    public static double Bench_SmallGet(nint World, int Which, int Ticks, uint* Entities, int Count)
+    {
+        var Registry = Wrapper<Lumina.CWorld>.ForObject(World)!;
+
+        float Total = 0.0f;
+        long Start = Stopwatch.GetTimestamp();
+        for (int Tick = 0; Tick < Ticks; ++Tick)
+        {
+            for (int Index = 0; Index < Count; ++Index)
+            {
+                FEntity Entity = new FEntity(Entities[Index]);
+                switch (Which)
+                {
+                    case 0:
+                        Total += Registry.GetComponent<Lumina.SBuoyancyComponent>(Entity).Buoyancy;
+                        break;
+                    case 1:
+                        if (Registry.TryGetComponent<Lumina.SBuoyancyComponent>(Entity) is { } Found)
+                        {
+                            Total += Found.Get().Buoyancy;
+                        }
+                        break;
+                    case 2:
+                        Total += Registry.HasComponent<Lumina.SBuoyancyComponent>(Entity) ? 1.0f : 0.0f;
+                        break;
+                    default:
+                        ref Lumina.SBuoyancyComponent Ref = ref Registry.GetComponent<Lumina.SBuoyancyComponent>(Entity);
+                        Total += Ref.Buoyancy + Ref.LinearDrag + Ref.AngularDrag;
+                        break;
+                }
+            }
+        }
+        long Elapsed = Stopwatch.GetTimestamp() - Start;
+        Sink = (int)Total;
+        return PerIterationNanos(Elapsed, Ticks * Count);
+    }
+
+    // A tracked reference kept across ticks, the way a script caches one in a field.
+    [ManagedExport]
+    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
+    public static double Bench_KeptRefGet(nint World, int Ticks, uint* Entities, int Count)
+    {
+        var Registry = Wrapper<Lumina.CWorld>.ForObject(World)!;
+        var Kept = new TComponentRef<Lumina.SBuoyancyComponent>[Count];
+        for (int Index = 0; Index < Count; ++Index)
+        {
+            Kept[Index] = Registry.TryGetComponent<Lumina.SBuoyancyComponent>(new FEntity(Entities[Index])) ?? default;
+        }
+
+        float Total = 0.0f;
+        long Start = Stopwatch.GetTimestamp();
+        for (int Tick = 0; Tick < Ticks; ++Tick)
+        {
+            for (int Index = 0; Index < Count; ++Index)
+            {
+                Total += Kept[Index].Get().Buoyancy;
+            }
+        }
+        long Elapsed = Stopwatch.GetTimestamp() - Start;
+        Sink = (int)Total;
+        return PerIterationNanos(Elapsed, Ticks * Count);
+    }
+
+    // One property operation a script performs on a native component, run Iterations times, with the managed bytes it allocated.
+    [ManagedExport]
+    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
+    public static double Bench_PropertyOp(IntPtr Component, int Which, int Iterations, long* OutBytes)
+    {
+        ref Lumina.SInteropBenchComponent C = ref Unsafe.AsRef<Lumina.SInteropBenchComponent>((void*)Component);
+        long Bytes = GC.GetAllocatedBytesForCurrentThread();
+        double Nanos = Which switch
+        {
+            0 => RunOp<OpFloatsAdd>(ref C, Iterations),
+            1 => RunOp<OpFloatsIndex>(ref C, Iterations),
+            2 => RunOp<OpFloatsCount>(ref C, Iterations),
+            3 => RunOp<OpPointsIndex>(ref C, Iterations),
+            4 => RunOp<OpNamesGet>(ref C, Iterations),
+            5 => RunOp<OpNamesSet>(ref C, Iterations),
+            6 => RunOp<OpLabelRead>(ref C, Iterations),
+            7 => RunOp<OpLabelWrite>(ref C, Iterations),
+            8 => RunOp<OpTagAssign>(ref C, Iterations),
+            9 => RunOp<OpTagCompare>(ref C, Iterations),
+            10 => RunOp<OpScoresGet>(ref C, Iterations),
+            11 => RunOp<OpScoresSet>(ref C, Iterations),
+            12 => RunOp<OpInnerField>(ref C, Iterations),
+            _ => RunOp<OpFloatsSpan>(ref C, Iterations),
+        };
+        *OutBytes = GC.GetAllocatedBytesForCurrentThread() - Bytes;
+        return Nanos;
+    }
+
+    private interface IPropertyOp
+    {
+        static abstract float Run(ref Lumina.SInteropBenchComponent C, int Slot);
+    }
+
+    // Specialized per operation, so each loop compiles the way a script's own method would.
+    private static double RunOp<TOp>(ref Lumina.SInteropBenchComponent C, int Iterations) where TOp : struct, IPropertyOp
+    {
+        float Total = 0.0f;
+        long Start = Stopwatch.GetTimestamp();
+        for (int i = 0; i < Iterations; ++i)
+        {
+            Total += TOp.Run(ref C, i & 255);
+        }
+        long Elapsed = Stopwatch.GetTimestamp() - Start;
+        Sink = (int)Total;
+        return PerIterationNanos(Elapsed, Iterations);
+    }
+
+    private static readonly FName CachedTag = "BenchTag";
+
+    private struct OpFloatsAdd : IPropertyOp { public static float Run(ref Lumina.SInteropBenchComponent C, int Slot) { if (Slot == 0) { C.Floats.Clear(); } C.Floats.Add(1.0f); return 0.0f; } }
+    private struct OpFloatsIndex : IPropertyOp { public static float Run(ref Lumina.SInteropBenchComponent C, int Slot) { C.Floats[Slot] += 1.0f; return 0.0f; } }
+    private struct OpFloatsCount : IPropertyOp { public static float Run(ref Lumina.SInteropBenchComponent C, int Slot) => C.Floats.Count; }
+    private struct OpPointsIndex : IPropertyOp { public static float Run(ref Lumina.SInteropBenchComponent C, int Slot) { C.Points[Slot].X += 1.0f; return 0.0f; } }
+    private struct OpNamesGet : IPropertyOp { public static float Run(ref Lumina.SInteropBenchComponent C, int Slot) => C.Names.Get(Slot).ToString().Length; }
+    private struct OpNamesSet : IPropertyOp { public static float Run(ref Lumina.SInteropBenchComponent C, int Slot) { C.Names.Set(Slot, "abc"); return 0.0f; } }
+    private struct OpLabelRead : IPropertyOp { public static float Run(ref Lumina.SInteropBenchComponent C, int Slot) => C.Label.Length; }
+    private struct OpLabelWrite : IPropertyOp { public static float Run(ref Lumina.SInteropBenchComponent C, int Slot) { C.Label = "hello"; return 0.0f; } }
+    private struct OpTagAssign : IPropertyOp { public static float Run(ref Lumina.SInteropBenchComponent C, int Slot) { C.Tag = "BenchTag"; return 0.0f; } }
+    private struct OpTagCompare : IPropertyOp { public static float Run(ref Lumina.SInteropBenchComponent C, int Slot) => C.Tag == CachedTag ? 1.0f : 0.0f; }
+    private struct OpScoresGet : IPropertyOp { public static float Run(ref Lumina.SInteropBenchComponent C, int Slot) => C.Scores[Slot]; }
+    private struct OpScoresSet : IPropertyOp { public static float Run(ref Lumina.SInteropBenchComponent C, int Slot) { C.Scores.Set(Slot, 1.0f); return 0.0f; } }
+    private struct OpInnerField : IPropertyOp { public static float Run(ref Lumina.SInteropBenchComponent C, int Slot) { C.Inner.Value += 1.0f; return 0.0f; } }
+    private struct OpFloatsSpan : IPropertyOp
+    {
+        public static float Run(ref Lumina.SInteropBenchComponent C, int Slot)
+        {
+            foreach (ref float Value in C.Floats.AsSpan()) { Value += 1.0f; }
+            return 0.0f;
+        }
+    }
+
+    // The pieces of a string property write and read, so the expensive one can be found.
+    [ManagedExport]
+    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
+    public static double Bench_StringPieces(IntPtr Component, int Which, int Iterations)
+    {
+        ref Lumina.SInteropBenchComponent C = ref Unsafe.AsRef<Lumina.SInteropBenchComponent>((void*)Component);
+        IntPtr FStringPtr = NativeBindings.FieldAt(Component, 48);
+        byte* Scratch = stackalloc byte[256];
+        int Total = 0;
+        long Start = Stopwatch.GetTimestamp();
+        for (int i = 0; i < Iterations; ++i)
+        {
+            switch (Which)
+            {
+                case 0: Native.StringAssign(FStringPtr, "hello"); break;
+                case 1: Interop.ToUtf8("hello", Scratch, 256, out int Length); Total += Length; break;
+                case 2: Total += NativeMarshal.ReadString(FStringPtr).Length; break;
+                case 3: Total += System.Text.Encoding.UTF8.GetString(Scratch, 26).Length; break;
+                case 4: C.Label = "hello"; break;
+                default: Total += C.Label.Length; break;
+            }
+        }
+        long Elapsed = Stopwatch.GetTimestamp() - Start;
+        Sink = Total;
+        return PerIterationNanos(Elapsed, Iterations);
+    }
+
+    // An untracked native lookup per entity, the price of finding a row again from its entity and pool.
+    [ManagedExport]
+    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
+    public static double Bench_SystemLookupGet(nint World, int Ticks, uint* Entities, int Count)
+    {
+        var Registry = Wrapper<Lumina.CWorld>.ForObject(World)!;
+
+        float Total = 0.0f;
+        long Start = Stopwatch.GetTimestamp();
+        for (int Tick = 0; Tick < Ticks; ++Tick)
+        {
+            for (int Index = 0; Index < Count; ++Index)
+            {
+                Total += Registry.GetComponent<Lumina.STransformComponent>(new FEntity(Entities[Index])).LocalTransform.Location.X;
+            }
+        }
+        long Elapsed = Stopwatch.GetTimestamp() - Start;
+        Sink = (int)Total;
+        return PerIterationNanos(Elapsed, Ticks * Count);
+    }
+
     // A random access per entity rather than a walk, which is what a system reaching a second component does.
     [ManagedExport]
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]

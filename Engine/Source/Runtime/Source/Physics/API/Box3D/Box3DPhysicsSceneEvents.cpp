@@ -47,7 +47,7 @@ namespace Lumina::Physics
     {
         LUMINA_PROFILE_SCOPE();
 
-        ECS::FRegistry& Registry = ECS::GetWorldRegistry(*World);
+        ECS::FRegistry& Registry = World->GetEntityRegistry();
         auto RigidStorage = Registry.GetStorage<SRigidBodyComponent>();
 
         // A system reading collisions wants them all, otherwise only a body listening for one is worth resolving a manifold for.
@@ -348,7 +348,7 @@ namespace Lumina::Physics
 
     void FBox3DPhysicsScene::SynchronizeBodyGroups()
     {
-        ECS::FRegistry& Registry = ECS::GetWorldRegistry(*World);
+        ECS::FRegistry& Registry = World->GetEntityRegistry();
         for (const FPendingStaticGroup& Group : PendingStaticGroups)
         {
             if (Registry.IsValid(Group.Owner)) { CommitStaticBodyGroup(Group.GroupID, Group.Owner, Group.Builds); }
@@ -386,7 +386,7 @@ namespace Lumina::Physics
 
     void FBox3DPhysicsScene::SynchronizeBodies()
     {
-        ECS::FRegistry& Registry = ECS::GetWorldRegistry(*World);
+        ECS::FRegistry& Registry = World->GetEntityRegistry();
         for (uint32 Handle : PendingBodyDestructions)
         {
             DestroyBodyHandle(Handle);
@@ -422,6 +422,12 @@ namespace Lumina::Physics
                     continue;
                 }
 
+                const b3BodyId Old = ResolveBody(Record.Handle);
+                if (b3Body_IsValid(Old) && b3Body_GetType(Old) == b3_dynamicBody)
+                {
+                    CarriedMotion.push_back({ Entity, b3Body_GetLinearVelocity(Old), b3Body_GetAngularVelocity(Old), b3Body_IsAwake(Old) });
+                }
+
                 DestroyBodyHandle(Record.Handle);
                 Record.Handle = InvalidBodyHandle;
                 Record.Status = EPhysicsBodyStatus::Pending;
@@ -431,6 +437,19 @@ namespace Lumina::Physics
         }
         PendingDrainScratch.resize(Count);
         CreateRigidBodiesBatched(PendingDrainScratch);
+
+        for (const FCarriedMotion& Motion : CarriedMotion)
+        {
+            const FBodyRecord* Rebuilt = RigidBodies.Find(Motion.Entity);
+            const b3BodyId Body = Rebuilt != nullptr ? ResolveBody(Rebuilt->Handle) : b3_nullBodyId;
+            if (b3Body_IsValid(Body) && b3Body_GetType(Body) == b3_dynamicBody)
+            {
+                b3Body_SetLinearVelocity(Body, Motion.Linear);
+                b3Body_SetAngularVelocity(Body, Motion.Angular);
+                b3Body_SetAwake(Body, Motion.bAwake);
+            }
+        }
+        CarriedMotion.clear();
 
         TVector<ECS::FEntity> Characters;
         Characters.swap(PendingCharacters);
@@ -446,6 +465,7 @@ namespace Lumina::Physics
                 }
             }
         }
+        ApplyPendingCharacterUpdates(Registry);
         SynchronizeBodyGroups();
         DrainPendingConstraints();
         SynchronizeConstraints();
@@ -461,7 +481,7 @@ namespace Lumina::Physics
             return;
         }
 
-        ECS::FRegistry& Registry = ECS::GetWorldRegistry(*World);
+        ECS::FRegistry& Registry = World->GetEntityRegistry();
 
         if (BatchBuildScratch.size() < Count)
         {

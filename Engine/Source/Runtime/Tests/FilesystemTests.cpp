@@ -4,6 +4,8 @@
 #include "Containers/String.h"
 #include "Containers/StringFormat.h"
 #include "Platform/Filesystem/PlatformFilesystem.h"
+#include <chrono>
+#include <thread>
 
 using namespace Lumina;
 using namespace Lumina::Filesystem;
@@ -182,6 +184,48 @@ TEST_F(FilesystemTest, AtomicWriteReplacesAFileHeldOpenForRead)
 
     Reader.Close();
 
+    FString Text;
+    ASSERT_TRUE(ReadFile(Text, Path));
+    EXPECT_EQ(Text, FString("replaced"));
+}
+
+// A read-only file is meant to stay as it is, so the write leaves it alone until it is made writable.
+TEST_F(FilesystemTest, AtomicWriteRefusesAReadOnlyFile)
+{
+    const FString Path = Under("ReadOnly.bin");
+    ASSERT_TRUE(WriteFile(Path, Bytes("original")));
+    ASSERT_TRUE(SetReadOnly(Path, true));
+
+    EXPECT_FALSE(AtomicWriteFile(Path, Bytes("replaced")));
+    EXPECT_TRUE(Stat(Path).IsReadOnly());
+    EXPECT_FALSE(Exists(Path + ".tmp"));
+
+    FString Text;
+    ASSERT_TRUE(ReadFile(Text, Path));
+    EXPECT_EQ(Text, FString("original"));
+
+    ASSERT_TRUE(SetReadOnly(Path, false));
+    EXPECT_TRUE(AtomicWriteFile(Path, Bytes("replaced")));
+}
+
+// A scanner holding the file without delete sharing blocks a replace only until it lets go.
+TEST_F(FilesystemTest, AtomicWriteWaitsOutABriefLockOnTheTarget)
+{
+    const FString Path = Under("Scanned.bin");
+    ASSERT_TRUE(WriteFile(Path, Bytes("original")));
+
+    FFileHandle Scanner = Open(Path, EAccess::Read, ECreateMode::OpenExisting, EShare::Read);
+    ASSERT_TRUE(Scanner.IsValid());
+    std::thread Release([&Scanner]
+    {
+        std::this_thread::sleep_for(std::chrono::milliseconds(60));
+        Scanner.Close();
+    });
+
+    const bool bWritten = AtomicWriteFile(Path, Bytes("replaced"));
+    Release.join();
+
+    EXPECT_TRUE(bWritten);
     FString Text;
     ASSERT_TRUE(ReadFile(Text, Path));
     EXPECT_EQ(Text, FString("replaced"));

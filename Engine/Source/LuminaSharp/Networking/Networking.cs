@@ -48,17 +48,17 @@ public static class Networking
     public static IReadOnlyList<Connection> Connections => GetConnections(Engine.World);
 
     // A host and a standalone world are always in session, and a client is once it has joined.
-    public static bool IsConnected => !Engine.World.IsClient || Lumina.CNetworkLibrary.IsJoined(Engine.World);
+    public static bool IsConnected => !Engine.World.IsClient || Engine.World.IsNetJoined();
 
     // The entity Connection owns, preferring one with a character controller, or FEntity.Null.
-    public static FEntity PawnOf(Connection Connection) => Lumina.CNetworkLibrary.GetOwnedPawn(Engine.World, Connection.Id);
+    public static FEntity PawnOf(Connection Connection) => Engine.World.GetOwnedPawn(Connection.Id);
 
     // This peer's own pawn, found by ownership.
     public static FEntity LocalPawn => PawnOf(Connection.Local);
 
     internal static uint LocalConnectionId(Lumina.CWorld World)
     {
-        return World.IsClient ? Lumina.CNetworkLibrary.GetLocalConnection(World) : 0u;
+        return World.IsClient ? World.GetLocalNetConnection() : 0u;
     }
 
     internal static IReadOnlyList<Connection> GetConnections(Lumina.CWorld World)
@@ -68,7 +68,7 @@ public static class Networking
             return Array.Empty<Connection>();
         }
 
-        uint[] Ids = Lumina.CNetworkLibrary.GetConnections(World);
+        uint[] Ids = World.GetNetConnections();
         var Result = new Connection[Ids.Length];
         for (int Index = 0; Index < Ids.Length; ++Index)
         {
@@ -93,9 +93,9 @@ public readonly struct EntityNetwork
     public static EntityNetwork Of(FEntity Entity) => new(Engine.World, Entity);
 
     // Needs an SNetworkComponent on the entity.
-    public bool IsNetworked => World.IsNetworked && Lumina.CNetworkLibrary.IsEntityNetworked(World, Entity);
+    public bool IsNetworked => World.IsNetworked && World.IsEntityNetworked(Entity);
 
-    public Connection Owner => new(Lumina.CNetworkLibrary.GetOwner(World, Entity));
+    public Connection Owner => new(World.GetNetOwner(Entity));
 
     // Always true in a standalone world, where nothing else could control it.
     public bool IsOwner => !IsNetworked || Owner.Id == Networking.LocalConnectionId(World);
@@ -104,14 +104,14 @@ public readonly struct EntityNetwork
     public bool IsProxy => IsNetworked && !IsOwner;
 
     // Host only, a client asking is refused.
-    public bool AssignOwnership(Connection Connection) => Lumina.CNetworkLibrary.SetOwner(World, Entity, Connection.Id);
+    public bool AssignOwnership(Connection Connection) => World.SetNetOwner(Entity, Connection.Id);
 
     public bool DropOwnership() => AssignOwnership(Connection.Host);
 
-    public uint NetId => Lumina.CNetworkLibrary.EntityToNetId(World, Entity);
+    public uint NetId => World.EntityToNetId(Entity);
 
     // Resends replicated component fields. A [Property(Sync)] field marks itself when written.
-    public void MarkDirty() => Lumina.CNetworkLibrary.MarkEntityDirty(World, Entity);
+    public void MarkDirty() => World.MarkEntityNetDirty(Entity);
 }
 
 // Mark a void method on an CEntityScript with one of these and calling it routes the call.

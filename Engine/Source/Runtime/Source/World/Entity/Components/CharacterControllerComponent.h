@@ -71,6 +71,14 @@ namespace Lumina
         FUNCTION()
         void Jump() { bJumpPressed = true; }
 
+        // Crouches until UnCrouch, with the feet staying where they are. Ignored when the movement component cannot crouch.
+        FUNCTION()
+        void Crouch() { bWantsToCrouch = true; }
+
+        // Stands back up once there is room above, staying crouched under a low ceiling until it clears.
+        FUNCTION()
+        void UnCrouch() { bWantsToCrouch = false; }
+
         // Add a velocity impulse (jump pad, knockback, dash). Override flags replace velocity on that axis
         // instead of adding: horizontal = X/Z plane, vertical = Y (up).
         FUNCTION()
@@ -109,6 +117,10 @@ namespace Lumina
         /** True for one frame after Jump() is called; consumed by the movement system. */
         PROPERTY(ReadOnly)
         bool bJumpPressed = false;
+
+        // Held between Crouch and UnCrouch, and copied to the movement component each frame.
+        PROPERTY(ReadOnly)
+        bool bWantsToCrouch = false;
 
         // Game-defined bits that ride with each predicted move, so the host reads the owner's held buttons here.
         PROPERTY(Hidden, NoSerialize, Category = "Network")

@@ -2,6 +2,8 @@
 
 #include "imgui.h"
 #include "Containers/Function.h"
+#include "Containers/String.h"
+#include "Containers/Vector.h"
 #include "GUID/GUID.h"
 
 namespace Lumina
@@ -44,6 +46,9 @@ namespace Lumina
 
         /** Writes every dirty package through its open tool, which is what a standalone launch reads from disk. */
         virtual void SaveAllDirtyPackages() = 0;
+
+        // Asks before touching files that are read-only on disk and runs Then once they are writable. True when none were, so the caller goes ahead now.
+        virtual bool ConfirmWritable(TVector<FString> VirtualPaths, TMoveOnlyFunction<void()> Then, bool bThenSaves = true) = 0;
         
     };
 }

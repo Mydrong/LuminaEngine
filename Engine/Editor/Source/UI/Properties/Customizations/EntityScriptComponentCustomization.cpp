@@ -38,9 +38,45 @@ namespace Lumina
         }
     }
 
+    namespace
+    {
+        // Names the component being dragged within, so a slot dropped on another entity's script list is ignored.
+        struct FScriptSlotPayload
+        {
+            const void* Component = nullptr;
+            int32       Index     = 0;
+        };
+
+        constexpr const char* kScriptSlotPayload = "LUMINA_SCRIPT_SLOT";
+    }
+
     TSharedPtr<FEntityScriptComponentCustomization> FEntityScriptComponentCustomization::MakeInstance()
     {
         return MakeShared<FEntityScriptComponentCustomization>();
+    }
+
+    void FEntityScriptComponentCustomization::QueueMove(SEntityScriptComponent* Component, int32 From, int32 To)
+    {
+        PendingMutation = [this, Component, From, To]
+        {
+            const int32 Count = (int32)Component->Scripts.size();
+            if (From == To || From < 0 || To < 0 || From >= Count || To >= Count)
+            {
+                return;
+            }
+
+            TStrongObjectPtr<CEntityScript> Moved = Move(Component->Scripts[From]);
+            Component->Scripts.erase(Component->Scripts.begin() + From);
+            Component->Scripts.insert(Component->Scripts.begin() + To, Move(Moved));
+
+            // The views travel with their scripts, so an open table keeps its state across the move.
+            if ((int32)SlotViews.size() == Count)
+            {
+                FSlotView View = Move(SlotViews[From]);
+                SlotViews.erase(SlotViews.begin() + From);
+                SlotViews.insert(SlotViews.begin() + To, Move(View));
+            }
+        };
     }
 
     EPropertyChangeOp FEntityScriptComponentCustomization::DrawProperty(const TSharedPtr<FPropertyHandle>& Property, const FPropertyDrawArgs& Args)
@@ -71,7 +107,7 @@ namespace Lumina
 
             const float Spacing     = ImGui::GetStyle().ItemSpacing.x;
             const float HeaderRight = ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x;
-            const float ButtonsLeft = HeaderRight - AssetPickerFilter::kButtonSize.x * 3.0f - Spacing * 2.0f;
+            const float ButtonsLeft = HeaderRight - AssetPickerFilter::kButtonSize.x * 5.0f - Spacing * 4.0f;
 
             // Breathing room around the title, which is what stops the stack of scripts reading as one block.
             ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(ImGui::GetStyle().FramePadding.x, 6.0f));
@@ -84,6 +120,28 @@ namespace Lumina
             ImGui::PopStyleColor(3);
             ImGui::PopStyleVar();
 
+            // Dragging one header onto another moves that script into its slot.
+            if (ImGui::BeginDragDropSource())
+            {
+                const FScriptSlotPayload Payload{ Component, Index };
+                ImGui::SetDragDropPayload(kScriptSlotPayload, &Payload, sizeof(Payload));
+                ImGui::TextUnformatted(HeaderLabel.c_str());
+                ImGui::EndDragDropSource();
+            }
+            if (ImGui::BeginDragDropTarget())
+            {
+                if (const ImGuiPayload* Dropped = ImGui::AcceptDragDropPayload(kScriptSlotPayload))
+                {
+                    const FScriptSlotPayload& Payload = *static_cast<const FScriptSlotPayload*>(Dropped->Data);
+                    if (Payload.Component == Component && Payload.Index != Index)
+                    {
+                        QueueMove(Component, Payload.Index, Index);
+                        bWasChanged = true;
+                    }
+                }
+                ImGui::EndDragDropTarget();
+            }
+
             // The namespace trails the name in the header's own row, dimmed, so it informs without competing.
             if (!Namespace.empty())
             {
@@ -92,6 +150,26 @@ namespace Lumina
             }
 
             ImGui::SameLine(ButtonsLeft);
+            ImGui::BeginDisabled(Index == 0);
+            if (ImGui::Button(LE_ICON_ARROW_UP "##MoveEntityScriptUp", AssetPickerFilter::kButtonSize))
+            {
+                QueueMove(Component, Index, Index - 1);
+                bWasChanged = true;
+            }
+            ImGui::EndDisabled();
+            ImGuiX::TextTooltip("{}", "Move up. Scripts attach, ready and update top to bottom.");
+
+            ImGui::SameLine();
+            ImGui::BeginDisabled(Index + 1 >= (int32)Component->Scripts.size());
+            if (ImGui::Button(LE_ICON_ARROW_DOWN "##MoveEntityScriptDown", AssetPickerFilter::kButtonSize))
+            {
+                QueueMove(Component, Index, Index + 1);
+                bWasChanged = true;
+            }
+            ImGui::EndDisabled();
+            ImGuiX::TextTooltip("{}", "Move down. Scripts attach, ready and update top to bottom.");
+
+            ImGui::SameLine();
             ImGui::BeginDisabled(View.SourceFile.empty());
             if (ImGui::Button(LE_ICON_FILE_CODE "##OpenEntityScriptSource", AssetPickerFilter::kButtonSize))
             {

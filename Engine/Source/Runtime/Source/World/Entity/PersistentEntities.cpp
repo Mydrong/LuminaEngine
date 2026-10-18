@@ -34,7 +34,7 @@ namespace Lumina
         // The persistent entity the level placed under the same tag, which an arrival stands in for.
         ECS::FEntity FindPlaced(CWorld* World, ECS::FEntity Arrival, const THashSet<ECS::FEntity>& Arrived)
         {
-            ECS::FRegistry& Registry = ECS::GetWorldRegistry(*World);
+            ECS::FRegistry& Registry = World->GetEntityRegistry();
             const FName Tag = ECS::Utils::GetEntityTag(Registry, Arrival);
             if (Tag.IsNone())
             {
@@ -87,7 +87,7 @@ namespace Lumina
             return;
         }
 
-        ECS::FRegistry& Registry = ECS::GetWorldRegistry(*From);
+        ECS::FRegistry& Registry = From->GetEntityRegistry();
         TVector<ECS::FEntity> Carried;
         Registry.View<SPersistentComponent>().ForEach([&](ECS::FEntity Entity, const SPersistentComponent&)
         {
@@ -155,7 +155,7 @@ namespace Lumina
             ECS::Utils::SerializeRegistry(Archive, Staging);
         }
 
-        ECS::FRegistry& Registry = ECS::GetWorldRegistry(*To);
+        ECS::FRegistry& Registry = To->GetEntityRegistry();
         THashMap<ECS::FEntity, ECS::FEntity> Arrived;
         CPrefab::CopyRegistry(Staging, Registry, Arrived);
 

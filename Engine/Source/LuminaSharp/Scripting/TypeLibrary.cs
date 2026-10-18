@@ -160,6 +160,42 @@ internal sealed class TypeLibrary
     // Every reflected enum as (name, type).
     public IEnumerable<KeyValuePair<string, Type>> EnumTypes => Enums;
 
+    // Builds the handle for a script struct named at runtime, so a caller can reach it through an interface it implements.
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, Func<nint, object>?> StructViews = new();
+
+    public object? ViewScriptStruct(string StableId, nint Address)
+    {
+        if (Address == 0)
+        {
+            return null;
+        }
+        Func<nint, object>? View = StructViews.GetOrAdd(StableId, Name =>
+        {
+            // A component struct is reached by ref rather than through a handle, so it has no view to build.
+            if (!ScriptStructs.TryGetValue(Name, out ScriptStructEntry Entry) || !typeof(INativeStruct).IsAssignableFrom(Entry.Description.Type))
+            {
+                return null;
+            }
+            MethodInfo Box = typeof(TypeLibrary).GetMethod(nameof(BoxView), BindingFlags.NonPublic | BindingFlags.Static)!
+                .MakeGenericMethod(Entry.Description.Type);
+            return Box.CreateDelegate<Func<nint, object>>();
+        });
+        return View?.Invoke(Address);
+    }
+
+    private static object BoxView<T>(nint Address) where T : struct, INativeStruct => NativeStructs.FromAddress<T>(Address);
+
+    private static bool IsEngineNamespace(string? Space) => Space != null && (Space.StartsWith("System") || Space.StartsWith("LuminaSharp"));
+
+    // The user interfaces a script struct implements, which an instanced property's Implements filter matches against.
+    public static string ImplementedInterfaces(Type Type)
+    {
+        IEnumerable<string> Names = Type.GetInterfaces()
+            .Where(Interface => Interface.FullName != null && !IsEngineNamespace(Interface.Namespace))
+            .Select(Interface => Interface.FullName!);
+        return string.Join(";", Names);
+    }
+
     private static IEnumerable<string> HeldStructNames(ScriptType Type)
     {
         if (Type.Kind is EPropertyType.Struct or EPropertyType.ComponentRef && Type.NativeName != null)
@@ -188,7 +224,10 @@ internal sealed class TypeLibrary
     public Type? GetScriptable(string FullName) => Scriptables.TryGetValue(FullName, out Type? Type) ? Type : null;
 
     // A type that views native storage, so a get-only member of it is still a real property.
-    private static bool IsNativeOwnedViewType(Type Type) => ScriptPropertyViews.IsView(Type);
+    internal static bool IsNativeOwnedViewType(Type Type) => ScriptPropertyViews.IsView(Type) || IsInstancedStructView(Type);
+
+    private static bool IsInstancedStructView(Type Type)
+        => Type == typeof(FInstancedStruct) || (Type.IsGenericType && Type.GetGenericTypeDefinition() == typeof(TInstancedStruct<>));
 
     // The nearest C# class above Type that is minted too, which is what Type is minted under, or null below a native base.
     public Type? MintedParentOf(Type Type)
@@ -376,6 +415,12 @@ internal sealed class TypeLibrary
             {
                 return new ScriptType { Kind = EPropertyType.Object, Clr = Type, TargetClass = NativeTypeName.Of(Type.GetGenericArguments()[0]) };
             }
+        }
+
+        if (IsInstancedStructView(Type))
+        {
+            string? BaseName = Type.IsGenericType ? ResolveType(Type.GetGenericArguments()[0]).NativeName : null;
+            return new ScriptType { Kind = EPropertyType.InstancedStruct, Clr = Type, BaseName = BaseName };
         }
 
         // A wrapper around a native CObject is a hard reference, stored as an object property.
@@ -570,6 +615,7 @@ internal sealed class TypeLibrary
         AddIfSet(nameof(PropertyAttribute.AssetType), Meta?.AssetType);
         AddIfSet(nameof(PropertyAttribute.Bundle), Meta?.Bundle);
         AddIfSet(nameof(PropertyAttribute.Group), Meta?.Group);
+        AddIfSet(nameof(PropertyAttribute.Implements), Meta?.Implements?.FullName);
         if (Meta != null && Meta.Component != EComponentBind.None)
         {
             Result.Add(new(nameof(PropertyAttribute.Component), Meta.Component.ToString()));
@@ -662,7 +708,7 @@ internal sealed class TypeDescription
         PropertyInfo? Property = Method.DeclaringType.GetProperty(Method.Name.Substring(4),
             BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly);
         return Property != null && Property.SetMethod == null && Property.GetCustomAttribute<PropertyAttribute>()?.Has(ESpecifier.Bind) == true
-            && !ScriptPropertyViews.IsView(Property.PropertyType);
+            && !TypeLibrary.IsNativeOwnedViewType(Property.PropertyType);
     }
 
     private static HashSet<string> MethodsNamedBySync(Type Type)

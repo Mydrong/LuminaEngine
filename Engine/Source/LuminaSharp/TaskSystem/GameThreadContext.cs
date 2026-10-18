@@ -45,6 +45,12 @@ internal sealed class GameThreadContext : SynchronizationContext
         Pending.Enqueue(new FWork(Callback, State, OnGameThread ? Engine.Snapshot() : default));
     }
 
+    // Queues work for the next drain from any thread, keeping the caller's scope, which a MoveToTask carried onto its worker.
+    internal static void Run(Action Work)
+    {
+        Pending.Enqueue(new FWork(static State => ((Action)State!)(), Work, Engine.Snapshot()));
+    }
+
     // Blocking a worker on the thread that drains the queue would deadlock, so this refuses rather than waits.
     public override void Send(SendOrPostCallback Callback, object? State)
     {

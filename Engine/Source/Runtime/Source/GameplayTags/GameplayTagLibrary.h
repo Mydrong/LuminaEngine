@@ -9,19 +9,13 @@
 
 namespace Lumina
 {
-    class CWorld;
-
-    /** Tag queries against an entity's tag component, which is the tag registry's business. */
+    // The process-global tag registry, while tags on an entity live on CWorld.
     REFLECT()
     class RUNTIME_API CGameplayTagLibrary : public CFunctionLibrary
     {
         GENERATED_BODY()
 
     public:
-
-        /** The registered tag ids the entity carries, empty when it has no tag component. */
-        FUNCTION()
-        static void GetTags(CWorld* World, ECS::FEntity Entity, TVector<uint32>& Out);
 
         //~ The process-global registry, where an id interns a dotted name and all of its ancestors.
 
@@ -46,23 +40,5 @@ namespace Lumina
 
         FUNCTION()
         static bool IsValidTag(uint32 TagId);
-
-        //~ Per entity, stored on the tag component that Add creates.
-
-        FUNCTION()
-        static void AddTag(CWorld* World, ECS::FEntity Entity, uint32 TagId);
-
-        FUNCTION()
-        static void RemoveTag(CWorld* World, ECS::FEntity Entity, uint32 TagId);
-
-        /** Hierarchical, so an entity tagged with a leaf answers true for a query on its parent. */
-        FUNCTION()
-        static bool HasTag(CWorld* World, ECS::FEntity Entity, uint32 TagId);
-
-        FUNCTION()
-        static bool HasTagExact(CWorld* World, ECS::FEntity Entity, uint32 TagId);
-
-        FUNCTION()
-        static void ClearTags(CWorld* World, ECS::FEntity Entity);
     };
 }

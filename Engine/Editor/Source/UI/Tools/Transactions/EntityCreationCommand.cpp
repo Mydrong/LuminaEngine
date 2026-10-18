@@ -28,7 +28,7 @@ namespace Lumina
             return;
         }
 
-        ECS::FRegistry& Registry = ECS::GetWorldRegistry(*W);
+        ECS::FRegistry& Registry = W->GetEntityRegistry();
 
         // Excluded for the same reason the registry snapshot excludes them, they are not the document.
         Out.reserve(Registry.NumEntities());
@@ -49,7 +49,7 @@ namespace Lumina
             return;
         }
 
-        ECS::FRegistry& Registry = ECS::GetWorldRegistry(*W);
+        ECS::FRegistry& Registry = W->GetEntityRegistry();
 
         TVector<ECS::FEntity> LiveAfter;
         CaptureLiveEntities(LiveAfter);
@@ -98,7 +98,7 @@ namespace Lumina
             return;
         }
 
-        ECS::FRegistry& Registry = ECS::GetWorldRegistry(*W);
+        ECS::FRegistry& Registry = W->GetEntityRegistry();
 
         // Descendants inside the created set are taken by their root, so the validity guard makes it a no-op.
         for (ECS::FEntity E : Created)
@@ -123,7 +123,7 @@ namespace Lumina
             return;
         }
 
-        ECS::FRegistry& Registry = ECS::GetWorldRegistry(*W);
+        ECS::FRegistry& Registry = W->GetEntityRegistry();
 
         FMemoryReader Reader(CreatedData);
         FObjectProxyArchiver Ar(Reader, true);

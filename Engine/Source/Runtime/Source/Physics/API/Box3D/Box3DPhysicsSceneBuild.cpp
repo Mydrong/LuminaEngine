@@ -88,9 +88,11 @@ namespace Lumina::Physics
         bool bColliderIsTrigger = false;
         const CPhysicsMaterial* ResolvedMaterial = nullptr;
 
-        const FVector3 Scale = Transform->GetScale();
-        const float UniformScale = Transform->MaxScale();
-        if (!Box3DUtils::IsSafePose(Transform->GetLocation(), Transform->GetRotation()) || !Box3DUtils::IsWithin(Scale, Box3DUtils::MaxSafeCoordinate))
+        // A body lives in world space, so a parented entity is placed and sized by its world transform.
+        const FTransform BodyPose = Transform->ComputeWorldTransform();
+        const FVector3 Scale = BodyPose.GetScale();
+        const float UniformScale = Math::Max(Scale.x, Math::Max(Scale.y, Scale.z));
+        if (!Box3DUtils::IsSafePose(BodyPose.GetLocation(), BodyPose.GetRotation()) || !Box3DUtils::IsWithin(Scale, Box3DUtils::MaxSafeCoordinate))
         {
             LOG_ERROR("Entity {} has a NaN, infinite or out of range transform, so its rigid body is not created", Entity.Value);
             return EBodyBuildStatus::Error;
@@ -401,8 +403,8 @@ namespace Lumina::Physics
             }
         }
 
-        const FVector3 Position = Transform->GetLocation();
-        const FQuat Rotation = Transform->GetRotation();
+        const FVector3 Position = BodyPose.GetLocation();
+        const FQuat Rotation = BodyPose.GetRotation();
 
         Out.BodyDef = b3DefaultBodyDef();
         Out.BodyDef.type = Box3DUtils::ToBox3DBodyType(BodyType);
@@ -638,7 +640,7 @@ namespace Lumina::Physics
                 continue;
             }
 
-            const FVector3 Scale   = Transform->GetScale();
+            const FVector3 Scale   = Transform->ComputeWorldTransform().GetScale();
             const bool     bConvex = DMC->bConvex;
 
             FDynamicMeshCookEntry& Entry = DynamicMeshCooks[Entity];

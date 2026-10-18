@@ -41,7 +41,7 @@ namespace Lumina
             return;
         }
 
-        ECS::FRegistry& Registry = ECS::GetWorldRegistry(*W);
+        ECS::FRegistry& Registry = W->GetEntityRegistry();
 
         FMemoryWriter Writer(Data);
         FObjectProxyArchiver Ar(Writer, false);
@@ -74,7 +74,7 @@ namespace Lumina
             return;
         }
 
-        ECS::FRegistry& Registry = ECS::GetWorldRegistry(*W);
+        ECS::FRegistry& Registry = W->GetEntityRegistry();
 
         // A candidate still alive was never part of the delete, so it owes no undo step.
         TVector<FEntry> Kept;
@@ -100,7 +100,7 @@ namespace Lumina
             return;
         }
 
-        ECS::FRegistry& Registry = ECS::GetWorldRegistry(*W);
+        ECS::FRegistry& Registry = W->GetEntityRegistry();
 
         FMemoryReader Reader(Data);
         FObjectProxyArchiver Ar(Reader, true);
@@ -137,7 +137,7 @@ namespace Lumina
             return;
         }
 
-        ECS::FRegistry& Registry = ECS::GetWorldRegistry(*W);
+        ECS::FRegistry& Registry = W->GetEntityRegistry();
 
         // Reverse, so each child goes before the parent that would otherwise take it along.
         for (auto It = Entries.rbegin(); It != Entries.rend(); ++It)

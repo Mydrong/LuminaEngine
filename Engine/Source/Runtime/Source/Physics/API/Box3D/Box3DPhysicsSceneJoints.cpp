@@ -468,8 +468,9 @@ namespace Lumina::Physics
         Desc.Type = Component->Type;
         Desc.BodyA = TargetEntity;
         Desc.BodyB = Entity;
-        Desc.Anchor = Transform->GetLocation() + Component->PivotOffset;
-        Desc.Axis = Math::Rotate(Transform->GetRotation(), Component->Axis);
+        const FTransform JointPose = Transform->ComputeWorldTransform();
+        Desc.Anchor = JointPose.GetLocation() + Component->PivotOffset;
+        Desc.Axis = Math::Rotate(JointPose.GetRotation(), Component->Axis);
         Desc.AnchorB = Desc.Anchor;
         Desc.MinLimit = Component->LowerLimit;
         Desc.MaxLimit = Component->UpperLimit;
@@ -524,7 +525,7 @@ namespace Lumina::Physics
             return;
         }
 
-        ECS::FRegistry& Registry = ECS::GetWorldRegistry(*World);
+        ECS::FRegistry& Registry = World->GetEntityRegistry();
 
         // Compacted in place, so an entity whose bodies are not ready is retried next frame without a copy.
         size_t Write = 0;

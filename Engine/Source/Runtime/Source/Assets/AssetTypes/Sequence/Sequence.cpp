@@ -214,7 +214,7 @@ namespace Lumina
             return;
         }
 
-        ECS::FRegistry& Registry = ECS::GetWorldRegistry(*Context.World);
+        ECS::FRegistry& Registry = Context.World->GetEntityRegistry();
         void* Component = Ops->Get(Registry, Entity);
         if (Component == nullptr)
         {
@@ -262,7 +262,7 @@ namespace Lumina
         }
 
         const FComponentOps* Ops = FindComponentOps(ComponentType.ToString());
-        void* Component = Ops != nullptr ? Ops->Get(ECS::GetWorldRegistry(*World), Entity) : nullptr;
+        void* Component = Ops != nullptr ? Ops->Get(World->GetEntityRegistry(), Entity) : nullptr;
         if (Component == nullptr)
         {
             return false;
@@ -383,7 +383,7 @@ namespace Lumina
             return;
         }
 
-        ECS::FRegistry& Registry = ECS::GetWorldRegistry(*Context.World);
+        ECS::FRegistry& Registry = Context.World->GetEntityRegistry();
         FSequenceInstance::FPlayingShake* Playing = nullptr;
         for (FSequenceInstance::FPlayingShake& Shake : Context.Instance->Shakes)
         {
@@ -433,7 +433,7 @@ namespace Lumina
             {
                 if (World != nullptr)
                 {
-                    SCameraSystem::StopCameraShake(ECS::GetWorldRegistry(*World), Instance.Shakes[Index].Handle);
+                    SCameraSystem::StopCameraShake(World->GetEntityRegistry(), Instance.Shakes[Index].Handle);
                 }
                 Instance.Shakes.erase(Instance.Shakes.begin() + Index);
                 continue;
@@ -625,7 +625,7 @@ namespace Lumina
                 }
             }
 
-            SCameraSystem::SetCinematicOverlay(ECS::GetWorldRegistry(*World), 0.0f, FVector3(0.0f), 0.0f);
+            SCameraSystem::SetCinematicOverlay(World->GetEntityRegistry(), 0.0f, FVector3(0.0f), 0.0f);
 
             // Hands the view back when the sequence still owns it, so gameplay resumes on its own camera.
             const ECS::FEntity Active = World->GetActiveCameraEntity();
@@ -698,7 +698,7 @@ namespace Lumina
 
         OverlayFade = 0.0f;
         Sequence->Evaluate(Context);
-        SCameraSystem::SetCinematicOverlay(ECS::GetWorldRegistry(*World), OverlayFade, OverlayFadeColor, Sequence->LetterboxAspect);
+        SCameraSystem::SetCinematicOverlay(World->GetEntityRegistry(), OverlayFade, OverlayFadeColor, Sequence->LetterboxAspect);
     }
 
     int32 CSequence::GetFrameCount() const

@@ -10,6 +10,7 @@
 #include "Scripting/ScriptableObject.h"
 #include "Scripting/ManagedTypeRegistry.h"
 #include "World/World.h"
+#include "World/Entity/EntityUtils.h"
 #include "Core/Object/ObjectReinstancer.h"
 #include "Core/Reflection/Type/ObjectReferenceVisitor.h"
 #include "ScriptTestUtil.h"
@@ -1357,4 +1358,87 @@ TEST(ScriptClassInheritance, AClassUnderAScriptParentKeepsItsOverrides)
     ASSERT_NE(ChildClass, nullptr);
     EXPECT_NE(ChildClass->FindScriptOverride(FName("OnReady")), nullptr) << "an event overridden in C# under a C# parent must dispatch to it";
     EXPECT_NE(ChildClass->FindScriptOverride(FName("OnUpdate")), nullptr);
+}
+
+namespace
+{
+    // Added the way a loaded scene arrives, unattached, so the tick's lifecycle pass is what attaches it.
+    CEntityScriptTest* AddUnattached(ECS::FRegistry& Registry, ECS::FEntity Entity, const char* Label, TVector<FString>& Log)
+    {
+        auto* Script = static_cast<CEntityScriptTest*>(NewObject(CEntityScriptTest::StaticClass(), nullptr, NAME_None, FGuid::New(), OF_Transient));
+        Script->Label = Label;
+        Script->EventLog = &Log;
+        Registry.GetOrEmplace<SEntityScriptComponent>(Entity).Scripts.push_back(Script);
+        return Script;
+    }
+
+    // Reparenting keeps world placement, so it needs a transform to work with.
+    ECS::FEntity CreatePlaced(ECS::FRegistry& Registry)
+    {
+        const ECS::FEntity Entity = Registry.Create();
+        Registry.Emplace<STransformComponent>(Entity);
+        return Entity;
+    }
+
+    FString Joined(const TVector<FString>& Log)
+    {
+        FString Out;
+        for (const FString& Entry : Log)
+        {
+            Out += Out.empty() ? Entry : " " + Entry;
+        }
+        return Out;
+    }
+}
+
+// Godot's order. Every attach runs parents first, then every ready runs children first, scripts top to bottom within an entity.
+TEST(EntityScriptUnification, LifecycleRunsAttachInPreorderThenReadyInPostorder)
+{
+    RegisterPendingTypes();
+    ECS::FRegistry Registry{};
+    TVector<FString> Log;
+
+    const ECS::FEntity Root   = CreatePlaced(Registry);
+    const ECS::FEntity First  = CreatePlaced(Registry);
+    const ECS::FEntity Second = CreatePlaced(Registry);
+    const ECS::FEntity Leaf   = CreatePlaced(Registry);
+    const ECS::FEntity Loner  = CreatePlaced(Registry);
+    ECS::Utils::ReparentEntity(Registry, First, Root);
+    ECS::Utils::ReparentEntity(Registry, Second, Root);
+    ECS::Utils::ReparentEntity(Registry, Leaf, First);
+
+    // Added out of tree order, so the result cannot come from insertion order.
+    AddUnattached(Registry, Loner, "loner", Log);
+    AddUnattached(Registry, Leaf, "leaf", Log);
+    AddUnattached(Registry, Second, "second", Log);
+    AddUnattached(Registry, Root, "root1", Log);
+    AddUnattached(Registry, Root, "root2", Log);
+    AddUnattached(Registry, First, "first", Log);
+
+    EntityScripts::Tick(Registry, 0.1f);
+
+    EXPECT_EQ(Joined(Log), FString("A:root1 A:root2 A:first A:leaf A:second A:loner "
+                                   "R:leaf R:first R:second R:root1 R:root2 R:loner"));
+}
+
+// A script added while the tick runs joins the next lifecycle round in the same order, rather than readying ahead of its parent.
+TEST(EntityScriptUnification, LifecycleOrderHoldsForAScriptAddedLater)
+{
+    RegisterPendingTypes();
+    ECS::FRegistry Registry{};
+    TVector<FString> Log;
+
+    const ECS::FEntity Parent = CreatePlaced(Registry);
+    const ECS::FEntity Child  = CreatePlaced(Registry);
+    ECS::Utils::ReparentEntity(Registry, Child, Parent);
+
+    AddUnattached(Registry, Parent, "parent", Log);
+    EntityScripts::Tick(Registry, 0.1f);
+    Log.clear();
+
+    AddUnattached(Registry, Child, "child", Log);
+    AddUnattached(Registry, Parent, "late", Log);
+    EntityScripts::Tick(Registry, 0.1f);
+
+    EXPECT_EQ(Joined(Log), FString("A:late A:child R:child R:late"));
 }

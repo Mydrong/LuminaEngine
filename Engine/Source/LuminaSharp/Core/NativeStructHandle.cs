@@ -55,7 +55,7 @@ public readonly unsafe struct NativeRef : IEquatable<NativeRef>
     public bool IsValid
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        get => EpochSlot == null ? Base != 0 : *EpochSlot == Epoch || Resolve(false) != 0;
+        get => EpochSlot == null ? Base != 0 : (*EpochSlot == Epoch && Base != 0) || Resolve(false) != 0;
     }
 
     public bool IsTracked => EpochSlot != null;
@@ -77,7 +77,8 @@ public readonly unsafe struct NativeRef : IEquatable<NativeRef>
                 }
                 return Base + Offset;
             }
-            return (*EpochSlot == Epoch ? Base : Resolve(true)) + Offset;
+            // A tracked reference to a component that was not there yet has no base, and looks again until one is.
+            return (*EpochSlot == Epoch && Base != 0 ? Base : Resolve(true)) + Offset;
         }
     }
 
@@ -101,7 +102,7 @@ public readonly unsafe struct NativeRef : IEquatable<NativeRef>
 
         if (Pointer == 0 && bThrow)
         {
-            throw new InvalidOperationException($"The component is no longer on entity {EntityId & 0xFFFFF}; it was removed or its world was destroyed.");
+            throw new InvalidOperationException($"The component is not on entity {EntityId & 0xFFFFF}; it was never added, was removed, or its world was destroyed.");
         }
         return Pointer;
     }

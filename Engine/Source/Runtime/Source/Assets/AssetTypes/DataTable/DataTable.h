@@ -71,6 +71,12 @@ namespace Lumina
          *  old struct, and reinterpreting those bytes as a different layout is not a conversion. */
         RUNTIME_API void SetRowStruct(CStruct* InStruct);
 
+        // True when every row is a Base or derives from it, so the rows can be read as a Base.
+        NODISCARD RUNTIME_API bool RowsAre(const CStruct* Base) const;
+
+        FUNCTION(ScriptInternal)
+        NODISCARD RUNTIME_API bool RowsAreNamed(const FName& BaseName) const;
+
         FUNCTION()
         NODISCARD RUNTIME_API int32 GetRowCount() const { return (int32)Rows.size(); }
 
@@ -124,13 +130,11 @@ namespace Lumina
         FStructResolveCache RowStructCache;
     };
 
-    /** Typed lookup. Returns null unless the table's row type actually is T -- a mismatched cast here
-     *  would reinterpret unrelated fields rather than fail. A free function because the reflector does
-     *  not parse member templates. */
+    // Null unless the rows are T or derive from it. Free because the reflector does not parse member templates.
     template <typename T>
     const T* FindDataTableRow(const CDataTable* Table, const FName& RowName)
     {
-        if (Table == nullptr || Table->GetRowStruct() != T::StaticStruct())
+        if (Table == nullptr || !Table->RowsAre(T::StaticStruct()))
         {
             return nullptr;
         }
@@ -181,7 +185,7 @@ namespace Lumina
     template <typename T>
     const T* FindDataTableRow(const SDataTableRowHandle& Handle)
     {
-        if (Handle.GetRowStruct() != T::StaticStruct())
+        if (Handle.DataTable == nullptr || !Handle.DataTable->RowsAre(T::StaticStruct()))
         {
             return nullptr;
         }

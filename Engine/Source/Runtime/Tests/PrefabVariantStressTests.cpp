@@ -250,14 +250,14 @@ namespace
     {
         RegisterPendingTypes();
         CWorld* World = NewObject<CWorld>(nullptr, NAME_None, FGuid::New(), OF_Transient);
-        ECS::GetWorldRegistry(*World).GetSignals<STransformComponent>().OnConstruct.Connect<&BindTransformLikeAWorld>();
+        World->GetEntityRegistry().GetSignals<STransformComponent>().OnConstruct.Connect<&BindTransformLikeAWorld>();
         return World;
     }
 
     // What the end of a frame does, so a later refresh reads current world matrices.
     void EndFrame(CWorld* World)
     {
-        ECS::Utils::ResolveAllDirtyTransforms(ECS::GetWorldRegistry(*World));
+        ECS::Utils::ResolveAllDirtyTransforms(World->GetEntityRegistry());
     }
 
     CPrefab* MakeParent()
@@ -451,7 +451,7 @@ TEST(PrefabVariantStress, InstancesMatchTheVariantThroughRefresh)
     const ECS::FEntity Root = Variant->Instantiate(World, FTransform());
     ASSERT_NE(Root, ECS::NullEntity);
     EndFrame(World);
-    ECS::FRegistry& W = ECS::GetWorldRegistry(*World);
+    ECS::FRegistry& W = World->GetEntityRegistry();
 
     auto InstanceSnapshot = [&]()
     {
@@ -495,7 +495,7 @@ TEST(PrefabVariantStress, ParentEditReachesVariantInstances)
     const ECS::FEntity Root = Variant->Instantiate(World, FTransform());
     ASSERT_NE(Root, ECS::NullEntity);
     EndFrame(World);
-    ECS::FRegistry& W = ECS::GetWorldRegistry(*World);
+    ECS::FRegistry& W = World->GetEntityRegistry();
 
     ECS::FRegistry& P = Parent->Registry;
     P.Get<STransformComponent>(Find(P, "leg")).SetLocalLocation(FVector3(0.0f, -6.0f, 0.0f));
@@ -645,7 +645,7 @@ TEST(PrefabVariantStress, RandomEditsRoundTripThroughAChain)
         CPrefab* Leaf = MakeVariantOf(Mid);
         CWorld* World = MakeWorld();
         const ECS::FEntity InstanceRoot = Leaf->Instantiate(World, FTransform());
-        ECS::FRegistry& WorldRegistry = ECS::GetWorldRegistry(*World);
+        ECS::FRegistry& WorldRegistry = World->GetEntityRegistry();
         EndFrame(World);
         FFuzzer BaseEdits(Seed * 7919u, "b");
         FFuzzer MidEdits(Seed * 104729u, "m");

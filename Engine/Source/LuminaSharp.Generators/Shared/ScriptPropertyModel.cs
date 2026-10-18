@@ -100,10 +100,18 @@ internal static class ScriptPropertyClassifier
                 + "parameter or return but not yet for a [Property].");
         }
 
+        if (Type.ToDisplayString() == ScriptPropertyTypeNames.FInstancedStruct)
+        {
+            return FScriptPropertyClassification.Of(EScriptAccess.InstancedStruct);
+        }
+
         if (Type is INamedTypeSymbol Named && Named.IsGenericType)
         {
             switch (Named.ConstructedFrom.ToDisplayString())
             {
+                case ScriptPropertyTypeNames.TInstancedStruct:
+                    return FScriptPropertyClassification.Of(EScriptAccess.InstancedStruct);
+
                 // A hard object reference. Stored natively as an object property, so it keeps its target
                 // alive. Checked before the unmanaged test below: it is a bare pointer, so it would otherwise
                 // pass as blittable and be copied WITHOUT taking a reference.
@@ -150,13 +158,17 @@ internal static class ScriptPropertyClassifier
     // A [Property(Component = ...)] member is a reference to the owner's component rather than a value of that type.
     public static FScriptPropertyClassification ClassifyMember(ISymbol Member, ITypeSymbol Type)
     {
+        bool bRefType = Type is INamedTypeSymbol { IsGenericType: true } Named
+            && Named.OriginalDefinition.ToDisplayString() == ScriptPropertyTypeNames.ComponentRef;
         if (!BindsComponent(Member))
         {
-            return Classify(Type);
+            // Without this the reference reads as a script struct, and the advice to mark it [Reflect] leads nowhere.
+            return bRefType
+                ? FScriptPropertyClassification.Reject($"'{Display(Type)}' is a component reference, so the [Property] needs "
+                    + "Component = EComponentBind.Get to find the entity's component, or EComponentBind.GetOrAdd to add it when missing.")
+                : Classify(Type);
         }
-        bool bComponentRef = Type is INamedTypeSymbol { IsGenericType: true } Named
-            && Named.OriginalDefinition.ToDisplayString() == ScriptPropertyTypeNames.ComponentRef
-            && IsComponent(Named.TypeArguments[0]);
+        bool bComponentRef = bRefType && IsComponent(((INamedTypeSymbol)Type).TypeArguments[0]);
         return bComponentRef
             ? FScriptPropertyClassification.Of(EScriptAccess.ComponentRef)
             : FScriptPropertyClassification.Reject($"'{Display(Type)}' is not a TComponentRef<T> of a component, and Component binds a reference to one of the entity's components.");
@@ -525,6 +537,9 @@ internal enum EScriptAccess
 
     // A reference to the owner entity's component, bound before OnAttach and read as the handle that tracks it.
     ComponentRef,
+
+    // A view over a native FInstancedStruct slot, whose held type is picked at runtime.
+    InstancedStruct,
 }
 
 /// <summary>The result of <see cref="ScriptPropertyClassifier.Classify"/>: the access shape plus whatever type
@@ -606,6 +621,8 @@ internal static class ScriptPropertyTypeNames
     public const string TVector = "Lumina.TVector<T>";
     public const string THashMap = "Lumina.THashMap<K, V>";
     public const string ObjectPtr = "Lumina.TStrongObjectPtr<T>";
+    public const string FInstancedStruct = "Lumina.FInstancedStruct";
+    public const string TInstancedStruct = "Lumina.TInstancedStruct<TBase>";
 
     public const string List = "System.Collections.Generic.List<T>";
     public const string Dictionary = "System.Collections.Generic.Dictionary<TKey, TValue>";
@@ -624,5 +641,5 @@ internal static class ScriptPropertyTypeNames
     };
 
     public static bool IsViewAccess(EScriptAccess Access) =>
-        Access is EScriptAccess.ListView or EScriptAccess.MapView;
+        Access is EScriptAccess.ListView or EScriptAccess.MapView or EScriptAccess.InstancedStruct;
 }

@@ -39,6 +39,14 @@ namespace Lumina::ImGuiX
     // Set by the ImGui renderer whenever the scale is (re)resolved.
     RUNTIME_API void SetUIScale(float Scale);
 
+    // The engine's menu look, a rounded padded popup, pushed before the popup or the menu bar that opens it.
+    RUNTIME_API void PushMenuWindowStyle();
+    RUNTIME_API void PopMenuWindowStyle();
+
+    // Soft accent rows with rounded highlights, for the items inside a popup or a whole menu bar and its dropdowns.
+    RUNTIME_API void PushMenuItemStyle();
+    RUNTIME_API void PopMenuItemStyle();
+
     RUNTIME_API void TextTooltip_Internal(FStringView String);
     RUNTIME_API void TextColoredUnformatted(const ImVec4& Color, const FFixedString& String);
 
@@ -147,12 +155,12 @@ namespace Lumina::ImGuiX
     RUNTIME_API bool SelectAllCheckbox(const char* Label, uint32 NumChecked, uint32 NumTotal, bool& bOutCheckAll);
     RUNTIME_API bool ToggleSwitch(const char* Label, bool* Value);
 
-    RUNTIME_API inline bool FlatButton( char const* pLabel, ImVec2 const& size = ImVec2( 0, 0 ), const ImColor& foregroundColor = ImGui::ColorConvertFloat4ToU32( ImGui::GetStyle().Colors[ImGuiCol_Text] ) )
+    inline bool FlatButton( char const* pLabel, ImVec2 const& size = ImVec2( 0, 0 ), const ImColor& foregroundColor = ImGui::ColorConvertFloat4ToU32( ImGui::GetStyle().Colors[ImGuiCol_Text] ) )
     {
         return ButtonEx( nullptr, pLabel, size, ImColor(0), ImColor(0), ImGui::ColorConvertFloat4ToU32(ImGui::GetStyle().Colors[ImGuiCol_Text]));
     }
 
-    RUNTIME_API inline bool IconButton(char const* pIcon, char const* pLabel, const ImColor& iconColor = ImGui::ColorConvertFloat4ToU32( ImGui::GetStyle().Colors[ImGuiCol_Text] ), ImVec2 const& size = ImVec2(0, 0), bool shouldCenterContents = false )
+    inline bool IconButton(char const* pIcon, char const* pLabel, const ImColor& iconColor = ImGui::ColorConvertFloat4ToU32( ImGui::GetStyle().Colors[ImGuiCol_Text] ), ImVec2 const& size = ImVec2(0, 0), bool shouldCenterContents = false )
     {
         return ButtonEx(pIcon, pLabel, size, ImGui::ColorConvertFloat4ToU32(ImGui::GetStyle().Colors[ImGuiCol_Button]), iconColor, ImGui::ColorConvertFloat4ToU32(ImGui::GetStyle().Colors[ImGuiCol_Text]), shouldCenterContents);
     }

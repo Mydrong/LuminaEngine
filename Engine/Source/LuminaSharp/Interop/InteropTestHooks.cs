@@ -829,43 +829,39 @@ internal static unsafe class InteropTestHooks
         return CInteropTestLibrary.ReadOpaqueValue(Opaque);
     }
 
-    private static readonly DelegateBinding[] DelegateProbeBindings = new DelegateBinding[3];
+    private static IntPtr DelegateProbeHost;
     private static int DelegateProbeFlags;
 
-    // Binds every arity the generated accessors expose, over a native SDelegateTestHost the caller owns.
+    private static void OnProbeOne(string Text)
+    {
+        DelegateProbeFlags |= 1;
+        if (Text == "solo") DelegateProbeFlags |= 2;
+    }
+
+    private static void OnProbeTwo(Lumina.SDelegateTestPayload Payload, float Scalar)
+    {
+        DelegateProbeFlags |= 4;
+        if (Payload.X == 2.0f && Payload.Count == 5 && Scalar == 0.25f) DelegateProbeFlags |= 8;
+    }
+
+    private static void OnProbeThree(Lumina.SDelegateTestPayload Payload, float Scalar, string Text)
+    {
+        DelegateProbeFlags |= 16;
+        if (Payload.X == 7.0f && Payload.Count == 3 && Scalar == 1.5f && Text == "hello") DelegateProbeFlags |= 32;
+    }
+
+    // Subscribes to every arity the generated events expose, over a native SDelegateTestHost the caller owns.
     [ManagedExport]
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
     public static int Test_DelegateArgsBind(IntPtr Host)
     {
         DelegateProbeFlags = 0;
+        DelegateProbeHost = Host;
 
         Lumina.SDelegateTestHost View = new Lumina.SDelegateTestHost(Host);
-
-        DelegateProbeBindings[0] = View.OnOneString.Bind(Text =>
-        {
-            DelegateProbeFlags |= 1;
-            if (Text == "solo") DelegateProbeFlags |= 2;
-        });
-
-        DelegateProbeBindings[1] = View.OnTwo.Bind((Payload, Scalar) =>
-        {
-            DelegateProbeFlags |= 4;
-            if (Payload.X == 2.0f && Payload.Count == 5 && Scalar == 0.25f) DelegateProbeFlags |= 8;
-        });
-
-        DelegateProbeBindings[2] = View.OnThree.Bind((Payload, Scalar, Text) =>
-        {
-            DelegateProbeFlags |= 16;
-            if (Payload.X == 7.0f && Payload.Count == 3 && Scalar == 1.5f && Text == "hello") DelegateProbeFlags |= 32;
-        });
-
-        foreach (DelegateBinding Binding in DelegateProbeBindings)
-        {
-            if (!Binding.IsValid)
-            {
-                return 0;
-            }
-        }
+        View.OnOneString += OnProbeOne;
+        View.OnTwo += OnProbeTwo;
+        View.OnThree += OnProbeThree;
         return 1;
     }
 
@@ -873,16 +869,28 @@ internal static unsafe class InteropTestHooks
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
     public static int Test_DelegateArgsFlags() => DelegateProbeFlags;
 
-    // Must run while the native delegates are still alive, or the bindings outlive the memory they name.
+    // Must run while the native delegates are still alive, since -= reads their listeners.
     [ManagedExport]
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
     public static void Test_DelegateArgsRelease()
     {
-        for (int Index = 0; Index < DelegateProbeBindings.Length; ++Index)
-        {
-            DelegateProbeBindings[Index].Dispose();
-            DelegateProbeBindings[Index] = default;
-        }
+        Lumina.SDelegateTestHost View = new Lumina.SDelegateTestHost(DelegateProbeHost);
+        View.OnOneString -= OnProbeOne;
+        View.OnTwo -= OnProbeTwo;
+        View.OnThree -= OnProbeThree;
+        DelegateProbeHost = IntPtr.Zero;
+    }
+
+    // A handler added twice and removed once stays bound once, and a handler never added removes nothing.
+    [ManagedExport]
+    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
+    public static void Test_DelegateArgsAddTwiceRemoveOnce(IntPtr Host)
+    {
+        Lumina.SDelegateTestHost View = new Lumina.SDelegateTestHost(Host);
+        View.OnTwo += OnProbeTwo;
+        View.OnTwo += OnProbeTwo;
+        View.OnTwo -= OnProbeTwo;
+        View.OnOneString -= OnProbeOne;
     }
 
     // A blittable argument is read in place, so a two-argument broadcast must not allocate at all.
@@ -914,6 +922,80 @@ internal static unsafe class InteropTestHooks
     }
 
     // Failure bits, four per form, for a root, an extension and a component compiled together the way the editor compiles them.
+    // Script structs picked by the interface they implement, the strategy pattern C# structs reach without inheritance.
+    [ManagedExport]
+    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
+    public static int Test_ScriptStructStrategies()
+    {
+        const string Source = """
+            using Lumina;
+            using LuminaSharp;
+            public interface IProbeStrategy
+            {
+                int Compute(int X);
+            }
+            [Reflect]
+            public partial struct DoubleStrategy : INativeStruct<DoubleStrategy>, IProbeStrategy
+            {
+                [Property] public int Unused;
+                public int Compute(int X) => X * 2;
+            }
+            [Reflect]
+            public partial struct AddStrategy : INativeStruct<AddStrategy>, IProbeStrategy
+            {
+                [Property] public int Unused;
+                public int Compute(int X) => X + 3;
+            }
+            [Reflect]
+            public partial struct PlainProbeData : INativeStruct<PlainProbeData>
+            {
+                [Property] public int Value;
+            }
+            """;
+        FScriptImage? Image = ScriptCompiler.Compile("StrategyProbe", new[] { ("StrategyProbe.cs", Source) });
+        if (Image is not { } Compiled)
+        {
+            return -1;
+        }
+
+        var Context = new ScriptLoadContext("StrategyProbe");
+        void* Memory = System.Runtime.InteropServices.NativeMemory.AllocZeroed(64);
+        try
+        {
+            Type[] Types = Context.LoadScriptAssembly("StrategyProbe", Compiled).GetTypes();
+            var Library = new TypeLibrary(Types);
+            int Failures = 0;
+
+            Type Interface = Types.First(Candidate => Candidate.Name == "IProbeStrategy");
+            System.Reflection.MethodInfo Compute = Interface.GetMethod("Compute")!;
+            int Run(string Name) => Library.ViewScriptStruct(Name, (nint)Memory) is { } View && Interface.IsInstanceOfType(View)
+                ? (int)Compute.Invoke(View, new object[] { 5 })!
+                : int.MinValue;
+
+            Failures |= Run("DoubleStrategy") == 10 ? 0 : 1;
+            Failures |= Run("AddStrategy") == 8 ? 0 : 2;
+            Failures |= Run("PlainProbeData") == int.MinValue ? 0 : 4;
+            Failures |= Library.ViewScriptStruct("NoSuchStruct", (nint)Memory) == null ? 0 : 8;
+            Failures |= Library.ViewScriptStruct("DoubleStrategy", 0) == null ? 0 : 16;
+
+            Type Double = Types.First(Candidate => Candidate.Name == "DoubleStrategy");
+            Type Plain = Types.First(Candidate => Candidate.Name == "PlainProbeData");
+            Failures |= TypeLibrary.ImplementedInterfaces(Double) == "IProbeStrategy" ? 0 : 32;
+            Failures |= TypeLibrary.ImplementedInterfaces(Plain) == "" ? 0 : 64;
+            return Failures;
+        }
+        catch (Exception Error)
+        {
+            Native.Log(ELogLevel.Error, "StrategyProbe threw " + Error);
+            return -2;
+        }
+        finally
+        {
+            System.Runtime.InteropServices.NativeMemory.Free(Memory);
+            Context.Unload();
+        }
+    }
+
     [ManagedExport]
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
     public static int Test_CompileScriptStructForms()
@@ -1036,6 +1118,112 @@ internal static unsafe class InteropTestHooks
                 return true;
             }
         }
+    }
+
+    // On its first row the walk removes the doomed rows' second component and grows that pool, then sums what every row reads.
+    [ManagedExport]
+    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
+    public static int Test_ViewMutatesMidLoop(IntPtr World, uint* Doomed, int DoomedCount, uint* Joiners, int JoinerCount, uint* OutFirst, double* OutSum)
+    {
+        var Registry = new Lumina.CWorld(World);
+        int Visited = 0;
+        foreach (var Row in Registry.View<Lumina.STransformComponent, Lumina.SBuoyancyComponent>().Each())
+        {
+            // Read first, since a structural change leaves even the current row's refs dangling.
+            *OutSum += Row.Second.Buoyancy;
+            if (Visited == 0)
+            {
+                *OutFirst = Row.Entity.Id;
+                for (int i = 0; i < DoomedCount; ++i)
+                {
+                    if (Doomed[i] != Row.Entity.Id)
+                    {
+                        Registry.RemoveComponent<Lumina.SBuoyancyComponent>(new FEntity(Doomed[i]));
+                    }
+                }
+                for (int i = 0; i < JoinerCount; ++i)
+                {
+                    Registry.GetOrEmplaceComponent<Lumina.SBuoyancyComponent>(new FEntity(Joiners[i])).Buoyancy = -1000.0f;
+                }
+            }
+            ++Visited;
+        }
+        return Visited;
+    }
+
+    // Spawns a loaded prefab through the World overload, placed under a parent.
+    [ManagedExport]
+    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
+    public static uint Test_SpawnLoadedPrefab(IntPtr World, IntPtr Prefab, uint Parent)
+    {
+        var Target = new Lumina.CWorld(World);
+        var Loaded = Wrapper<Lumina.CPrefab>.ForObject(Prefab)!;
+        return Target.SpawnPrefab(Loaded, new FVector3(3.0f, 4.0f, 5.0f), null, new FEntity(Parent)).Id;
+    }
+
+    // Reads the row named Row through SInteropTestRow, by name and through a handle, and -1 when either refuses.
+    [ManagedExport]
+    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
+    public static int Test_ReadRowAsBase(IntPtr Table, IntPtr Handle)
+    {
+        var Loaded = Wrapper<Lumina.CDataTable>.ForObject(Table)!;
+        Lumina.SInteropTestRow? ByName = Loaded.TryGetRow<Lumina.SInteropTestRow>("Row");
+        Lumina.SInteropTestRow? ByHandle = NativeStructs.FromAddress<Lumina.SDataTableRowHandle>(Handle).TryGet<Lumina.SInteropTestRow>();
+        if (ByName is not { } Row || ByHandle is not { } Same)
+        {
+            return -1;
+        }
+        return Row.BaseValue == Same.BaseValue ? Row.BaseValue : -1;
+    }
+
+    // True when the table refuses to be read as the derived row, both by name and through a handle.
+    [ManagedExport]
+    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
+    public static int Test_RefusesRowAsDerived(IntPtr Table, IntPtr Handle)
+    {
+        var Loaded = Wrapper<Lumina.CDataTable>.ForObject(Table)!;
+        return Loaded.TryGetRow<Lumina.SInteropTestDerivedRow>("Row") is null
+            && NativeStructs.FromAddress<Lumina.SDataTableRowHandle>(Handle).TryGet<Lumina.SInteropTestDerivedRow>() is null ? 1 : 0;
+    }
+
+    private static FVector3 TweenValue;
+    private static int TweenFinished;
+    private static int TweenLoops;
+
+    // Builds one tween through the fluent C# API, for native to tick and Test_TweenRead to inspect.
+    [ManagedExport]
+    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
+    public static int Test_TweenBuild(IntPtr World, uint Entity, float* OutDuration)
+    {
+        var Target = new Lumina.CWorld(World);
+        FEntity E = new FEntity(Entity);
+        TweenValue = default;
+        TweenFinished = 0;
+        TweenLoops = 0;
+
+        Tween T = Target.CreateTween(E)
+            .MoveTo(E, new FVector3(3.0f, 0.0f, 0.0f), 0.2f).Trans(EEaseTransition.Linear)
+            .Parallel()
+            .Value(new FVector3(0.0f), new FVector3(1.0f, 2.0f, 3.0f), 0.2f, V => TweenValue = V).Trans(EEaseTransition.Linear)
+            .Property<Lumina.SBuoyancyComponent>(E, "Buoyancy", 5.0f, 0.2f).Trans(EEaseTransition.Linear)
+            .Punch(E, ETweenTransformChannel.Scale, new FVector3(0.5f), 0.2f)
+            .SetLoops(2, ETweenLoopMode.Yoyo)
+            .OnLoop(Count => TweenLoops = Count)
+            .OnFinished(() => ++TweenFinished);
+
+        *OutDuration = T.Duration;
+        return T.IsRunning ? 1 : 0;
+    }
+
+    [ManagedExport]
+    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
+    public static void Test_TweenRead(float* OutValue, int* OutFinished, int* OutLoops)
+    {
+        OutValue[0] = TweenValue.X;
+        OutValue[1] = TweenValue.Y;
+        OutValue[2] = TweenValue.Z;
+        *OutFinished = TweenFinished;
+        *OutLoops = TweenLoops;
     }
 
     // Reads what native queued through fresh readers, then sends three script pings for the next hook to read back.

@@ -1093,18 +1093,6 @@ namespace Lumina::ECS::Utils
         }
     }
 
-    void QueueDirtyTransforms(FTransformDirtyGate* Gate, const ECS::FEntity* Entities, size_t Count)
-    {
-        if (Gate == nullptr || Count == 0)
-        {
-            return;
-        }
-
-        FTransformDirtyState* State = static_cast<FTransformDirtyState*>(Gate);
-        State->DirtyTransforms.EnqueueBulk(Entities, Count);
-        State->bAnyDirty.store(true, std::memory_order_relaxed);
-    }
-
     void FlushDirtyPhysicsBodies(ECS::FRegistry& Registry)
     {
         TUniquePtr<FTransformDirtyState>* Holder = Registry.Ctx().Find<TUniquePtr<FTransformDirtyState>>();
@@ -1137,6 +1125,15 @@ namespace Lumina::ECS::Utils
                 {
                     Registry.EmplaceOrReplace<FNeedsPhysicsBodyUpdate>(E);
                 }
+
+                // Bodies are placed in world space, so moving an entity carries every bodied descendant with it.
+                Registry.GetHierarchy().ForEachDescendant(E, [&Registry](ECS::FEntity Descendant)
+                {
+                    if (Registry.HasAny<SRigidBodyComponent, SCharacterPhysicsComponent>(Descendant))
+                    {
+                        Registry.EmplaceOrReplace<FNeedsPhysicsBodyUpdate>(Descendant);
+                    }
+                });
             }
         }
     }

@@ -175,7 +175,7 @@ namespace Lumina
         float BestDistance = FLT_MAX;
         bool  bHit = false;
 
-        ECS::FRegistry& Registry = ECS::GetWorldRegistry(*World);
+        ECS::FRegistry& Registry = World->GetEntityRegistry();
 
         for (auto&& [Entity, Terrain] : Registry.View<STerrainComponent>().Each())
         {

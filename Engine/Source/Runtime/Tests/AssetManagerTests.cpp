@@ -6,7 +6,9 @@
 #include "Core/Object/Package/Package.h"
 #include "Core/Serialization/MemoryArchiver.h"
 #include "Core/Serialization/Package/PackageSaver.h"
+#include "TaskSystem/CoroutineAssets.h"
 #include "TaskSystem/ThreadedCallback.h"
+#include "World/World.h"
 
 using namespace Lumina;
 
@@ -131,4 +133,53 @@ TEST(AssetHandles, WhatResolvesToNothingIsAnInvalidHandleWhoseCallbackStillRuns)
     ByPath.OnReady([&bCalled](const FAssetHandle& Loaded) { bCalled = Loaded.Get() == nullptr; });
     MainThread::ProcessQueue();
     EXPECT_TRUE(bCalled) << "a failure still completes, so an awaiting caller is never left hanging";
+}
+
+TEST(AssetCoroutines, AResidentObjectLoadsWithoutSuspendingAndStaysWhileHeld)
+{
+    CDataAsset* Object = NewObject<CDataAsset>();
+    const TWeakObjectPtr<CDataAsset> Weak(Object);
+
+    TCoroutine<TStrongObjectPtr<CDataAsset>> Load = Coro::LoadObject<CDataAsset>(Object->GetGUID());
+    ASSERT_TRUE(Load.IsDone());
+    TStrongObjectPtr<CDataAsset> Loaded = Load.GetResult();
+    EXPECT_EQ(Loaded.Get(), Object);
+
+    Load = {};
+    EXPECT_TRUE(Weak.IsValid()) << "the returned pointer keeps it resident once the load's handle is gone";
+    Loaded = nullptr;
+    EXPECT_FALSE(Weak.IsValid());
+}
+
+TEST(AssetCoroutines, AMissingPathOrTheWrongTypeLoadsNull)
+{
+    CDataAsset* Object = NewObject<CDataAsset>();
+
+    TCoroutine<TStrongObjectPtr<CDataAsset>> Missing = Coro::LoadObject<CDataAsset>(FStringView("/Game/Content/NoSuchAsset"));
+    ASSERT_TRUE(Missing.IsDone());
+    EXPECT_EQ(Missing.GetResult().Get(), nullptr);
+
+    TCoroutine<TStrongObjectPtr<CWorld>> WrongType = Coro::LoadObject<CWorld>(Object->GetGUID());
+    ASSERT_TRUE(WrongType.IsDone());
+    EXPECT_EQ(WrongType.GetResult().Get(), nullptr);
+
+    TCoroutine<TStrongObjectPtr<CObject>> NullPath = Coro::LoadObject(FSoftObjectPath());
+    ASSERT_TRUE(NullPath.IsDone());
+    EXPECT_EQ(NullPath.GetResult().Get(), nullptr);
+}
+
+TEST(AssetCoroutines, AParentAwaitsTheLoadedObject)
+{
+    CDataAsset* Object = NewObject<CDataAsset>();
+
+    auto Parent = [](FGuid Asset) -> TCoroutine<CDataAsset*>
+    {
+        TStrongObjectPtr<CDataAsset> Loaded = co_await Coro::LoadObject<CDataAsset>(Asset);
+        FAssetHandle Handle = co_await Coro::Load(Asset);
+        co_return Handle.Get<CDataAsset>() == Loaded.Get() ? Loaded.Get() : nullptr;
+    };
+
+    TCoroutine<CDataAsset*> Run = Parent(Object->GetGUID());
+    ASSERT_TRUE(Run.IsDone());
+    EXPECT_EQ(Run.GetResult(), Object);
 }

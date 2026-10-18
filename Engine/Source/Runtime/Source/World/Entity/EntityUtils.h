@@ -126,8 +126,6 @@ namespace Lumina::ECS::Utils
 	// Bodiless entities pass bQueueBody=false to skip that queue (and its drain) entirely.
 	RUNTIME_API void QueueDirtyTransform(FTransformDirtyGate* Gate, ECS::FEntity Entity, bool bQueueTransform, bool bQueueBody);
 
-	// The bulk form, for entities a parallel writer already marked dirty with SetFromPhysicsUnqueued.
-	RUNTIME_API void QueueDirtyTransforms(FTransformDirtyGate* Gate, const ECS::FEntity* Entities, size_t Count);
 
 	// Start recording which entities the resolve moved for one more consumer, such as the render scene or navigation, each draining its own copy.
 	RUNTIME_API uint32 AddMovedTransformConsumer(ECS::FRegistry& Registry);

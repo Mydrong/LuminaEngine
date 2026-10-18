@@ -188,7 +188,7 @@ namespace Lumina
             return;
         }
 
-        ECS::FRegistry& Registry = ECS::GetWorldRegistry(*SelectedWorld);
+        ECS::FRegistry& Registry = SelectedWorld->GetEntityRegistry();
         const bool bIsServer = SelectedWorld->GetNetMode() == ENetMode::ListenServer
                             || SelectedWorld->GetNetMode() == ENetMode::DedicatedServer;
 

@@ -8,20 +8,13 @@
 
 namespace Lumina
 {
-    class CWorld;
-    class CWorldSubsystem;
-
-    // Engine level session operations. OpenLevel takes the calling world, since editor PIE runs one world per player.
+    // Process level session operations, where a level change lives on CWorld since editor PIE runs one world per player.
     REFLECT()
     class RUNTIME_API CGameLibrary : public CFunctionLibrary
     {
         GENERATED_BODY()
 
     public:
-
-        // The swap runs at the next frame start, so calling this mid tick is safe.
-        FUNCTION()
-        static void OpenLevel(CWorld* World, const FString& Url);
 
         /** Ends the play session in the editor and exits the process in a packaged game, both deferred. */
         FUNCTION()
@@ -30,13 +23,5 @@ namespace Lumina
         // True for a dedicated server or load-test process, which never opens a window or an audio device.
         FUNCTION()
         static bool IsHeadless();
-
-        // False wherever nothing is drawn or heard, which covers a headless process, a dedicated server world and a bot world.
-        FUNCTION()
-        static bool HasPresentation(CWorld* World);
-
-        /** Resolved by class name, so a C# subsystem and a C++ one are found through the same call. */
-        FUNCTION()
-        static CWorldSubsystem* GetSubsystem(CWorld* World, const FName& ClassName);
     };
 }

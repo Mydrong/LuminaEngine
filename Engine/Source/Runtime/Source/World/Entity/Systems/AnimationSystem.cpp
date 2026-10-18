@@ -132,6 +132,7 @@ namespace Lumina
         RequireUpdate(EUpdateStage::Paused);
         Writes<SSkeletalMeshComponent, STransformComponent, SSimpleAnimationComponent, SAnimationGraphComponent, SFollowerPoseComponent>();
         Reads<SCharacterMovementComponent, SystemResource::Hierarchy, SystemResource::PhysicsQuery, SystemResource::Kinematics>();
+        SendsEvent<SAnimMontageStartedEvent, SAnimMontageBlendingOutEvent, SAnimMontageEndedEvent>();
     }
 
     // Diagnostic cross-check of the deferred executor against direct single-clip sampling.
@@ -636,6 +637,26 @@ namespace Lumina
             }
         }
 
+        void SendMontageEvents(const SSystemContext& Context, ECS::FEntity Entity, FAnimMontagePlayer& Montages)
+        {
+            for (const FAnimMontageTransition& Transition : Montages.Transitions)
+            {
+                switch (Transition.Type)
+                {
+                case EAnimMontageTransition::Started:
+                    Context.SendEvent(SAnimMontageStartedEvent{ Entity, Transition.Montage });
+                    break;
+                case EAnimMontageTransition::BlendingOut:
+                    Context.SendEvent(SAnimMontageBlendingOutEvent{ Entity, Transition.Montage, Transition.bInterrupted });
+                    break;
+                case EAnimMontageTransition::Ended:
+                    Context.SendEvent(SAnimMontageEndedEvent{ Entity, Transition.Montage, Transition.bInterrupted });
+                    break;
+                }
+            }
+            Montages.Transitions.clear();
+        }
+
         // One entity's graph update, parallel-safe; pose math happens in the execute phase.
         void UpdateGraph(const SSystemContext& SystemContext, ECS::FEntity Entity,
                          SAnimationGraphComponent& AnimGraph, SSkeletalMeshComponent& Mesh,
@@ -967,6 +988,7 @@ namespace Lumina
                     [&](ECS::FEntity Entity, SAnimationGraphComponent& AnimGraph, SSkeletalMeshComponent& Mesh)
                 {
                     UpdateGraph(Context, Entity, AnimGraph, Mesh, DeltaTime, Now, KinematicsState);
+                    SendMontageEvents(Context, Entity, AnimGraph.Montages);
 
                     // Run while this mesh is hot, instead of after a barrier that waits for every graph.
                     if (bFuseExecute)

@@ -8,7 +8,7 @@ namespace Lumina
 {
     /** Glues this entity to a socket on its parent entity's mesh: skeletal parents follow the animated
      *  bone (socket or raw bone name), static mesh parents follow the authored socket. Attach via
-     *  CSkeletalMeshLibrary::AttachEntityToSocket (parents + snaps in one call) or add manually to an entity that is
+     *  CWorld::AttachEntityToSocket (parents + snaps in one call) or add manually to an entity that is
      *  already a child of a mesh entity. */
     REFLECT(Component, Category = "Animation")
     struct RUNTIME_API SSocketAttachmentComponent

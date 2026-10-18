@@ -6,7 +6,6 @@
 #include "SaveGame.h"
 #include "SaveGameArchive.h"
 #include "SaveGameEvents.h"
-#include "World/World.h"
 #include "Core/Engine/Engine.h"
 #include "Core/Object/Class.h"
 #include "Core/Serialization/MemoryArchiver.h"
@@ -51,35 +50,6 @@ namespace Lumina
         {
             return FStringView(String.c_str(), String.size());
         }
-
-        void SendRequest(CWorld* World, const SSaveGameRequestEvent& Request)
-        {
-            if (World == nullptr)
-            {
-                LOG_WARN("A save game request for slot '{}' was given no world.", Request.SlotName.c_str());
-                return;
-            }
-            ECS::SendEvent(World->GetEvents(), Request);
-        }
-    }
-
-    void CSaveGameLibrary::RequestSaveGame(CWorld* World, CSaveGame* SaveGame, const FString& SlotName, int32 UserIndex)
-    {
-        SSaveGameRequestEvent Request;
-        Request.Action    = ESaveGameAction::Save;
-        Request.SlotName  = SlotName;
-        Request.UserIndex = UserIndex;
-        Request.SaveGame  = SaveGame;
-        SendRequest(World, Move(Request));
-    }
-
-    void CSaveGameLibrary::RequestLoadGame(CWorld* World, const FString& SlotName, int32 UserIndex)
-    {
-        SSaveGameRequestEvent Request;
-        Request.Action    = ESaveGameAction::Load;
-        Request.SlotName  = SlotName;
-        Request.UserIndex = UserIndex;
-        SendRequest(World, Move(Request));
     }
 
     FString CSaveGameLibrary::GetSaveGameDirectory(int32 UserIndex)

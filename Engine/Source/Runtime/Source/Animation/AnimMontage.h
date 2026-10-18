@@ -43,6 +43,9 @@ namespace Lumina
         /** Indices into the montage's NotifyStates whose window the playhead was inside last update. */
         TVector<int32> ActiveNotifyStates;
 
+        // Stopped or cut off by another montage rather than played through, carried into the blend out and end events.
+        bool bInterrupted = false;
+
         bool IsActive() const { return State != EAnimMontageState::Finished; }
     };
 
@@ -58,10 +61,28 @@ namespace Lumina
         bool bRootMotion = false;
     };
 
+    enum class EAnimMontageTransition : uint8
+    {
+        Started,
+        BlendingOut,
+        Ended,
+    };
+
+    // One change of a montage's state, recorded by the player and sent as an event by the animation system.
+    struct FAnimMontageTransition
+    {
+        TStrongObjectPtr<CAnimationMontage> Montage;
+        EAnimMontageTransition Type = EAnimMontageTransition::Started;
+        bool bInterrupted = false;
+    };
+
     // Owns every montage playing on one entity. Advances update-side; the graph's Slot opcode reads it.
     struct RUNTIME_API FAnimMontagePlayer
     {
         TVector<FAnimMontageInstance> Instances;
+
+        // Started, blending out and ended since the animation system last sent them, oldest first.
+        TVector<FAnimMontageTransition> Transitions;
 
         /** Starts a montage, blending out anything already playing on a slot it uses. Returns its id. */
         uint32 Play(CAnimationMontage* Montage, float PlayRate = 1.0f, const FName& StartSection = FName());
@@ -101,7 +122,8 @@ namespace Lumina
         FAnimMontageInstance* Find(const CAnimationMontage* Montage);
         const FAnimMontageInstance* Find(const CAnimationMontage* Montage) const;
 
-        void BeginBlendOut(FAnimMontageInstance& Instance, float BlendOutTime);
+        void BeginBlendOut(FAnimMontageInstance& Instance, float BlendOutTime, bool bInterrupted);
+        void RecordTransition(const FAnimMontageInstance& Instance, EAnimMontageTransition Type);
         void AdvanceInstance(FAnimMontageInstance& Instance, float DeltaTime, TVector<FAnimNotifyEvent>* OutEvents);
         void DispatchNotifies(FAnimMontageInstance& Instance, bool bAdvanced, TVector<FAnimNotifyEvent>* OutEvents);
         void EndActiveNotifyStates(FAnimMontageInstance& Instance, TVector<FAnimNotifyEvent>* OutEvents);

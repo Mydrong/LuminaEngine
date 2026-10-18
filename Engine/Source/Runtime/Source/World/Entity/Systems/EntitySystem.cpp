@@ -158,7 +158,7 @@ namespace Lumina
 
         namespace
         {
-            void DropWhere(TVector<TStrongObjectPtr<CEntitySystem>>& Systems, TFunctionRef<bool(const CEntitySystem&)> Predicate)
+            void DropWhere(const SSystemContext& Context, TVector<TStrongObjectPtr<CEntitySystem>>& Systems, TFunctionRef<bool(const CEntitySystem&)> Predicate)
             {
                 // Back to front, so a system created later can still reach an earlier one while it tears down.
                 for (size_t Index = Systems.size(); Index > 0; --Index)
@@ -172,7 +172,7 @@ namespace Lumina
                     // Paired with OnStartup, so a system dropped before the world started never sees one.
                     if (System->HasStarted())
                     {
-                        System->OnTeardown(System->GetWorld()->GetSystemContext());
+                        System->OnTeardown(Context);
                     }
                     System->SetOwningWorld(nullptr);
                     Systems.erase(Systems.begin() + (int64)(Index - 1));
@@ -180,38 +180,38 @@ namespace Lumina
             }
         }
 
-        void DropScripted(TVector<TStrongObjectPtr<CEntitySystem>>& Systems)
+        void DropScripted(const SSystemContext& Context, TVector<TStrongObjectPtr<CEntitySystem>>& Systems)
         {
-            DropWhere(Systems, [](const CEntitySystem& System)
+            DropWhere(Context, Systems, [](const CEntitySystem& System)
             {
                 return Cast<CScriptClass>(System.GetClass()) != nullptr;
             });
         }
 
-        void DropOutsideRealm(CWorld& World, TVector<TStrongObjectPtr<CEntitySystem>>& Systems)
+        void DropOutsideRealm(const SSystemContext& Context, CWorld& World, TVector<TStrongObjectPtr<CEntitySystem>>& Systems)
         {
-            DropWhere(Systems, [&World](const CEntitySystem& System)
+            DropWhere(Context, Systems, [&World](const CEntitySystem& System)
             {
                 return !NetRealm::Allows(System.GetClass(), &World);
             });
         }
 
-        void DropDisabled(const THashSet<FName>& Disabled, TVector<TStrongObjectPtr<CEntitySystem>>& Systems)
+        void DropDisabled(const SSystemContext& Context, const THashSet<FName>& Disabled, TVector<TStrongObjectPtr<CEntitySystem>>& Systems)
         {
-            DropWhere(Systems, [&Disabled](const CEntitySystem& System)
+            DropWhere(Context, Systems, [&Disabled](const CEntitySystem& System)
             {
                 return Disabled.count(System.GetClass()->GetName()) != 0;
             });
         }
 
-        void StartupPending(TVector<TStrongObjectPtr<CEntitySystem>>& Systems)
+        void StartupPending(const SSystemContext& Context, TVector<TStrongObjectPtr<CEntitySystem>>& Systems)
         {
             for (TStrongObjectPtr<CEntitySystem>& System : Systems)
             {
                 if (System != nullptr && !System->HasStarted())
                 {
                     System->MarkStarted();
-                    System->OnStartup(System->GetWorld()->GetSystemContext());
+                    System->OnStartup(Context);
                 }
             }
         }
@@ -234,7 +234,7 @@ namespace Lumina
             return nullptr;
         }
 
-        void DestroyAll(TVector<TStrongObjectPtr<CEntitySystem>>& Systems)
+        void DestroyAll(const SSystemContext& Context, TVector<TStrongObjectPtr<CEntitySystem>>& Systems)
         {
             // Back to front, so a system created later can still reach an earlier one while it tears down.
             for (size_t Index = Systems.size(); Index > 0; --Index)
@@ -243,7 +243,7 @@ namespace Lumina
                 {
                     if (System->HasStarted())
                     {
-                        System->OnTeardown(System->GetWorld()->GetSystemContext());
+                        System->OnTeardown(Context);
                     }
                     System->SetOwningWorld(nullptr);
                 }

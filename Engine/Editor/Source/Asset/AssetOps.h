@@ -2,6 +2,7 @@
 
 #include "Containers/String.h"
 #include "Containers/StringView.h"
+#include "Containers/Vector.h"
 
 namespace Lumina
 {
@@ -45,6 +46,9 @@ namespace Lumina::AssetOps
 
     // A mount root holds Content and Scripts, so an asset placed directly in one lands where nothing scans.
     NODISCARD EDITOR_API bool IsAssetLocation(FStringView VirtualPath);
+
+    // Every file at or under VirtualPath that is read-only on disk, which move, rename and delete leave alone.
+    NODISCARD EDITOR_API TVector<FString> FindReadOnlyFiles(FStringView VirtualPath);
 
     // Rename and move are one operation, since both only change the full path.
     NODISCARD EDITOR_API FPathOpResult MovePath(FStringView OldPath, FStringView NewPath);

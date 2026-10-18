@@ -10,7 +10,6 @@
 
 namespace Lumina
 {
-    class CWorld;
     class CEntityScript;
 
     // The script-facing half of the RmlUi bridge, reflected so C# binds it instead of hand-written thunks.
@@ -20,14 +19,6 @@ namespace Lumina
         GENERATED_BODY()
 
     public:
-
-        /** UI pixel size of the world's screen context, which in the editor is the panel, not the target. */
-        FUNCTION()
-        static FVector2 GetLayoutSize(CWorld* World);
-
-        /** True while the cursor is on an interface element, so a click to move can ignore that click. */
-        FUNCTION()
-        static bool IsCursorOverUI(CWorld* World);
 
         //~ UI scripts, callable on any CUIScript from either language
 
@@ -42,19 +33,6 @@ namespace Lumina
 
         FUNCTION()
         static SUIDocument GetScriptDocument(CEntityScript* Script);
-
-        //~ Documents
-
-        /** Loads a virtual path into the world's screen context. The document starts hidden. */
-        FUNCTION()
-        static SUIDocument LoadDocument(CWorld* World, const FString& Path);
-
-        /** SourceUrl resolves the document's relative includes such as stylesheets and images. */
-        FUNCTION()
-        static SUIDocument LoadDocumentFromMemory(CWorld* World, const FString& Rml, const FString& SourceUrl);
-
-        FUNCTION()
-        static void UnloadDocument(CWorld* World, SUIDocument Document);
 
         /** Modal blocks focus to other documents, AutoFocus focuses the document's first autofocus element. */
         FUNCTION()
@@ -116,23 +94,9 @@ namespace Lumina
         FUNCTION()
         static FVector4 GetElementBox(SUIElement Element);
 
-        //~ Event listeners
-
-        FUNCTION()
-        static SUIEventListener AddEventListener(CWorld* World, SUIElement Element, const FString& EventType);
-
-        FUNCTION()
-        static void RemoveEventListener(CWorld* World, SUIEventListener Listener);
-
         /** The listener's FScriptDelegateBase, which script binds its handler to. */
         FUNCTION()
         static uint64 GetEventListenerDelegate(SUIEventListener Listener);
-
-        //~ Data models
-
-        // OnSet gets an FUIDataSet and OnEvent an FUIDataEvent by address, and the model owns both from here.
-        FUNCTION(ScriptInternal)
-        static SUIDataModel CreateDataModel(CWorld* World, const FString& Name, SScriptCallback OnSet, SScriptCallback OnEvent);
 
         FUNCTION()
         static void DestroyDataModel(SUIDataModel Model);

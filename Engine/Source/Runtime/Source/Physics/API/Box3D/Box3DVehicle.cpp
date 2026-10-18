@@ -83,7 +83,7 @@ namespace Lumina::Physics
     {
         LUMINA_PROFILE_SCOPE();
 
-        ECS::FRegistry& Registry = ECS::GetWorldRegistry(*World);
+        ECS::FRegistry& Registry = World->GetEntityRegistry();
         const bool bDrawWheels = IsDebugDrawEnabled() || FBox3DPhysicsContext::IsDebugDrawForced();
         const bool bPermissive = Box3DUtils::UsesPermissiveCollisionFilter();
 
@@ -299,7 +299,7 @@ namespace Lumina::Physics
 
     void FBox3DPhysicsScene::PoseVehicleWheels()
     {
-        ECS::FRegistry& Registry = ECS::GetWorldRegistry(*World);
+        ECS::FRegistry& Registry = World->GetEntityRegistry();
 
         Registry.View<SVehicleComponent>().ForEach([&](ECS::FEntity, const SVehicleComponent& Vehicle)
         {

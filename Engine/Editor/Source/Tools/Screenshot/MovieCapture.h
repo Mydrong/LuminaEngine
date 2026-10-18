@@ -3,6 +3,11 @@
 #include "Containers/String.h"
 #include "Platform/GenericPlatform.h"
 
+namespace Lumina
+{
+    class IRenderScene;
+}
+
 // Records what the playing world shows into a video, one frame per engine frame at a locked time step.
 namespace Lumina::MovieCapture
 {
@@ -64,6 +69,8 @@ namespace Lumina::MovieCapture
 
     // Width over height of the movie being recorded, or zero when none is, so a viewport can letterbox to the frame that is kept.
     EDITOR_API float GetRecordingAspect();
+
+    EDITOR_API bool GetRecordingSize(IRenderScene* Scene, uint32& OutWidth, uint32& OutHeight);
 
     // Called once per editor frame; records the frame the world last rendered.
     EDITOR_API void Tick();

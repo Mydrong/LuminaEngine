@@ -574,6 +574,8 @@ namespace Lumina
         // True while listening for the bind key. bArmed skips the frame the activating click landed on,
         // so the click that starts the capture isn't itself bound.
         bool bCapturing = false;
+        // The last bare modifier pressed while capturing, bound by itself if it is released with nothing else pressed.
+        EKey PendingModifier = EKey::Num;
         bool bArmed = false;
 
         // Capture / clear are one-frame discrete edits: Started this frame, Finished the next, so they

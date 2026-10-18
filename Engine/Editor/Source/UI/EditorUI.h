@@ -157,6 +157,7 @@ namespace Lumina
         // File > Save All: every dirty package, routed through its open editor tool when there is one
         // so type-specific save work still runs.
         void SaveAllDirtyPackages() override;
+        bool ConfirmWritable(TVector<FString> VirtualPaths, TMoveOnlyFunction<void()> Then, bool bThenSaves = true) override;
 
         struct FSaveAllResult
         {

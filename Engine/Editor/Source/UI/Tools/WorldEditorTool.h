@@ -290,8 +290,7 @@ namespace Lumina
          *  clears any half-finished gizmo / vertex-snap state from the prior mode. */
         void SetActiveMode(int32 NewIndex);
 
-        // Copies every entity that is not a locked prefab child as one undo step, then selects the copies.
-        void DuplicateAndSelect(TSpan<const ECS::FEntity> Entities);
+        bool CanDuplicateEntity(ECS::FEntity Entity) const override;
 
     private:
 

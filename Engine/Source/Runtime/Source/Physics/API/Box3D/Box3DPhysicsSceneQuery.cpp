@@ -226,7 +226,7 @@ namespace Lumina::Physics
             return Constants::kIndexNone;
         }
 
-        ECS::FRegistry& Registry = ECS::GetWorldRegistry(*World);
+        ECS::FRegistry& Registry = World->GetEntityRegistry();
         const SRagdollComponent* RagdollComp = Registry.TryGet<SRagdollComponent>(Entity);
         if (RagdollComp == nullptr || !RagdollComp->Ragdoll)
         {

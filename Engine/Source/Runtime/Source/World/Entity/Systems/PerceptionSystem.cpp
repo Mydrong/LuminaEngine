@@ -181,6 +181,17 @@ namespace Lumina
             }
         }
 
+        // Never inside the acquire shape, or a target between the two is taken and dropped on alternate scans.
+        float LoseSightRange(const SPerceptionComponent& Comp)
+        {
+            return Math::Max(Comp.LoseSightRadius, Comp.SightRadius);
+        }
+
+        float LoseSightFOV(const SPerceptionComponent& Comp)
+        {
+            return Math::Max(Comp.LoseSightFOVDegrees, Comp.SightFOVDegrees);
+        }
+
         SPerceptionEvent MakePerceptionEvent(ECS::FEntity Perceiver, const FPerceivedTarget& Target, bool bSensed)
         {
             SPerceptionEvent Event;
@@ -201,7 +212,8 @@ namespace Lumina
             {
                 Context.DrawDebugCone(Eye, Forward, Math::Radians(Comp.SightFOVDegrees * 0.5f), Comp.SightRadius,
                     FVector4(0.2f, 0.8f, 1.0f, 1.0f), 16, 4, 1.0f, OneFrame);
-                Context.DrawDebugSphere(Eye, Comp.LoseSightRadius, FVector4(0.25f, 0.3f, 0.6f, 1.0f), 16, 1.0f, OneFrame);
+                Context.DrawDebugCone(Eye, Forward, Math::Radians(LoseSightFOV(Comp) * 0.5f),
+                    LoseSightRange(Comp), FVector4(0.25f, 0.3f, 0.6f, 1.0f), 16, 4, 1.0f, OneFrame);
             }
             if (Comp.bHearingEnabled)
             {
@@ -274,7 +286,7 @@ namespace Lumina
         for (int32 i = 0; i < NumPerceivers; ++i)
         {
             const SPerceptionComponent& C = View.Get<SPerceptionComponent>(Perceivers[i]);
-            MaxSightRange = Math::Max(C.LoseSightRadius, MaxSightRange);
+            MaxSightRange = Math::Max(LoseSightRange(C), MaxSightRange);
         }
         State.SourceGrid.Build(MaxSightRange);
 
@@ -323,10 +335,12 @@ namespace Lumina
                 Comp.PerceivedTargets[i].ActiveSenses &= ~SightBit;
             }
 
-            const float CosHalfFOV = Math::Cos(Math::Radians(Comp.SightFOVDegrees * 0.5f));
+            const float CosHalfFOV     = Math::Cos(Math::Radians(Comp.SightFOVDegrees * 0.5f));
+            const float CosHalfLoseFOV = Math::Cos(Math::Radians(LoseSightFOV(Comp) * 0.5f));
+            const float LoseRange      = LoseSightRange(Comp);
             const ECS::FEntity SelfBody = E;
 
-            Grid.ForEachInRadius(Eye, Comp.LoseSightRadius, [&](const FPerceptionSource& Src)
+            Grid.ForEachInRadius(Eye, LoseRange, [&](const FPerceptionSource& Src)
             {
                 if (Src.Entity == E || (Src.RegisteredSenses & SightBit) == 0)
                 {
@@ -337,10 +351,11 @@ namespace Lumina
                     return;
                 }
 
-                // The FOV cone gates fresh acquisition only, or a target stepping aside is dropped each scan.
+                // A seen target is held to the wider lose-sight cone and radius, so one on the edge of either does not flicker.
                 const int32 Existing = Comp.Find(Src.Entity);
                 const bool bAlreadySighted = (Existing >= 0 && WasSighted[Existing]);
-                const float Range = bAlreadySighted ? Comp.LoseSightRadius : Comp.SightRadius;
+                const float Range = bAlreadySighted ? LoseRange : Comp.SightRadius;
+                const float CosHalfCone = bAlreadySighted ? CosHalfLoseFOV : CosHalfFOV;
 
                 const FVector3 To = Src.AimPoint - Eye;
                 const float Dist = Math::Length(To);
@@ -348,11 +363,11 @@ namespace Lumina
                 {
                     return;
                 }
-                if (!bAlreadySighted && Dist > 1e-4f)
+                if (Dist > 1e-4f)
                 {
                     const FVector3 Dir = To / Dist;
                     const float Facing = Dir.x * Forward.x + Dir.y * Forward.y + Dir.z * Forward.z;
-                    if (Facing < CosHalfFOV)
+                    if (Facing < CosHalfCone)
                     {
                         return;
                     }

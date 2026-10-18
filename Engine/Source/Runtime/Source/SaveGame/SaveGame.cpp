@@ -36,7 +36,7 @@ namespace Lumina
             return false;
         }
         Notify(World, this, &CEntitySystem::OnWorldSaving);
-        return CaptureRegistry(WorldKey(World), ECS::GetWorldRegistry(*World));
+        return CaptureRegistry(WorldKey(World), World->GetEntityRegistry());
     }
 
     bool CSaveGame::RestoreWorld(CWorld* World)
@@ -46,7 +46,7 @@ namespace Lumina
             LOG_WARN("CSaveGame::RestoreWorld was given no world.");
             return false;
         }
-        if (!RestoreRegistry(WorldKey(World), ECS::GetWorldRegistry(*World)))
+        if (!RestoreRegistry(WorldKey(World), World->GetEntityRegistry()))
         {
             return false;
         }

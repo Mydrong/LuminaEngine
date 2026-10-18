@@ -129,7 +129,7 @@ internal static class EventTypes
 
         int Size = Unsafe.SizeOf<T>();
         int Alignment = Unsafe.SizeOf<AlignmentProbe<T>>() - Size;
-        uint Id = CEventQueueLibrary.ResolveEventType(Name, (uint)Size, (uint)Math.Max(Alignment, 1));
+        uint Id = CWorld.ResolveEventType(Name, (uint)Size, (uint)Math.Max(Alignment, 1));
         return (Id, Name, bView);
     }
 }
@@ -167,7 +167,7 @@ public readonly unsafe struct WorldEvents
         {
             fixed (T* Pointer = &Event)
             {
-                CEventQueueLibrary.Send(World!, EventType<T>.Id, (IntPtr)Pointer, 1);
+                World!.SendEvents(EventType<T>.Id, (IntPtr)Pointer, 1);
             }
         }
     }
@@ -179,7 +179,7 @@ public readonly unsafe struct WorldEvents
         {
             fixed (T* Pointer = Events)
             {
-                CEventQueueLibrary.Send(World!, EventType<T>.Id, (IntPtr)Pointer, (uint)Events.Length);
+                World!.SendEvents(EventType<T>.Id, (IntPtr)Pointer, (uint)Events.Length);
             }
         }
     }
@@ -200,7 +200,7 @@ public readonly unsafe struct WorldEvents
     }
 
     public bool HasUnread<T>(in EventReader<T> Reader) where T : struct, IEvent
-        => IsLive && CEventQueueLibrary.NumUnread(World!, EventType<T>.Id, Reader.Cursor) != 0;
+        => IsLive && World!.NumUnreadEvents(EventType<T>.Id, Reader.Cursor) != 0;
 
     private EventRuns ReadRuns(uint Id, ref ulong Cursor)
     {
@@ -209,7 +209,7 @@ public readonly unsafe struct WorldEvents
         {
             fixed (ulong* CursorPointer = &Cursor)
             {
-                CEventQueueLibrary.Read(World!, Id, (IntPtr)CursorPointer, (IntPtr)(&Runs));
+                World!.ReadEvents(Id, (IntPtr)CursorPointer, (IntPtr)(&Runs));
             }
         }
         return Runs;

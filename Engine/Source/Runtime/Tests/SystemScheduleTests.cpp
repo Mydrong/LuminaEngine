@@ -7,6 +7,7 @@
 
 #include "Scripting/ScriptableTest.h"
 #include "World/Entity/Systems/EntitySystem.h"
+#include "World/Entity/Systems/SystemContext.h"
 #include "World/World.h"
 
 using namespace Lumina;
@@ -42,7 +43,7 @@ namespace
 
         ~FScheduleSystems()
         {
-            EntitySystems::DestroyAll(Systems);
+            EntitySystems::DestroyAll(SSystemContext(), Systems);
             CEntitySystemTest::bAllowCreation = false;
         }
 

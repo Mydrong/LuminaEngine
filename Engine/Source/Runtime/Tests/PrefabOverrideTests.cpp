@@ -236,7 +236,7 @@ TEST(PrefabInstances, DetachLeavesANestedInstanceOfAnotherPrefabLinked)
     ASSERT_NE(Outer, nullptr);
     ASSERT_NE(Inner, nullptr);
 
-    ECS::FRegistry& Registry = ECS::GetWorldRegistry(*World);
+    ECS::FRegistry& Registry = World->GetEntityRegistry();
 
     const ECS::FEntity OuterRoot = AddInstanceNode(Registry, Outer, "outer-root", true);
     const ECS::FEntity OuterChild = AddInstanceNode(Registry, Outer, "outer-child", false);
@@ -272,7 +272,7 @@ TEST(PrefabInstances, RefreshRespawnsANodeDestroyedWithItsDeletedParent)
     const ECS::FEntity PrefabLeaf = AddNode(Prefab->Registry, "leaf");
     ECS::Utils::ReparentEntity(Prefab->Registry, PrefabLeaf, PrefabRoot);
 
-    ECS::FRegistry& Registry = ECS::GetWorldRegistry(*World);
+    ECS::FRegistry& Registry = World->GetEntityRegistry();
 
     const ECS::FEntity Root = AddInstanceNode(Registry, Prefab, "root", true);
     const ECS::FEntity Gone = AddInstanceNode(Registry, Prefab, "gone", false);
@@ -336,7 +336,7 @@ TEST(PrefabInstances, RefreshLeavesANestedCopyOfTheSamePrefabAlone)
 {
     CWorld* World = MakeWorld();
     CPrefab* Prefab = MakeRootChildPrefab();
-    ECS::FRegistry& Registry = ECS::GetWorldRegistry(*World);
+    ECS::FRegistry& Registry = World->GetEntityRegistry();
     const FSelfNested Placed = PlaceSelfNested(Registry, Prefab);
 
     Prefab->RefreshInstance(World, Placed.OuterRoot);
@@ -353,7 +353,7 @@ TEST(PrefabInstances, DetachLeavesANestedCopyOfTheSamePrefabLinked)
 {
     CWorld* World = MakeWorld();
     CPrefab* Prefab = MakeRootChildPrefab();
-    ECS::FRegistry& Registry = ECS::GetWorldRegistry(*World);
+    ECS::FRegistry& Registry = World->GetEntityRegistry();
     const FSelfNested Placed = PlaceSelfNested(Registry, Prefab);
 
     ASSERT_TRUE(CPrefab::DetachInstance(World, Placed.OuterRoot));
@@ -369,7 +369,7 @@ TEST(PrefabInstances, CaptureGivesEveryNestedNodeItsOwnStableID)
     CWorld* World = MakeWorld();
     CPrefab* Inner = MakeRootChildPrefab();
     CPrefab* Outer = MakePrefab();
-    ECS::FRegistry& Registry = ECS::GetWorldRegistry(*World);
+    ECS::FRegistry& Registry = World->GetEntityRegistry();
 
     const ECS::FEntity Root = Registry.Create();
     Registry.Emplace<STransformComponent>(Root);
@@ -405,7 +405,7 @@ TEST(PrefabInstances, RefreshKeepsAnOverriddenHandleThatCollidesWithAPrefabID)
 {
     CWorld* World = MakeWorld();
     CPrefab* Prefab = MakePrefab();
-    ECS::FRegistry& Registry = ECS::GetWorldRegistry(*World);
+    ECS::FRegistry& Registry = World->GetEntityRegistry();
 
     const ECS::FEntity PrefabRoot = AddNode(Prefab->Registry, "root");
     const ECS::FEntity PrefabLink = AddNode(Prefab->Registry, "link");
@@ -436,7 +436,7 @@ TEST(PrefabInstances, OverrideCaptureComparesHandlesInTheInstancesIDs)
 {
     CWorld* World = MakeWorld();
     CPrefab* Prefab = MakePrefab();
-    ECS::FRegistry& Registry = ECS::GetWorldRegistry(*World);
+    ECS::FRegistry& Registry = World->GetEntityRegistry();
 
     const ECS::FEntity PrefabRoot = AddNode(Prefab->Registry, "root");
     const ECS::FEntity PrefabLink = AddNode(Prefab->Registry, "link");
@@ -469,4 +469,38 @@ TEST(PrefabInstances, OverrideCaptureComparesHandlesInTheInstancesIDs)
     CPrefab::RecaptureComponentOverrides(Registry, Link, SPrefabLinkTestComponent::StaticStruct());
     const TVector<FName> Recorded = Paths();
     EXPECT_TRUE(Algo::Contains(Recorded, FName("Target"))) << "a world handle sharing the prefab root's number is still an edit";
+}
+
+// A prefab the caller already holds spawns placed and parented, with no path for the library to resolve.
+TEST(PrefabInstances, SpawnLoadedPrefabPlacesAndParentsTheRoot)
+{
+    CWorld* World = MakeWorld();
+    CPrefab* Prefab = MakePrefab();
+    ASSERT_NE(World, nullptr);
+    ASSERT_NE(Prefab, nullptr);
+
+    const ECS::FEntity PrefabRoot = AddNode(Prefab->Registry, "root");
+    const ECS::FEntity PrefabLeaf = AddNode(Prefab->Registry, "leaf");
+    ECS::Utils::ReparentEntity(Prefab->Registry, PrefabLeaf, PrefabRoot);
+
+    ECS::FRegistry& Registry = World->GetEntityRegistry();
+    const ECS::FEntity Holder = Registry.Create();
+    Registry.Emplace<STransformComponent>(Holder);
+
+    const FTransform Placement(FVector3(3.0f, 4.0f, 5.0f));
+    const ECS::FEntity Root = World->SpawnLoadedPrefabAt(Prefab, Placement, Holder);
+    ASSERT_TRUE(Registry.IsValid(Root));
+
+    const SPrefabInstanceComponent* Instance = Registry.TryGet<SPrefabInstanceComponent>(Root);
+    ASSERT_NE(Instance, nullptr);
+    EXPECT_EQ(Instance->SourcePrefab.Get(), Prefab);
+    EXPECT_TRUE(Instance->bIsRoot);
+    EXPECT_EQ(Registry.GetHierarchy().GetParent(Root), Holder);
+
+    const FVector3 Location = Registry.Get<STransformComponent>(Root).GetLocalLocation();
+    EXPECT_FLOAT_EQ(Location.x, 3.0f);
+    EXPECT_FLOAT_EQ(Location.y, 4.0f);
+    EXPECT_FLOAT_EQ(Location.z, 5.0f);
+
+    EXPECT_EQ(World->SpawnLoadedPrefab(nullptr), ECS::NullEntity);
 }

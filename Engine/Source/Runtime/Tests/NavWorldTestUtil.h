@@ -17,6 +17,7 @@
 #include "World/Entity/Components/TransformComponent.h"
 #include "World/Entity/Systems/NavMeshSystem.h"
 #include "World/Entity/Systems/PathFollowSystem.h"
+#include "WorldTestAccess.h"
 
 namespace Lumina::NavTest
 {
@@ -81,7 +82,7 @@ namespace Lumina::NavTest
         SPathFollowSystem* Follow = nullptr;
         ECS::FEntity       Volume;
 
-        ECS::FRegistry& Registry() const { return ECS::GetWorldRegistry(*World); }
+        ECS::FRegistry& Registry() const { return World->GetEntityRegistry(); }
         SNavMeshComponent& Nav() const { return Registry().Get<SNavMeshComponent>(Volume); }
 
         // A world with only ground under the volume, square and Size across, flat slabs or one terrain.
@@ -122,13 +123,13 @@ namespace Lumina::NavTest
             System = NewObject<SNavMeshSystem>(nullptr, NAME_None, FGuid::New(), OF_Transient);
             System->SetOwningWorld(World);
             World->Systems.push_back(System);
-            System->OnStartup(World->GetSystemContext());
+            System->OnStartup(FWorldTestAccess::SystemContext(*World));
             if (bWithPathFollow)
             {
                 Follow = NewObject<SPathFollowSystem>(nullptr, NAME_None, FGuid::New(), OF_Transient);
                 Follow->SetOwningWorld(World);
                 World->Systems.push_back(Follow);
-                Follow->OnStartup(World->GetSystemContext());
+                Follow->OnStartup(FWorldTestAccess::SystemContext(*World));
             }
         }
 
@@ -136,12 +137,12 @@ namespace Lumina::NavTest
         {
             if (Follow != nullptr)
             {
-                Follow->OnTeardown(World->GetSystemContext());
+                Follow->OnTeardown(FWorldTestAccess::SystemContext(*World));
                 Follow = nullptr;
             }
             if (System != nullptr)
             {
-                System->OnTeardown(World->GetSystemContext());
+                System->OnTeardown(FWorldTestAccess::SystemContext(*World));
                 System = nullptr;
             }
         }
@@ -149,14 +150,14 @@ namespace Lumina::NavTest
         double TickFollow()
         {
             PlatformTime::FStopwatch Watch;
-            Follow->OnUpdate(World->GetSystemContext());
+            Follow->OnUpdate(FWorldTestAccess::SystemContext(*World));
             return Watch.ElapsedMilliseconds();
         }
 
         double Tick()
         {
             PlatformTime::FStopwatch Watch;
-            System->OnUpdate(World->GetSystemContext());
+            System->OnUpdate(FWorldTestAccess::SystemContext(*World));
             return Watch.ElapsedMilliseconds();
         }
 

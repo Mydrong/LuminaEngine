@@ -390,7 +390,8 @@ namespace Lumina::NavMeshBuilder
             Cfg.ch = S.CellHeight;
             Cfg.walkableSlopeAngle = S.AgentMaxSlopeDeg;
             Cfg.walkableHeight     = (int)std::ceil(S.AgentHeight / S.CellHeight);
-            Cfg.walkableClimb      = (int)std::floor(S.AgentMaxClimb / S.CellHeight);
+            // One cell less, since rasterizing both surfaces lets a ledge up to a cell taller than this pass as climbable.
+            Cfg.walkableClimb      = Math::Max((int)std::floor(S.AgentMaxClimb / S.CellHeight) - 1, 0);
             Cfg.walkableRadius     = (int)std::ceil(S.AgentRadius / S.CellSize);
             Cfg.maxEdgeLen         = (int)(S.EdgeMaxLength / S.CellSize);
             Cfg.maxSimplificationError = S.EdgeMaxError;

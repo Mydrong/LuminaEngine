@@ -4,7 +4,7 @@
 
 struct FPushConstants
 {
-    uint64_t          Env;            // FEnvironmentParams, see LoadBlock
+    Ptr<FEnvironmentParams> Env;
     FRWTexture2DArray SkyCube;        // sky cube (GetMipUAVIndex(0))
     float             Time;
     float3            SunDirection;
@@ -18,7 +18,7 @@ FPushConstants* Pass() { return GetPassArgs<FPushConstants>(); }
 [numthreads(SKYCAP_TILE, SKYCAP_TILE, 1)]
 void ComputeMain(uint3 DTid : SV_DispatchThreadID)
 {
-    FEnvironmentParams uEnvironment = LoadBlock<FEnvironmentParams>(Pass().Env);
+    FEnvironmentParams uEnvironment = *Pass().Env;
     FRWTexture2DArray  uSkyCube = Pass().SkyCube;
 
     uint Width, Height, Layers;

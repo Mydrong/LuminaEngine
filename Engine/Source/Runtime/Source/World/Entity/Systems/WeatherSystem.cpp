@@ -42,7 +42,7 @@ namespace Lumina
     {
         CWorld* World = GetWorld();
         const ECS::TComponentStorage<SWeatherComponent> Weather = World != nullptr
-            ? ECS::GetWorldRegistry(*World).FindStorage<SWeatherComponent>()
+            ? World->GetEntityRegistry().FindStorage<SWeatherComponent>()
             : ECS::TComponentStorage<SWeatherComponent>();
         return Weather && !Weather.IsEmpty();
     }

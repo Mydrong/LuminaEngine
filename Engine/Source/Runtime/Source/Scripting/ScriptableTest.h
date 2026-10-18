@@ -55,11 +55,23 @@ namespace Lumina
         GENERATED_BODY()
     public:
 
-        void OnAttach() override      { ++AttachCount; }
-        void OnReady() override       { ++ReadyCount; }
+        void OnAttach() override      { ++AttachCount; Record('A'); }
+        void OnReady() override       { ++ReadyCount; Record('R'); }
         void OnUpdate(float Dt) override      { ++UpdateCount; AccumulatedTime += Dt; }
         void OnFixedUpdate(float Dt) override { ++FixedUpdateCount; }
         void OnDetach() override      { ++DetachCount; if (DetachHook != nullptr) { DetachHook(*this, HookContext); } }
+
+        // Appends Phase and Label to a test's log, so a test can read back the order callbacks ran in. Unreflected.
+        TVector<FString>* EventLog = nullptr;
+        FString           Label;
+
+        void Record(char Phase)
+        {
+            if (EventLog != nullptr)
+            {
+                EventLog->push_back(FString(1, Phase) + ":" + Label);
+            }
+        }
 
         // Lets a test make OnDetach mutate the registry. Unreflected, so a clone never carries it over.
         void (*DetachHook)(CEntityScriptTest&, void*) = nullptr;

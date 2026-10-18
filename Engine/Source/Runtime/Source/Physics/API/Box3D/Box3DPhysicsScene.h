@@ -208,6 +208,7 @@ namespace Lumina::Physics
 
         void OnCharacterComponentConstructed(ECS::FRegistry& Registry, ECS::FEntity Entity);
         void OnCharacterComponentDestroyed(ECS::FRegistry& Registry, ECS::FEntity Entity);
+        void OnCharacterComponentUpdated(ECS::FRegistry& Registry, ECS::FEntity Entity);
 
         void OnRigidBodyComponentUpdated(ECS::FRegistry& Registry, ECS::FEntity Entity);
         void OnRigidBodyComponentConstructed(ECS::FRegistry& Registry, ECS::FEntity Entity);
@@ -344,6 +345,8 @@ namespace Lumina::Physics
         FRagdollMotion MeasureRagdoll(const FPhysicsRagdollHandle& Ragdoll) const;
         void DestroyBodyHandle(uint32 Handle);
         void CreateCharacter(ECS::FRegistry& Registry, ECS::FEntity Entity);
+        void ApplyPendingCharacterUpdates(ECS::FRegistry& Registry);
+        void UpdateCrouch(ECS::FEntity Entity, SCharacterPhysicsComponent& Physics, SCharacterMovementComponent& Movement);
         void ApplyBuoyancy(b3BodyId BodyId, const FVector3& SurfacePosition, const FVector3& SurfaceNormal,
             float Buoyancy, float LinearDrag, float AngularDrag, const FVector3& FluidVelocity, float DeltaTime);
         void ApplySurfaceVelocity(b3BodyId Body, const FVector3& Linear, const FVector3& Angular);
@@ -497,6 +500,18 @@ namespace Lumina::Physics
         uint64 NextBindingRevision = 1;
         TVector<ECS::FEntity> PendingRigidBodies;
         TVector<ECS::FEntity> PendingCharacters;
+        TVector<ECS::FEntity> PendingCharacterUpdates;
+        TVector<SCharacterCrouchEvent> CrouchEvents;
+
+        // A rebuilt body's motion, carried from the body it replaces so a runtime resize does not stop it dead.
+        struct FCarriedMotion
+        {
+            ECS::FEntity Entity;
+            b3Vec3       Linear;
+            b3Vec3       Angular;
+            bool         bAwake = true;
+        };
+        TVector<FCarriedMotion> CarriedMotion;
         TVector<uint32> PendingBodyDestructions;
         TVector<uint32> BodyGenerations;
         uint64 SceneIdentity = 0;
@@ -674,13 +689,6 @@ namespace Lumina::Physics
         TVector<uint32>                         InterpApplied;
         TVector<uint32>                         InterpAppliedParented;
         TVector<uint8>                          InterpCategory;
-
-        // Parented poses written in parallel, queued for the resolve in one bulk call per frame.
-        struct CACHE_ALIGN FInterpDeferBucket
-        {
-            TVector<ECS::FEntity> Entities;
-        };
-        TVector<FInterpDeferBucket>             InterpDeferred;
 
         // Body handle to staging slot for this frame, reset through StagedBodyHandles so it stays O(moved).
         TVector<uint32>                         BodyStagingSlot;

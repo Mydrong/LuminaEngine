@@ -1,4 +1,5 @@
 ﻿
+#include "FileSystem/FileSystem.h"
 #include "Containers/StringFormat.h"
 #include "Renderer/RHICore.h"
 #include "World/ECS/Registry.h"
@@ -574,6 +575,22 @@ namespace Lumina
             }
 
             ImGuiX::TextTooltip("Browse to asset in Content Browser");
+
+            // Polled, since another program can flip the flag without touching the file.
+            if (ImGui::GetFrameCount() % 30 == 0)
+            {
+                bAssetReadOnlyOnDisk = VFS::IsReadOnlyOnDisk(FStringView(AssetVirtualPath.c_str(), AssetVirtualPath.size()));
+            }
+            if (bAssetReadOnlyOnDisk)
+            {
+                ImGui::PushStyleColor(ImGuiCol_Text, EditorColors::Warning());
+                if (ImGui::MenuItem(LE_ICON_LOCK " Read-only##ReadOnly"))
+                {
+                    ToolContext->ConfirmWritable({ FString(AssetVirtualPath.c_str()) }, {}, false);
+                }
+                ImGui::PopStyleColor();
+                ImGuiX::TextTooltip("{}", "Read-only on disk, so saving will fail. Click to make it writable.");
+            }
         }
 
         ImGui::BeginDisabled(!AllowsUndoRedo() || !CanUndo());
@@ -609,7 +626,10 @@ namespace Lumina
         {
             ImGuiX::TextTooltip("Nothing to redo");
         }
-        
+
+        // In a menu bar this draws upright, parting the document actions from the menus.
+        ImGui::Separator();
+
 
         if (ImGui::BeginMenu(LE_ICON_HELP_CIRCLE_OUTLINE" Help"))
         {
@@ -944,7 +964,12 @@ namespace Lumina
 
         if (World != nullptr)
         {
-            RmlUi::SetWorldDisplaySize(World.Get(), FUIntVector2(uint32(Math::Max(ViewportSize.x, 1.0f)), uint32(Math::Max(ViewportSize.y, 1.0f))));
+            uint32 RecordingWidth = 0;
+            uint32 RecordingHeight = 0;
+            const bool bRecording = MovieCapture::GetRecordingSize(World->GetRenderer(), RecordingWidth, RecordingHeight);
+            RmlUi::SetWorldDisplaySize(World.Get(), bRecording
+                ? FUIntVector2(RecordingWidth, RecordingHeight)
+                : FUIntVector2(uint32(Math::Max(ViewportSize.x, 1.0f)), uint32(Math::Max(ViewportSize.y, 1.0f))));
         }
 
         FInputViewportRegistry::Get().UpdateViewportFocus(InputViewport.get(), bViewportHovered, bViewportFocused);
@@ -2310,7 +2335,7 @@ namespace Lumina
             return;
         }
 
-        ECS::FRegistry& Registry = ECS::GetWorldRegistry(*World);
+        ECS::FRegistry& Registry = World->GetEntityRegistry();
 
         TVector<ECS::FEntity> Affected;
         FEntityRelationshipCommand::CollectAffected(Registry, Seeds, NewParent, Affected);
@@ -2333,7 +2358,7 @@ namespace Lumina
             return;
         }
 
-        ECS::FRegistry& Registry = ECS::GetWorldRegistry(*World);
+        ECS::FRegistry& Registry = World->GetEntityRegistry();
 
         TVector<ECS::FEntity> Candidates;
         FEntityDestroyCommand::CollectCandidates(Registry, Doomed, Candidates);
@@ -2659,7 +2684,7 @@ namespace Lumina
         bool  bHit         = false;
 
         // The case that matters most, since a landscape has no collision for anything else to hit.
-        ECS::FRegistry& Registry = ECS::GetWorldRegistry(*World);
+        ECS::FRegistry& Registry = World->GetEntityRegistry();
         for (auto&& [Entity, Terrain] : Registry.View<STerrainComponent>().Each())
         {
             FVector3 TerrainOrigin(0.0f);

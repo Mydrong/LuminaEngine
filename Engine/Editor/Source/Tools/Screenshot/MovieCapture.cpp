@@ -11,6 +11,7 @@
 #include "ScreenshotCapture.h"
 #include "Tools/Image/ImageWrite.h"
 #include "VideoEncoder.h"
+#include "World/Scene/RenderScene/RenderScene.h"
 
 namespace Lumina::MovieCapture
 {
@@ -20,6 +21,7 @@ namespace Lumina::MovieCapture
 
         // The renderer only resizes to an exact view once the size has held for 8 frames, so the letterboxed view needs a few more.
         constexpr uint32 LetterboxSettleFrames = 12;
+        constexpr uint32 MaximumSizeWaitFrames = 120;
 
         struct FState
         {
@@ -27,6 +29,7 @@ namespace Lumina::MovieCapture
             FStatus       Status;
             FVideoEncoder Encoder;
             uint32        WarmupRemaining = 0;
+            uint32        SizeWaitFrames = 0;
             bool          bStartedCallback = false;
             FString       PreviousFixedDelta;
             int32         PreviousFrameRateCap = -1;
@@ -58,52 +61,6 @@ namespace Lumina::MovieCapture
             if (!Value.empty())
             {
                 FConsoleRegistry::Get().SetValueFromString(Name, Value);
-            }
-        }
-
-        // The largest centered region of Source with the output's aspect, scaled to the output with bilinear filtering.
-        void CropAndScale(const TVector<uint8>& Source, uint32 SourceWidth, uint32 SourceHeight, TVector<uint8>& Out, uint32 Width, uint32 Height)
-        {
-            const float TargetAspect = (float)Width / (float)Height;
-            float RegionWidth = (float)SourceWidth;
-            float RegionHeight = (float)SourceHeight;
-            if (RegionWidth / RegionHeight > TargetAspect)
-            {
-                RegionWidth = RegionHeight * TargetAspect;
-            }
-            else
-            {
-                RegionHeight = RegionWidth / TargetAspect;
-            }
-            const float OffsetX = ((float)SourceWidth - RegionWidth) * 0.5f;
-            const float OffsetY = ((float)SourceHeight - RegionHeight) * 0.5f;
-            const float StepX = RegionWidth / (float)Width;
-            const float StepY = RegionHeight / (float)Height;
-
-            Out.resize((size_t)Width * Height * 4u);
-            for (uint32 Y = 0; Y < Height; ++Y)
-            {
-                const float SY = Math::Clamp(OffsetY + ((float)Y + 0.5f) * StepY - 0.5f, 0.0f, (float)SourceHeight - 1.0f);
-                const uint32 Y0 = (uint32)SY;
-                const uint32 Y1 = Math::Min(Y0 + 1u, SourceHeight - 1u);
-                const float FY = SY - (float)Y0;
-                for (uint32 X = 0; X < Width; ++X)
-                {
-                    const float SX = Math::Clamp(OffsetX + ((float)X + 0.5f) * StepX - 0.5f, 0.0f, (float)SourceWidth - 1.0f);
-                    const uint32 X0 = (uint32)SX;
-                    const uint32 X1 = Math::Min(X0 + 1u, SourceWidth - 1u);
-                    const float FX = SX - (float)X0;
-                    for (uint32 Channel = 0; Channel < 4; ++Channel)
-                    {
-                        const float A = Source[((size_t)Y0 * SourceWidth + X0) * 4 + Channel];
-                        const float B = Source[((size_t)Y0 * SourceWidth + X1) * 4 + Channel];
-                        const float C = Source[((size_t)Y1 * SourceWidth + X0) * 4 + Channel];
-                        const float D = Source[((size_t)Y1 * SourceWidth + X1) * 4 + Channel];
-                        const float Top = A + (B - A) * FX;
-                        const float Bottom = C + (D - C) * FX;
-                        Out[((size_t)Y * Width + X) * 4 + Channel] = (uint8)Math::Clamp(Top + (Bottom - Top) * FY + 0.5f, 0.0f, 255.0f);
-                    }
-                }
             }
         }
 
@@ -251,6 +208,7 @@ namespace Lumina::MovieCapture
         S.Status.PngDirectory = Settings.PngDirectory;
         S.Status.bAudio = S.bOfflineAudio;
         S.WarmupRemaining = Math::Max(Settings.WarmupFrames, LetterboxSettleFrames);
+        S.SizeWaitFrames = 0;
         S.bStartedCallback = false;
 
         // Every frame advances the game by exactly one video frame, however long it takes to draw and encode.
@@ -282,6 +240,18 @@ namespace Lumina::MovieCapture
         return S.Status.bActive ? (float)S.Settings.Width / (float)S.Settings.Height : 0.0f;
     }
 
+    bool GetRecordingSize(IRenderScene* Scene, uint32& OutWidth, uint32& OutHeight)
+    {
+        const FState& S = State();
+        if (!S.Status.bActive || Scene == nullptr || Scene != Screenshot::FindActiveRenderScene())
+        {
+            return false;
+        }
+        OutWidth = S.Settings.Width;
+        OutHeight = S.Settings.Height;
+        return true;
+    }
+
     void Tick()
     {
         FState& S = State();
@@ -310,6 +280,21 @@ namespace Lumina::MovieCapture
 
         if (!S.bStartedCallback)
         {
+            IRenderScene* Scene = Screenshot::FindActiveRenderScene();
+            if (Scene == nullptr)
+            {
+                Finish("No world is rendering.");
+                return;
+            }
+            const FUIntVector2 Extent = Scene->GetRenderExtent();
+            if (!Scene->HasCompositedFrame() || Extent.x != S.Settings.Width || Extent.y != S.Settings.Height)
+            {
+                if (++S.SizeWaitFrames >= MaximumSizeWaitFrames)
+                {
+                    Finish(Lumina::Format("The scene did not reach {}x{} for recording.", S.Settings.Width, S.Settings.Height));
+                }
+                return;
+            }
             S.bStartedCallback = true;
             if (S.Settings.OnRecordingStarted)
             {
@@ -331,7 +316,13 @@ namespace Lumina::MovieCapture
         S.Status.SourceWidth = SourceWidth;
         S.Status.SourceHeight = SourceHeight;
 
-        CropAndScale(S.Source, SourceWidth, SourceHeight, S.Frame, S.Settings.Width, S.Settings.Height);
+        if (SourceWidth != S.Settings.Width || SourceHeight != S.Settings.Height)
+        {
+            Finish(Lumina::Format("The scene rendered at {}x{} instead of {}x{}.",
+                SourceWidth, SourceHeight, S.Settings.Width, S.Settings.Height));
+            return;
+        }
+        S.Frame.swap(S.Source);
 
         if (S.Encoder.IsOpen() && !S.Encoder.WriteFrame(S.Frame.data(), Error))
         {

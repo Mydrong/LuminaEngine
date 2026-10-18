@@ -11,6 +11,7 @@
 #include "World/Entity/Components/TransformComponent.h"
 #include "World/Entity/Systems/EntitySystem.h"
 #include "World/Entity/Systems/SystemContext.h"
+#include "World/Entity/Systems/SystemContext.h"
 #include "World/World.h"
 
 using namespace Lumina;
@@ -19,6 +20,9 @@ namespace
 {
     // The driver only stores and hands back the pointer, so a sentinel proves ownership without a world.
     CWorld* const SentinelWorld = reinterpret_cast<CWorld*>(0x5150);
+
+    // The sentinel world has no real context, and these systems read nothing from the one they are handed.
+    SSystemContext NoContext() { return SSystemContext(); }
 
     // Flips the gate for one test and puts it back, so discovery in any other test still skips the types.
     struct FCreationGate
@@ -63,7 +67,7 @@ TEST(EntitySystem, TeardownOnlyRunsForASystemThatStarted)
     CEntitySystemTest* Created = FindTestSystem(Systems);
     ASSERT_NE(Created, nullptr);
 
-    EntitySystems::DestroyAll(Systems);
+    EntitySystems::DestroyAll(NoContext(), Systems);
 
     EXPECT_EQ(Created->TeardownCount, 0) << "a system that never started must not be torn down";
 }
@@ -98,7 +102,7 @@ TEST(EntitySystem, ConfigureDeclaresStagesAndAccess)
     // Without one per declared type the lazy assure rehashes the shared pool map inside a parallel batch.
     EXPECT_EQ(Access.Pools.size(), 2u) << "a name keyed declaration must carry its pool too";
 
-    EntitySystems::DestroyAll(Systems);
+    EntitySystems::DestroyAll(NoContext(), Systems);
 }
 
 TEST(EntitySystem, DeclaringNoAccessRunsExclusive)
@@ -114,7 +118,7 @@ TEST(EntitySystem, DeclaringNoAccessRunsExclusive)
     EXPECT_TRUE(Exclusive->GetAccess().bExclusive) << "declaring nothing is not a claim to be honest about";
     EXPECT_TRUE(FSystemAccess::Conflicts(Exclusive->GetAccess(), FindTestSystem(Systems)->GetAccess()));
 
-    EntitySystems::DestroyAll(Systems);
+    EntitySystems::DestroyAll(NoContext(), Systems);
 }
 
 TEST(EntitySystem, CreateMissingIsIdempotent)
@@ -135,7 +139,7 @@ TEST(EntitySystem, CreateMissingIsIdempotent)
     EXPECT_EQ(Systems.size(), CountAfterFirst);
     EXPECT_EQ(Created->ConfigureCount, 1) << "an existing system must not be configured twice";
 
-    EntitySystems::DestroyAll(Systems);
+    EntitySystems::DestroyAll(NoContext(), Systems);
 }
 
 TEST(EntitySystem, StartupRunsOnceAndTeardownFollows)
@@ -149,11 +153,11 @@ TEST(EntitySystem, StartupRunsOnceAndTeardownFollows)
     ASSERT_NE(Created, nullptr);
     EXPECT_EQ(Created->StartupCount, 0) << "creating a system must not start it";
 
-    EntitySystems::StartupPending(Systems);
-    EntitySystems::StartupPending(Systems);
+    EntitySystems::StartupPending(NoContext(), Systems);
+    EntitySystems::StartupPending(NoContext(), Systems);
     EXPECT_EQ(Created->StartupCount, 1) << "a system already started must not start again";
 
-    EntitySystems::DestroyAll(Systems);
+    EntitySystems::DestroyAll(NoContext(), Systems);
 
     EXPECT_EQ(Created->TeardownCount, 1);
     EXPECT_EQ(Created->GetWorld(), nullptr) << "teardown must unlink the world it no longer belongs to";
@@ -167,20 +171,20 @@ TEST(EntitySystem, DropDisabledRemovesOnlyTheNamedSystem)
     TVector<TStrongObjectPtr<CEntitySystem>> Systems;
     EntitySystems::CreateMissing(*SentinelWorld, AllButTestSystems(), Systems);
 
-    EntitySystems::StartupPending(Systems);
+    EntitySystems::StartupPending(NoContext(), Systems);
 
     CEntitySystemTest* Created = FindTestSystem(Systems);
     ASSERT_NE(Created, nullptr);
 
     THashSet<FName> Disabled;
     Disabled.insert(CEntitySystemTest::StaticClass()->GetName());
-    EntitySystems::DropDisabled(Disabled, Systems);
+    EntitySystems::DropDisabled(NoContext(), Disabled, Systems);
 
     EXPECT_EQ(FindTestSystem(Systems), nullptr);
     EXPECT_EQ(Created->TeardownCount, 1) << "a disabled system tears down rather than being dropped";
     EXPECT_NE(EntitySystems::Find(Systems, CEntitySystemExclusiveTest::StaticClass()), nullptr);
 
-    EntitySystems::DestroyAll(Systems);
+    EntitySystems::DestroyAll(NoContext(), Systems);
 }
 
 TEST(EntitySystem, DropScriptedLeavesNativeSystemsAlone)
@@ -194,12 +198,12 @@ TEST(EntitySystem, DropScriptedLeavesNativeSystemsAlone)
     ASSERT_GT(Before, 0u);
 
     // Nothing here is backed by a script class, so a reload rebuild must not disturb the native ones.
-    EntitySystems::DropScripted(Systems);
+    EntitySystems::DropScripted(NoContext(), Systems);
 
     EXPECT_EQ(Systems.size(), Before);
     EXPECT_NE(FindTestSystem(Systems), nullptr);
 
-    EntitySystems::DestroyAll(Systems);
+    EntitySystems::DestroyAll(NoContext(), Systems);
 }
 
 // Every wrapper below forwards a signal that lives in the registry, so a deduced value would drop the connect.

@@ -120,6 +120,8 @@ internal static class ScriptDelegateArgs
 internal sealed class ArgsInvoker1<T1> : DelegateInvoker
 {
     public Action<T1> Handler = null!;
+
+    internal override Delegate BoundHandler => Handler;
     public FrameMarshal.FSlot[] Slots = null!;
 
     protected override void Run(IntPtr Payload)
@@ -135,6 +137,8 @@ internal sealed class ArgsInvoker1<T1> : DelegateInvoker
 internal sealed class ArgsInvoker2<T1, T2> : DelegateInvoker
 {
     public Action<T1, T2> Handler = null!;
+
+    internal override Delegate BoundHandler => Handler;
     public FrameMarshal.FSlot[] Slots = null!;
 
     protected override void Run(IntPtr Payload)
@@ -149,6 +153,8 @@ internal sealed class ArgsInvoker2<T1, T2> : DelegateInvoker
 internal sealed class ArgsInvoker3<T1, T2, T3> : DelegateInvoker
 {
     public Action<T1, T2, T3> Handler = null!;
+
+    internal override Delegate BoundHandler => Handler;
     public FrameMarshal.FSlot[] Slots = null!;
 
     protected override void Run(IntPtr Payload)
@@ -164,6 +170,8 @@ internal sealed class ArgsInvoker3<T1, T2, T3> : DelegateInvoker
 internal sealed class ArgsInvoker4<T1, T2, T3, T4> : DelegateInvoker
 {
     public Action<T1, T2, T3, T4> Handler = null!;
+
+    internal override Delegate BoundHandler => Handler;
     public FrameMarshal.FSlot[] Slots = null!;
 
     protected override void Run(IntPtr Payload)
@@ -180,6 +188,8 @@ internal sealed class ArgsInvoker4<T1, T2, T3, T4> : DelegateInvoker
 internal sealed class ArgsInvoker5<T1, T2, T3, T4, T5> : DelegateInvoker
 {
     public Action<T1, T2, T3, T4, T5> Handler = null!;
+
+    internal override Delegate BoundHandler => Handler;
     public FrameMarshal.FSlot[] Slots = null!;
 
     protected override void Run(IntPtr Payload)
@@ -197,6 +207,8 @@ internal sealed class ArgsInvoker5<T1, T2, T3, T4, T5> : DelegateInvoker
 internal sealed class ArgsInvoker6<T1, T2, T3, T4, T5, T6> : DelegateInvoker
 {
     public Action<T1, T2, T3, T4, T5, T6> Handler = null!;
+
+    internal override Delegate BoundHandler => Handler;
     public FrameMarshal.FSlot[] Slots = null!;
 
     protected override void Run(IntPtr Payload)
@@ -240,6 +252,8 @@ public readonly unsafe struct ScriptDelegate<T1>
 
     public bool IsValid => Address != null;
 
+    public void Remove(Action<T1> Handler) => DelegateBindings.Remove(Address, Handler);
+
     public DelegateBinding Bind(Action<T1> Handler)
     {
         if (Address == null || Handler == null)
@@ -271,6 +285,8 @@ public readonly unsafe struct ScriptDelegate<T1, T2>
     }
 
     public bool IsValid => Address != null;
+
+    public void Remove(Action<T1, T2> Handler) => DelegateBindings.Remove(Address, Handler);
 
     public DelegateBinding Bind(Action<T1, T2> Handler)
     {
@@ -305,6 +321,8 @@ public readonly unsafe struct ScriptDelegate<T1, T2, T3>
 
     public bool IsValid => Address != null;
 
+    public void Remove(Action<T1, T2, T3> Handler) => DelegateBindings.Remove(Address, Handler);
+
     public DelegateBinding Bind(Action<T1, T2, T3> Handler)
     {
         if (Address == null || Handler == null)
@@ -337,6 +355,8 @@ public readonly unsafe struct ScriptDelegate<T1, T2, T3, T4>
     }
 
     public bool IsValid => Address != null;
+
+    public void Remove(Action<T1, T2, T3, T4> Handler) => DelegateBindings.Remove(Address, Handler);
 
     public DelegateBinding Bind(Action<T1, T2, T3, T4> Handler)
     {
@@ -371,6 +391,8 @@ public readonly unsafe struct ScriptDelegate<T1, T2, T3, T4, T5>
 
     public bool IsValid => Address != null;
 
+    public void Remove(Action<T1, T2, T3, T4, T5> Handler) => DelegateBindings.Remove(Address, Handler);
+
     public DelegateBinding Bind(Action<T1, T2, T3, T4, T5> Handler)
     {
         if (Address == null || Handler == null)
@@ -403,6 +425,8 @@ public readonly unsafe struct ScriptDelegate<T1, T2, T3, T4, T5, T6>
     }
 
     public bool IsValid => Address != null;
+
+    public void Remove(Action<T1, T2, T3, T4, T5, T6> Handler) => DelegateBindings.Remove(Address, Handler);
 
     public DelegateBinding Bind(Action<T1, T2, T3, T4, T5, T6> Handler)
     {

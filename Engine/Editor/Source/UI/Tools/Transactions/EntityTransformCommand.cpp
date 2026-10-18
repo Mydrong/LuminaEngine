@@ -31,7 +31,7 @@ namespace Lumina
             return;
         }
 
-        ECS::FRegistry& Registry = ECS::GetWorldRegistry(*W);
+        ECS::FRegistry& Registry = W->GetEntityRegistry();
         for (SIZE_T i = 0; i < Entities.size(); ++i)
         {
             const ECS::FEntity Entity = Entities[i];
@@ -52,7 +52,7 @@ namespace Lumina
             return;
         }
 
-        ECS::FRegistry& Registry = ECS::GetWorldRegistry(*W);
+        ECS::FRegistry& Registry = W->GetEntityRegistry();
         for (SIZE_T i = 0; i < Entities.size(); ++i)
         {
             const ECS::FEntity Entity = Entities[i];

@@ -52,6 +52,8 @@ namespace Lumina
         float       HalfHeight = 0.55f;
         float       Padding = 0.02f;
         FVector3    TranslationOffset = FVector3(0.0f);
+        // How far a crouch lowered the capsule's center, so its feet stay where the standing capsule had them.
+        float       CrouchDrop = 0.0f;
         float       StepHeight = 0.4f;
         float       CosMaxSlope = 0.7071f;
         float       MaxStrength = 100.0f;
@@ -79,7 +81,7 @@ namespace Lumina
         // HalfHeight is the cylinder half, matching SCapsuleColliderComponent, so the total is 2*(HalfHeight+Radius).
         b3Capsule MakeCapsule(float InRadius) const
         {
-            const b3Vec3 Center{ TranslationOffset.x, TranslationOffset.y, TranslationOffset.z };
+            const b3Vec3 Center{ TranslationOffset.x, TranslationOffset.y - CrouchDrop, TranslationOffset.z };
             return b3Capsule{ b3Vec3{ Center.x, Center.y - HalfHeight, Center.z },
                               b3Vec3{ Center.x, Center.y + HalfHeight, Center.z }, InRadius };
         }

@@ -44,7 +44,8 @@ namespace Lumina
 
         ImGui::PushItemWidth(ImGui::GetContentRegionAvail().x);
         ImGui::PushID(this);
-        if (ImGui::BeginChild("SOP", ImVec2(-1, 0), ImGuiChildFlags_AutoResizeY, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse))
+        // A group rather than an auto-sizing child, which keeps a stale height while clipped and collapses the row under it.
+        ImGui::BeginGroup();
         {
             const auto& Style = ImGui::GetStyle();
 
@@ -206,7 +207,7 @@ namespace Lumina
 
             ImGui::EndGroup();
         }
-        ImGui::EndChild();
+        ImGui::EndGroup();
         ImGui::PopID();
         ImGui::PopItemWidth();
 

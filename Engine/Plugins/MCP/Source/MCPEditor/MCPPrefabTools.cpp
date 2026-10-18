@@ -1,5 +1,4 @@
 ﻿#include "MCPPrefabTools.h"
-#include "World/Prefab/PrefabLibrary.h"
 
 #include "Agent/AgentAssetResolve.h"
 #include "Agent/AgentEntityToken.h"
@@ -296,7 +295,7 @@ namespace Lumina::MCP
                     ECS::FEntity Root = ECS::NullEntity;
                     SessionOps::RunCreationTransacted("Spawn Prefab (agent)", [&]()
                     {
-                        Root = CPrefabLibrary::SpawnPrefabAt(World, Ref, Transform, Parent);
+                        Root = World->SpawnPrefabAt(Ref, Transform, Parent);
                         if (Root != ECS::NullEntity)
                         {
                             SessionOps::AdoptSpawnedSubtree(Root);

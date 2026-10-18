@@ -29,7 +29,6 @@
 #include "SaveGame/WorldSaveState.h"
 #include "Animation/Pose.h"
 #include "Animation/SkeletalMeshUtils.h"
-#include "Animation/SkeletalMeshLibrary.h"
 #include "Assets/AssetTypes/Mesh/SkeletalMesh/SkeletalMesh.h"
 #include "Assets/AssetTypes/Mesh/Skeleton/Skeleton.h"
 #include "Entity/EntityUtils.h"
@@ -84,15 +83,6 @@ namespace Lumina
 {
     // Generous for the handful of paint ops a frame issues, and drained every Extract.
     static constexpr uint32 kRenderTargetPaintQueueCapacity = 1024;
-
-    namespace ECS
-    {
-        // Routes through CWorld's private accessor so the registry stays off the public API.
-        ECS::FRegistry& GetWorldRegistry(CWorld& World)
-        {
-            return World.GetEntityRegistry();
-        }
-    }
 
     namespace
     {
@@ -266,7 +256,7 @@ namespace Lumina
         }
     }
 
-    void CWorld::PaintRenderTarget(CTextureRenderTarget* Target, const FVector2& UV, float RadiusUV, const FVector4& Color, float Strength, float Hardness, CTexture* BrushMask)
+    void CWorld::PaintRenderTarget(CTextureRenderTarget* Target, FVector2 UV, float RadiusUV, FVector4 Color, float Strength, float Hardness, CTexture* BrushMask)
     {
         if (Target == nullptr || !Target->GetTextureResource().NewTexture.IsValid())
         {
@@ -287,7 +277,7 @@ namespace Lumina
         EnqueueRenderTargetPaint(Move(Op));
     }
 
-    void CWorld::ClearRenderTarget(CTextureRenderTarget* Target, const FVector4& Color)
+    void CWorld::ClearRenderTarget(CTextureRenderTarget* Target, FVector4 Color)
     {
         if (Target == nullptr || !Target->GetTextureResource().NewTexture.IsValid())
         {
@@ -439,6 +429,8 @@ namespace Lumina
 
         // Per-world subsystem singleton ticked by STimerSystem and reached by ctx address.
         EntityRegistry.Ctx().Emplace<FTimerManager>();
+        EntityRegistry.Ctx().Emplace<FCoroutineManager>();
+        EntityRegistry.Ctx().Emplace<FInputModeLeases>(this);
         EntityRegistry.Ctx().Emplace<FTweenManager>();
 
         // SCameraSystem owns FCameraGlobalState and writes FResolvedSceneView for Extract.
@@ -573,7 +565,7 @@ namespace Lumina
 
         Audio::Context().StopAllSounds();
 
-        EntitySystems::DestroyAll(Systems);
+        EntitySystems::DestroyAll(SystemContext, Systems);
         for (int32 i = 0; i < (int32)EUpdateStage::Max; ++i)
         {
             SystemUpdateList[i].clear();
@@ -588,6 +580,8 @@ namespace Lumina
         }
 
         EntityRegistry.Ctx().Get<FTimerManager>().Clear();
+        EntityRegistry.Ctx().Get<FCoroutineManager>().Clear();
+        EntityRegistry.Ctx().Get<FInputModeLeases>().Clear();
         EntityRegistry.Ctx().Get<FTweenManager>().Clear();
 
         RegistryPending.Clear();
@@ -616,7 +610,7 @@ namespace Lumina
         if (Stage == EUpdateStage::FrameStart && DotNet::IsInitialized()
             && DotNet::GetScriptGeneration() != ScriptGeneration)
         {
-            EntitySystems::DropScripted(Systems);
+            EntitySystems::DropScripted(SystemContext, Systems);
             RegisterSystems();
 
             // A reload retires the old script classes, so the scripted subsystems rebuild against the new ones.
@@ -627,7 +621,7 @@ namespace Lumina
         // Joining a host turns a standalone world into a client, which changes what HostOnly and ClientOnly allow.
         if (Stage == EUpdateStage::FrameStart && NetRealm::KeyOf(this) != RegisteredRealmKey)
         {
-            EntitySystems::DropOutsideRealm(*this, Systems);
+            EntitySystems::DropOutsideRealm(SystemContext, *this, Systems);
             RegisterSystems();
             WorldSubsystems::DropOutsideRealm(*this, Subsystems);
             WorldSubsystems::CreateMissing(*this, Subsystems);
@@ -756,7 +750,7 @@ namespace Lumina
         return NewEntity;
     }
 
-    bool CWorld::FractureEntity(ECS::FEntity Entity, const FVector3& Origin, float Strength)
+    bool CWorld::FractureEntity(ECS::FEntity Entity, FVector3 Origin, float Strength)
     {
         LUMINA_PROFILE_SCOPE();
 
@@ -1122,6 +1116,31 @@ namespace Lumina
         return EntityRegistry.GetHierarchy().GetRoot(Entity);
     }
 
+    ECS::FEntity CWorld::GetFirstChild(ECS::FEntity Entity) const
+    {
+        return EntityRegistry.GetHierarchy().GetFirstChild(Entity);
+    }
+
+    ECS::FEntity CWorld::GetNextSibling(ECS::FEntity Entity) const
+    {
+        return EntityRegistry.GetHierarchy().GetNextSibling(Entity);
+    }
+
+    void CWorld::GetAncestorChain(ECS::FEntity Entity, TVector<ECS::FEntity>& Out) const
+    {
+        const ECS::FHierarchy& Hierarchy = EntityRegistry.GetHierarchy();
+        for (ECS::FEntity Current = Entity; Current != ECS::NullEntity; Current = Hierarchy.GetParent(Current))
+        {
+            Out.push_back(Current);
+        }
+    }
+
+    void CWorld::GetSubtree(ECS::FEntity Entity, TVector<ECS::FEntity>& Out) const
+    {
+        Out.push_back(Entity);
+        EntityRegistry.GetHierarchy().ForEachDescendant(Entity, [&Out](ECS::FEntity Descendant) { Out.push_back(Descendant); });
+    }
+
     void CWorld::DestroyEntity(ECS::FEntity Entity)
     {
         LUMINA_PROFILE_SCOPE();
@@ -1135,9 +1154,10 @@ namespace Lumina
         EntityRegistry.Destroy(Entity);
     }
 
-    STransformComponent& CWorld::GetEntityTransform(ECS::FEntity Entity)
+    FTransform CWorld::GetEntityTransform(ECS::FEntity Entity)
     {
-        return EntityRegistry.Get<STransformComponent>(Entity);
+        const STransformComponent* Transform = FindScriptTransform(Entity, "GetEntityTransform");
+        return Transform != nullptr ? Transform->GetWorldTransform() : FTransform();
     }
 
     // Scripts reach these by handle and can race teardown, so a missing transform is a no-op rather than a fatal assert.
@@ -1163,6 +1183,12 @@ namespace Lumina
         return Transform != nullptr ? Transform->GetWorldRotation() : FQuat(1.0f, 0.0f, 0.0f, 0.0f);
     }
 
+    FVector3 CWorld::GetEntityScale(ECS::FEntity Entity)
+    {
+        const STransformComponent* Transform = FindScriptTransform(Entity, "GetEntityScale");
+        return Transform != nullptr ? Transform->GetWorldScale() : FVector3(1.0f);
+    }
+
     void CWorld::SetEntityLocation(ECS::FEntity Entity, FVector3 Location)
     {
         // An unchanged write is skipped, since marking it dirty would re-sync the entity downstream for nothing.
@@ -1182,12 +1208,40 @@ namespace Lumina
         }
     }
 
+    void CWorld::SetEntityScale(ECS::FEntity Entity, FVector3 Scale)
+    {
+        STransformComponent* Transform = FindScriptTransform(Entity, "SetEntityScale");
+        if (Transform != nullptr && Transform->GetLocalScale() != Scale)
+        {
+            Transform->SetLocalScale(Scale);
+        }
+    }
+
     void CWorld::SetEntityLocationAndRotation(ECS::FEntity Entity, FVector3 Location, FQuat Rotation)
     {
         STransformComponent* Transform = FindScriptTransform(Entity, "SetEntityLocationAndRotation");
         if (Transform != nullptr && (Transform->GetLocalLocation() != Location || !(Transform->GetLocalRotation() == Rotation)))
         {
             Transform->SetLocalLocationAndRotation(Location, Rotation);
+        }
+    }
+
+    void CWorld::SetEntityTransforms(const ECS::FEntity* Entities, int32 EntityCount, const FTransform* Transforms, int32 TransformCount)
+    {
+        LUMINA_PROFILE_SCOPE();
+
+        if (Entities == nullptr || Transforms == nullptr)
+        {
+            return;
+        }
+
+        const int32 Count = Math::Min(EntityCount, TransformCount);
+        for (int32 Index = 0; Index < Count; ++Index)
+        {
+            if (STransformComponent* Transform = EntityRegistry.TryGet<STransformComponent>(Entities[Index]))
+            {
+                Transform->SetLocalTransform(Transforms[Index]);
+            }
         }
     }
 
@@ -1202,21 +1256,11 @@ namespace Lumina
         return (uint32)EntityRegistry.NumEntities();
     }
 
-    void CWorld::SetActiveCamera(ECS::FEntity InEntity) const
+    void CWorld::SetActiveCamera(ECS::FEntity Entity, float BlendTime, ECameraBlendFunction Function)
     {
-        SetActiveCamera(InEntity, 0.0f);
-    }
-
-    void CWorld::SetActiveCamera(ECS::FEntity InEntity, float BlendTime, ECameraBlendFunction Function) const
-    {
-        if (!EntityRegistry.IsValid(InEntity))
+        if (EntityRegistry.IsValid(Entity) && EntityRegistry.HasAll<SCameraComponent>(Entity))
         {
-            return;
-        }
-
-        if (EntityRegistry.HasAll<SCameraComponent>(InEntity))
-        {
-            SCameraSystem::SetActiveCamera(const_cast<ECS::FRegistry&>(EntityRegistry), InEntity, BlendTime, Function);
+            SCameraSystem::SetActiveCamera(EntityRegistry, Entity, BlendTime, Function);
         }
     }
 
@@ -1235,9 +1279,10 @@ namespace Lumina
         GetDefaultWorldSettings().DeltaTimeScale = Math::Max(Dilation, 0.0f);
     }
 
-    float CWorld::GetTimeDilation()
+    float CWorld::GetTimeDilation() const
     {
-        return GetDefaultWorldSettings().DeltaTimeScale;
+        const SDefaultWorldSettings* Settings = EntityRegistry.IsValid(SingletonEntity) ? EntityRegistry.TryGet<SDefaultWorldSettings>(SingletonEntity) : nullptr;
+        return Settings != nullptr ? Settings->DeltaTimeScale : 1.0f;
     }
 
     SDefaultWorldSettings& CWorld::GetDefaultWorldSettings()
@@ -1260,26 +1305,6 @@ namespace Lumina
         }
 
         return EntityRegistry.GetOrEmplace<SSceneFolderComponent>(SingletonEntity);
-    }
-
-    SSceneFolderComponent* CWorld::FindSceneFolders()
-    {
-        if (!EntityRegistry.IsValid(SingletonEntity))
-        {
-            return nullptr;
-        }
-
-        return EntityRegistry.TryGet<SSceneFolderComponent>(SingletonEntity);
-    }
-
-    const SSceneFolderComponent* CWorld::FindSceneFolders() const
-    {
-        if (!EntityRegistry.IsValid(SingletonEntity))
-        {
-            return nullptr;
-        }
-
-        return EntityRegistry.TryGet<SSceneFolderComponent>(SingletonEntity);
     }
 
     bool CWorld::EntityHasTag(ECS::FEntity Entity, const FName& Tag)
@@ -1426,6 +1451,11 @@ namespace Lumina
         return NetRuntime != nullptr ? NetRuntime->GetConnectedClientCount(this) : 0;
     }
 
+    bool CWorld::HasPresentation() const
+    {
+        return !GIsHeadless && GetNetMode() != ENetMode::DedicatedServer && !IsBotWorld();
+    }
+
     bool CWorld::ShouldRender() const
     {
         // CreateWorldContext sets OwningContext before InitializeWorld, so keep that ordering.
@@ -1491,21 +1521,58 @@ namespace Lumina
         EntityScripts::DetachAll(Registry, Entity);
     }
 
-    CEntityScript* CWorld::AddEntityScript(ECS::FEntity Entity, FStringView ScriptClass)
+    CEntityScript* CWorld::AddEntityScript(ECS::FEntity Entity, TSubclassOf<CEntityScript> ScriptClass)
     {
-        if (!EntityRegistry.IsValid(Entity) || ScriptClass.empty())
+        if (!EntityRegistry.IsValid(Entity) || !ScriptClass.IsValid())
         {
             return nullptr;
         }
-
-        // Class-keyed, so this attaches a C++ script and a C# one through exactly the same call.
-        CClass* Class = FindObject<CClass>(FName(ScriptClass));
-        return EntityScripts::Attach(EntityRegistry, Entity, Class);
+        return EntityScripts::Attach(EntityRegistry, Entity, ScriptClass.Get());
     }
 
-    void CWorld::SetEntityScript(ECS::FEntity Entity, FStringView ScriptClass)
+    CEntityScript* CWorld::FindEntityScript(ECS::FEntity Entity, TSubclassOf<CEntityScript> ScriptClass)
     {
-        AddEntityScript(Entity, ScriptClass);
+        return ScriptClass.IsValid() ? EntityScripts::Find(EntityRegistry, Entity, ScriptClass.Get()) : nullptr;
+    }
+
+    void CWorld::FindEntityScripts(ECS::FEntity Entity, TSubclassOf<CEntityScript> ScriptClass, TVector<TStrongObjectPtr<CEntityScript>>& Out)
+    {
+        if (!ScriptClass.IsValid())
+        {
+            return;
+        }
+
+        TVector<CEntityScript*> Found;
+        EntityScripts::FindAll(EntityRegistry, Entity, ScriptClass.Get(), Found);
+        Out.reserve(Out.size() + Found.size());
+        for (CEntityScript* Script : Found)
+        {
+            Out.emplace_back(Script);
+        }
+    }
+
+    void CWorld::FindScriptsInWorld(TSubclassOf<CEntityScript> ScriptClass, TVector<TStrongObjectPtr<CEntityScript>>& Out)
+    {
+        if (!ScriptClass.IsValid())
+        {
+            return;
+        }
+
+        for (ECS::FEntity Entity : EntityRegistry.View<SEntityScriptComponent>())
+        {
+            for (const TStrongObjectPtr<CEntityScript>& Script : EntityRegistry.Get<SEntityScriptComponent>(Entity).Scripts)
+            {
+                if (Script.Get() != nullptr && Script->IsAttached() && Script->GetClass()->IsChildOf(ScriptClass.Get()))
+                {
+                    Out.push_back(Script);
+                }
+            }
+        }
+    }
+
+    bool CWorld::RemoveEntityScript(ECS::FEntity Entity, CEntityScript* Script)
+    {
+        return Script != nullptr && EntityScripts::Remove(EntityRegistry, Entity, Script);
     }
 
     void SystemSchedule::SortStage(TVector<CWorld::FStageSlot>& Stage)
@@ -1613,7 +1680,7 @@ namespace Lumina
     {
         if (bSystemsStarted)
         {
-            EntitySystems::StartupPending(Systems);
+            EntitySystems::StartupPending(SystemContext, Systems);
         }
     }
 
@@ -1664,7 +1731,7 @@ namespace Lumina
         DisabledSystems = PendingDisabledSystems;
 
         // Torn down before the rebuild, so a disabled system still sees a schedule it belongs to.
-        EntitySystems::DropDisabled(DisabledSystems, Systems);
+        EntitySystems::DropDisabled(SystemContext, DisabledSystems, Systems);
 
         // Creates whatever was just re-enabled and starts only what has not started yet.
         RegisterSystems();
@@ -1695,6 +1762,7 @@ namespace Lumina
             }
 
             FSystemInfo& Info = Out.emplace_back();
+            Info.Class    = Class;
             Info.Name     = Class->GetName();
             Info.bEnabled = PendingDisabledSystems.count(Info.Name) == 0;
 
@@ -1710,17 +1778,20 @@ namespace Lumina
         });
     }
 
-    bool CWorld::IsSystemEnabled(FName System) const
+    bool CWorld::IsSystemEnabled(TSubclassOf<CEntitySystem> System) const
     {
-        return PendingDisabledSystems.count(System) == 0;
+        return System.IsValid() && PendingDisabledSystems.count(System->GetName()) == 0;
     }
 
-    void CWorld::SetSystemEnabled(FName System, bool bEnabled)
+    void CWorld::SetSystemEnabled(TSubclassOf<CEntitySystem> SystemClass, bool bEnabled)
     {
-        if (System.IsNone())
+        if (!SystemClass.IsValid())
         {
             return;
         }
+
+        // Disabled systems persist by class name, since that survives a reload that remints the class.
+        const FName System = SystemClass->GetName();
 
         const bool bCurrentlyEnabled = PendingDisabledSystems.count(System) == 0;
         if (bCurrentlyEnabled == bEnabled)
@@ -1773,65 +1844,6 @@ namespace Lumina
         DebugTextLines.clear();
     }
 
-    TOptional<SRayResult> CWorld::CastRay(const SRayCastSettings& Settings)
-    {
-        LUMINA_PROFILE_SCOPE();
-        
-        if (PhysicsScene == nullptr)
-        {
-            return NullOpt;
-        }
-        
-        TOptional<SRayResult> Result = PhysicsScene->CastRay(Settings);
-        
-        if (Settings.bDrawDebug)
-        {
-            if (Result.has_value())
-            {
-                SRayResult RayResult = Result.value();
-                DebugInterface.DrawLine(Settings.Start, RayResult.Location, FColor(Settings.DebugMissColor), 3.0f, true, Settings.DebugDuration);
-                
-                FVector3 NormalEnd = RayResult.Location + RayResult.Normal * 0.5f;
-                DebugInterface.DrawLine(RayResult.Location, NormalEnd, FColor::Blue, 3.0f,true, Settings.DebugDuration);
-                
-                DebugInterface.DrawBox(RayResult.Location, FVector3(0.05f), FQuat(1.0f, 0.0f, 0.0f, 0.0f), FColor::Yellow, 3.0f, true, Settings.DebugDuration);
-                
-                DebugInterface.DrawLine(RayResult.Location, Settings.End, FColor(Settings.DebugHitColor), 3.0f, true, Settings.DebugDuration);
-            }
-            else
-            {
-                DebugInterface.DrawLine(Settings.Start, Settings.End, FColor(Settings.DebugMissColor), 3.0f, true, Settings.DebugDuration);
-            }
-        }
-        
-        return Move(Result);
-    }
-    
-    void CWorld::CastSphere(const SSphereCastSettings& Settings, TVector<SRayResult>& OutHits) const
-    {
-        LUMINA_PROFILE_SCOPE();
-
-        if (PhysicsScene == nullptr)
-        {
-            OutHits.clear();
-            return;
-        }
-
-        PhysicsScene->CastSphere(Settings, OutHits);
-    }
-
-    TOptional<SRayResult> CWorld::CastSphereClosest(const SSphereCastSettings& Settings) const
-    {
-        LUMINA_PROFILE_SCOPE();
-
-        if (PhysicsScene == nullptr)
-        {
-            return NullOpt;
-        }
-
-        return PhysicsScene->CastSphereClosest(Settings);
-    }
-
     EUpdateStage CWorld::GetUpdateStage() const
     {
         return SystemContext.GetUpdateStage();
@@ -1839,8 +1851,7 @@ namespace Lumina
 
     ECS::FEntity CWorld::GetEntityByTag(const FName& Tag)
     {
-        const ECS::FSparseSet* Storage =
-            EntityRegistry.FindNamedStorage(ECS::GetComponentTypeID<STagComponent>(), Tag);
+        const ECS::FSparseSet* Storage = EntityRegistry.FindNamedStorage(ECS::GetComponentTypeID<STagComponent>(), Tag);
 
         if (Storage == nullptr || Storage->IsEmpty())
         {
@@ -1893,31 +1904,30 @@ namespace Lumina
         return ECS::NullEntity;
     }
 
+    FName CWorld::GetEntityTag(ECS::FEntity Entity)
+    {
+        return ECS::Utils::GetEntityTag(EntityRegistry, Entity);
+    }
+
     FName CWorld::GetEntityName(ECS::FEntity Entity)
     {
         const SNameComponent* Name = EntityRegistry.TryGet<SNameComponent>(Entity);
         return Name ? Name->Name : FName();
     }
 
-    ECS::FEntity CWorld::GetFirstEntityWith(uint32 Type)
-    {
-        if (!EntityRegistry.FindStorage(Type))
-        {
-            return ECS::NullEntity;
-        }
-
-        const ECS::FSparseSet* storage = EntityRegistry.FindStorage(static_cast<ECS::FComponentTypeID>(Type));
-
-        if (storage == nullptr || storage->IsEmpty())
-        {
-            return ECS::NullEntity;
-        }
-        return *storage->begin();
-    }
-
     void CWorld::SetEntityTransform(ECS::FEntity Entity, const FTransform& NewTransform)
     {
-        EntityRegistry.EmplaceOrReplace<STransformComponent>(Entity, NewTransform);
+        if (!EntityRegistry.IsValid(Entity))
+        {
+            return;
+        }
+
+        if (STransformComponent* Transform = EntityRegistry.TryGet<STransformComponent>(Entity))
+        {
+            Transform->SetLocalTransform(NewTransform);
+            return;
+        }
+        EntityRegistry.Emplace<STransformComponent>(Entity, NewTransform);
         EntityRegistry.EmplaceOrReplace<FNeedsTransformUpdate>(Entity);
     }
 

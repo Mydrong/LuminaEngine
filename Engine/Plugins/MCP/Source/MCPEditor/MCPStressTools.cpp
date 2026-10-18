@@ -6,7 +6,6 @@
 #include "Agent/AgentToolRegistry.h"
 #include "Core/Math/Random.h"
 #include "Core/Object/Cast.h"
-#include "Physics/PhysicsLibrary.h"
 #include "Session/SessionOps.h"
 #include "Tools/PrimitiveManager/PrimitiveManager.h"
 #include "World/Entity/Components/CameraComponent.h"
@@ -63,7 +62,7 @@ namespace Lumina::MCP
         int32 CountStressEntities(CWorld* World)
         {
             int32 Count = 0;
-            auto View = ECS::GetWorldRegistry(*World).View<SNameComponent>();
+            auto View = World->GetEntityRegistry().View<SNameComponent>();
             for (ECS::FEntity Entity : View)
             {
                 Count += IsStressEntity(View.Get<SNameComponent>(Entity)) ? 1 : 0;
@@ -73,7 +72,7 @@ namespace Lumina::MCP
 
         float GroundAt(CWorld* World, float X, float Z)
         {
-            const SRayResult Hit = CPhysicsLibrary::Raycast(World, FVector3(X, 5000.0f, Z), FVector3(X, -5000.0f, Z), ECS::NullEntity);
+            const SRayResult Hit = World->Raycast(FVector3(X, 5000.0f, Z), FVector3(X, -5000.0f, Z), ECS::NullEntity);
             return Hit.bHit ? Hit.Location.y : NoGround;
         }
 
@@ -106,7 +105,7 @@ namespace Lumina::MCP
             constexpr float TraceDistance = 2000.0f;
             const FVector3 Eye = Transform->GetWorldLocation();
             const FVector3 Forward = CameraComponent->GetForwardVector();
-            const SRayResult Hit = CPhysicsLibrary::Raycast(World, Eye, Eye + Forward * TraceDistance, ECS::NullEntity);
+            const SRayResult Hit = World->Raycast(Eye, Eye + Forward * TraceDistance, ECS::NullEntity);
             const FVector3 Target = Hit.bHit ? Hit.Location : Eye + Forward * FallbackDistance;
             OutCenter = FVector2(Target.x, Target.z);
             return true;
@@ -391,7 +390,7 @@ namespace Lumina::MCP
             }
 
             TVector<ECS::FEntity> Doomed;
-            auto View = ECS::GetWorldRegistry(*World).View<SNameComponent>();
+            auto View = World->GetEntityRegistry().View<SNameComponent>();
             for (ECS::FEntity Entity : View)
             {
                 if (IsStressEntity(View.Get<SNameComponent>(Entity)))
@@ -472,7 +471,7 @@ namespace Lumina::MCP
             THashMap<int32, ECS::FEntity> Cells;
             TVector<ECS::FEntity> Decoys;
             {
-                auto View = ECS::GetWorldRegistry(*World).View<SNameComponent>();
+                auto View = World->GetEntityRegistry().View<SNameComponent>();
                 for (ECS::FEntity Entity : View)
                 {
                     const SNameComponent& Name = View.Get<SNameComponent>(Entity);

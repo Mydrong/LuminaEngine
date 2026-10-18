@@ -744,7 +744,7 @@ FShadedSurface ShadeGBuffer(FGBufferData G, float3 WorldPosition, float3 ViewPos
     const float2 ShadowNoiseDir = LocalShadowNoiseDir(ScreenPos);
 
     uint    NumLights   = GetNumLights();
-    FLight* LightArray  = LightData().Lights.At(0);
+    const GPUSpan<FLight> Lights = LightData().Lights;
     const uint MaskWords = GetClusterMaskWords();
 
 #ifdef SHADING_COMPUTE
@@ -783,7 +783,7 @@ FShadedSurface ShadeGBuffer(FGBufferData G, float3 WorldPosition, float3 ViewPos
             }
 
             // Position and Radius alone decide the cull; the rest of the light is fetched only once some lane wants it.
-            const float4 PositionRadius = loadAligned<16>(reinterpret<float4*>(LightArray + LightIndex));
+            const float4 PositionRadius = loadAligned<16>(reinterpret<float4*>(Lights.At(LightIndex)));
             const float3 LightToFrag    = PositionRadius.xyz - WorldPosition;
             const float  DistSq         = dot(LightToFrag, LightToFrag);
 
@@ -802,7 +802,7 @@ FShadedSurface ShadeGBuffer(FGBufferData G, float3 WorldPosition, float3 ViewPos
                 continue;
             }
 
-            const FLight Light       = loadAligned<16>(LightArray + LightIndex);
+            const FLight Light       = loadAligned<16>(Lights.At(LightIndex));
             const float  InvDist     = rsqrt(max(DistSq, 1e-8));
             const float3 L           = LightToFrag * InvDist;
             const float  DistToLight = DistSq * InvDist;

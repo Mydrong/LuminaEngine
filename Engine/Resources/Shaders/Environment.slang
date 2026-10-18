@@ -6,7 +6,7 @@
 
 struct FEnvPushConstants
 {
-    uint64_t     Env;             // FEnvironmentParams, see LoadBlock
+    Ptr<FEnvironmentParams> Env;
     FTextureCube SkyCube;
     FTexture2D   Equirect;
     uint         EquirectWidth;   // equirect base width in texels; drives the anti-aliasing LOD
@@ -34,7 +34,7 @@ float3 GetViewRay(float2 UV)
 [shader("fragment")]
 FragmentOutput FragmentMain(FragmentInput Input)
 {
-    FEnvironmentParams uEnvironment = LoadBlock<FEnvironmentParams>(Pass().Env);
+    FEnvironmentParams uEnvironment = *Pass().Env;
 
     float3 Color;
     uint SkyMode = (SPEC_SKY_MODE == SKY_MODE_RUNTIME) ? asuint(uEnvironment.Misc.x) : SPEC_SKY_MODE;

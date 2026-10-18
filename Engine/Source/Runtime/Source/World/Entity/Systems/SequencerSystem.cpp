@@ -16,7 +16,7 @@ namespace Lumina
     {
         CWorld* World = GetWorld();
         const ECS::TComponentStorage<SSequencePlayerComponent> Players = World != nullptr
-            ? ECS::GetWorldRegistry(*World).FindStorage<SSequencePlayerComponent>()
+            ? World->GetEntityRegistry().FindStorage<SSequencePlayerComponent>()
             : ECS::TComponentStorage<SSequencePlayerComponent>();
         return Players && !Players.IsEmpty();
     }

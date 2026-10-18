@@ -51,6 +51,8 @@ public readonly unsafe struct ScriptDelegate
 
     public bool IsValid => Address != null;
 
+    public void Remove(Action Handler) => DelegateBindings.Remove(Address, Handler);
+
     public DelegateBinding Bind(Action Handler)
     {
         if (Address == null || Handler == null)

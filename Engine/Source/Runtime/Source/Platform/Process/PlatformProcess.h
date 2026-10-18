@@ -102,6 +102,9 @@ namespace Lumina::Platform
     // Restores and raises the process's main window. False when it has none or the OS refused the focus change.
     RUNTIME_API bool FocusProcessWindow(uint32 ProcessId);
 
+    // Whether the OS focus is on any window of this process, a floating tool window or a dialog included. True where the platform cannot tell.
+    RUNTIME_API bool IsProcessForeground();
+
     RUNTIME_API const TCHAR* ExecutableName(bool bRemoveExtension = true);
 
     RUNTIME_API size_t GetProcessMemoryUsageBytes();

@@ -60,6 +60,9 @@ namespace Lumina
 
         bool bDrawShapes = true;
 
+        // Fills each shape in as well as outlining it, which reads better where shapes overlap the mesh or each other.
+        bool bDrawSolid = false;
+
     private:
 
         SMeshCollision* GetCollision() const;
@@ -91,10 +94,12 @@ namespace Lumina
         void  EndShapeTransaction() override             { EndTransaction(); }
 
         // Rebuilt from the points rather than serialized, so an edited hull is never drawn against a stale outline.
-        struct FHullWireframe
+        struct FHullDrawData
         {
             TVector<FVector3> Vertices;
             TVector<uint32>   Edges;
+            TVector<FVector3> SolidVertices;
+            TVector<uint32>   SolidIndices;
         };
 
         FTransactionManager&           Transactions;
@@ -102,7 +107,7 @@ namespace Lumina
         TUniquePtr<FPropertyTable>     DetailsTable;
         TUniquePtr<FPropertyTable>     SettingsTable;
         void*                          DetailsTarget = nullptr;
-        TVector<FHullWireframe>        HullWireframes;
+        TVector<FHullDrawData>         HullDrawData;
         int32                          SelectedPrimitive = Constants::kIndexNone;
         FShapeHandleState              HandleState;
         ImGuizmo::OPERATION            GizmoOp = ImGuizmo::TRANSLATE;

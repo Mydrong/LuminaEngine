@@ -71,7 +71,7 @@ namespace Lumina
         template<typename TComponent, typename TApply>
         ECS::FEntity RetargetOrSpawn(CWorld* World, CObject* Asset, const FTransform& SpawnTransform, ECS::FEntity DropTarget, bool bAttachToTarget, TApply&& Apply)
         {
-            ECS::FRegistry& Registry = ECS::GetWorldRegistry(*World);
+            ECS::FRegistry& Registry = World->GetEntityRegistry();
             if (IsLiveEntity(Registry, DropTarget))
             {
                 if (TComponent* Existing = Registry.TryGet<TComponent>(DropTarget))
@@ -100,7 +100,7 @@ namespace Lumina
         // DropTarget when it wears a mesh on Skeleton, otherwise the skeleton's preview mesh spawned in its place.
         ECS::FEntity ResolveSkeletalTarget(CWorld* World, CObject* Asset, CSkeleton* Skeleton, const FTransform& SpawnTransform, ECS::FEntity DropTarget, bool bAttachToTarget)
         {
-            ECS::FRegistry& Registry = ECS::GetWorldRegistry(*World);
+            ECS::FRegistry& Registry = World->GetEntityRegistry();
             if (IsLiveEntity(Registry, DropTarget))
             {
                 if (SSkeletalMeshComponent* MeshComponent = Registry.TryGet<SSkeletalMeshComponent>(DropTarget))
@@ -146,7 +146,7 @@ namespace Lumina
 
                 if (bSpawned)
                 {
-                    SceneOps::AddPlacementCollision(ECS::GetWorldRegistry(*World), Entity);
+                    SceneOps::AddPlacementCollision(World->GetEntityRegistry(), Entity);
                 }
                 return Entity;
             }, /*bPlacesEntity*/ true);
@@ -154,7 +154,7 @@ namespace Lumina
             // A material is only meaningful on an existing mesh entity, and sets slot 0.
             RegisterTyped<CMaterialInterface>(Instance, [](CWorld* World, CMaterialInterface* Material, const FTransform&, ECS::FEntity DropTarget, bool)
             {
-                ECS::FRegistry& Registry = ECS::GetWorldRegistry(*World);
+                ECS::FRegistry& Registry = World->GetEntityRegistry();
                 SStaticMeshComponent* MeshComponent = IsLiveEntity(Registry, DropTarget) ? Registry.TryGet<SStaticMeshComponent>(DropTarget) : nullptr;
                 if (MeshComponent == nullptr)
                 {
@@ -226,7 +226,7 @@ namespace Lumina
                     return ECS::NullEntity;
                 }
 
-                SRagdollComponent& Ragdoll = ECS::GetWorldRegistry(*World).GetOrEmplace<SRagdollComponent>(Target);
+                SRagdollComponent& Ragdoll = World->GetEntityRegistry().GetOrEmplace<SRagdollComponent>(Target);
                 Ragdoll.PhysicsAsset = PhysicsAsset;
                 Ragdoll.State        = ERagdollState::Simulated;
                 return Target;
@@ -240,7 +240,7 @@ namespace Lumina
                     return ECS::NullEntity;
                 }
 
-                ECS::GetWorldRegistry(*World).GetOrEmplace<SSimpleAnimationComponent>(Target).PlayAnimation(Animation, /*bLoop*/ true);
+                World->GetEntityRegistry().GetOrEmplace<SSimpleAnimationComponent>(Target).PlayAnimation(Animation, /*bLoop*/ true);
                 return Target;
             });
 
@@ -252,7 +252,7 @@ namespace Lumina
                     return ECS::NullEntity;
                 }
 
-                ECS::GetWorldRegistry(*World).GetOrEmplace<SAnimationGraphComponent>(Target).Graph = Graph;
+                World->GetEntityRegistry().GetOrEmplace<SAnimationGraphComponent>(Target).Graph = Graph;
                 return Target;
             });
 
@@ -267,7 +267,7 @@ namespace Lumina
             // A destructible needs the mesh it breaks from, so a collection on its own spawns its source mesh.
             RegisterTyped<CGeometryCollection>(Instance, [](CWorld* World, CGeometryCollection* Collection, const FTransform& SpawnTransform, ECS::FEntity DropTarget, bool bAttachToTarget)
             {
-                ECS::FRegistry& Registry = ECS::GetWorldRegistry(*World);
+                ECS::FRegistry& Registry = World->GetEntityRegistry();
                 ECS::FEntity Target = DropTarget;
                 if (!IsLiveEntity(Registry, Target) || Registry.TryGet<SStaticMeshComponent>(Target) == nullptr)
                 {
@@ -299,7 +299,7 @@ namespace Lumina
             // Weather is one per world, so a drop swaps the preset on the existing component wherever it sits.
             RegisterTyped<CWeatherPreset>(Instance, [](CWorld* World, CWeatherPreset* Preset, const FTransform& SpawnTransform, ECS::FEntity DropTarget, bool bAttachToTarget)
             {
-                ECS::FRegistry& Registry = ECS::GetWorldRegistry(*World);
+                ECS::FRegistry& Registry = World->GetEntityRegistry();
                 ECS::FEntity Existing = ECS::NullEntity;
                 for (ECS::FEntity Entity : Registry.View<SWeatherComponent>())
                 {
@@ -318,7 +318,7 @@ namespace Lumina
                     [Sheet](SAnimatedSprite3DComponent& Animated, bool) { Animated.SpriteSheet = Sheet; });
 
                 // Seeded from the sheet so it draws in the editor, where the animation system does not run.
-                SSprite3DComponent& Sprite = ECS::GetWorldRegistry(*World).GetOrEmplace<SSprite3DComponent>(Target);
+                SSprite3DComponent& Sprite = World->GetEntityRegistry().GetOrEmplace<SSprite3DComponent>(Target);
                 Sprite.Texture = Sheet->Texture;
                 Sprite.HFrames = Math::Max(Sheet->HFrames, 1);
                 Sprite.VFrames = Math::Max(Sheet->VFrames, 1);
@@ -392,7 +392,7 @@ namespace Lumina
             return ECS::NullEntity;
         }
 
-        ECS::FRegistry& Registry = ECS::GetWorldRegistry(*World);
+        ECS::FRegistry& Registry = World->GetEntityRegistry();
         if (!IsLiveEntity(Registry, DropTarget))
         {
             return ECS::NullEntity;

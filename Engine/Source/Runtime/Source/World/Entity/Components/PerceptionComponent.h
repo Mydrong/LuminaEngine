@@ -88,13 +88,17 @@ namespace Lumina
         PROPERTY(Editable, Category = "AI|Perception|Sight", ClampMin = 0.0f)
         float SightRadius = 20.0f;
 
-        /** Distance at which an already-seen target is dropped (>= SightRadius for hysteresis; meters). */
+        // Distance at which an already-seen target is dropped (meters), treated as SightRadius when set smaller.
         PROPERTY(Editable, Category = "AI|Perception|Sight", ClampMin = 0.0f)
         float LoseSightRadius = 25.0f;
 
         /** Full vision cone angle (degrees). */
         PROPERTY(Editable, Category = "AI|Perception|Sight", ClampMin = 0.0f, ClampMax = 360.0f)
         float SightFOVDegrees = 90.0f;
+
+        // Full cone an already-seen target has to stay inside, treated as SightFOVDegrees when set narrower.
+        PROPERTY(Editable, Category = "AI|Perception|Sight", ClampMin = 0.0f, ClampMax = 360.0f)
+        float LoseSightFOVDegrees = 110.0f;
 
         /** Eye offset (along entity up) used as the sight ray origin. */
         PROPERTY(Editable, Category = "AI|Perception|Sight")

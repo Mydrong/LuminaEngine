@@ -10,20 +10,13 @@ namespace Lumina;
 public unsafe partial class CWorld
 {
     internal ulong WorldHandle => (ulong)Handle.ToInt64();
-    public GameplayMessageBus Messages => new(this);
 
     // The world's event queues, for systems that drain them and scripts that send into them.
     public WorldEvents Events => new(this);
 
     // The subsystem of type T in this world, or null when none was created. Finds a C++ one just the same.
     public T? GetSubsystem<T>() where T : NativeObject
-        => CGameLibrary.GetSubsystem(this, SubsystemName<T>.Value) as T;
-
-    // Interned once per type, so a lookup sends an 8-byte id instead of text the native side re-interns.
-    private static class SubsystemName<T>
-    {
-        public static readonly FName Value = typeof(T).Name;
-    }
+        => GetSubsystem(NativeClass<T>.Of.AsBase<CWorldSubsystem>()) as T;
 
     public float DeltaTime => (float)GetWorldDeltaTime();
     public double ElapsedTime => GetTimeSinceWorldCreation();
@@ -42,8 +35,16 @@ public unsafe partial class CWorld
         set => SetTimeDilation(value);
     }
 
-    /// Spawns a prefab at the origin, unparented. Null entity if the prefab could not be spawned.
-    public FEntity SpawnPrefab(TSoftObjectPtr<CPrefab> Prefab) => CPrefabLibrary.SpawnPrefab(this, Prefab);
+    // Setting it cuts to the camera, and SetActiveCamera blends instead.
+    public FEntity ActiveCamera
+    {
+        get => GetActiveCameraEntity();
+        set => SetActiveCamera(value);
+    }
+
+    // Runs OnSpawned once on the game thread with the spawned root, or the null entity if it failed.
+    public void SpawnPrefabAsync(TSoftObjectPtr<CPrefab> Prefab, Action<FEntity> OnSpawned)
+        => SpawnPrefabAsync(Prefab, ScriptCallback.Of(OnSpawned));
 
     /// Spawns a prefab already placed, in one native call. Null entity if the prefab could not be spawned.
     public FEntity SpawnPrefab(TSoftObjectPtr<CPrefab> Prefab, FVector3 Location, FQuat? Rotation = null, FEntity? Parent = null)
@@ -51,7 +52,18 @@ public unsafe partial class CWorld
 
     /// Spawns a prefab at a full transform, so an authored scale survives the spawn.
     public FEntity SpawnPrefab(TSoftObjectPtr<CPrefab> Prefab, FTransform Transform, FEntity? Parent = null)
-        => CPrefabLibrary.SpawnPrefabAt(this, Prefab, Transform, Parent ?? FEntity.Null);
+        => SpawnPrefabAt(Prefab, Transform, Parent ?? FEntity.Null);
+
+    /// Spawns a prefab already loaded, with no path lookup. Null entity if the prefab is null.
+    public FEntity SpawnPrefab(CPrefab Prefab) => SpawnLoadedPrefab(Prefab);
+
+    /// Spawns a prefab already loaded, placed in one native call.
+    public FEntity SpawnPrefab(CPrefab Prefab, FVector3 Location, FQuat? Rotation = null, FEntity? Parent = null)
+        => SpawnPrefab(Prefab, new FTransform(Location, Rotation ?? FQuat.Identity, FVector3.One), Parent);
+
+    /// Spawns a prefab already loaded at a full transform, so an authored scale survives the spawn.
+    public FEntity SpawnPrefab(CPrefab Prefab, FTransform Transform, FEntity? Parent = null)
+        => SpawnLoadedPrefabAt(Prefab, Transform, Parent ?? FEntity.Null);
 
     public List<T> Scripts<T>() where T : class
     {
@@ -63,7 +75,7 @@ public unsafe partial class CWorld
         TSubclassOf<CEntityScript> Class = typeof(CEntityScript).IsAssignableFrom(typeof(T))
             ? TSubclassOf<CEntityScript>.FromName(LuminaSharp.NativeTypeName.Of(typeof(T)))
             : default;
-        CEntityScript[] Found = CEntityScriptLibrary.FindScriptsInWorld(this, Class.IsValid ? Class : LuminaSharp.NativeClass<CEntityScript>.Of.AsBase<CEntityScript>());
+        CEntityScript[] Found = FindScriptsInWorld(Class.IsValid ? Class : LuminaSharp.NativeClass<CEntityScript>.Of.AsBase<CEntityScript>());
         var Result = new List<T>(Found.Length);
         foreach (CEntityScript Script in Found)
         {
@@ -98,6 +110,6 @@ public unsafe partial class CWorld
 
     /// A projectile that sweeps forward each frame, reports its first hit through its component's OnHit, and despawns after lifetime seconds.
     public FEntity SpawnProjectile(FVector3 position, FVector3 velocity, float damage = 0.0f, float lifetime = 5.0f)
-        => CProjectileLibrary.SpawnProjectile(this, position, velocity, damage, lifetime, FEntity.Null);
+        => SpawnProjectile(position, velocity, damage, lifetime, FEntity.Null);
 
 }

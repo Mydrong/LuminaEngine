@@ -23,6 +23,17 @@ namespace Lumina
         RowStructCache.Set(InStruct, RowStructName);
     }
 
+    bool CDataTable::RowsAre(const CStruct* Base) const
+    {
+        const CStruct* RowStruct = GetRowStruct();
+        return RowStruct != nullptr && RowStruct->IsChildOf(Base);
+    }
+
+    bool CDataTable::RowsAreNamed(const FName& BaseName) const
+    {
+        return !BaseName.IsNone() && RowsAre(ResolveStructByName(BaseName));
+    }
+
     int32 CDataTable::FindRowIndex(const FName& RowName) const
     {
         for (int32 i = 0; i < (int32)Rows.size(); ++i)

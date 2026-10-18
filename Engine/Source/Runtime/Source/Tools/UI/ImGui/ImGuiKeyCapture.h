@@ -116,6 +116,20 @@ namespace Lumina::ImGuiX
             || K == EKey::LeftSuper   || K == EKey::RightSuper;
     }
 
+    // Whether the modifier K stands for is still down, by either side, which is all a release check needs.
+    inline bool IsModifierHeld(EKey K)
+    {
+        const ImGuiIO& Io = ImGui::GetIO();
+        switch (K)
+        {
+        case EKey::LeftControl: case EKey::RightControl: return Io.KeyCtrl;
+        case EKey::LeftShift:   case EKey::RightShift:   return Io.KeyShift;
+        case EKey::LeftAlt:     case EKey::RightAlt:     return Io.KeyAlt;
+        case EKey::LeftSuper:   case EKey::RightSuper:   return Io.KeySuper;
+        default:                                         return false;
+        }
+    }
+
     // True when the chord described by Key was pressed this frame, with its modifiers held exactly.
     // Use to drive rebindable editor hotkeys from an SKey setting.
     inline bool IsChordPressed(const SKey& Key)
@@ -125,8 +139,12 @@ namespace Lumina::ImGuiX
             return false;
         }
 
+        // A bound modifier holds its own flag down while pressed, so that flag is expected rather than compared.
         const ImGuiIO& Io = ImGui::GetIO();
-        if (Key.bCtrl != Io.KeyCtrl || Key.bShift != Io.KeyShift || Key.bAlt != Io.KeyAlt)
+        const bool bSelfCtrl  = Key.IsKeyboard() && (Key.Key == EKey::LeftControl || Key.Key == EKey::RightControl);
+        const bool bSelfShift = Key.IsKeyboard() && (Key.Key == EKey::LeftShift || Key.Key == EKey::RightShift);
+        const bool bSelfAlt   = Key.IsKeyboard() && (Key.Key == EKey::LeftAlt || Key.Key == EKey::RightAlt);
+        if ((Key.bCtrl || bSelfCtrl) != Io.KeyCtrl || (Key.bShift || bSelfShift) != Io.KeyShift || (Key.bAlt || bSelfAlt) != Io.KeyAlt)
         {
             return false;
         }

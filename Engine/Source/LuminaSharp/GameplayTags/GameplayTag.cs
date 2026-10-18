@@ -7,7 +7,7 @@ namespace LuminaSharp;
 /// A hierarchical gameplay tag (-style), e.g. <c>"Ability.Fire.Fireball"</c>. A lightweight value
 /// wrapping an interned id from the process-global registry, so equality and hierarchical matching are
 /// O(depth) integer compares. Request one with <see cref="Request"/>; the registry interns the tag and all
-/// its ancestors. Used as message-bus channels (<see cref="GameplayMessageBus"/>), entity/ability tags, etc.
+/// its ancestors. Used as message-bus channels (<see cref="Lumina.CWorld"/> Subscribe and Broadcast), entity/ability tags, etc.
 /// </summary>
 public readonly partial struct GameplayTag : IEquatable<GameplayTag>
 {

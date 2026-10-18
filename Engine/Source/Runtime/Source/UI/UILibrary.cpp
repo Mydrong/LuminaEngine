@@ -2,7 +2,6 @@
 #include "UI/UIScript.h"
 
 #include "UI/RmlUiBridge.h"
-#include "World/World.h"
 
 namespace Lumina
 {
@@ -23,17 +22,6 @@ namespace Lumina
         }
     }
 
-    FVector2 CUILibrary::GetLayoutSize(CWorld* World)
-    {
-        const FUIntVector2 Size = RmlUi::GetWorldLayoutSize(World);
-        return FVector2((float)Size.x, (float)Size.y);
-    }
-
-    bool CUILibrary::IsCursorOverUI(CWorld* World)
-    {
-        return RmlUi::IsCursorOverWorldUI(World);
-    }
-
     void CUILibrary::ShowScriptUI(CEntityScript* Script)
     {
         UIScripts::Show(Script);
@@ -52,21 +40,6 @@ namespace Lumina
     SUIDocument CUILibrary::GetScriptDocument(CEntityScript* Script)
     {
         return FromPtr<SUIDocument>(UIScripts::GetDocument(Script));
-    }
-
-    SUIDocument CUILibrary::LoadDocument(CWorld* World, const FString& Path)
-    {
-        return FromPtr<SUIDocument>(RmlUi::LoadScreenDocument(World, Path));
-    }
-
-    SUIDocument CUILibrary::LoadDocumentFromMemory(CWorld* World, const FString& Rml, const FString& SourceUrl)
-    {
-        return FromPtr<SUIDocument>(RmlUi::LoadScreenDocumentFromMemory(World, Rml, SourceUrl));
-    }
-
-    void CUILibrary::UnloadDocument(CWorld* World, SUIDocument Document)
-    {
-        RmlUi::UnloadScreenDocument(World, AsPtr(Document));
     }
 
     void CUILibrary::ShowDocument(SUIDocument Document, bool bModal, bool bAutoFocus)
@@ -161,24 +134,9 @@ namespace Lumina
         return FVector4(XYWH[0], XYWH[1], XYWH[2], XYWH[3]);
     }
 
-    SUIEventListener CUILibrary::AddEventListener(CWorld* World, SUIElement Element, const FString& EventType)
-    {
-        return FromPtr<SUIEventListener>(RmlUi::AddElementEventListener(World, AsPtr(Element), EventType));
-    }
-
-    void CUILibrary::RemoveEventListener(CWorld* World, SUIEventListener Listener)
-    {
-        RmlUi::RemoveElementEventListener(World, AsPtr(Listener));
-    }
-
     uint64 CUILibrary::GetEventListenerDelegate(SUIEventListener Listener)
     {
         return reinterpret_cast<uint64>(RmlUi::GetElementEventListenerDelegate(AsPtr(Listener)));
-    }
-
-    SUIDataModel CUILibrary::CreateDataModel(CWorld* World, const FString& Name, SScriptCallback OnSet, SScriptCallback OnEvent)
-    {
-        return FromPtr<SUIDataModel>(RmlUi::CreateDataModel(World, Name, OnSet, OnEvent));
     }
 
     void CUILibrary::DestroyDataModel(SUIDataModel Model)

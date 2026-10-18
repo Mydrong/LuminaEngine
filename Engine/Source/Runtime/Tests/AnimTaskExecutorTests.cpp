@@ -269,3 +269,21 @@ TEST(AnimTaskExecutor, InertializationCaptureVectorPathMatchesScalarBitForBit)
         ExpectChannelsBitEqual(Vector.Scale, Scalar.Scale, N, "scale");
     }
 }
+
+// Bone LOD trims the active set below the skeleton, and the transition still has to start from the pose on screen.
+TEST(AnimTaskExecutor, ATransitionWithBonesCulledByLodStillBlendsFromTheShownPose)
+{
+    FExecutorRig Rig;
+    const FPose Shown  = Rig.SamplePose(Rig.ClipA, 0.8f);
+    const FPose Target = Rig.SamplePose(Rig.ClipB, 0.8f);
+    constexpr int32 ActiveBones = 4;
+    ASSERT_LT(ActiveBones, Rig.Skeleton.GetNumBones());
+
+    FAnimInertializer Inert;
+    Anim::InertCaptureForTest(Inert, Shown, Shown, Target, 0.016f, true, ActiveBones, true);
+
+    for (int32 i = 1; i < ActiveBones; ++i)
+    {
+        EXPECT_GT(Inert.Rot.X0()[i], 1e-3f) << "bone " << i << " would snap to the new state instead of blending";
+    }
+}

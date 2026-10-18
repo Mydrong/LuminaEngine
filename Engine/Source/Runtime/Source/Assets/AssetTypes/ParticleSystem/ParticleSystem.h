@@ -532,7 +532,7 @@ namespace Lumina
         PROPERTY(Editable, Category = "Sub-Emitter", EditCondition = "SpawnEvent == Collision")
         bool bSpawnAlongSurfaceNormal = false;
 
-        // Hands where this emitter's particles hit to scripts through CParticleSystemLibrary::GetCollisions, a few frames late.
+        // Hands where this emitter's particles hit to scripts through CWorld::GetParticleCollisions, a few frames late.
         PROPERTY(Editable, Category = "Events")
         bool bReportCollisions = false;
 

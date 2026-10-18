@@ -39,13 +39,45 @@ public partial class CEntityScript
     // The token GameTask falls back to, so an await started by a script ends with it even when no token was passed.
     internal System.Threading.CancellationToken LifetimeToken => DestroyToken;
 
-    internal void CancelDestroyToken()
+    private System.Collections.Generic.List<System.IDisposable>? Owned;
+
+    // Disposed after OnDetach in reverse order, so subscriptions made after a document go before it closes.
+    protected T Own<T>(T Resource) where T : System.IDisposable
+    {
+        (Owned ??= new()).Add(Resource);
+        return Resource;
+    }
+
+    protected void Own(System.Action OnRelease) => Own(new OwnedAction(OnRelease));
+
+    private sealed class OwnedAction(System.Action OnRelease) : System.IDisposable
+    {
+        public void Dispose() => OnRelease();
+    }
+
+    internal void ReleaseLifetime()
     {
         if (DestroyCts != null)
         {
             DestroyCts.Cancel();
             DestroyCts.Dispose();
             DestroyCts = null;
+        }
+
+        if (Owned is { } Resources)
+        {
+            Owned = null;
+            for (int Index = Resources.Count - 1; Index >= 0; --Index)
+            {
+                try
+                {
+                    Resources[Index].Dispose();
+                }
+                catch (System.Exception Exception)
+                {
+                    Native.Log(ELogLevel.Error, $"{GetType().Name} threw releasing an owned resource: {Exception}");
+                }
+            }
         }
     }
 

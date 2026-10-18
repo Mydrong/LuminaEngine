@@ -146,6 +146,38 @@ namespace Lumina::AssetOps
         return IsAtOrUnder(VirtualPath, "/Game/Content") || IsAtOrUnder(VirtualPath, "/Engine/Resources/Content");
     }
 
+    TVector<FString> FindReadOnlyFiles(FStringView VirtualPath)
+    {
+        TVector<FString> ReadOnly;
+        if (!VFS::IsDirectory(VirtualPath))
+        {
+            if (VFS::IsReadOnlyOnDisk(VirtualPath))
+            {
+                ReadOnly.emplace_back(VirtualPath.data(), VirtualPath.size());
+            }
+            return ReadOnly;
+        }
+
+        VFS::RecursiveDirectoryIterator(VirtualPath, [&ReadOnly](const VFS::FFileInfo& Info)
+        {
+            if (!Info.IsDirectory() && Info.IsReadOnly())
+            {
+                ReadOnly.emplace_back(Info.VirtualPath.c_str(), Info.VirtualPath.size());
+            }
+        });
+        return ReadOnly;
+    }
+
+    namespace
+    {
+        FString DescribeReadOnly(const TVector<FString>& ReadOnly, const char* Verb)
+        {
+            return ReadOnly.size() == 1
+                ? Lumina::Format("{} is read-only, so it was not {}. Make it writable first.", ReadOnly.front(), Verb)
+                : Lumina::Format("{} files are read-only, including {}, so nothing was {}. Make them writable first.", ReadOnly.size(), ReadOnly.front(), Verb);
+        }
+    }
+
     FPathOpResult MovePath(FStringView OldPath, FStringView NewPath)
     {
         if (OldPath.empty() || NewPath.empty())
@@ -166,6 +198,11 @@ namespace Lumina::AssetOps
         if (IsProtectedRoot(OldPath))
         {
             return FPathOpResult::Fail(Lumina::Format("{} is a mount root and cannot be moved.", OldPath));
+        }
+
+        if (const TVector<FString> ReadOnly = FindReadOnlyFiles(OldPath); !ReadOnly.empty())
+        {
+            return FPathOpResult::Fail(DescribeReadOnly(ReadOnly, "moved"));
         }
 
         if (VFS::Exists(NewPath))
@@ -264,6 +301,12 @@ namespace Lumina::AssetOps
         if (IsAnyWorldPlayingOrSimulating())
         {
             Result.Error = "Cannot delete while a world is playing or simulating.";
+            return Result;
+        }
+
+        if (const TVector<FString> ReadOnly = FindReadOnlyFiles(AssetPath); !ReadOnly.empty())
+        {
+            Result.Error = DescribeReadOnly(ReadOnly, "deleted");
             return Result;
         }
 

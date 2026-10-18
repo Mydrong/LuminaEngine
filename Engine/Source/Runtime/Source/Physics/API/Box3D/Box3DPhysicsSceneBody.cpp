@@ -230,8 +230,8 @@ namespace Lumina::Physics
 
     bool FBox3DPhysicsScene::BuildCompoundShapes(const SCompoundColliderComponent& Comp, const STransformComponent& Transform, TVector<FPendingShape>& OutShapes)
     {
-        const FVector3 Scale = Transform.GetScale();
-        const float UniformScale = Transform.MaxScale();
+        const FVector3 Scale = Transform.ComputeWorldTransform().GetScale();
+        const float UniformScale = Math::Max(Scale.x, Math::Max(Scale.y, Scale.z));
 
         for (const SCompoundSubShape& Child : Comp.Shapes)
         {

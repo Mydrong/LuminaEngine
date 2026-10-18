@@ -6,6 +6,7 @@
 #include "Config/NavigationSettings.h"
 #include "NavWorldTestUtil.h"
 #include "World/Entity/Components/NavModifierComponent.h"
+#include "World/Entity/Components/PathFollowComponent.h"
 
 using namespace Lumina;
 
@@ -359,3 +360,137 @@ TEST(PathFollow, ACrowdOwingPathsIsServedAFewPerTick)
     World.Stop();
 }
 
+namespace
+{
+    // An agent that never moves on its own, so only replanning changes its corners.
+    ECS::FEntity SpawnFollower(NavTest::FNavWorld& World, const FVector3& At, const FVector3& Goal)
+    {
+        ECS::FRegistry& R = World.Registry();
+        const ECS::FEntity Agent = R.Create();
+        R.Emplace<STransformComponent>(Agent).SetLocation(At);
+        SPathFollowComponent& Follow = R.Emplace<SPathFollowComponent>(Agent);
+        Follow.bDriveCharacterController = false;
+        Follow.SetTargetLocation(Goal);
+        return Agent;
+    }
+
+    // Whether any leg of the agent's remaining route crosses the box, tested along each leg at small steps.
+    bool RouteCrosses(const NavTest::FNavWorld& World, ECS::FEntity Agent, const FVector3& BoxMin, const FVector3& BoxMax)
+    {
+        const SPathFollowComponent& Follow = World.Registry().Get<SPathFollowComponent>(Agent);
+        FVector3 From = World.Registry().Get<STransformComponent>(Agent).GetWorldLocationCached();
+        for (int32 i = Follow.CurrentCorner; i < Follow.CornerCount; ++i)
+        {
+            const FVector3 To = Follow.PathCorners[i];
+            for (int32 Step = 0; Step <= 64; ++Step)
+            {
+                const FVector3 P = Math::Mix(From, To, (float)Step / 64.0f);
+                if (P.x > BoxMin.x && P.x < BoxMax.x && P.z > BoxMin.z && P.z < BoxMax.z)
+                {
+                    return true;
+                }
+            }
+            From = To;
+        }
+        return false;
+    }
+}
+
+// A wall raised across a path after it was found has to send the follower around it, not through it.
+TEST(NavPathRepath, AWallBuiltAcrossAPathIsWalkedAround)
+{
+    NavTest::FNavWorld World;
+    World.Create(64.0f);
+    World.Start(true);
+    ASSERT_TRUE(World.WaitReady());
+
+    const ECS::FEntity Agent = SpawnFollower(World, FVector3(0.0f, 0.0f, -12.0f), FVector3(0.0f, 0.0f, 12.0f));
+    World.TickFollow();
+    ASSERT_TRUE(World.Registry().Get<SPathFollowComponent>(Agent).IsFollowing());
+
+    const FVector3 Half(8.0f, 0.7f, 1.0f);
+    NavTest::SpawnBox(World.Registry(), FVector3(0.0f, 0.7f, 0.0f), Half);
+    ASSERT_TRUE(World.WaitSettled());
+    for (int32 Tick = 0; Tick < 4; ++Tick)
+    {
+        World.TickFollow();
+    }
+
+    EXPECT_FALSE(RouteCrosses(World, Agent, -Half, Half)) << "the follower still walks its old path through the new wall";
+    World.Stop();
+}
+
+// The builder stands against what it built, so its own spot is carved away and the replan has to start from the nearest ground.
+TEST(NavPathRepath, AnAgentStandingAgainstANewWallStillReplans)
+{
+    NavTest::FNavWorld World;
+    World.Create(64.0f);
+    World.Start(true);
+    ASSERT_TRUE(World.WaitReady());
+
+    const ECS::FEntity Agent = SpawnFollower(World, FVector3(0.0f, 0.0f, -1.15f), FVector3(0.0f, 0.0f, 12.0f));
+    World.TickFollow();
+    ASSERT_TRUE(World.Registry().Get<SPathFollowComponent>(Agent).IsFollowing());
+
+    const FVector3 Half(8.0f, 0.7f, 1.0f);
+    NavTest::SpawnBox(World.Registry(), FVector3(0.0f, 0.7f, 0.0f), Half);
+    ASSERT_TRUE(World.WaitSettled());
+    for (int32 Tick = 0; Tick < 4; ++Tick)
+    {
+        World.TickFollow();
+    }
+
+    const SPathFollowComponent& Follow = World.Registry().Get<SPathFollowComponent>(Agent);
+    EXPECT_FALSE(RouteCrosses(World, Agent, -Half, Half)) << "status " << (int32)Follow.Status << ", failures " << Follow.ConsecutiveFailures;
+    World.Stop();
+}
+
+// The builder can stand on the site it is building, so finishing it carves away the very ground the agent is on.
+TEST(NavPathRepath, AnAgentInsideANewObstacleStillReplans)
+{
+    NavTest::FNavWorld World;
+    World.Create(64.0f);
+    World.Start(true);
+    ASSERT_TRUE(World.WaitReady());
+
+    const ECS::FEntity Agent = SpawnFollower(World, FVector3(0.0f, 0.0f, -0.5f), FVector3(0.0f, 0.0f, 12.0f));
+    World.TickFollow();
+    ASSERT_TRUE(World.Registry().Get<SPathFollowComponent>(Agent).IsFollowing());
+
+    const FVector3 Half(8.0f, 0.7f, 1.0f);
+    NavTest::SpawnBox(World.Registry(), FVector3(0.0f, 0.7f, 0.0f), Half);
+    ASSERT_TRUE(World.WaitSettled());
+    for (int32 Tick = 0; Tick < 4; ++Tick)
+    {
+        World.TickFollow();
+    }
+
+    const SPathFollowComponent& Follow = World.Registry().Get<SPathFollowComponent>(Agent);
+    EXPECT_EQ(Follow.Status, EPathFollowStatus::Following) << "failures " << Follow.ConsecutiveFailures;
+    bool bRoundsTheEnd = false;
+    for (int32 i = 0; i < Follow.CornerCount; ++i)
+    {
+        bRoundsTheEnd |= std::fabs(Follow.PathCorners[i].x) > Half.x;
+    }
+    EXPECT_TRUE(bRoundsTheEnd) << "the replan has to leave the wall and go around one of its ends";
+    World.Stop();
+}
+
+// The navmesh may not promise a ledge the character cannot step, or a low building gets a walkable top the agent walks into.
+TEST(NavPathRepath, ALedgeAboveTheClimbHeightIsNotWalkedOnto)
+{
+    for (const auto& [Height, bReachable] : { std::pair{ 0.3f, true }, std::pair{ 0.5f, false } })
+    {
+        NavTest::FNavWorld World;
+        World.Create(64.0f);
+        NavTest::SpawnBox(World.Registry(), FVector3(0.0f, Height * 0.5f, 0.0f), FVector3(4.0f, Height * 0.5f, 4.0f));
+        World.Start(true);
+        ASSERT_TRUE(World.WaitReady());
+
+        const ECS::FEntity Agent = SpawnFollower(World, FVector3(0.0f, 0.0f, -10.0f), FVector3(0.0f, Height, 0.0f));
+        World.TickFollow();
+        const SPathFollowComponent& Follow = World.Registry().Get<SPathFollowComponent>(Agent);
+        EXPECT_EQ(!Follow.IsPathPartial(), bReachable) << "slab " << Height << " m against a 0.4 m climb";
+        World.Stop();
+    }
+}

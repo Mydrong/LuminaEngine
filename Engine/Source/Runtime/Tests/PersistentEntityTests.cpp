@@ -53,7 +53,7 @@ TEST(PersistentEntities, TheSameScriptInstanceAndChildrenArriveInTheNextWorld)
 {
     CWorld* From = NewTestWorld();
     CWorld* To = NewTestWorld();
-    ECS::FRegistry& Old = ECS::GetWorldRegistry(*From);
+    ECS::FRegistry& Old = From->GetEntityRegistry();
 
     const ECS::FEntity Hero = MakePersistent(Old, FVector3(1.0f, 2.0f, 3.0f));
     const ECS::FEntity Child = MakeEntity(Old, FVector3(0.0f));
@@ -68,7 +68,7 @@ TEST(PersistentEntities, TheSameScriptInstanceAndChildrenArriveInTheNextWorld)
     EXPECT_TRUE(Old.Get<SEntityScriptComponent>(Hero).Scripts.empty()) << "the old world's teardown must find nothing to detach";
     Carry.Land(To);
 
-    ECS::FRegistry& New = ECS::GetWorldRegistry(*To);
+    ECS::FRegistry& New = To->GetEntityRegistry();
     const TVector<ECS::FEntity> Arrived = Heroes(To);
     ASSERT_EQ(Arrived.size(), 1u);
     const ECS::FEntity Arrival = Arrived[0];
@@ -90,9 +90,9 @@ TEST(PersistentEntities, AnArrivalReplacesThePlacedEntityWithItsTag)
 {
     CWorld* From = NewTestWorld();
     CWorld* To = NewTestWorld();
-    MakePersistent(ECS::GetWorldRegistry(*From), FVector3(1.0f, 2.0f, 3.0f));
+    MakePersistent(From->GetEntityRegistry(), FVector3(1.0f, 2.0f, 3.0f));
 
-    ECS::FRegistry& New = ECS::GetWorldRegistry(*To);
+    ECS::FRegistry& New = To->GetEntityRegistry();
     const ECS::FEntity Placed = MakePersistent(New, FVector3(5.0f, 0.0f, 0.0f));
     const ECS::FEntity Door = MakeEntity(New, FVector3(0.0f));
     New.Emplace<SCameraFollowComponent>(Door).Target = Placed;
@@ -113,9 +113,9 @@ TEST(PersistentEntities, WithoutTakePlacementTheArrivalKeepsItsOwnTransform)
 {
     CWorld* From = NewTestWorld();
     CWorld* To = NewTestWorld();
-    const ECS::FEntity Hero = MakePersistent(ECS::GetWorldRegistry(*From), FVector3(1.0f, 2.0f, 3.0f));
-    ECS::GetWorldRegistry(*From).Get<SPersistentComponent>(Hero).bTakePlacement = false;
-    MakePersistent(ECS::GetWorldRegistry(*To), FVector3(5.0f, 0.0f, 0.0f));
+    const ECS::FEntity Hero = MakePersistent(From->GetEntityRegistry(), FVector3(1.0f, 2.0f, 3.0f));
+    From->GetEntityRegistry().Get<SPersistentComponent>(Hero).bTakePlacement = false;
+    MakePersistent(To->GetEntityRegistry(), FVector3(5.0f, 0.0f, 0.0f));
 
     FPersistentCarry Carry;
     Carry.Lift(From);
@@ -123,5 +123,5 @@ TEST(PersistentEntities, WithoutTakePlacementTheArrivalKeepsItsOwnTransform)
 
     const TVector<ECS::FEntity> Arrived = Heroes(To);
     ASSERT_EQ(Arrived.size(), 1u);
-    EXPECT_EQ(ECS::GetWorldRegistry(*To).Get<STransformComponent>(Arrived[0]).LocalTransform.GetLocation(), FVector3(1.0f, 2.0f, 3.0f));
+    EXPECT_EQ(To->GetEntityRegistry().Get<STransformComponent>(Arrived[0]).LocalTransform.GetLocation(), FVector3(1.0f, 2.0f, 3.0f));
 }

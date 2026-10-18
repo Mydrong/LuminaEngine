@@ -14,7 +14,7 @@ namespace
     Lumina::ECS::FRegistry* LmRegistryFromWorld(uint64 World)
     {
         Lumina::CWorld* W = reinterpret_cast<Lumina::CWorld*>(World);
-        return W ? &Lumina::ECS::GetWorldRegistry(*W) : nullptr;
+        return W ? &W->GetEntityRegistry() : nullptr;
     }
 }
 
@@ -28,33 +28,33 @@ LUMINA_DOTNET_EXPORT(const void*, FindComponentOps)(const char* Name, int Len)
     return Lumina::FindComponentOps(Lumina::FStringView(Name, static_cast<size_t>(Len)));
 }
 
+namespace
+{
+    // Inline down to the sparse probe, since this is the path every C# get takes.
+    FORCEINLINE const Lumina::ECS::FSparseSet* LmFindPool(uint64 World, const void* Ops)
+    {
+        Lumina::CWorld* W = reinterpret_cast<Lumina::CWorld*>(World);
+        const auto* O = static_cast<const Lumina::FComponentOps*>(Ops);
+        return (W && O) ? W->GetEntityRegistry().FindStorage(O->GetTypeID()) : nullptr;
+    }
+}
+
 LUMINA_DOTNET_EXPORT(void*, GetComponent)(uint64 World, uint32 Entity, const void* Ops)
 {
-    Lumina::ECS::FRegistry* R = LmRegistryFromWorld(World);
-    const auto* O = static_cast<const Lumina::FComponentOps*>(Ops);
-    return (R && O) ? O->Get(*R, static_cast<Lumina::ECS::FEntity>(Entity)) : nullptr;
+    const Lumina::ECS::FSparseSet* Pool = LmFindPool(World, Ops);
+    return Pool ? Pool->GetRaw(static_cast<Lumina::ECS::FEntity>(Entity)) : nullptr;
 }
 
 // Also hands back the pool's layout epoch, so the view can revalidate itself without crossing again.
 LUMINA_DOTNET_EXPORT(void*, GetComponentTracked)(uint64 World, uint32 Entity, const void* Ops, const uint32** OutEpoch)
 {
     *OutEpoch = nullptr;
-    Lumina::ECS::FRegistry* R = LmRegistryFromWorld(World);
-    const auto* O = static_cast<const Lumina::FComponentOps*>(Ops);
-    if (R == nullptr || O == nullptr)
-    {
-        return nullptr;
-    }
-
-    void* Component = O->Get(*R, static_cast<Lumina::ECS::FEntity>(Entity));
+    const Lumina::ECS::FSparseSet* Pool = LmFindPool(World, Ops);
+    void* Component = Pool ? Pool->GetRaw(static_cast<Lumina::ECS::FEntity>(Entity)) : nullptr;
     if (Component != nullptr)
     {
-        if (const Lumina::ECS::FSparseSet* Pool = R->FindStorage(static_cast<uint32>(O->TypeId)))
-        {
-            *OutEpoch = Pool->GetLayoutEpoch();
-        }
+        *OutEpoch = Pool->GetLayoutEpoch();
     }
-
     return Component;
 }
 
@@ -78,7 +78,7 @@ LUMINA_DOTNET_EXPORT(int, TrackComponentPointer)(const void* Payload, const void
             return;
         }
 
-        const Lumina::ECS::FSparseSet* Pool = Lumina::ECS::GetWorldRegistry(World).FindStorage(static_cast<uint32>(O->TypeId));
+        const Lumina::ECS::FSparseSet* Pool = World.GetEntityRegistry().FindStorage(static_cast<uint32>(O->TypeId));
         const Lumina::ECS::FEntity Owner = Pool != nullptr ? Pool->FindPayloadOwner(Payload) : Lumina::ECS::NullEntity;
         if (!Owner.IsNull())
         {
@@ -93,9 +93,8 @@ LUMINA_DOTNET_EXPORT(int, TrackComponentPointer)(const void* Payload, const void
 
 LUMINA_DOTNET_EXPORT(int, HasComponent)(uint64 World, uint32 Entity, const void* Ops)
 {
-    Lumina::ECS::FRegistry* R = LmRegistryFromWorld(World);
-    const auto* O = static_cast<const Lumina::FComponentOps*>(Ops);
-    return (R && O) ? O->Has(*R, static_cast<Lumina::ECS::FEntity>(Entity)) : 0;
+    const Lumina::ECS::FSparseSet* Pool = LmFindPool(World, Ops);
+    return Pool && Pool->Contains(static_cast<Lumina::ECS::FEntity>(Entity)) ? 1 : 0;
 }
 
 // Get-or-emplace a default component, returning the live pointer to configure in place.

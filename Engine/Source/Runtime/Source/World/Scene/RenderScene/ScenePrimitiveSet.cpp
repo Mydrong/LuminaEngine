@@ -3138,7 +3138,7 @@ namespace Lumina
 
     void FScenePrimitiveSet::Sync(CWorld& World, TSpan<const ECS::FEntity> Moved)
     {
-        ECS::FRegistry&     Registry = ECS::GetWorldRegistry(World);
+        ECS::FRegistry&     Registry = World.GetEntityRegistry();
         FRenderDirtyTracker& Tracker  = FRenderDirtyTracker::Ensure(Registry);
 
         SyncStats = FSyncStats{};

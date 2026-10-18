@@ -3,7 +3,7 @@ using Lumina;
 
 namespace LuminaSharp;
 
-/// Fluent physics query, s&amp;box style, as Trace.Ray(a, b).Ignore(self).Run(). A mutable builder over CPhysicsLibrary that allocates nothing until Run or RunAll, against the ambient Engine.World.
+/// Fluent physics query, s&amp;box style, as Trace.Ray(a, b).Ignore(self).Run(). A mutable builder over the World physics queries that allocates nothing until Run or RunAll, against the ambient Engine.World.
 public struct Trace
 {
     private CWorld World;
@@ -98,15 +98,15 @@ public struct Trace
     public SRayResult Run()
     {
         return bSwept
-            ? CPhysicsLibrary.ShapeCast(World, Shape, From, To, IgnoreEntity, Mask)
-            : CPhysicsLibrary.Raycast(World, From, To, IgnoreEntity, Mask);
+            ? World.ShapeCast(Shape, From, To, IgnoreEntity, Mask)
+            : World.Raycast(From, To, IgnoreEntity, Mask);
     }
 
     /// Runs the query and returns every hit, near to far.
     public SRayResult[] RunAll()
     {
         return bSwept
-            ? CPhysicsLibrary.ShapeCastAll(World, Shape, From, To, IgnoreEntity, Mask)
-            : CPhysicsLibrary.RaycastAll(World, From, To, IgnoreEntity, Mask);
+            ? World.ShapeCastAll(Shape, From, To, IgnoreEntity, Mask)
+            : World.RaycastAll(From, To, IgnoreEntity, Mask);
     }
 }

@@ -81,7 +81,7 @@ namespace Lumina::MCP
                     SEngineWorldStats& Stats = Out.Worlds.emplace_back();
                     Stats.Name = World.GetName().ToString();
                     Stats.Type = WorldTypeName(World.GetWorldType());
-                    Stats.Entities = (int32)ECS::GetWorldRegistry(World).NumEntities();
+                    Stats.Entities = (int32)World.GetEntityRegistry().NumEntities();
                 });
             }
 

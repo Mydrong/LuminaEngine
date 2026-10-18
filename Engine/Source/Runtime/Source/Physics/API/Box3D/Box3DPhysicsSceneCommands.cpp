@@ -217,7 +217,7 @@ namespace Lumina::Physics
             {
                 const EBodyType Type = static_cast<EBodyType>(static_cast<uint8>(Command.Parameters.x));
                 b3Body_SetType(Body, Box3DUtils::ToBox3DBodyType(Type));
-                if (auto* Component = ECS::GetWorldRegistry(*World).TryGet<SRigidBodyComponent>(Command.Entity))
+                if (auto* Component = World->GetEntityRegistry().TryGet<SRigidBodyComponent>(Command.Entity))
                 {
                     Component->BodyType = Type;
                 }

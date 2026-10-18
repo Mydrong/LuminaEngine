@@ -49,8 +49,9 @@ namespace Lumina
         ImGui::PushStyleVar(ImGuiStyleVar_ButtonTextAlign, ImVec2(0.0f, 0.5f));
         if (ImGui::Button(Label.c_str(), ImVec2(FieldW > 1.0f ? FieldW : 1.0f, 0.0f)) && !bCapturing)
         {
-            bCapturing = true;
-            bArmed     = false;
+            bCapturing      = true;
+            bArmed          = false;
+            PendingModifier = EKey::Num;
         }
         ImGui::PopStyleVar();
         ImGui::PopStyleColor(4);
@@ -89,7 +90,11 @@ namespace Lumina
                 // Bare modifier presses keep listening, so a chord can be built before the key commits.
                 const ImGuiIO& Io = ImGui::GetIO();
                 const EKey K = ImGuiX::PollPressedKey();
-                if (K != EKey::Num && !ImGuiX::IsModifierEKey(K))
+                if (K != EKey::Num && ImGuiX::IsModifierEKey(K))
+                {
+                    PendingModifier = K;
+                }
+                else if (K != EKey::Num)
                 {
                     DisplayValue.SetKey(K);
                     DisplayValue.bCtrl  = Io.KeyCtrl;
@@ -110,6 +115,16 @@ namespace Lumina
                 else if (const EGamepadButton G = FInputViewportRegistry::Get().GetGamepads().GetFirstPressedButton(); G != EGamepadButton::Num)
                 {
                     DisplayValue.SetGamepadButton(G);
+                    bCapturing = false;
+                    bCommitted = true;
+                }
+                else if (PendingModifier != EKey::Num && !ImGuiX::IsModifierHeld(PendingModifier))
+                {
+                    // Released with nothing pressed alongside it, so the modifier itself is the binding, such as Ctrl for crouch.
+                    DisplayValue.SetKey(PendingModifier);
+                    DisplayValue.bCtrl  = false;
+                    DisplayValue.bShift = false;
+                    DisplayValue.bAlt   = false;
                     bCapturing = false;
                     bCommitted = true;
                 }

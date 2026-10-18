@@ -74,7 +74,7 @@ namespace Lumina
 
         if (World != nullptr)
         {
-            ECS::FRegistry& Registry = ECS::GetWorldRegistry(*World);
+            ECS::FRegistry& Registry = World->GetEntityRegistry();
 
             MovedTransformConsumer = ECS::Utils::AddMovedTransformConsumer(Registry);
 
@@ -234,7 +234,7 @@ namespace Lumina
 
         if (World != nullptr)
         {
-            ECS::FRegistry& Registry = ECS::GetWorldRegistry(*World);
+            ECS::FRegistry& Registry = World->GetEntityRegistry();
             ECS::Utils::RemoveMovedTransformConsumer(Registry, MovedTransformConsumer);
             MovedTransformConsumer = Constants::kIndexNoneU32;
 

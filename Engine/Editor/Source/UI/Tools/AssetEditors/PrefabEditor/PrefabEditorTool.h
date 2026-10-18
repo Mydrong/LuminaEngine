@@ -71,6 +71,7 @@ namespace Lumina
         // The details panel is shared (FSceneEditorTool::DrawDetailsPanel); the prefab only guards
         // root deletion and hides its internal SPrefabComponent.
         bool CanDeleteEntity(ECS::FEntity Entity) const override;
+        bool CanDuplicateEntity(ECS::FEntity Entity) const override { return CanDeleteEntity(Entity); }
         bool IsComponentHiddenInDetails(const CStruct* Type) const override;
 
         // Restrict the shared outliner to prefab-owned entities (hides preview lights/floor/camera).

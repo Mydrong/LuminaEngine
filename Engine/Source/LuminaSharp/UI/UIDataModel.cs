@@ -106,7 +106,7 @@ public sealed unsafe class UIDataModel : IDisposable
         _lastText = new string?[_shape.Scalars.Count];
         _lastList = new long[_shape.Lists.Count];
 
-        _native = Lumina.CUILibrary.CreateDataModel(UIWorld.FromHandle(World), Name,
+        _native = UIWorld.FromHandle(World).CreateUIDataModel(Name,
             ScriptCallback.Bind(new UIDataSetClosure { Model = this }), ScriptCallback.Bind(new UIDataEventClosure { Model = this }));
         if (!_native.IsValid)
         {

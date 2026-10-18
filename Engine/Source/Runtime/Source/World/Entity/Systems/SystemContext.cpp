@@ -115,13 +115,17 @@ namespace Lumina
     void SSystemContext::CastSphere(const SSphereCastSettings& Settings, TVector<SRayResult>& OutHits) const
     {
         CheckPhysics(false);
-        World->CastSphere(Settings, OutHits);
+        OutHits.clear();
+        if (World->PhysicsScene)
+        {
+            World->PhysicsScene->CastSphere(Settings, OutHits);
+        }
     }
 
     TOptional<SRayResult> SSystemContext::CastSphereClosest(const SSphereCastSettings& Settings) const
     {
         CheckPhysics(false);
-        return World->CastSphereClosest(Settings);
+        return World->PhysicsScene ? World->PhysicsScene->CastSphereClosest(Settings) : NullOpt;
     }
 
     STransformComponent& SSystemContext::GetEntityTransform(ECS::FEntity Entity) const

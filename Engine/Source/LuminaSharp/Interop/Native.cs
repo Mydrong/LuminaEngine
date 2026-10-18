@@ -174,7 +174,7 @@ public static unsafe partial class Native
     [NativeCall] public static partial IntPtr PropMapOps(IntPtr Prop);
 
     // Writes an FString at a raw address, since reads decode the native string in place with no crossing.
-    [NativeCall] public static partial void StringAssign(IntPtr String, string Value);
+    [NativeCall(SuppressGCTransition = true)] public static partial void StringAssign(IntPtr String, string Value);
 
     // A TStrongObjectPtr at a raw address, the write keeping the reference count a raw pointer store would skip.
     [NativeCall] public static partial void SetObjectPtr(IntPtr Slot, IntPtr Object);
@@ -187,6 +187,7 @@ public static unsafe partial class Native
     // Delegate properties, bound to a managed closure and described by their reflected arguments.
     [NativeCall] public static partial ulong DelegateBind(IntPtr Delegate, ulong Callback);
     [NativeCall] public static partial void DelegateUnbind(IntPtr Delegate, ulong Handle);
+    [NativeCall] public static partial int DelegateManagedListeners(IntPtr Delegate, ulong* OutIds, ulong* OutTokens, int Capacity);
     [NativeCall] public static partial int DelegateArgCount(IntPtr DelegateProperty);
     [NativeCall] public static partial IntPtr DelegateArgProperty(IntPtr DelegateProperty, int Index);
 }

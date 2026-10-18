@@ -1,6 +1,8 @@
 ﻿#include <gtest/gtest.h>
 
 #include <cstdio>
+#include <chrono>
+#include <thread>
 
 #include "Containers/Name.h"
 #include "Core/Math/Vector/VectorTypes.h"
@@ -19,6 +21,7 @@
 #include "Scripting/ScriptFunctionMint.h"
 #include "Scripting/ScriptStruct.h"
 #include "Scripting/ScriptableObject.h"
+#include "World/Entity/Components/BuoyancyComponent.h"
 #include "World/Entity/Components/TransformComponent.h"
 #include "World/World.h"
 
@@ -117,6 +120,12 @@ namespace LuminaInteropBench
             Lumina::Paths::InitializePaths();
             // Registers the reflected types, without which a property offset resolves to zero.
             Lumina::RegisterPendingTypes();
+            // Read when the runtime starts, so hot loops tier up as soon as they cross the call threshold.
+#if defined(_WIN32)
+            _putenv_s("DOTNET_TC_CallCountingDelayMs", "0");
+#else
+            setenv("DOTNET_TC_CallCountingDelayMs", "0", 1);
+#endif
             DotNet::Initialize();
         }
 
@@ -505,6 +514,108 @@ namespace LuminaInteropBench
         SUCCEED();
     }
 
+    // What each property shape costs a script to touch on a native component, against the same edit in C++.
+    TEST_F(FInteropBench, ComponentPropertyOps)
+    {
+        using FPropertyOpFn = double(*)(void*, int32, int32, Lumina::int64*);
+        auto* PropertyOp = (FPropertyOpFn)DotNet::ResolveManagedExport("Bench_PropertyOp");
+        ASSERT_NE(PropertyOp, nullptr);
+        Lumina::RegisterPendingTypes();
+
+        constexpr int32 kSlots = 256;
+        constexpr int32 kOps = 196608;
+        constexpr int32 kKinds = 14;
+        Lumina::SInteropBenchComponent Component;
+        Component.Floats.resize(kSlots, 0.0f);
+        Component.Points.resize(kSlots);
+        for (int32 Slot = 0; Slot < kSlots; ++Slot)
+        {
+            Component.Names.push_back(Lumina::FString("a name of moderate length"));
+            Component.Scores[Slot] = (float)Slot;
+        }
+        Component.Label = "a label of moderate length";
+
+        const char* Names[kKinds] = {
+            "TVector<float> Add", "TVector<float> [i] += 1", "TVector<float> Count", "TVector<FVector3> [i].X += 1",
+            "TVector<FString> Get(i) to string", "TVector<FString> Set(i, literal)", "FString read to string", "FString write literal",
+            "FName assign from string", "FName compare to cached", "THashMap<int, float> [key]", "THashMap<int, float> Set",
+            "nested struct field += 1", "TVector<float> AsSpan, per element" };
+
+        const Lumina::FName CachedTag("BenchTag");
+        float NativeTotal = 0.0f;
+        double NativeNanos[kKinds] = {};
+        NativeNanos[0] = BestNanosOf(kRepeats, kOps, [&] { for (int32 i = 0; i < kOps; ++i) { if ((i & (kSlots - 1)) == 0) { Component.Floats.clear(); } Component.Floats.push_back(1.0f); } });
+        Component.Floats.resize(kSlots, 0.0f);
+        NativeNanos[1] = BestNanosOf(kRepeats, kOps, [&] { for (int32 i = 0; i < kOps; ++i) { Component.Floats[i & (kSlots - 1)] += 1.0f; } });
+        NativeNanos[2] = BestNanosOf(kRepeats, kOps, [&] { for (int32 i = 0; i < kOps; ++i) { NativeTotal += (float)Component.Floats.size(); } });
+        NativeNanos[3] = BestNanosOf(kRepeats, kOps, [&] { for (int32 i = 0; i < kOps; ++i) { Component.Points[i & (kSlots - 1)].x += 1.0f; } });
+        NativeNanos[4] = BestNanosOf(kRepeats, kOps, [&] { for (int32 i = 0; i < kOps; ++i) { Lumina::FString Copy = Component.Names[i & (kSlots - 1)]; NativeTotal += (float)Copy.size(); } });
+        NativeNanos[5] = BestNanosOf(kRepeats, kOps, [&] { for (int32 i = 0; i < kOps; ++i) { Component.Names[i & (kSlots - 1)] = "abc"; } });
+        NativeNanos[6] = BestNanosOf(kRepeats, kOps, [&] { for (int32 i = 0; i < kOps; ++i) { Lumina::FString Copy = Component.Label; NativeTotal += (float)Copy.size(); } });
+        NativeNanos[7] = BestNanosOf(kRepeats, kOps, [&] { for (int32 i = 0; i < kOps; ++i) { Component.Label = "hello"; } });
+        NativeNanos[8] = BestNanosOf(kRepeats, kOps, [&] { for (int32 i = 0; i < kOps; ++i) { Component.Tag = Lumina::FName("BenchTag"); } });
+        NativeNanos[9] = BestNanosOf(kRepeats, kOps, [&] { for (int32 i = 0; i < kOps; ++i) { NativeTotal += Component.Tag == CachedTag ? 1.0f : 0.0f; } });
+        NativeNanos[10] = BestNanosOf(kRepeats, kOps, [&] { for (int32 i = 0; i < kOps; ++i) { NativeTotal += Component.Scores[i & (kSlots - 1)]; } });
+        NativeNanos[11] = BestNanosOf(kRepeats, kOps, [&] { for (int32 i = 0; i < kOps; ++i) { Component.Scores[i & (kSlots - 1)] = 1.0f; } });
+        NativeNanos[12] = BestNanosOf(kRepeats, kOps, [&] { for (int32 i = 0; i < kOps; ++i) { Component.Inner.Value += 1.0f; } });
+        NativeNanos[13] = BestNanosOf(kRepeats, kOps / kSlots, [&] { for (int32 i = 0; i < kOps / kSlots; ++i) { for (float& Value : Component.Floats) { Value += 1.0f; } } }) / kSlots;
+        GInteropBenchSink += (uint64)NativeTotal;
+
+        // Past the call threshold for every loop, then a pause so the background recompile lands before timing.
+        auto WarmUp = [&](auto&& Call, int32 Kinds)
+        {
+            for (int32 Round = 0; Round < 40; ++Round)
+            {
+                for (int32 Which = 0; Which < Kinds; ++Which)
+                {
+                    Call(Which);
+                }
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(600));
+        };
+        WarmUp([&](int32 Which) { Lumina::int64 Ignored = 0; PropertyOp(&Component, Which, kSlots, &Ignored); }, kKinds);
+
+        std::printf("\ncomponent property operations from C#, per operation\n");
+        std::printf("  %-40s %9s %9s %7s %10s\n", "operation", "C++ ns", "C# ns", "ratio", "C# B/op");
+        for (int32 Which = 0; Which < kKinds; ++Which)
+        {
+            const int32 Iterations = Which == 13 ? kOps / kSlots : kOps;
+            double Best = 1e30;
+            Lumina::int64 Bytes = 0;
+            for (int32 Attempt = 0; Attempt < kRepeats; ++Attempt)
+            {
+                Lumina::int64 AttemptBytes = 0;
+                const double Value = PropertyOp(&Component, Which, Iterations, &AttemptBytes);
+                Best = Value < Best ? Value : Best;
+                Bytes = AttemptBytes;
+            }
+            if (Which == 13)
+            {
+                Best /= kSlots;
+            }
+            const double Native = NativeNanos[Which];
+            std::printf("  %-40s %9.2f %9.2f %6.1fx %10.1f\n", Names[Which], Native, Best, Native > 0.0 ? Best / Native : 0.0, (double)Bytes / (double)Iterations);
+        }
+
+        using FStringPiecesFn = double(*)(void*, int32, int32);
+        if (auto* Pieces = (FStringPiecesFn)DotNet::ResolveManagedExport("Bench_StringPieces"))
+        {
+            const char* PieceNames[] = { "Native.StringAssign call", "UTF-8 encode into scratch", "ReadString", "UTF8.GetString 26 bytes", "Label property write", "Label property read" };
+            WarmUp([&](int32 Which) { Pieces(&Component, Which, 64); }, 6);
+            for (int32 Which = 0; Which < 6; ++Which)
+            {
+                double Best = 1e30;
+                for (int32 Attempt = 0; Attempt < kRepeats; ++Attempt)
+                {
+                    const double Value = Pieces(&Component, Which, kOps);
+                    Best = Value < Best ? Value : Best;
+                }
+                std::printf("  piece %-34s %9.2f\n", PieceNames[Which], Best);
+            }
+        }
+        SUCCEED();
+    }
+
     // What a CEntitySystem actually costs per entity, which is the question a gameplay author is asking.
     TEST_F(FInteropBench, EntitySystemWorkload)
     {
@@ -512,6 +623,10 @@ namespace LuminaInteropBench
         auto* Write = (FSystemWalkFn)DotNet::ResolveManagedExport("Bench_SystemViewWrite");
         auto* StepOnly = (FSystemWalkFn)DotNet::ResolveManagedExport("Bench_SystemViewStepOnly");
         auto* RandomGet = (FRandomGetFn)DotNet::ResolveManagedExport("Bench_SystemRandomGet");
+        auto* WalkTwo = (FSystemWalkFn)DotNet::ResolveManagedExport("Bench_SystemViewWalkTwo");
+        auto* LookupGet = (FRandomGetFn)DotNet::ResolveManagedExport("Bench_SystemLookupGet");
+        ASSERT_NE(WalkTwo, nullptr);
+        ASSERT_NE(LookupGet, nullptr);
         ASSERT_NE(Walk, nullptr);
         ASSERT_NE(Write, nullptr);
         ASSERT_NE(RandomGet, nullptr);
@@ -523,13 +638,14 @@ namespace LuminaInteropBench
         constexpr int32 kEntities = 10000;
         constexpr int32 kTicks = 40;
 
-        Lumina::ECS::FRegistry& Registry = Lumina::ECS::GetWorldRegistry(*World);
+        Lumina::ECS::FRegistry& Registry = World->GetEntityRegistry();
         Lumina::TVector<Lumina::uint32> Ids;
         Ids.reserve(kEntities);
         for (int32 Index = 0; Index < kEntities; ++Index)
         {
             const Lumina::ECS::FEntity Entity = Registry.Create();
             Registry.Emplace<Lumina::STransformComponent>(Entity);
+            Registry.Emplace<Lumina::SBuoyancyComponent>(Entity);
             Ids.push_back((Lumina::uint32)Entity);
         }
 
@@ -551,13 +667,40 @@ namespace LuminaInteropBench
         });
         GInteropBenchSink += (uint64)NativeTotal;
 
+        const double NativeWalkTwo = BestNanosOf(kRepeats, kTicks * kEntities, [&]
+        {
+            for (int32 Tick = 0; Tick < kTicks; ++Tick)
+            {
+                Registry.View<Lumina::STransformComponent, Lumina::SBuoyancyComponent>().ForEach(
+                    [&](Lumina::ECS::FEntity, Lumina::STransformComponent& Transform, Lumina::SBuoyancyComponent& Buoyancy)
+                {
+                    NativeTotal += Transform.LocalTransform.GetLocation().x * Buoyancy.Buoyancy;
+                });
+            }
+        });
+
+        const double NativeLookup = BestNanosOf(kRepeats, kTicks * kEntities, [&]
+        {
+            for (int32 Tick = 0; Tick < kTicks; ++Tick)
+            {
+                for (Lumina::uint32 Id : Ids)
+                {
+                    NativeTotal += Registry.Get<Lumina::STransformComponent>(Lumina::ECS::FEntity(Id)).LocalTransform.GetLocation().x;
+                }
+            }
+        });
+        GInteropBenchSink += (uint64)NativeTotal;
+
         int32 SeenWalk = 0;
         int32 SeenWrite = 0;
         double BestWalk = 1e30;
         double BestWrite = 1e30;
         double BestRandom = 1e30;
         double BestStep = 1e30;
+        double BestWalkTwo = 1e30;
+        double BestLookup = 1e30;
         int32 SeenStep = 0;
+        int32 SeenWalkTwo = 0;
         for (int32 Attempt = 0; Attempt < kRepeats; ++Attempt)
         {
             const double A = Walk(World, kTicks, &SeenWalk);
@@ -568,6 +711,10 @@ namespace LuminaInteropBench
             BestWrite = B < BestWrite ? B : BestWrite;
             BestRandom = C < BestRandom ? C : BestRandom;
             BestStep = D >= 0.0 && D < BestStep ? D : BestStep;
+            const double E = WalkTwo(World, kTicks, &SeenWalkTwo);
+            const double F = LookupGet(World, kTicks, Ids.data(), kEntities);
+            BestWalkTwo = E < BestWalkTwo ? E : BestWalkTwo;
+            BestLookup = F < BestLookup ? F : BestLookup;
         }
 
         EXPECT_EQ(SeenWalk, kEntities) << "the managed view did not see every entity";
@@ -581,6 +728,80 @@ namespace LuminaInteropBench
         ReportRow("C# view walk, read a transform", BestWalk, NativeWalk);
         ReportRow("C# view walk, read and write it back", BestWrite, NativeWalk);
         ReportRow("C# TryGet per entity, read a transform", BestRandom, NativeWalk);
+        ReportRow("C++ view walk, two components", NativeWalkTwo, 0.0);
+        ReportRow("C# view walk, two components", BestWalkTwo, NativeWalkTwo);
+        ReportRow("C++ Get per entity, read a transform", NativeLookup, 0.0);
+        ReportRow("C# GetComponent per entity, read a transform", BestLookup, NativeLookup);
+
+        using FSmallGetFn = double(*)(void*, int32, int32, uint32*, int32);
+        using FKeptRefFn = double(*)(void*, int32, uint32*, int32);
+        auto* SmallGet = (FSmallGetFn)DotNet::ResolveManagedExport("Bench_SmallGet");
+        auto* KeptRef = (FKeptRefFn)DotNet::ResolveManagedExport("Bench_KeptRefGet");
+        ASSERT_NE(SmallGet, nullptr);
+        ASSERT_NE(KeptRef, nullptr);
+
+        const double NativeSmallGet = BestNanosOf(kRepeats, kTicks * kEntities, [&]
+        {
+            for (int32 Tick = 0; Tick < kTicks; ++Tick)
+            {
+                for (Lumina::uint32 Id : Ids)
+                {
+                    NativeTotal += Registry.Get<Lumina::SBuoyancyComponent>(Lumina::ECS::FEntity(Id)).Buoyancy;
+                }
+            }
+        });
+        const double NativeSmallTryGet = BestNanosOf(kRepeats, kTicks * kEntities, [&]
+        {
+            for (int32 Tick = 0; Tick < kTicks; ++Tick)
+            {
+                for (Lumina::uint32 Id : Ids)
+                {
+                    if (const Lumina::SBuoyancyComponent* Found = Registry.TryGet<Lumina::SBuoyancyComponent>(Lumina::ECS::FEntity(Id)))
+                    {
+                        NativeTotal += Found->Buoyancy;
+                    }
+                }
+            }
+        });
+        GInteropBenchSink += (uint64)NativeTotal;
+
+        double BestSmall[4] = { 1e30, 1e30, 1e30, 1e30 };
+        double BestKept = 1e30;
+        for (int32 Attempt = 0; Attempt < kRepeats; ++Attempt)
+        {
+            for (int32 Which = 0; Which < 4; ++Which)
+            {
+                const double Value = SmallGet(World, Which, kTicks, Ids.data(), kEntities);
+                BestSmall[Which] = Value < BestSmall[Which] ? Value : BestSmall[Which];
+            }
+            const double Value = KeptRef(World, kTicks, Ids.data(), kEntities);
+            BestKept = Value < BestKept ? Value : BestKept;
+        }
+
+        std::printf("\n  small component gets, 12 bytes, per entity\n");
+        ReportRow("C++ Get", NativeSmallGet, 0.0);
+        ReportRow("C++ TryGet", NativeSmallTryGet, 0.0);
+        ReportRow("C# GetComponent", BestSmall[0], NativeSmallGet);
+        ReportRow("C# GetComponent, three fields", BestSmall[3], NativeSmallGet);
+        ReportRow("C# TryGetComponent then Get", BestSmall[1], NativeSmallTryGet);
+        ReportRow("C# HasComponent", BestSmall[2], NativeSmallTryGet);
+        ReportRow("C# kept TComponentRef Get", BestKept, NativeSmallGet);
+
+        using FGatherFn = double(*)(void*, int32, int32);
+        if (auto* Gather = (FGatherFn)DotNet::ResolveManagedExport("Bench_ViewGatherOnly"))
+        {
+            double BestBegin = 1e30;
+            double BestGather = 1e30;
+            for (int32 Attempt = 0; Attempt < kRepeats; ++Attempt)
+            {
+                const double A = Gather(World, kTicks, 1);
+                const double B = Gather(World, kTicks, 0);
+                BestBegin = A < BestBegin ? A : BestBegin;
+                BestGather = B < BestGather ? B : BestGather;
+            }
+            ReportRow("C# view native snapshot only", BestBegin, NativeWalk);
+            ReportRow("C# view native snapshot and chunk gather", BestGather, NativeWalk);
+        }
 
         SUCCEED();
     }

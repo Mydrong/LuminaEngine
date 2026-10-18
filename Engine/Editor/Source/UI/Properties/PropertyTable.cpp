@@ -2139,8 +2139,34 @@ namespace Lumina
         return StructIdentity(Type).c_str();
     }
 
-    // A None entry sits at index 0.
-    static CStruct* DrawInstancedStructTypePicker(const char* StrId, CStruct* Base, CStruct* Current, bool& bOutChanged)
+    // Whether Candidate lists Interface among the interfaces its C# type implements.
+    static bool ImplementsInterface(const CStruct* Candidate, FStringView Interface)
+    {
+        if (!Candidate->HasMeta("Implements"))
+        {
+            return false;
+        }
+        const FString& Listed = Candidate->GetMeta("Implements");
+        const FStringView All(Listed.c_str(), Listed.size());
+        size_t Start = 0;
+        while (Start <= All.size())
+        {
+            size_t End = Start;
+            while (End < All.size() && All[End] != ';')
+            {
+                ++End;
+            }
+            if (All.substr(Start, End - Start) == Interface)
+            {
+                return true;
+            }
+            Start = End + 1;
+        }
+        return false;
+    }
+
+    // A None entry sits at index 0. A nonempty Implements keeps only the structs that implement that interface.
+    static CStruct* DrawInstancedStructTypePicker(const char* StrId, CStruct* Base, FStringView Implements, CStruct* Current, bool& bOutChanged)
     {
         bOutChanged = false;
 
@@ -2152,7 +2178,7 @@ namespace Lumina
             {
                 continue;
             }
-            if (Base == nullptr || Candidate->IsChildOf(Base))
+            if ((Base == nullptr || Candidate->IsChildOf(Base)) && (Implements.empty() || ImplementsInterface(Candidate, Implements)))
             {
                 Candidates.push_back(Candidate);
             }
@@ -2246,7 +2272,9 @@ namespace Lumina
 
         bool bChanged = false;
         CStruct* Current = Instance->GetScriptStruct();
-        CStruct* Picked = DrawInstancedStructTypePicker("##instancedstructpicker", InstancedStructProperty->GetMetaStruct(), Current, bChanged);
+        const FCStringView Implements = InstancedStructProperty->GetMetadata("Implements");
+        CStruct* Picked = DrawInstancedStructTypePicker("##instancedstructpicker", InstancedStructProperty->GetMetaStruct(),
+            FStringView(Implements.data(), Implements.size()), Current, bChanged);
 
         if (bChanged && Picked != Current)
         {

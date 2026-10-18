@@ -2,7 +2,7 @@ using Lumina;
 
 namespace LuminaSharp;
 
-/// A live camera shake returned by CCameraLibrary.PlayShake. A lightweight value handle, safe to copy. Stopping it fades out over its blend-out time rather than cutting.
+/// A live camera shake returned by World.PlayCameraShake. A lightweight value handle, safe to copy. Stopping it fades out over its blend-out time rather than cutting.
 public readonly struct FCameraShake
 {
     private readonly CWorld World;
@@ -22,7 +22,7 @@ public readonly struct FCameraShake
     {
         if (Id != 0)
         {
-            CCameraLibrary.StopShake(World, Id);
+            World.StopCameraShake(Id);
         }
     }
 }

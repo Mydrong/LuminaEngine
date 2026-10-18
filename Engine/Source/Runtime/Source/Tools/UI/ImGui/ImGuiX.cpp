@@ -159,6 +159,45 @@ namespace Lumina::ImGuiX
         DrawList->AddCallback(Detail::GetDisplayStateCallback(), &State, sizeof(State));
     }
 
+    void PushMenuWindowStyle()
+    {
+        using namespace EditorColors;
+        const float Scale = GetUIScale();
+        ImGui::PushStyleColor(ImGuiCol_PopupBg, WithAlpha(Lighten(WindowBg(), -0.02f), 0.98f));
+        ImGui::PushStyleColor(ImGuiCol_Border,  Border());
+        ImGui::PushStyleVar(ImGuiStyleVar_PopupRounding,   8.0f * Scale);
+        ImGui::PushStyleVar(ImGuiStyleVar_PopupBorderSize, 1.0f);
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding,   ImVec2(6.0f * Scale, 6.0f * Scale));
+    }
+
+    void PopMenuWindowStyle()
+    {
+        ImGui::PopStyleVar(3);
+        ImGui::PopStyleColor(2);
+    }
+
+    void PushMenuItemStyle()
+    {
+        using namespace EditorColors;
+        const float Scale = GetUIScale();
+        ImGui::PushStyleColor(ImGuiCol_Text,          TextPrimary());
+        ImGui::PushStyleColor(ImGuiCol_HeaderHovered, WithAlpha(Accent(), 0.28f));
+        ImGui::PushStyleColor(ImGuiCol_Header,        WithAlpha(Accent(), 0.16f));
+        ImGui::PushStyleColor(ImGuiCol_HeaderActive,  WithAlpha(Accent(), 0.45f));
+        ImGui::PushStyleColor(ImGuiCol_Separator,     WithAlpha(Border(), 0.65f));
+        ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding,    4.0f * Scale);
+        ImGui::PushStyleVar(ImGuiStyleVar_MenuItemRounding, 4.0f * Scale);
+        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing,      ImVec2(8.0f * Scale, 3.0f * Scale));
+        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding,     ImVec2(10.0f * Scale, 5.0f * Scale));
+        ImGui::PushStyleVar(ImGuiStyleVar_ItemInnerSpacing, ImVec2(8.0f * Scale, 4.0f * Scale));
+    }
+
+    void PopMenuItemStyle()
+    {
+        ImGui::PopStyleVar(5);
+        ImGui::PopStyleColor(5);
+    }
+
     void TextTooltip_Internal(FStringView String)
     {
         ImGui::PushStyleVar( ImGuiStyleVar_WindowPadding, ImVec2(4, 4));

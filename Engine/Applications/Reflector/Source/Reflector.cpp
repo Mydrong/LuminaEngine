@@ -376,11 +376,11 @@ int main(int argc, char* argv[])
                 continue;
             }
 
-            // The right generated.h is included, now verify it is the last include in the file.
+            // The generated.h must be the last include, except for an .inl of definitions read after GENERATED_BODY expands.
             const FIncludeRef* LaterInclude = nullptr;
             for (const FIncludeRef& Inc : Header->Includes)
             {
-                if (Inc.LineNumber > GeneratedInclude->LineNumber && LaterInclude == nullptr)
+                if (Inc.LineNumber > GeneratedInclude->LineNumber && LaterInclude == nullptr && !Inc.Spelling.ends_with(".inl"))
                 {
                     LaterInclude = &Inc;
                 }

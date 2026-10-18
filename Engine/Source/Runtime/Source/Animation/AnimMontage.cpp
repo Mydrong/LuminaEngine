@@ -42,7 +42,7 @@ namespace Lumina
 
             if (bOverlaps)
             {
-                BeginBlendOut(Existing, -1.0f);
+                BeginBlendOut(Existing, -1.0f, true);
             }
         }
 
@@ -62,6 +62,7 @@ namespace Lumina
         Instance.CurrentSection = SectionIndex;
         Instance.Position       = (SectionIndex != Constants::kIndexNone) ? Montage->Sections[SectionIndex].StartTime : 0.0f;
         Instance.PrevPosition   = Instance.Position;
+        RecordTransition(Instance, EAnimMontageTransition::Started);
 
         return Instance.InstanceID;
     }
@@ -70,7 +71,7 @@ namespace Lumina
     {
         if (FAnimMontageInstance* Instance = Find(Montage))
         {
-            BeginBlendOut(*Instance, BlendOutTime);
+            BeginBlendOut(*Instance, BlendOutTime, true);
         }
     }
 
@@ -80,22 +81,39 @@ namespace Lumina
         {
             if (Instance.IsActive())
             {
-                BeginBlendOut(Instance, BlendOutTime);
+                BeginBlendOut(Instance, BlendOutTime, true);
             }
         }
     }
 
     void FAnimMontagePlayer::Reset()
     {
+        // Dropped without a blend, so whoever waits on these still hears that they ended.
+        for (FAnimMontageInstance& Instance : Instances)
+        {
+            if (Instance.IsActive())
+            {
+                Instance.bInterrupted = true;
+                RecordTransition(Instance, EAnimMontageTransition::Ended);
+            }
+        }
         Instances.clear();
     }
 
-    void FAnimMontagePlayer::BeginBlendOut(FAnimMontageInstance& Instance, float BlendOutTime)
+    void FAnimMontagePlayer::RecordTransition(const FAnimMontageInstance& Instance, EAnimMontageTransition Type)
+    {
+        Transitions.push_back({ Instance.Montage, Type, Instance.bInterrupted });
+    }
+
+    void FAnimMontagePlayer::BeginBlendOut(FAnimMontageInstance& Instance, float BlendOutTime, bool bInterrupted)
     {
         if (Instance.State == EAnimMontageState::BlendingOut || Instance.State == EAnimMontageState::Finished)
         {
             return;
         }
+
+        Instance.bInterrupted = bInterrupted;
+        RecordTransition(Instance, EAnimMontageTransition::BlendingOut);
 
         const float Duration = (BlendOutTime >= 0.0f)
             ? BlendOutTime
@@ -257,7 +275,9 @@ namespace Lumina
         CAnimationMontage* Montage = Instance.Montage.Get();
         if (Montage == nullptr)
         {
-            Instance.State = EAnimMontageState::Finished;
+            Instance.State        = EAnimMontageState::Finished;
+            Instance.bInterrupted = true;
+            RecordTransition(Instance, EAnimMontageTransition::Ended);
             return;
         }
 
@@ -272,6 +292,7 @@ namespace Lumina
         {
             EndActiveNotifyStates(Instance, OutEvents);
             Instance.State = EAnimMontageState::Finished;
+            RecordTransition(Instance, EAnimMontageTransition::Ended);
             return;
         }
 
@@ -311,7 +332,7 @@ namespace Lumina
             }
 
             Instance.Position = SectionEnd;
-            BeginBlendOut(Instance, -1.0f);
+            BeginBlendOut(Instance, -1.0f, false);
         }
         else if (Instance.State != EAnimMontageState::BlendingOut &&
                  Instance.Position >= Montage->GetBlendOutStartTime(Instance.CurrentSection))
@@ -323,7 +344,7 @@ namespace Lumina
 
             if (!bChains)
             {
-                BeginBlendOut(Instance, -1.0f);
+                BeginBlendOut(Instance, -1.0f, false);
             }
         }
 

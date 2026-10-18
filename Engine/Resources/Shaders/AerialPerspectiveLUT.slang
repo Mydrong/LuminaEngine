@@ -7,7 +7,7 @@
 
 struct FPushConstants
 {
-    uint64_t     Env;             // FEnvironmentParams, see LoadBlock
+    Ptr<FEnvironmentParams> Env;
     FRWTexture3D InScatter;       // rgb = in-scattered radiance
     FRWTexture3D Transmittance;   // rgb = per-channel transmittance
 
@@ -32,7 +32,7 @@ void ComputeMain(uint3 DTid : SV_DispatchThreadID)
         return;
     }
 
-    FEnvironmentParams Env = LoadBlock<FEnvironmentParams>(Pass().Env);
+    FEnvironmentParams Env = *Pass().Env;
 
     float2 UV      = (float2(DTid.xy) + 0.5) / float2(LutW, LutH);
     float2 NDC     = UV * 2.0 - 1.0;

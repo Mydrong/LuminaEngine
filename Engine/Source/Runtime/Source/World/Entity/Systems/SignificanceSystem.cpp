@@ -194,7 +194,7 @@ namespace Lumina
             {
                 return nullptr;
             }
-            return ECS::GetWorldRegistry(*World).Ctx().Find<FSignificanceState>();
+            return World->GetEntityRegistry().Ctx().Find<FSignificanceState>();
         }
     }
 }

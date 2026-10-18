@@ -641,6 +641,10 @@ internal static class ScriptPropertyRewriter
                     break;
                 }
 
+                case EScriptAccess.InstancedStruct:
+                    Get = $"new {Type}((nint){SelfHandle} + {Offset})";
+                    break;
+
                 // Listed rather than defaulted, so a kind the classifier gains without this emitter learning it fails loudly.
                 default:
                     Errors.Add($"{FilePath}({Line(Declarator)}): [Property] '{Name}' classified as "

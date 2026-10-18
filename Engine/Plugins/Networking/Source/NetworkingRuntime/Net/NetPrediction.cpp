@@ -211,7 +211,7 @@ namespace Lumina::NetPrediction
             return;
         }
 
-        ECS::FRegistry& Registry = ECS::GetWorldRegistry(*World);
+        ECS::FRegistry& Registry = World->GetEntityRegistry();
         Physics::IPhysicsScene* Scene = World->GetPhysicsScene();
         auto View = Registry.View<FNetPredictionClient>();
         for (ECS::FEntity Entity : View)
