@@ -297,6 +297,8 @@ namespace Lumina::Physics
 
     private:
 
+        void DrawRayDebug(const SRayCastSettings& Settings, const TSpan<SRayResult>& Hits) const;
+
         uint32 FindEntityBody(ECS::FEntity Entity) const;
         b3BodyId ResolveTarget(const SPhysicsBodyTarget& Target) const;
         bool ReadBodyState(b3BodyId Body, FPhysicsBodyState& Out) const;

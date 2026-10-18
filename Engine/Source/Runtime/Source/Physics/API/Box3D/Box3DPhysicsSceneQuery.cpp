@@ -288,7 +288,36 @@ namespace Lumina::Physics
             return {};
         }
 
+        if (Settings.bDrawDebug)
+        {
+            DrawRayDebug(Settings, TVector{Result});
+        }
         return Result;
+    }
+
+    void FBox3DPhysicsScene::DrawRayDebug(const SRayCastSettings& Settings, const TSpan<SRayResult>& Hits) const
+    {
+        FWorldDebugInterface* Debug = World ? World->GetDebugInterface() : nullptr;
+        if (Debug == nullptr)
+        {
+            return;
+        }
+
+        const FVector4 HitColor = FColor(Settings.DebugHitColor);
+        const FVector4 MissColor = FColor(Settings.DebugMissColor);
+        if (Hits.empty())
+        {
+            Debug->DrawLine(Settings.Start, Settings.End, MissColor, 3.0f, true, Settings.DebugDuration);
+            return;
+        }
+
+        Debug->DrawLine(Settings.Start, Hits[0].Location, HitColor, 3.0f, true, Settings.DebugDuration);
+        Debug->DrawLine(Hits[0].Location, Settings.End, MissColor, 3.0f, true, Settings.DebugDuration);
+        for (const SRayResult& Hit : Hits)
+        {
+            Debug->DrawLine(Hit.Location, Hit.Location + Hit.Normal * 0.5f, FColor::Blue, 3.0f, true, Settings.DebugDuration);
+            Debug->DrawBox(Hit.Location, FVector3(0.05f), FQuat(1.0f, 0.0f, 0.0f, 0.0f), FColor::Yellow, 3.0f, true, Settings.DebugDuration);
+        }
     }
 
     void FBox3DPhysicsScene::CastRayAll(const SRayCastSettings& Settings, TVector<SRayResult>& OutHits)
@@ -313,6 +342,10 @@ namespace Lumina::Physics
         b3World_CastRay(WorldId, Box3DUtils::ToB3Vec3(Settings.Start), Box3DUtils::ToB3Vec3(Delta),
                         MakeLayerFilter(Settings.LayerMask), &AllHitsCastCallback, &Query);
         SortNearToFar(OutHits);
+        if (Settings.bDrawDebug)
+        {
+            DrawRayDebug(Settings, OutHits);
+        }
     }
 
     bool FBox3DPhysicsScene::CastRayAny(const SRayCastSettings& Settings)
