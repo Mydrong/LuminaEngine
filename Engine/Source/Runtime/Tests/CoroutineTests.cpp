@@ -21,10 +21,6 @@ namespace
         CWorld* World = NewObject<CWorld>(nullptr, NAME_None, FGuid::New(), OF_Transient);
         ECS::FRegistry& Registry = World->GetEntityRegistry();
         Registry.Ctx().Emplace<CWorld*>(World);
-        if (Registry.Ctx().Find<FCoroutineManager>() == nullptr)
-        {
-            Registry.Ctx().Emplace<FCoroutineManager>();
-        }
         return World;
     }
 
@@ -32,7 +28,7 @@ namespace
     {
         for (int32 Index = 0; Index < Steps; ++Index)
         {
-            World->GetCoroutineManager().Tick(Step, Step, bPaused);
+            World->GetTimers()->GetCoroutineManager().Tick(Step, Step, bPaused);
         }
     }
 
@@ -120,11 +116,11 @@ TEST(Coroutine, ClocksFollowPauseAndDilation)
     WaitSeconds(World, bDilatedReal, 1.0, ECoroutineClock::Real);
     for (int32 Index = 0; Index < 6; ++Index)
     {
-        World->GetCoroutineManager().Tick(0.05, 0.2, false);
+        World->GetTimers()->GetCoroutineManager().Tick(0.05, 0.2, false);
     }
     EXPECT_FALSE(bDilatedWorld);
     EXPECT_TRUE(bDilatedReal);
-    World->GetCoroutineManager().Clear();
+    World->GetTimers()->GetCoroutineManager().Clear();
 }
 
 TEST(Coroutine, UntilPollsOncePerTick)
@@ -338,15 +334,15 @@ TEST(Coroutine, WorldTeardownEndsEveryCoroutineAndScriptWait)
     CoroDetail::FLatentWaitSpec Spec;
     Spec.Kind  = CoroDetail::FLatentWaitSpec::EKind::Ticks;
     Spec.Ticks = 100;
-    World->GetCoroutineManager().AddWait(std::move(Spec), [&ScriptResult](bool bCompleted) { ScriptResult = bCompleted ? 1 : 0; });
+    World->GetTimers()->GetCoroutineManager().AddWait(std::move(Spec), [&ScriptResult](bool bCompleted) { ScriptResult = bCompleted ? 1 : 0; });
 
-    World->GetCoroutineManager().Clear();
+    World->GetTimers()->GetCoroutineManager().Clear();
     EXPECT_TRUE(Coroutine.IsDone());
     EXPECT_FALSE(Coroutine.WasSuccessful()) << "teardown goes past guards";
     EXPECT_EQ(Destroyed, 1);
     EXPECT_EQ(Reached, 0);
     EXPECT_EQ(ScriptResult, 0);
-    EXPECT_EQ(World->GetCoroutineManager().NumTracked(), 0);
+    EXPECT_EQ(World->GetTimers()->GetCoroutineManager().NumTracked(), 0);
 }
 
 TEST(Coroutine, ScriptWaitsFireAndCancel)
@@ -356,13 +352,13 @@ TEST(Coroutine, ScriptWaitsFireAndCancel)
     CoroDetail::FLatentWaitSpec Spec;
     Spec.Kind    = CoroDetail::FLatentWaitSpec::EKind::Time;
     Spec.Seconds = 0.25;
-    World->GetCoroutineManager().AddWait(std::move(Spec), [&Fired](bool bCompleted) { Fired += bCompleted ? 1 : 100; });
+    World->GetTimers()->GetCoroutineManager().AddWait(std::move(Spec), [&Fired](bool bCompleted) { Fired += bCompleted ? 1 : 100; });
 
     CoroDetail::FLatentWaitSpec Dropped;
     Dropped.Kind  = CoroDetail::FLatentWaitSpec::EKind::Ticks;
     Dropped.Ticks = 1;
-    const uint64 Id = World->GetCoroutineManager().AddWait(std::move(Dropped), [&Fired](bool) { Fired += 1000; });
-    World->GetCoroutineManager().CancelWait(Id);
+    const uint64 Id = World->GetTimers()->GetCoroutineManager().AddWait(std::move(Dropped), [&Fired](bool) { Fired += 1000; });
+    World->GetTimers()->GetCoroutineManager().CancelWait(Id);
 
     Advance(World, 2);
     EXPECT_EQ(Fired, 0);

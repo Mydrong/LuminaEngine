@@ -89,7 +89,25 @@ namespace Lumina
         }
         #endif
 
-        GEngine->Init();
+        auto ShutdownApplication = [this]
+        {
+            GEngine->Shutdown();
+
+            if (PrimaryViewport)
+            {
+                FInputViewportRegistry::Get().Unregister(PrimaryViewport.get());
+                PrimaryViewport.reset();
+            }
+
+            Shutdown();
+        };
+
+        if (!GEngine->Init())
+        {
+            LOG_ERROR("Engine startup failed.");
+            ShutdownApplication();
+            return 1;
+        }
 
         ApplyCommandLineConsoleVariables();
         Benchmark::Start();
@@ -138,15 +156,7 @@ namespace Lumina
 
         LOG_TRACE("Shutting down Lumina");
 
-        GEngine->Shutdown();
-
-        if (PrimaryViewport)
-        {
-            FInputViewportRegistry::Get().Unregister(PrimaryViewport.get());
-            PrimaryViewport.reset();
-        }
-
-        Shutdown();
+        ShutdownApplication();
 
         return 0;
     }

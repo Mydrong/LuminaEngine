@@ -45,6 +45,14 @@ namespace Lumina
         return GCObjectAllocator.AllocateCObject(InClass->GetSize(), Alignment);
     }
 
+    // Reuses the class name's table entry, since looking the string up again cost more than the rest of the name.
+    static FName MakeUniqueObjectName(CClass* Class)
+    {
+        const int32 Unique = std::atomic_ref<int32>(Class->ClassUnique).fetch_add(1, std::memory_order_relaxed) + 1;
+        const FName ClassName = Class->GetName();
+        return ClassName.HasNumber() ? FName(ClassName.c_str(), (uint32)Unique) : FName::FromIndexAndNumber(ClassName.GetID(), (uint32)Unique);
+    }
+
     /** Seeds a new object's reflected properties from its archetype, which is the class CDO unless one was named. */
     static void InitPropertiesFromTemplate(CObject* Object, const FConstructCObjectParams& Params)
     {
@@ -234,15 +242,7 @@ namespace Lumina
 
         FConstructCObjectParams Params(InClass);
 
-        if (Name == NAME_None)
-        {
-            int32 Unique = std::atomic_ref<int32>(InClass->ClassUnique).fetch_add(1, std::memory_order_relaxed) + 1;
-            Params.Name = FName(InClass->GetName().c_str(), Unique);
-        }
-        else
-        {
-            Params.Name = Name;
-        }
+        Params.Name = (Name == NAME_None) ? MakeUniqueObjectName(InClass) : Name;
 
         
         Params.Guid = GUID;
@@ -261,16 +261,7 @@ namespace Lumina
 
         FConstructCObjectParams Params(Template->GetClass());
 
-        if (Name == NAME_None)
-        {
-            CClass* Class = Template->GetClass();
-            int32 Unique = std::atomic_ref<int32>(Class->ClassUnique).fetch_add(1, std::memory_order_relaxed) + 1;
-            Params.Name = FName(Class->GetName().c_str(), Unique);
-        }
-        else
-        {
-            Params.Name = Name;
-        }
+        Params.Name = (Name == NAME_None) ? MakeUniqueObjectName(Template->GetClass()) : Name;
 
         Params.Guid     = GUID;
         Params.Flags    = Flags;

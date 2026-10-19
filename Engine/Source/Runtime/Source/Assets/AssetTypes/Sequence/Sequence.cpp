@@ -141,7 +141,7 @@ namespace Lumina
         {
             // A jump lands on the shot at once, since easing in from wherever the scrub was would show a blend never authored.
             const float Blend = Context.bJumped ? 0.0f : Cuts[CutIndex].BlendTime;
-            Context.World->SetActiveCamera(Camera, Blend);
+            Context.World->GetCamera()->SetActiveCamera(Camera, Blend);
         }
     }
 
@@ -529,7 +529,7 @@ namespace Lumina
         }
 
         BoundEntities.assign(Sequence->Bindings.size(), ECS::NullEntity);
-        PreviousCamera = World->GetActiveCameraEntity();
+        PreviousCamera = World->GetCamera()->GetActiveCameraEntity();
         PreviousTimeDilation = World->GetTimeDilation();
 
         for (int32 i = 0; i < (int32)Sequence->Bindings.size(); ++i)
@@ -628,7 +628,7 @@ namespace Lumina
             SCameraSystem::SetCinematicOverlay(World->GetEntityRegistry(), 0.0f, FVector3(0.0f), 0.0f);
 
             // Hands the view back when the sequence still owns it, so gameplay resumes on its own camera.
-            const ECS::FEntity Active = World->GetActiveCameraEntity();
+            const ECS::FEntity Active = World->GetCamera()->GetActiveCameraEntity();
             bool bOwnsView = false;
             for (ECS::FEntity Entity : BoundEntities)
             {
@@ -636,7 +636,7 @@ namespace Lumina
             }
             if (bOwnsView && PreviousCamera != ECS::NullEntity && World->IsValidEntity(PreviousCamera))
             {
-                World->SetActiveCamera(PreviousCamera);
+                World->GetCamera()->SetActiveCamera(PreviousCamera);
             }
 
             if (bRestore)

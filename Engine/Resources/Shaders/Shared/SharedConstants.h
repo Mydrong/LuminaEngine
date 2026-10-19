@@ -145,5 +145,13 @@
 #define RENDER_LAYER_DEFAULT_MASK       1u
 #define RENDER_LAYER_FOREGROUND_MASK    0x80000000u
 
+// The low bits of an instance's LODAndThinning, its forced LOD plus one.
+#define INSTANCE_FORCED_LOD_MASK        0xFu
 // Set in an instance's LODAndThinning when its layers are anything but Default, so only those instances load their mask.
-#define INSTANCE_CUSTOM_LAYERS_BIT      0x100u
+#define INSTANCE_CUSTOM_LAYERS_BIT      0x10u
+// Where an instance's custom depth word sits in its LODAndThinning, nine bits below the thinning half.
+#define INSTANCE_CUSTOM_DEPTH_SHIFT     7u
+#define CUSTOM_DEPTH_WORD_MASK          0x1FFu
+// Set in a custom depth word when the instance draws into custom depth, above its stencil byte.
+#define CUSTOM_DEPTH_ENABLED_BIT        0x100u
+#define CUSTOM_DEPTH_STENCIL_MASK       0xFFu

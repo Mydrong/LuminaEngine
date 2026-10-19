@@ -112,6 +112,36 @@ namespace Lumina
     };
 
     REFLECT()
+    class CMaterialExpression_CustomDepth : public CMaterialExpression
+    {
+        GENERATED_BODY()
+    public:
+        void BuildNode() override;
+        FFixedString GetNodeCategory() const override { return "Scene"; }
+        FStringView GetNodeDisplayName() const override { return "CustomDepth"; }
+        FStringView GetNodeTooltip() const override { return "Samples the depth of meshes with Render Custom Depth on, drawn even where other geometry hides them. Linear by default, toggle for raw reverse-Z where zero means nothing was drawn. Only valid in PostProcess materials."; }
+        void GenerateDefinition(FMaterialCompiler& Compiler) override;
+
+        PROPERTY(Editable) bool bLinear = true;
+
+        CMaterialInput* UV = nullptr;
+    };
+
+    REFLECT()
+    class CMaterialExpression_CustomStencil : public CMaterialExpression
+    {
+        GENERATED_BODY()
+    public:
+        void BuildNode() override;
+        FFixedString GetNodeCategory() const override { return "Scene"; }
+        FStringView GetNodeDisplayName() const override { return "CustomStencil"; }
+        FStringView GetNodeTooltip() const override { return "Returns the Custom Depth Stencil Value of the nearest custom depth mesh under the pixel, from 0 to 255, and 0 where none is. Only valid in PostProcess materials."; }
+        void GenerateDefinition(FMaterialCompiler& Compiler) override;
+
+        CMaterialInput* UV = nullptr;
+    };
+
+    REFLECT()
     class CMaterialExpression_SceneHDRColor : public CMaterialExpression
     {
         GENERATED_BODY()

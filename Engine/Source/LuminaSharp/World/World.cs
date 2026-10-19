@@ -35,36 +35,6 @@ public unsafe partial class CWorld
         set => SetTimeDilation(value);
     }
 
-    // Setting it cuts to the camera, and SetActiveCamera blends instead.
-    public FEntity ActiveCamera
-    {
-        get => GetActiveCameraEntity();
-        set => SetActiveCamera(value);
-    }
-
-    // Runs OnSpawned once on the game thread with the spawned root, or the null entity if it failed.
-    public void SpawnPrefabAsync(TSoftObjectPtr<CPrefab> Prefab, Action<FEntity> OnSpawned)
-        => SpawnPrefabAsync(Prefab, ScriptCallback.Of(OnSpawned));
-
-    /// Spawns a prefab already placed, in one native call. Null entity if the prefab could not be spawned.
-    public FEntity SpawnPrefab(TSoftObjectPtr<CPrefab> Prefab, FVector3 Location, FQuat? Rotation = null, FEntity? Parent = null)
-        => SpawnPrefab(Prefab, new FTransform(Location, Rotation ?? FQuat.Identity, FVector3.One), Parent);
-
-    /// Spawns a prefab at a full transform, so an authored scale survives the spawn.
-    public FEntity SpawnPrefab(TSoftObjectPtr<CPrefab> Prefab, FTransform Transform, FEntity? Parent = null)
-        => SpawnPrefabAt(Prefab, Transform, Parent ?? FEntity.Null);
-
-    /// Spawns a prefab already loaded, with no path lookup. Null entity if the prefab is null.
-    public FEntity SpawnPrefab(CPrefab Prefab) => SpawnLoadedPrefab(Prefab);
-
-    /// Spawns a prefab already loaded, placed in one native call.
-    public FEntity SpawnPrefab(CPrefab Prefab, FVector3 Location, FQuat? Rotation = null, FEntity? Parent = null)
-        => SpawnPrefab(Prefab, new FTransform(Location, Rotation ?? FQuat.Identity, FVector3.One), Parent);
-
-    /// Spawns a prefab already loaded at a full transform, so an authored scale survives the spawn.
-    public FEntity SpawnPrefab(CPrefab Prefab, FTransform Transform, FEntity? Parent = null)
-        => SpawnLoadedPrefabAt(Prefab, Transform, Parent ?? FEntity.Null);
-
     public List<T> Scripts<T>() where T : class
     {
         if (!typeof(T).IsInterface && !typeof(CEntityScript).IsAssignableFrom(typeof(T)))
@@ -107,9 +77,5 @@ public unsafe partial class CWorld
     /// A new named entity with a transform and nothing else.
     public FEntity CreateEntity(string Name, FVector3 Location = default, FQuat? Rotation = null, FVector3? Scale = null)
         => ConstructEntity(Name, new FTransform(Location, Rotation ?? FQuat.Identity, Scale ?? FVector3.One));
-
-    /// A projectile that sweeps forward each frame, reports its first hit through its component's OnHit, and despawns after lifetime seconds.
-    public FEntity SpawnProjectile(FVector3 position, FVector3 velocity, float damage = 0.0f, float lifetime = 5.0f)
-        => SpawnProjectile(position, velocity, damage, lifetime, FEntity.Null);
 
 }

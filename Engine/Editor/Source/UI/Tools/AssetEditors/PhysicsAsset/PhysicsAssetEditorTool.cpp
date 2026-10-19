@@ -504,7 +504,7 @@ namespace Lumina
 
         if (World->GetRenderer() != nullptr)
         {
-            World->GetRenderer()->GetSceneRenderSettings().bDrawBillboards = false;
+            World->GetRenderSettings().bDrawBillboards = false;
         }
 
         // The overlays are drawn from the bind pose, which the live ragdoll has already left behind.
@@ -990,7 +990,7 @@ namespace Lumina
 
         FAssetEditorTool::DrawViewportOverlayElements(UpdateContext, ViewportTexture, ViewportSize);
 
-        SCameraComponent* Camera = World.IsValid() ? World->GetActiveCamera() : nullptr;
+        SCameraComponent* Camera = World.IsValid() ? World->GetCamera()->GetActiveCamera() : nullptr;
         if (Camera == nullptr)
         {
             HandleState.ActiveHandle = EShapeHandle::None;

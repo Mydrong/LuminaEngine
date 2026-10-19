@@ -31,14 +31,14 @@ public sealed class InputModeLease : IDisposable
             }
             if (value)
             {
-                Lease = World.AcquireInputMode(InputMode, MouseMode);
+                Lease = World.Input.AcquireInputMode(InputMode, MouseMode);
                 return;
             }
 
             // A torn-down world has already dropped every lease it held.
             if (World.IsValid)
             {
-                World.ReleaseInputMode(Lease);
+                World.Input.ReleaseInputMode(Lease);
             }
             Lease = 0;
         }

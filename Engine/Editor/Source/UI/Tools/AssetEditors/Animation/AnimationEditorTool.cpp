@@ -159,7 +159,7 @@ namespace Lumina
         
         if (World && World->GetRenderer())
         {
-            World->GetRenderer()->GetSceneRenderSettings().bDrawBillboards = false;
+            World->GetRenderSettings().bDrawBillboards = false;
         }
     }
 

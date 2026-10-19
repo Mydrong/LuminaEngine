@@ -377,6 +377,7 @@ namespace Lumina
     void InitializeCObjectSystem()
     {
         Object::Internal::AllocateObjectPool(MaxCObjectCount.GetValue());
+        Memory::RegisterCountedCategory("CObject", [] { return GCObjectAllocator.GetStats(); });
     }
 
     void ShutdownCObjectSystem()

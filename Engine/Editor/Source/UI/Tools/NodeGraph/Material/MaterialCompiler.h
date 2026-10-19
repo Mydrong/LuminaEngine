@@ -371,6 +371,8 @@ namespace Lumina
         void SceneColor(const FString& ID, CMaterialInput* UV);
         void SceneDepth(const FString& ID, CMaterialInput* UV, bool bLinear);
         void SceneHDRColor(const FString& ID, CMaterialInput* UV);
+        void CustomDepth(const FString& ID, CMaterialInput* UV, bool bLinear);
+        void CustomStencil(const FString& ID, CMaterialInput* UV);
         void NumericConstant(const FString& ID, float Value);
         void CustomPrimitiveData(CMaterialExpression_CustomPrimitiveData* Node, ECustomPrimitiveDataType Type);
 
@@ -525,6 +527,10 @@ namespace Lumina
 
         FInputValue GetTypedInputValue(CMaterialInput* Input, float DefaultValue = 0.0f);
         FInputValue GetTypedInputValue(CMaterialInput* Input, const FString& DefaultValueStr);
+
+        bool RequirePostProcess(const FString& ID, CMaterialInput* UV, const char* NodeName, const char* Type, const char* Fallback);
+        // The connected UV's xy, or the screen UV when nothing is connected.
+        FString ScreenUV(CMaterialInput* UV);
 
         // An unconnected input falling back to a varying alias such as UV0 takes the gradient pair its pixel template declares, not a literal's zero.
         void ApplyFallbackAliasDeriv(FInputValue& Value) const;

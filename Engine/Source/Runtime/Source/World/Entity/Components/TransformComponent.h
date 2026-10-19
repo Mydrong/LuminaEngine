@@ -250,6 +250,24 @@ namespace Lumina
         {
             return LocalTransform.GetUp();
         }
+
+        FUNCTION(NoSuppressGCTransition)
+        FVector3 GetWorldForward() const
+        {
+            return ComputeWorldTransform().GetForward();
+        }
+
+        FUNCTION(NoSuppressGCTransition)
+        FVector3 GetWorldRight() const
+        {
+            return ComputeWorldTransform().GetRight();
+        }
+
+        FUNCTION(NoSuppressGCTransition)
+        FVector3 GetWorldUp() const
+        {
+            return ComputeWorldTransform().GetUp();
+        }
     
         FUNCTION()
         float MaxScale() const

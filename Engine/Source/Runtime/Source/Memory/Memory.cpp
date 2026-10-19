@@ -1,6 +1,7 @@
 ﻿#include "Core/Threading/Thread.h"
 #include "RuntimePCH.h"
 #include "Memory.h"
+#include "Core/Threading/Atomic.h"
 #include "MemoryTracking.h"
 #include "Allocators/Allocator.h"
 #include "Core/LuminaMacros.h"
@@ -24,16 +25,15 @@ namespace Lumina
         PANIC("{}", pMessage);
     }
     
-    RUNTIME_API Memory::FMalloc* Memory::GMalloc = nullptr;
 
     namespace
     {
         // Constant initialized so allocations made before the console variable registers read a valid depth.
-        constinit int32 GAllocCallstackDepth = 0;
+        constinit TAtomic<int32> GAllocCallstackDepth{0};
 
         TConsoleVar<int32> CVarAllocCallstackDepth("Profiler.AllocCallstackDepth", 0,
             "Frames Tracy walks per allocation while connected. Each walk costs about a microsecond, which inflates allocating zones.",
-            [](const CVarValueType& Value) { GAllocCallstackDepth = Containers::Get<int32>(Value); });
+            [](const CVarValueType& Value) { GAllocCallstackDepth.store(Containers::Get<int32>(Value), Atomic::MemoryOrderRelaxed); });
     }
 
     Memory::FMalloc::FMalloc() noexcept
@@ -46,11 +46,9 @@ namespace Lumina
 
     namespace
     {
-        // Magic-static bootstrap so dynamic-init allocations come up cleanly; also publishes GMalloc.
         Memory::FMalloc& EnsureAllocator()
         {
             static Memory::FMalloc Instance;
-            Memory::GMalloc = &Instance;
             return Instance;
         }
     }
@@ -151,18 +149,33 @@ namespace Lumina
     // Per-thread rpmalloc init happens inside FMalloc's primitives; the public wrappers needn't repeat it.
     void* Memory::Malloc(size_t Size, size_t Alignment)
     {
-        FMalloc& Allocator = (GMalloc != nullptr) ? *GMalloc : EnsureAllocator();
+        FMalloc& Allocator = EnsureAllocator();
         void* pMemory = Allocator.Malloc(Size, Align<size_t>(Alignment, 16));
-        TracyCAllocS(pMemory, Size, GAllocCallstackDepth);
+        TracyCAllocS(pMemory, Size, GAllocCallstackDepth.load(Atomic::MemoryOrderRelaxed));
     #if LUMINA_MEMORY_TRACKING
         ::Lumina::Memory::Hooks::OnAlloc(pMemory, Size);
     #endif
         return pMemory;
     }
 
+    void* Memory::MallocUntracked(size_t Size, size_t Alignment)
+    {
+        FMalloc& Allocator = EnsureAllocator();
+        void* pMemory = Allocator.Malloc(Size, Align<size_t>(Alignment, 16));
+        TracyCAllocS(pMemory, Size, GAllocCallstackDepth.load(Atomic::MemoryOrderRelaxed));
+        return pMemory;
+    }
+
+    void Memory::FreeUntracked(void* Memory)
+    {
+        TracyCFreeS(Memory, GAllocCallstackDepth.load(Atomic::MemoryOrderRelaxed));
+        FMalloc& Allocator = EnsureAllocator();
+        Allocator.Free(Memory);
+    }
+
     void* Memory::Realloc(void* Memory, size_t NewSize, size_t Alignment)
     {
-        FMalloc& Allocator = (GMalloc != nullptr) ? *GMalloc : EnsureAllocator();
+        FMalloc& Allocator = EnsureAllocator();
         void* pMemory = Allocator.Realloc(Memory, NewSize, Align<size_t>(Alignment, 16));
     #if LUMINA_MEMORY_TRACKING
         ::Lumina::Memory::Hooks::OnRealloc(Memory, pMemory, NewSize);
@@ -190,11 +203,11 @@ namespace Lumina
 
     void Memory::Free(void*& Memory)
     {
-        TracyCFreeS(Memory, GAllocCallstackDepth);
+        TracyCFreeS(Memory, GAllocCallstackDepth.load(Atomic::MemoryOrderRelaxed));
     #if LUMINA_MEMORY_TRACKING
         ::Lumina::Memory::Hooks::OnFree(Memory);
     #endif
-        FMalloc& Allocator = (GMalloc != nullptr) ? *GMalloc : EnsureAllocator();
+        FMalloc& Allocator = EnsureAllocator();
         Allocator.Free(Memory);
         Memory = nullptr;
     }

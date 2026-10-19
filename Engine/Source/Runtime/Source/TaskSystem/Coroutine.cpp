@@ -5,7 +5,6 @@
 #include "Core/Threading/Thread.h"
 #include "Scheduler/JobScheduler.h"
 #include "World/World.h"
-#include "World/Subsystems/CoroutineManager.h"
 
 namespace Lumina::CoroDetail
 {
@@ -113,7 +112,7 @@ namespace Lumina::CoroDetail
             return;
         }
         World = InWorld;
-        World->GetCoroutineManager().Track(*this);
+        World->GetTimers()->GetCoroutineManager().Track(*this);
     }
 
     void FCoroutineState::BindOwner(CObject* InOwner)
@@ -163,7 +162,7 @@ namespace Lumina::CoroDetail
 
         if (World != nullptr)
         {
-            World->GetCoroutineManager().Untrack(*this);
+            World->GetTimers()->GetCoroutineManager().Untrack(*this);
             World = nullptr;
         }
 
@@ -176,7 +175,7 @@ namespace Lumina::CoroDetail
     void SuspendLatent(FCoroutineState& State, FLatentWaitSpec&& Spec, uint32 Serial)
     {
         ASSERT(State.GetWorld() != nullptr, "A latent wait needs a world. Pass a CWorld*, or an object with GetWorld(), as the coroutine's first parameter.");
-        State.GetWorld()->GetCoroutineManager().Suspend(State, std::move(Spec), Serial);
+        State.GetWorld()->GetTimers()->GetCoroutineManager().Suspend(State, std::move(Spec), Serial);
     }
 
     namespace

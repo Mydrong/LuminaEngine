@@ -249,6 +249,16 @@ namespace Lumina::Physics
     // Queries carry no zone, since gameplay runs thousands a frame on every worker and fiber builds serialize Tracy events.
     TOptional<SRayResult> FBox3DPhysicsScene::CastRay(const SRayCastSettings& Settings)
     {
+        TOptional<SRayResult> Hit = CastRayClosest(Settings);
+        if (Settings.bDrawDebug)
+        {
+            DrawRayDebug(Settings, Hit ? TSpan<const SRayResult>(&*Hit, 1) : TSpan<const SRayResult>());
+        }
+        return Hit;
+    }
+
+    TOptional<SRayResult> FBox3DPhysicsScene::CastRayClosest(const SRayCastSettings& Settings)
+    {
         const FVector3 Delta = Settings.End - Settings.Start;
         const float Length = Math::Length(Delta);
         if (Length <= Math::kSmallNumber)
@@ -287,15 +297,10 @@ namespace Lumina::Physics
         {
             return {};
         }
-
-        if (Settings.bDrawDebug)
-        {
-            DrawRayDebug(Settings, TVector{Result});
-        }
         return Result;
     }
 
-    void FBox3DPhysicsScene::DrawRayDebug(const SRayCastSettings& Settings, const TSpan<SRayResult>& Hits) const
+    void FBox3DPhysicsScene::DrawRayDebug(const SRayCastSettings& Settings, TSpan<const SRayResult> Hits) const
     {
         FWorldDebugInterface* Debug = World ? World->GetDebugInterface() : nullptr;
         if (Debug == nullptr)
@@ -344,7 +349,7 @@ namespace Lumina::Physics
         SortNearToFar(OutHits);
         if (Settings.bDrawDebug)
         {
-            DrawRayDebug(Settings, OutHits);
+            DrawRayDebug(Settings, TSpan<const SRayResult>(OutHits.data(), OutHits.size()));
         }
     }
 

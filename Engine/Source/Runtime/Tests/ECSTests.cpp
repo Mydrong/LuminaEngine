@@ -5,7 +5,7 @@
 #include "World/Entity/EntityUtils.h"
 #include "World/Entity/Components/DirtyComponent.h"
 #include "World/Entity/Components/TransformComponent.h"
-#include "World/Scene/RenderScene/SceneRenderTypes.h"
+#include "World/Scene/RenderScene/WorldRenderSettings.h"
 
 using namespace Lumina;
 
@@ -293,47 +293,40 @@ TEST(ECSTests, LazyResolve_AfterCleanPhase_SeesUpdatedWorld)
     EXPECT_FLOAT_EQ(Registry.Get<STransformComponent>(Child).GetWorldLocation().x, 25.f);
 }
 
-// A swap takes the other registry's singletons too, which is why InitializeWorld carries the settings by hand.
-TEST(ECSTests, RenderSettings_SurviveRegistrySwap)
+// The toggles save with the world's entities, and the debug views and game view override do not.
+TEST(ECSTests, RenderSettings_SaveTogglesButNotDebugViews)
 {
-    ECS::FRegistry Live{};
-    ECS::FRegistry Pending{};
+    SWorldRenderSettings::StaticStruct();
 
-    Live.Ctx().Emplace<FSceneRenderSettings>().Flags = ERenderSceneDebugFlags::Meshlets;
-    Pending.Create();
+    ECS::FRegistry Source{};
+    SWorldRenderSettings& Written = Source.Emplace<SWorldRenderSettings>(Source.Create());
+    Written.bDrawBillboards     = false;
+    Written.bUseLODs            = false;
+    Written.Flags               = ERenderSceneDebugFlags::Meshlets;
+    Written.bFreezeCulling      = true;
+    Written.bHideEditorOverlays = true;
 
-    const FSceneRenderSettings Carried = Live.Ctx().Get<FSceneRenderSettings>();
+    TVector<uint8> Bytes;
+    {
+        FMemoryWriter Writer(Bytes);
+        ASSERT_TRUE(ECS::Utils::SerializeRegistry(Writer, Source));
+    }
 
-    Live.Swap(Pending);
+    ECS::FRegistry Loaded{};
+    {
+        FMemoryReader Reader(Bytes);
+        ASSERT_TRUE(ECS::Utils::SerializeRegistry(Reader, Loaded));
+    }
 
-    EXPECT_FALSE(Live.Ctx().Contains<FSceneRenderSettings>());
-
-    Live.Ctx().Emplace<FSceneRenderSettings>(Carried);
-
-    EXPECT_TRUE(Live.Ctx().Contains<FSceneRenderSettings>());
-    EXPECT_EQ((uint8)Live.Ctx().Get<FSceneRenderSettings>().Flags, (uint8)ERenderSceneDebugFlags::Meshlets);
-}
-
-namespace
-{
-    // Stands in for the renderer pointer CreateRenderer publishes and DestroyRenderer clears.
-    struct FFakeRendererHandle { int Unused = 0; };
-}
-
-// A renderer torn down and rebuilt has to find the edited values again rather than fresh defaults.
-TEST(ECSTests, RenderSettings_OutliveTheirReader)
-{
-    ECS::FRegistry Registry{};
-
-    Registry.Ctx().GetOrEmplace<FSceneRenderSettings>().bDrawBillboards = false;
-
-    Registry.Ctx().Emplace<FFakeRendererHandle>();
-    EXPECT_TRUE(Registry.Ctx().Erase<FFakeRendererHandle>());
-
-    EXPECT_TRUE(Registry.Ctx().Contains<FSceneRenderSettings>());
-
-    const bool bDrawBillboards = Registry.Ctx().GetOrEmplace<FSceneRenderSettings>().bDrawBillboards;
-    EXPECT_FALSE(bDrawBillboards);
+    auto View = Loaded.View<SWorldRenderSettings>();
+    ASSERT_EQ(View.Num(), 1u);
+    const SWorldRenderSettings& Read = Loaded.Get<SWorldRenderSettings>(*View.begin());
+    EXPECT_FALSE(Read.bDrawBillboards);
+    EXPECT_FALSE(Read.bUseLODs);
+    EXPECT_TRUE(Read.bFrustumCull);
+    EXPECT_EQ(Read.Flags, ERenderSceneDebugFlags::None);
+    EXPECT_FALSE(Read.bFreezeCulling);
+    EXPECT_FALSE(Read.bHideEditorOverlays);
 }
 
 namespace

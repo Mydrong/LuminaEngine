@@ -2278,7 +2278,7 @@ namespace Lumina
         // Hands the viewport back to the editor camera, which the cuts had taken.
         if (Instance.PreviousCamera != ECS::NullEntity && World->IsValidEntity(Instance.PreviousCamera))
         {
-            World->SetActiveCamera(Instance.PreviousCamera);
+            World->GetCamera()->SetActiveCamera(Instance.PreviousCamera);
         }
     }
 }

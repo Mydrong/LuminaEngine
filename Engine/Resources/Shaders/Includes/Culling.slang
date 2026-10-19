@@ -262,9 +262,14 @@ bool IsCascadeHZBOccluded(uint CascadeIndex, float3 CenterWS, float RadiusWS, bo
 
 // CullInstances sizes buckets from this and BuildMeshletBlocks appends against it, so they must agree.
 bool IsInstanceVisibleToView(FCullView View, float3 Center, float Radius, bool bNoCull, bool bCaster,
-                             bool bShadowOnly, bool bFarCaster, bool bFoliage, uint Layers)
+                             bool bShadowOnly, bool bFarCaster, bool bFoliage, bool bCustomDepth, uint Layers)
 {
     if ((View.LayerMask & Layers) == 0u)
+    {
+        return false;
+    }
+
+    if (View.HasFlag(CULL_VIEW_FLAG_CUSTOM_DEPTH_ONLY) && !bCustomDepth)
     {
         return false;
     }

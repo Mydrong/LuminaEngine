@@ -1,6 +1,7 @@
 #include "RuntimePCH.h"
 #include "Memory/MemoryTracking.h"
 #include "Class.h"
+#include "ObjectAllocator.h"
 #include "ScriptClass.h"
 #include "Core/Reflection/Type/LuminaTypes.h"
 #include "Core/Reflection/Type/Metadata/PropertyMetadata.h"
@@ -25,6 +26,14 @@ namespace Lumina
         return PackageObject;
     }
 
+    // From the CObject allocator like every other object, since FreeCObject is what destroys a type object too.
+    template<typename TClass, typename... TArgs>
+    static TClass* NewTypeObject(TArgs&&... Args)
+    {
+        void* Storage = GCObjectAllocator.AllocateCObject(sizeof(TClass), alignof(TClass));
+        return Memory::ConstructAt(static_cast<TClass*>(Storage), Forward<TArgs>(Args)...);
+    }
+
     static void LinkAndQueueStaticClass(CClass* NewClass, CClass* (*SuperClassFn)())
     {
         CClass* SuperClass = SuperClassFn();
@@ -40,7 +49,7 @@ namespace Lumina
     {
         DEBUG_ASSERT(*OutClass == nullptr);
 
-        *OutClass = Memory::New<CClass>(ResolveClassPackage(Package), FName(Name), Size, Alignment, OF_None, FactoryFunc);
+        *OutClass = NewTypeObject<CClass>(ResolveClassPackage(Package), FName(Name), Size, Alignment, OF_None, FactoryFunc);
         LinkAndQueueStaticClass(*OutClass, SuperClassFn);
     }
 
@@ -53,7 +62,7 @@ namespace Lumina
     {
         DEBUG_ASSERT(*OutClass == nullptr);
 
-        *OutClass = Memory::New<CScriptClass>(ResolveClassPackage(Package), FName(Name), Size, Alignment, OF_None, FactoryFunc);
+        *OutClass = NewTypeObject<CScriptClass>(ResolveClassPackage(Package), FName(Name), Size, Alignment, OF_None, FactoryFunc);
         (*OutClass)->SetSuperStruct(SuperClass != *OutClass ? SuperClass : nullptr);
         (*OutClass)->RegisterDependencies();
         (*OutClass)->BeginRegister();

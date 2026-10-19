@@ -31,7 +31,7 @@ namespace Lumina
     /** Maps normalized blend time [0..1] through Function to an eased [0..1] alpha. */
     RUNTIME_API float EvaluateCameraBlend(ECameraBlendFunction Function, float Alpha);
 
-    // Result of CWorld::WorldToScreen. Blittable so C# receives it by value.
+    // Result of CCameraSubsystem::WorldToScreen. Blittable so C# receives it by value.
     REFLECT()
     struct RUNTIME_API SScreenProjection
     {
@@ -50,7 +50,7 @@ namespace Lumina
         bool bOnScreen = false;
     };
 
-    // Result of CWorld::ScreenToWorldRay. Blittable so C# receives it by value.
+    // Result of CCameraSubsystem::ScreenToWorldRay. Blittable so C# receives it by value.
     REFLECT()
     struct RUNTIME_API SWorldRay
     {

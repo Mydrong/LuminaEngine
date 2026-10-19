@@ -64,6 +64,11 @@ namespace Lumina
      * The content hash is kept alongside, because it -- not the index -- is what is stable across runs, and
      * a couple of callers legitimately want that (a per-class colour, an ImGui dock class).
      */
+    struct FPrehashedNameHash
+    {
+        NODISCARD FORCEINLINE static uint64 operator()(uint64 Hash) noexcept { return Hash; }
+    };
+
     class FNameTable
     {
     public:
@@ -88,7 +93,7 @@ namespace Lumina
         TVector<const char*> Strings;
         TVector<uint64>      Hashes;
 
-        THashMap<uint64, uint32> HashToIndex;
+        THashMap<uint64, uint32, FPrehashedNameHash> HashToIndex;
         FStringPool Pool;
         
         static constexpr size_t INITIAL_CAPACITY = 16384;
@@ -150,9 +155,22 @@ namespace Lumina
                 return Index;
             }
 
-            // Case-folded, matching the lowercased form the hash was taken of.
             const char* Existing = Strings[It->second];
-            if (strlen(Existing) == Length && EqualsIgnoreCase(FStringView(Existing, Length), FStringView(Str, Length)))
+            size_t i = 0;
+            for (; i < Length; ++i)
+            {
+                const char C = Existing[i];
+                if (C == '\0')
+                {
+                    break;
+                }
+                const char Folded = (C >= 'A' && C <= 'Z') ? char(C + ('a' - 'A')) : C;
+                if (Folded != Lower[i])
+                {
+                    break;
+                }
+            }
+            if (i == Length && Existing[i] == '\0')
             {
                 return It->second;
             }

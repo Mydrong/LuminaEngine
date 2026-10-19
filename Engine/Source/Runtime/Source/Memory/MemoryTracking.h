@@ -46,6 +46,17 @@ namespace Lumina::Memory
         TotalAllocs,
     };
 
+    // What an owner that counts its own allocations reports for its category.
+    struct FCountedCategoryStats
+    {
+        uint64 LiveBytes   = 0;
+        uint64 LiveCount   = 0;
+        uint64 TotalAllocs = 0;
+        uint64 TotalFrees  = 0;
+    };
+
+    using FCountedCategoryReader = FCountedCategoryStats (*)();
+
 #if LUMINA_MEMORY_TRACKING
 
     // Interns a category name and returns a stable id (idempotent, thread-safe, cached per call site).
@@ -65,6 +76,9 @@ namespace Lumina::Memory
 
     RUNTIME_API uint64 GetTrackedLiveBytes();
     RUNTIME_API uint64 GetTrackedLiveCount();
+
+    // Adds Reader's numbers to the category at report time, for an owner whose allocations skip the per-allocation ledger.
+    RUNTIME_API void RegisterCountedCategory(const char* Name, FCountedCategoryReader Reader);
 
     // Allocations that could not be recorded because a table hit its ceiling.
     // Non-zero means reported live bytes under-count.
@@ -142,6 +156,8 @@ namespace Lumina::Memory
     };
 
     #define LUMINA_MEMORY_SCOPE(Name) ((void)0)
+
+    FORCEINLINE void RegisterCountedCategory(const char*, FCountedCategoryReader) {}
 
 #endif
 }

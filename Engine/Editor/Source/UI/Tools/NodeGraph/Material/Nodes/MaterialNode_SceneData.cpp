@@ -65,6 +65,38 @@ namespace Lumina
         C.SceneDepth(FullName, UV, bLinear);
     }
 
+    void CMaterialExpression_CustomDepth::BuildNode()
+    {
+        Super::BuildNode();
+        Output->SetInputType(EMaterialInputType::Float);
+        Output->SetComponentMask(EComponentMask::R);
+
+        UV = Cast<CMaterialInput>(CreatePin(CMaterialInput::StaticClass(), "UV", ENodePinDirection::Input));
+        UV->SetHideDuringConnection(false);
+        UV->SetPinName("UV");
+    }
+    void CMaterialExpression_CustomDepth::GenerateDefinition(FMaterialCompiler& C)
+    {
+        if (!C.RequirePixelStage(this, "CustomDepth")) return;
+        C.CustomDepth(FullName, UV, bLinear);
+    }
+
+    void CMaterialExpression_CustomStencil::BuildNode()
+    {
+        Super::BuildNode();
+        Output->SetInputType(EMaterialInputType::Float);
+        Output->SetComponentMask(EComponentMask::R);
+
+        UV = Cast<CMaterialInput>(CreatePin(CMaterialInput::StaticClass(), "UV", ENodePinDirection::Input));
+        UV->SetHideDuringConnection(false);
+        UV->SetPinName("UV");
+    }
+    void CMaterialExpression_CustomStencil::GenerateDefinition(FMaterialCompiler& C)
+    {
+        if (!C.RequirePixelStage(this, "CustomStencil")) return;
+        C.CustomStencil(FullName, UV);
+    }
+
     void CMaterialExpression_SceneHDRColor::BuildNode()
     {
         Super::BuildNode();

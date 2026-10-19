@@ -4,8 +4,7 @@
 
 namespace Lumina
 {
-    // Advances the per-world FTimerManager (a ctx singleton) once per frame. Runs first at FrameStart so
-    // Timer callbacks fire before gameplay systems, and run exclusive because a callback is arbitrary code.
+    // Advances the timer subsystem's manager first at FrameStart, so timer callbacks fire before gameplay systems.
     REFLECT()
     class STimerSystem : public CEntitySystem
     {

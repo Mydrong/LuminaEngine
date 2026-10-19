@@ -140,12 +140,28 @@ TEST(SceneCullMath, LODAndThinningRoundTrip)
     EXPECT_EQ(PackLODAndThinning(-1, 0.0f), 0u);
 
     const uint32 Packed = PackLODAndThinning(2, 30.0f);
-    EXPECT_EQ((int32)(Packed & 0xFFu) - 1, 2);
+    EXPECT_EQ((int32)(Packed & INSTANCE_FORCED_LOD_MASK) - 1, 2);
     EXPECT_NEAR((float)FHalf::FromBits((uint16)(Packed >> 16)), 30.0f, 0.05f);
 
     // Negative distances mean off, and absurd ones clamp instead of overflowing the half.
     EXPECT_EQ(PackLODAndThinning(-1, -5.0f), 0u);
     EXPECT_LT((float)FHalf::FromBits((uint16)(PackLODAndThinning(-1, 1e9f) >> 16)), 65504.5f);
+}
+
+TEST(SceneCullMath, CustomDepthWordSurvivesItsNeighbors)
+{
+    EXPECT_EQ(PackCustomDepthStencil(false, 200), 0u);
+
+    const uint32 Word   = PackCustomDepthStencil(true, 255);
+    const uint32 Packed = PackLODAndThinning(MESHLET_MAX_LODS - 1, 65000.0f, RENDER_LAYER_FOREGROUND_MASK, Word);
+
+    EXPECT_EQ((Packed >> INSTANCE_CUSTOM_DEPTH_SHIFT) & CUSTOM_DEPTH_WORD_MASK, Word);
+    EXPECT_EQ((int32)(Packed & INSTANCE_FORCED_LOD_MASK) - 1, MESHLET_MAX_LODS - 1);
+    EXPECT_NE(Packed & INSTANCE_CUSTOM_LAYERS_BIT, 0u);
+    EXPECT_NEAR((float)FHalf::FromBits((uint16)(Packed >> 16)), 65000.0f, 32.0f);
+
+    // A stencil of zero still draws, so the enable bit alone has to carry it.
+    EXPECT_NE((PackLODAndThinning(-1, 0.0f, RENDER_LAYER_DEFAULT_MASK, PackCustomDepthStencil(true, 0)) >> INSTANCE_CUSTOM_DEPTH_SHIFT) & CUSTOM_DEPTH_ENABLED_BIT, 0u);
 }
 
 TEST(SceneCullMath, BlockHasDistanceFieldCasterNeedsEveryFlag)

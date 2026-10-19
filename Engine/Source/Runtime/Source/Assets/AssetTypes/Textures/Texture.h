@@ -281,6 +281,9 @@ namespace Lumina
         /** True when this texture carries the bytes it was imported from, resident or not. */
         bool HasSourceFile() const { return SourceFile.IsValid(); }
 
+        // Empty until LoadSourceFileBytes has brought them back from the package.
+        const TVector<uint8>& GetSourceFileBytes() const { return SourceFile.Bytes; }
+
         /** First mip currently on the GPU; == GetFirstStreamedMipCount() when fully streamed out, 0 when
          *  fully resident. */
         uint32 GetResidentFirstMip() const { return TextureResource ? TextureResource->ResidentFirstMip : 0u; }

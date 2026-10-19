@@ -78,7 +78,7 @@ namespace Lumina
         const auto& BillboardInstances = Frame.Primitives.BillboardInstances;
         const auto& DrawCommands       = Frame.Geometry.DrawCommands;
 
-        if (BillboardInstances.empty() || !FrameSettings.bDrawBillboards)
+        if (BillboardInstances.empty() || !FrameSettings.ShouldDrawBillboards())
         {
             return;
         }

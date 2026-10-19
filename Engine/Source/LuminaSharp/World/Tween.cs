@@ -19,129 +19,129 @@ public readonly struct Tween : IEquatable<Tween>
 
     public Tween MoveTo(FEntity Target, FVector3 Destination, float Duration)
     {
-        World.TweenMoveTo(Id, Target, Destination, Duration);
+        World.Tweens.MoveTo(Id, Target, Destination, Duration);
         return this;
     }
 
     public Tween RotateTo(FEntity Target, FQuat Destination, float Duration)
     {
-        World.TweenRotateTo(Id, Target, Destination, Duration);
+        World.Tweens.RotateTo(Id, Target, Destination, Duration);
         return this;
     }
 
     public Tween ScaleTo(FEntity Target, FVector3 Destination, float Duration)
     {
-        World.TweenScaleTo(Id, Target, Destination, Duration);
+        World.Tweens.ScaleTo(Id, Target, Destination, Duration);
         return this;
     }
 
     // Relative to wherever Target is when the step begins.
     public Tween MoveBy(FEntity Target, FVector3 Offset, float Duration)
     {
-        World.TweenMoveBy(Id, Target, Offset, Duration);
+        World.Tweens.MoveBy(Id, Target, Offset, Duration);
         return this;
     }
 
     public Tween RotateBy(FEntity Target, FQuat Delta, float Duration)
     {
-        World.TweenRotateBy(Id, Target, Delta, Duration);
+        World.Tweens.RotateBy(Id, Target, Delta, Duration);
         return this;
     }
 
     // Multiplies the starting scale, so a factor of two doubles it.
     public Tween ScaleBy(FEntity Target, FVector3 Factor, float Duration)
     {
-        World.TweenScaleBy(Id, Target, Factor, Duration);
+        World.Tweens.ScaleBy(Id, Target, Factor, Duration);
         return this;
     }
 
     // A kick toward Amount that swings back and settles, rotation in degrees. Vibrato counts the swings.
     public Tween Punch(FEntity Target, ETweenTransformChannel Channel, FVector3 Amount, float Duration, int Vibrato = 10, float Elasticity = 1.0f)
     {
-        World.TweenPunch(Id, Target, Channel, Amount, Duration, Vibrato, Elasticity);
+        World.Tweens.Punch(Id, Target, Channel, Amount, Duration, Vibrato, Elasticity);
         return this;
     }
 
     // A decaying random wobble of up to Strength on each axis, rotation in degrees.
     public Tween Shake(FEntity Target, ETweenTransformChannel Channel, FVector3 Strength, float Duration, int Vibrato = 10)
     {
-        World.TweenShake(Id, Target, Channel, Strength, Duration, Vibrato);
+        World.Tweens.Shake(Id, Target, Channel, Strength, Duration, Vibrato);
         return this;
     }
 
     public Tween Value(float From, float To, float Duration, Action<float> OnValue)
     {
-        World.TweenValueTo(Id, From, To, Duration, ScriptCallback.OfFloat(OnValue));
+        World.Tweens.ValueTo(Id, From, To, Duration, ScriptCallback.OfFloat(OnValue));
         return this;
     }
 
     public Tween Value(FVector2 From, FVector2 To, float Duration, Action<FVector2> OnValue)
     {
-        World.TweenValueToVector2(Id, From, To, Duration, ScriptCallback.Bind(new ValueClosure<FVector2>(OnValue)));
+        World.Tweens.ValueToVector2(Id, From, To, Duration, ScriptCallback.Bind(new ValueClosure<FVector2>(OnValue)));
         return this;
     }
 
     public Tween Value(FVector3 From, FVector3 To, float Duration, Action<FVector3> OnValue)
     {
-        World.TweenValueToVector3(Id, From, To, Duration, ScriptCallback.Bind(new ValueClosure<FVector3>(OnValue)));
+        World.Tweens.ValueToVector3(Id, From, To, Duration, ScriptCallback.Bind(new ValueClosure<FVector3>(OnValue)));
         return this;
     }
 
     public Tween Value(FVector4 From, FVector4 To, float Duration, Action<FVector4> OnValue)
     {
-        World.TweenValueToVector4(Id, From, To, Duration, ScriptCallback.Bind(new ValueClosure<FVector4>(OnValue)));
+        World.Tweens.ValueToVector4(Id, From, To, Duration, ScriptCallback.Bind(new ValueClosure<FVector4>(OnValue)));
         return this;
     }
 
     // Slerps, so a wide turn follows the arc.
     public Tween Value(FQuat From, FQuat To, float Duration, Action<FQuat> OnValue)
     {
-        World.TweenValueToQuat(Id, From, To, Duration, ScriptCallback.Bind(new ValueClosure<FQuat>(OnValue)));
+        World.Tweens.ValueToQuat(Id, From, To, Duration, ScriptCallback.Bind(new ValueClosure<FQuat>(OnValue)));
         return this;
     }
 
     // Drives a reflected property of Target's T by a dotted path such as "Settings.Intensity", natively with no call per frame.
     public Tween Property<T>(FEntity Target, string Path, float To, float Duration) where T : struct, IComponent<T>
     {
-        World.TweenPropertyToFloat(Id, Target, T.NativeName, Path, To, Duration);
+        World.Tweens.PropertyToFloat(Id, Target, T.NativeName, Path, To, Duration);
         return this;
     }
 
     public Tween Property<T>(FEntity Target, string Path, FVector2 To, float Duration) where T : struct, IComponent<T>
     {
-        World.TweenPropertyToVector2(Id, Target, T.NativeName, Path, To, Duration);
+        World.Tweens.PropertyToVector2(Id, Target, T.NativeName, Path, To, Duration);
         return this;
     }
 
     public Tween Property<T>(FEntity Target, string Path, FVector3 To, float Duration) where T : struct, IComponent<T>
     {
-        World.TweenPropertyToVector3(Id, Target, T.NativeName, Path, To, Duration);
+        World.Tweens.PropertyToVector3(Id, Target, T.NativeName, Path, To, Duration);
         return this;
     }
 
     public Tween Property<T>(FEntity Target, string Path, FVector4 To, float Duration) where T : struct, IComponent<T>
     {
-        World.TweenPropertyToVector4(Id, Target, T.NativeName, Path, To, Duration);
+        World.Tweens.PropertyToVector4(Id, Target, T.NativeName, Path, To, Duration);
         return this;
     }
 
     public Tween Property<T>(FEntity Target, string Path, FQuat To, float Duration) where T : struct, IComponent<T>
     {
-        World.TweenPropertyToQuat(Id, Target, T.NativeName, Path, To, Duration);
+        World.Tweens.PropertyToQuat(Id, Target, T.NativeName, Path, To, Duration);
         return this;
     }
 
     // Dead time, for spacing steps apart.
     public Tween Interval(float Duration)
     {
-        World.TweenInterval(Id, Duration);
+        World.Tweens.Interval(Id, Duration);
         return this;
     }
 
     // Runs once when the sequence reaches this step.
     public Tween Call(Action OnCall)
     {
-        World.TweenCall(Id, ScriptCallback.Of(OnCall));
+        World.Tweens.Call(Id, ScriptCallback.Of(OnCall));
         return this;
     }
 
@@ -149,54 +149,54 @@ public readonly struct Tween : IEquatable<Tween>
 
     public Tween Trans(EEaseTransition Transition)
     {
-        World.TweenTrans(Id, Transition);
+        World.Tweens.Trans(Id, Transition);
         return this;
     }
 
     public Tween Ease(EEaseType Ease)
     {
-        World.TweenEase(Id, Ease);
+        World.Tweens.Ease(Id, Ease);
         return this;
     }
 
     // Shapes the step with the curve over its keyed time range, replacing Trans and Ease.
     public Tween EaseCurve(CCurveAsset Curve)
     {
-        World.TweenEaseCurve(Id, Curve);
+        World.Tweens.EaseCurve(Id, Curve);
         return this;
     }
 
     public Tween Delay(float Seconds)
     {
-        World.TweenDelay(Id, Seconds);
+        World.Tweens.Delay(Id, Seconds);
         return this;
     }
 
     // Runs the next tweener alongside the last one rather than after it.
     public Tween Parallel()
     {
-        World.TweenParallel(Id);
+        World.Tweens.Parallel(Id);
         return this;
     }
 
     // Zero or less loops forever.
     public Tween SetLoops(int Count, ETweenLoopMode Mode = ETweenLoopMode.Restart)
     {
-        World.SetTweenLoops(Id, Count);
-        World.SetTweenLoopMode(Id, Mode);
+        World.Tweens.SetLoops(Id, Count);
+        World.Tweens.SetLoopMode(Id, Mode);
         return this;
     }
 
     public Tween SetSpeedScale(float Scale)
     {
-        World.SetTweenSpeedScale(Id, Scale);
+        World.Tweens.SetSpeedScale(Id, Scale);
         return this;
     }
 
     // Runs on real time, through world pause and time dilation, for menus and other UI.
     public Tween SetIgnoreTimeScale(bool Ignore = true)
     {
-        World.SetTweenIgnoreTimeScale(Id, Ignore);
+        World.Tweens.SetIgnoreTimeScale(Id, Ignore);
         return this;
     }
 
@@ -204,37 +204,37 @@ public readonly struct Tween : IEquatable<Tween>
 
     public Tween OnFinished(Action Handler)
     {
-        World.OnTweenFinished(Id, ScriptCallback.Of(Handler));
+        World.Tweens.OnFinished(Id, ScriptCallback.Of(Handler));
         return this;
     }
 
     // Runs as each pass ends and another begins, with the passes completed so far.
     public Tween OnLoop(Action<int> Handler)
     {
-        World.OnTweenLoop(Id, ScriptCallback.OfInt(Handler));
+        World.Tweens.OnLoop(Id, ScriptCallback.OfInt(Handler));
         return this;
     }
 
     // Runs as each step ends, with that step's index in the order it was built.
     public Tween OnStep(Action<int> Handler)
     {
-        World.OnTweenStep(Id, ScriptCallback.OfInt(Handler));
+        World.Tweens.OnStep(Id, ScriptCallback.OfInt(Handler));
         return this;
     }
 
     //~ Control and state.
 
-    public void Pause() => World.SetTweenPaused(Id, true);
+    public void Pause() => World.Tweens.SetPaused(Id, true);
 
-    public void Resume() => World.SetTweenPaused(Id, false);
+    public void Resume() => World.Tweens.SetPaused(Id, false);
 
     // Stops where it is, leaving whatever it drove at its current value.
-    public void Kill() => World.KillTween(Id);
+    public void Kill() => World.Tweens.Kill(Id);
 
     // Jumps to the end of the current pass, running every step and OnFinished on the way.
-    public void Complete() => World.CompleteTween(Id);
+    public void Complete() => World.Tweens.Complete(Id);
 
-    public bool IsRunning => World != null && World.IsTweenRunning(Id);
+    public bool IsRunning => World != null && World.Tweens.IsRunning(Id);
 
     // Awaiting a tween resumes the frame it stops running, whether it finished or was killed, without taking its OnFinished.
     public System.Runtime.CompilerServices.TaskAwaiter GetAwaiter()
@@ -244,14 +244,14 @@ public readonly struct Tween : IEquatable<Tween>
     }
 
     // Seconds into the current pass.
-    public float Elapsed => World != null ? World.GetTweenElapsed(Id) : 0.0f;
+    public float Elapsed => World != null ? World.Tweens.GetElapsed(Id) : 0.0f;
 
     // The length of one pass.
-    public float Duration => World != null ? World.GetTweenDuration(Id) : 0.0f;
+    public float Duration => World != null ? World.Tweens.GetDuration(Id) : 0.0f;
 
-    public float Progress => World != null ? World.GetTweenProgress(Id) : 0.0f;
+    public float Progress => World != null ? World.Tweens.GetProgress(Id) : 0.0f;
 
-    public int CompletedLoops => World != null ? World.GetTweenCompletedLoops(Id) : 0;
+    public int CompletedLoops => World != null ? World.Tweens.GetCompletedLoops(Id) : 0;
 
     public bool Equals(Tween Other) => Id == Other.Id && ReferenceEquals(World, Other.World);
 
@@ -284,8 +284,8 @@ public readonly struct Tween : IEquatable<Tween>
     }
 }
 
-public partial class CWorld
+public partial class CTweenSubsystem
 {
     // Starts an empty tween. With an Owner, the tween dies with that entity, which is what gameplay usually wants.
-    public Tween CreateTween(FEntity? Owner = null) => new(this, CreateTweenId(Owner ?? FEntity.Null));
+    public Tween Create(FEntity? Owner = null) => new(GetWorld(), CreateId(Owner ?? FEntity.Null));
 }

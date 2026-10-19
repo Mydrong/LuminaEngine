@@ -251,6 +251,8 @@ void ComputeMain(uint3 GlobalID : SV_DispatchThreadID, uint3 GroupID : SV_GroupI
     const bool bShadowOnly = Cull.HasFlag(EInstanceFlags::ShadowOnly);
     const bool bFarCaster  = Cull.HasFlag(EInstanceFlags::CastFarShadow);
     const bool bFoliage    = Cull.HasFlag(EInstanceFlags::Foliage);
+    const uint CustomDepthStencil = Cull.CustomDepthStencil;
+    const bool bCustomDepth       = (CustomDepthStencil & CUSTOM_DEPTH_ENABLED_BIT) != 0u;
     const uint Layers      = Cull.bCustomLayers ? Pass().RetainedStatic.At(SlotIdx).RenderLayers : RENDER_LAYER_DEFAULT_MASK;
     const uint DrawID   = Cull.DrawID;
     const bool bInRange = DrawID < Pass().NumBatches;
@@ -268,7 +270,7 @@ void ComputeMain(uint3 GlobalID : SV_DispatchThreadID, uint3 GroupID : SV_GroupI
     // Needed before the compacted slot is claimed, because that slot indexes the range slab.
     for (uint v = 0; v < NumViews; ++v)
     {
-        if (IsInstanceVisibleToView(GetCullView(v), Center, Radius, bNoCull, bCaster, bShadowOnly, bFarCaster, bFoliage, Layers))
+        if (IsInstanceVisibleToView(GetCullView(v), Center, Radius, bNoCull, bCaster, bShadowOnly, bFarCaster, bFoliage, bCustomDepth, Layers))
         {
             bAnyView = true;
             break;
@@ -318,7 +320,7 @@ void ComputeMain(uint3 GlobalID : SV_DispatchThreadID, uint3 GroupID : SV_GroupI
         uint2 Range   = uint2(0u, 0u);
         uint  Emitted = 0u;
 
-        if (IsInstanceVisibleToView(View, Center, Radius, bNoCull, bCaster, bShadowOnly, bFarCaster, bFoliage, Layers))
+        if (IsInstanceVisibleToView(View, Center, Radius, bNoCull, bCaster, bShadowOnly, bFarCaster, bFoliage, bCustomDepth, Layers))
         {
             if (bSelectPerView)
             {
@@ -391,6 +393,7 @@ void ComputeMain(uint3 GlobalID : SV_DispatchThreadID, uint3 GroupID : SV_GroupI
     // Survives compaction, unlike OutSlot, and keys the two-phase visibility flags.
     Inst.RetainedSlot            = SlotIdx;
     Inst.RenderLayers            = Layers;
+    Inst.CustomDepthStencil      = CustomDepthStencil;
 
     Pass().OutInstances.Set(OutSlot, Inst);
 }

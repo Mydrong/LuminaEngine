@@ -98,15 +98,15 @@ public struct Trace
     public SRayResult Run()
     {
         return bSwept
-            ? World.ShapeCast(Shape, From, To, IgnoreEntity, Mask)
-            : World.Raycast(From, To, IgnoreEntity, Mask);
+            ? World.Physics.ShapeCast(Shape, From, To, IgnoreEntity, Mask)
+            : World.Physics.Raycast(From, To, IgnoreEntity, Mask);
     }
 
     /// Runs the query and returns every hit, near to far.
     public SRayResult[] RunAll()
     {
         return bSwept
-            ? World.ShapeCastAll(Shape, From, To, IgnoreEntity, Mask)
-            : World.RaycastAll(From, To, IgnoreEntity, Mask);
+            ? World.Physics.ShapeCastAll(Shape, From, To, IgnoreEntity, Mask)
+            : World.Physics.RaycastAll(From, To, IgnoreEntity, Mask);
     }
 }

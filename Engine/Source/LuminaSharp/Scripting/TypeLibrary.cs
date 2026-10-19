@@ -528,7 +528,7 @@ internal sealed class TypeLibrary
             Members.Add(new ScriptProperty
             {
                 Name = Member.Name,
-                DeclaringType = Member.DeclaringType,
+                DeclaringType = StorageOwnerOf(Member, Kind, bNativeObject),
                 Type = Resolved,
                 Meta = Meta,
                 Hidden = !Rule.bVisible,
@@ -542,6 +542,35 @@ internal sealed class TypeLibrary
         }
 
         return Members;
+    }
+
+    // An override reads and writes the storage of the stored property it overrides, so it counts as declared where that storage is.
+    private static Type? StorageOwnerOf(MemberInfo Member, EScriptMemberKind Kind, bool bNativeObject)
+    {
+        Type? Owner = Member.DeclaringType;
+        if (Member is not PropertyInfo Property || Property.GetMethod is not { } Getter || Getter.GetBaseDefinition().DeclaringType == Owner)
+        {
+            return Owner;
+        }
+
+        const BindingFlags Declared = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly;
+        for (Type? Base = Owner?.BaseType; Base != null; Base = Base.BaseType)
+        {
+            // A class between the two can leave the property alone, so only a redeclaring one is considered.
+            if (Base.GetProperty(Property.Name, Declared) is not { GetMethod: { IsVirtual: true } BaseGetter } Overridden)
+            {
+                continue;
+            }
+            if (!BaseGetter.IsAbstract && RuleFor(Overridden, Kind, bNativeObject).bStored)
+            {
+                Owner = Base;
+            }
+            if (BaseGetter.GetBaseDefinition().DeclaringType == Base)
+            {
+                break;
+            }
+        }
+        return Owner;
     }
 
     // A reference names the component it binds, the T of the TComponentRef<T> it is declared as.

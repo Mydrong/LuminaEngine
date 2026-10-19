@@ -1,5 +1,7 @@
 #pragma once
 
+#include <bit>
+
 #include "Containers/HashTable.h"
 #include "Containers/Function.h"
 #include "Memory/SmartPtr.h"
@@ -181,7 +183,9 @@ namespace Lumina
     
         virtual FArchive& operator<<(int16& Value)
         {
-            ByteOrderSerialize(reinterpret_cast<uint16&>(Value));
+            uint16 Bits = std::bit_cast<uint16>(Value);
+            ByteOrderSerialize(Bits);
+            Value = std::bit_cast<int16>(Bits);
             return *this;
         }
     
@@ -193,7 +197,9 @@ namespace Lumina
     
         virtual FArchive& operator<<(int32& Value)
         {
-            ByteOrderSerialize(reinterpret_cast<uint32&>(Value));
+            uint32 Bits = std::bit_cast<uint32>(Value);
+            ByteOrderSerialize(Bits);
+            Value = std::bit_cast<int32>(Bits);
             return *this;
         }
 
@@ -229,7 +235,9 @@ namespace Lumina
 
         virtual FArchive& operator<<(int64& Value)
         {
-            ByteOrderSerialize(reinterpret_cast<uint64&>(Value));
+            uint64 Bits = std::bit_cast<uint64>(Value);
+            ByteOrderSerialize(Bits);
+            Value = std::bit_cast<int64>(Bits);
             return *this;
         }
 
@@ -458,7 +466,10 @@ namespace Lumina
         requires (std::is_enum_v<EnumType>)
         {
             using Underlying = std::underlying_type_t<EnumType>;
-            return *this << reinterpret_cast<Underlying&>(Value);
+            Underlying Bits = std::bit_cast<Underlying>(Value);
+            FArchive& Archive = *this << Bits;
+            Value = std::bit_cast<EnumType>(Bits);
+            return Archive;
         }
 
     private:

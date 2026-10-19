@@ -570,11 +570,7 @@ namespace Lumina
             }
         }
 
-        // Re-applied every frame, since idle reclaim can rebuild the render scene and its settings.
-        if (IRenderScene* Renderer = World->GetRenderer())
-        {
-            Renderer->GetSceneRenderSettings().bDrawBillboards = false;
-        }
+        World->GetRenderSettings().bDrawBillboards = false;
 
         // Drive the selected-camera preview (shared with the world editor) before extract.
         UpdateCameraPreview();

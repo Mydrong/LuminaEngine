@@ -158,7 +158,7 @@ namespace Lumina
 
         if (World->GetRenderer() != nullptr)
         {
-            World->GetRenderer()->GetSceneRenderSettings().bDrawBillboards = false;
+            World->GetRenderSettings().bDrawBillboards = false;
         }
 
         SyncSampleTable();

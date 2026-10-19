@@ -585,7 +585,7 @@ TEST_F(PhysicsSceneLifecycle, ResizingACharacterAppliesInPlace)
     ASSERT_TRUE(Physics.Character);
     const FPhysicsCharacterHandle* Before = Physics.Character.Handle.get();
 
-    World->SetCapsuleSize(Character, 0.5f, 0.8f);
+    World->GetPhysics()->SetCapsuleSize(Character, 0.5f, 0.8f);
     Scene->Update(Dt);
 
     EXPECT_EQ(Physics.Character.Handle.get(), Before) << "the same character carries on, only resized";
@@ -610,7 +610,7 @@ TEST_F(PhysicsSceneLifecycle, ARebuiltBodyKeepsItsVelocity)
     Scene->SetLinearVelocity(Ball, FVector3(3.0f, 0.0f, 0.0f));
     Scene->Update(Dt);
 
-    World->SetSphereRadius(Ball, 1.0f);
+    World->GetPhysics()->SetSphereRadius(Ball, 1.0f);
     Scene->Update(Dt);
 
     EXPECT_NEAR(Scene->GetLinearVelocity(Ball).x, 3.0f, 0.05f);

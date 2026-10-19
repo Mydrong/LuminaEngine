@@ -24,7 +24,7 @@ namespace Lumina::Object::Internal
         FCObjectEntry** Objects = nullptr;
     
         int32 MaxElements = 0;
-        int32 NumElements = 0;
+        std::atomic<int32> NumElements = 0;
         int32 MaxChunks = 0;
         int32 NumChunks = 0;
     
@@ -53,19 +53,23 @@ namespace Lumina::Object::Internal
         FCObjectEntry* GetItem(int32 Index);
     
         FORCEINLINE int32 GetMaxElements() const { return MaxElements; }
-        FORCEINLINE int32 GetNumElements() const { return NumElements; }
+        FORCEINLINE int32 GetNumElements() const { return NumElements.load(std::memory_order_acquire); }
         FORCEINLINE int32 GetNumChunks() const { return NumChunks; }
-    
-        FORCEINLINE void IncrementElementCount()
-        {
-            ++NumElements;
-        }
 
-        FORCEINLINE void DecrementElementCount()
+        // An index never handed out before, or kIndexNone once every slot has been.
+        int32 ClaimFreshIndex()
         {
-            --NumElements;
+            int32 Index = NumElements.load(std::memory_order_relaxed);
+            do
+            {
+                if (Index >= MaxElements)
+                {
+                    return Constants::kIndexNone;
+                }
+            }
+            while (!NumElements.compare_exchange_weak(Index, Index + 1, std::memory_order_acq_rel, std::memory_order_relaxed));
+            return Index;
         }
-    
     };
         
     class FCObjectArray
@@ -75,11 +79,20 @@ namespace Lumina::Object::Internal
         // Delays slot reuse so a stale reference meets an empty slot, not an address-identical stranger.
         static constexpr int32      QuarantineCapacity = 1024;
 
+        // Freed slots go back to the freeing thread's shard, so threads creating and destroying objects do not share a lock.
+        static constexpr int32      SlotShardCount = 16;
+
+        struct alignas(64) FSlotShard
+        {
+            FMutex          Mutex;
+            TVector<int32>  FreeIndices;
+            TVector<int32>  QuarantinedIndices;
+            int32           QuarantineCursor = 0;
+        };
+
         FRecursiveMutex             Mutex;
         FChunkedFixedCObjectArray   ChunkedArray;
-        TVector<int32>              FreeIndices;
-        TVector<int32>              QuarantinedIndices;
-        int32                       QuarantineCursor = 0;
+        mutable FSlotShard          SlotShards[SlotShardCount];
 
         THashMap<FObjectHandle, FObjectHandle> ReinstanceRedirects;
         bool                        bInitialized = false;
@@ -111,6 +124,11 @@ namespace Lumina::Object::Internal
     private:
 
         CObjectBase* ResolveRedirect(const FObjectHandle& Handle) const;
+
+        FSlotShard& SlotShardForThisThread() const;
+
+        // Only once no fresh index is left, since capacity beats the quarantine window.
+        int32 ReclaimQuarantinedIndex();
 
     public:
 

@@ -4,10 +4,8 @@
 #if WITH_EDITOR
 #include "LuminaEditor.h"
 #endif
-#include <exception>
 #include "Config/Config.h"
 #include "Core/CommandLine/CommandLine.h"
-#include "Core/Delegates/CoreDelegates.h"
 #include "Core/Engine/Engine.h"
 #include "Memory/Memory.h"
 #include "Core/Diagnostics/BenchmarkRun.h"
@@ -28,6 +26,7 @@ int LuminaMain(int ArgC, char** ArgV)  // NOLINT(misc-use-internal-linkage)
 {
     // Reversed, the uploader would swallow the crash before anything was written to disk.
     CrashReporting::Initialize();
+    CrashHandler::SetAllowModalDialog(false);
     CrashHandler::Install();
 
     HangWatchdog::Start();
@@ -70,35 +69,28 @@ int LuminaMain(int ArgC, char** ArgV)  // NOLINT(misc-use-internal-linkage)
     #else
     // Bots are client worlds nobody watches, so a bot process draws and plays nothing either.
     GIsHeadless = USING(WITH_SERVER) || Parsed.Has("server") || Parsed.Has("bots") || Parsed.Has("netbots");
-    CrashHandler::SetAllowModalDialog(!GIsHeadless);
 
     FEngine Engine{};
     GEngine = &Engine;
+    if (!Parsed.Has("project"))
+    {
+        Engine.EnableCookedRuntimeStartup();
+    }
 
     // Named so a standalone run stops rotating the log the editor that launched it is still writing.
     if (TOptional<FFixedString> LogName = Parsed.Get("logfile"))
     {
         Logging::SetLogFileName(LogName.value());
+        CrashReporting::ClearAttachments();
+        CrashReporting::AddAttachment(Logging::GetLogFilePath());
     }
-
-    // A project on the command line is a standalone run straight out of the project tree, which
-    // FEngine::LoadProject mounts and starts itself. Only a packaged game has paks to mount.
-    if (!Parsed.Has("project"))
-    {
-        (void)FCoreDelegates::OnPreEngineInit.AddLambda([]
-        {
-            GEngine->MountCookedRuntime();
-        });
-        (void)FCoreDelegates::OnPostEngineInit.AddLambda([]
-        {
-            GEngine->StartCookedGame();
-        });
-    }
-    else
+    if (Parsed.Has("project"))
     {
         LOG_DISPLAY("Standalone: running the project tree uncooked, so no pak is mounted.");
     }
     #endif
+
+    CrashHandler::SetAllowModalDialog(!GIsHeadless);
 
     // A second editor on a project already open hands focus to the first and leaves before opening a window.
     #if WITH_EDITOR

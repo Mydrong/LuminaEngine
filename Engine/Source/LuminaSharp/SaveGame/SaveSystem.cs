@@ -28,13 +28,13 @@ public static class SaveSystem
     // Captures the running world into Game and writes it at the end of the frame, safe from any system.
     public static void RequestSave(CSaveGame Game, string Slot, int UserIndex = 0)
     {
-        Engine.World.RequestSaveGame(Game, Slot, UserIndex);
+        Engine.World.SaveGames.RequestSaveGame(Game, Slot, UserIndex);
     }
 
     // Loads the slot and restores the running world at the end of the frame. Systems hear it in OnWorldRestored.
     public static void RequestLoad(string Slot, int UserIndex = 0)
     {
-        Engine.World.RequestLoadGame(Slot, UserIndex);
+        Engine.World.SaveGames.RequestLoadGame(Slot, UserIndex);
     }
 
     public static T LoadOrCreate<T>(string Slot, int UserIndex = 0) where T : CSaveGame

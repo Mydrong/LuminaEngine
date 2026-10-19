@@ -233,7 +233,7 @@ namespace Lumina
 		uint32 DrivenListenerMask = 0;
 
 		CWorld* World = Context.GetWorld();
-		const ECS::FEntity ActiveCamera = World != nullptr ? World->GetActiveCameraEntity() : ECS::NullEntity;
+		const ECS::FEntity ActiveCamera = World != nullptr ? World->GetCamera()->GetActiveCameraEntity() : ECS::NullEntity;
 		const bool bCameraHasTransform = ActiveCamera != ECS::NullEntity && !ActiveCamera.IsTombstone() && XFormStorage.Contains(ActiveCamera);
 
 		{

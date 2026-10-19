@@ -23,6 +23,42 @@ namespace Lumina::WorldSubsystems
             }
             return false;
         }
+
+        // Null when the class is abstract, the world's realm excludes it, or it declines the world.
+        CWorldSubsystem* Instantiate(CWorld& World, CClass* Class)
+        {
+            if (Class->IsAbstract() || !NetRealm::Allows(Class, &World))
+            {
+                return nullptr;
+            }
+
+            CWorldSubsystem* Defaults = Class->GetDefaultObject<CWorldSubsystem>();
+            if (Defaults == nullptr || !Defaults->ShouldCreate())
+            {
+                return nullptr;
+            }
+
+            CWorldSubsystem* Subsystem = NewObject<CWorldSubsystem>(Class);
+            if (Subsystem == nullptr)
+            {
+                LOG_WARN("World subsystem '{}' could not be created.", Class->GetName().ToString().c_str());
+                return nullptr;
+            }
+            Subsystem->SetOwningWorld(&World);
+            return Subsystem;
+        }
+    }
+
+    CWorldSubsystem* Create(CWorld& World, TVector<TStrongObjectPtr<CWorldSubsystem>>& Out, CClass* Class)
+    {
+        CWorldSubsystem* Subsystem = Class != nullptr && Class->IsChildOf(CWorldSubsystem::StaticClass()) ? Instantiate(World, Class) : nullptr;
+        if (Subsystem != nullptr)
+        {
+            Out.push_back(Subsystem);
+            Subsystem->OnInitialize();
+            Subsystem->OnWorldReady();
+        }
+        return Subsystem;
     }
 
     int32 CreateMissing(CWorld& World, TVector<TStrongObjectPtr<CWorldSubsystem>>& Out)
@@ -49,26 +85,10 @@ namespace Lumina::WorldSubsystems
 
         for (CClass* Class : Candidates)
         {
-            if (!NetRealm::Allows(Class, &World))
+            if (CWorldSubsystem* Subsystem = Instantiate(World, Class))
             {
-                continue;
+                Out.push_back(Subsystem);
             }
-
-            CWorldSubsystem* Defaults = Class->GetDefaultObject<CWorldSubsystem>();
-            if (Defaults == nullptr || !Defaults->ShouldCreate())
-            {
-                continue;
-            }
-
-            CWorldSubsystem* Subsystem = NewObject<CWorldSubsystem>(Class);
-            if (Subsystem == nullptr)
-            {
-                LOG_WARN("World subsystem '{}' could not be created.", Class->GetName().ToString().c_str());
-                continue;
-            }
-
-            Subsystem->SetOwningWorld(&World);
-            Out.push_back(Subsystem);
         }
 
         // Separate passes, so a subsystem's OnInitialize cannot observe a half built list.

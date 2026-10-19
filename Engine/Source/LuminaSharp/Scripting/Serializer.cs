@@ -48,11 +48,16 @@ internal static class Serializer
     }
 
     // MintedParent's members already live in its own minted class, so only what derives below it is written.
-    public static byte[] WriteSchema(TypeDescription Description, Type? MintedParent = null)
+    internal static List<ScriptProperty> PropertiesBelow(TypeDescription Description, Type? MintedParent)
     {
-        List<ScriptProperty> Properties = MintedParent == null
+        return MintedParent == null
             ? new List<ScriptProperty>(Description.Properties)
             : Description.Properties.Where(Property => Property.DeclaringType == null || !Property.DeclaringType.IsAssignableFrom(MintedParent)).ToList();
+    }
+
+    public static byte[] WriteSchema(TypeDescription Description, Type? MintedParent = null)
+    {
+        List<ScriptProperty> Properties = PropertiesBelow(Description, MintedParent);
 
         using var Stream = new MemoryStream();
         using var Writer = new BinaryWriter(Stream, Encoding.UTF8, leaveOpen: true);

@@ -1035,7 +1035,7 @@ namespace Lumina
 
         if (World->GetRenderer())
         {
-            World->GetRenderer()->GetSceneRenderSettings().bDrawBillboards = false;
+            World->GetRenderSettings().bDrawBillboards = false;
         }
 
         SSkeletalMeshComponent& MeshComponent = World->GetComponent<SSkeletalMeshComponent>(MeshEntity);

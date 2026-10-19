@@ -358,6 +358,8 @@ namespace Lumina
                 TVector<uint32>                  PointShadowCullViewBases;
                 TVector<uint32>                  SpotShadowCullViewBases;
                 TVector<FCaptureViewData>        CaptureViews;
+                // The camera again, holding only custom depth instances, and kIndexNoneU32 while none exist.
+                uint32                           CustomDepthCullView = Constants::kIndexNoneU32;
             } Views;
 
             struct FLighting
@@ -596,6 +598,9 @@ namespace Lumina
             TemporalHistoryA,
             TemporalHistoryB,
             UpscaledHDR,
+            CustomDepth,
+            CustomDepthVis,
+            CustomStencil,
 
             #if USING(WITH_EDITOR)
             PointLightIcon,
@@ -760,7 +765,7 @@ namespace Lumina
 
         FRenderContext MakeRenderContext(RHI::FCmdListH CL, ERenderStage Stage);
         void RunRenderCallbacks(RHI::FCmdListH CL, ERenderStage Stage);
-        void CustomDepthPass(RHI::FCmdListH CL);
+        void CallbackDepthPass(RHI::FCmdListH CL);
         void RunShadowRenderCallbacks(RHI::FCmdListH CL, EShadowViewType Type, uint32 Index, const FMatrix4& ViewProjection,
                                       const RHI::FRect& Tile, EFormat DepthFormat);
         bool HasRenderCallbacks(ERenderStage Stage) const;
@@ -833,6 +838,12 @@ namespace Lumina
         void DecalPass(RHI::FCmdListH CL);
         void VisBufferPass(RHI::FCmdListH CL, uint32 ViewIndex, bool bClear,
                            ECullPhase::Type Phase = ECullPhase::Early);
+
+        // Custom depth instances drawn again from the camera with nothing occluding them, then their stencil values resolved.
+        void CustomDepthStencilPass(RHI::FCmdListH CL);
+        void DrawVisBufferBatches(RHI::FCmdListH CL, uint32 ViewIndex, EMeshletSlice Slice, const FUIntVector2& Extent, EFormat VisFormat);
+        static FShaderH GetVisBufferPixelShader();
+        const char* FindMissingMeshletDrawBuffer() const;
         void VisBufferClassifyPass(RHI::FCmdListH CL);
         void MaterialGBufferPass(RHI::FCmdListH CL);
         void DeferredLightingPass(RHI::FCmdListH CL);
@@ -1090,6 +1101,7 @@ namespace Lumina
         void ResolveLightFunctions();
         
         void BuildCullViews(const FViewVolume& ViewVolume);
+        bool HasCustomDepthPrimitives() const { return ScenePrimitives.GetCustomDepthPrimitiveCount() > 0u; }
         
         uint32 PrepareBatchedLines(FLineBatcherComponent& Batcher);
         void   BatchLineChunks(const Task::FParallelRange& Range);
@@ -1344,6 +1356,7 @@ namespace Lumina
 
             uint32             CascadeViewBase  = Constants::kIndexNoneU32;
             uint32             NumCascadeViews  = 0;
+            uint32             CustomDepthCullView = Constants::kIndexNoneU32;
             uint32             NumNearCascadeViews = 0;
             bool               bValid           = false;
         };

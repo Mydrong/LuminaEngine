@@ -157,7 +157,7 @@ namespace Lumina
         // Re-applied every frame, since idle reclaim can rebuild the render scene and its settings.
         if (World.IsValid() && World->GetRenderer() != nullptr)
         {
-            World->GetRenderer()->GetSceneRenderSettings().bDrawBillboards = false;
+            World->GetRenderSettings().bDrawBillboards = false;
         }
     }
 

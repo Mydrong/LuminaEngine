@@ -56,6 +56,9 @@ namespace Lumina
         // Creates any subsystem class not already instanced, then initializes and readies only the new ones.
         RUNTIME_API int32 CreateMissing(CWorld& World, TVector<TStrongObjectPtr<CWorldSubsystem>>& Out);
 
+        // Creates, initializes and readies one subsystem of Class, or null when it declines the world.
+        RUNTIME_API CWorldSubsystem* Create(CWorld& World, TVector<TStrongObjectPtr<CWorldSubsystem>>& Out, CClass* Class);
+
         // Tears down the subsystems backed by a script class, so a hot reload can rebuild them.
         RUNTIME_API void DropScripted(TVector<TStrongObjectPtr<CWorldSubsystem>>& Subsystems);
 

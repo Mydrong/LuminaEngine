@@ -295,7 +295,7 @@ namespace Lumina::MCP
                     ECS::FEntity Root = ECS::NullEntity;
                     SessionOps::RunCreationTransacted("Spawn Prefab (agent)", [&]()
                     {
-                        Root = World->SpawnPrefabAt(Ref, Transform, Parent);
+                        Root = World->GetSpawner()->SpawnPrefabAt(Ref, Transform, Parent);
                         if (Root != ECS::NullEntity)
                         {
                             SessionOps::AdoptSpawnedSubtree(Root);

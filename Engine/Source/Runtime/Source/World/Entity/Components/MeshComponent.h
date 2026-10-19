@@ -89,6 +89,14 @@ namespace Lumina
         PROPERTY(Editable, Category = "Rendering")
         SRenderLayerMask RenderLayers;
 
+        // Also drawn into the custom depth and stencil buffers, which post process materials read for outlines and x-ray effects.
+        PROPERTY(Editable, Category = "Rendering|Custom Depth")
+        bool bRenderCustomDepth = false;
+
+        // Written into the custom stencil buffer wherever this mesh is the nearest custom depth surface.
+        PROPERTY(Editable, Category = "Rendering|Custom Depth", EditCondition = "bRenderCustomDepth")
+        uint8 CustomDepthStencilValue = 0;
+
         // Compared against the live mesh field so a direct assignment self-heals after one frame.
         const void*     CachedMeshKey = nullptr;
 

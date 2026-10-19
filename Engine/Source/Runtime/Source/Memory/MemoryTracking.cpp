@@ -31,6 +31,7 @@ namespace Lumina::Memory
             TAtomic<uint64> PeakBytes;
             TAtomic<uint64> TotalAllocs;
             TAtomic<uint64> TotalFrees;
+            TAtomic<FCountedCategoryReader> CountedReader;
         };
 
         constexpr uint32 kMaxCategories = 256;
@@ -396,6 +397,35 @@ namespace Lumina::Memory
         }
     }
 
+    void RegisterCountedCategory(const char* Name, FCountedCategoryReader Reader)
+    {
+        const uint32 Id = RegisterCategory(Name);
+        if (Id != 0)
+        {
+            gCategories[Id].CountedReader.store(Reader, Atomic::MemoryOrderRelease);
+        }
+    }
+
+    namespace
+    {
+        // Never reset with the ledger, since the owner's counts are absolute rather than relative to a baseline.
+        FCountedCategoryStats SumCountedCategories()
+        {
+            FCountedCategoryStats Sum;
+            const uint32 Count = gCategoryCount.load(Atomic::MemoryOrderAcquire);
+            for (uint32 i = 0; i < Count; ++i)
+            {
+                if (const FCountedCategoryReader Reader = gCategories[i].CountedReader.load(Atomic::MemoryOrderAcquire))
+                {
+                    const FCountedCategoryStats Stats = Reader();
+                    Sum.LiveBytes += Stats.LiveBytes;
+                    Sum.LiveCount += Stats.LiveCount;
+                }
+            }
+            return Sum;
+        }
+    }
+
     uint32 GetCategoryStats(FMemoryCategoryStats* Out, uint32 MaxOut)
     {
         {
@@ -412,12 +442,25 @@ namespace Lumina::Memory
             Out[i].PeakBytes   = gCategories[i].PeakBytes.load(Atomic::MemoryOrderRelaxed);
             Out[i].TotalAllocs = gCategories[i].TotalAllocs.load(Atomic::MemoryOrderRelaxed);
             Out[i].TotalFrees  = gCategories[i].TotalFrees.load(Atomic::MemoryOrderRelaxed);
+
+            if (const FCountedCategoryReader Reader = gCategories[i].CountedReader.load(Atomic::MemoryOrderAcquire))
+            {
+                const FCountedCategoryStats Counted = Reader();
+                Out[i].LiveBytes   += Counted.LiveBytes;
+                Out[i].LiveCount   += Counted.LiveCount;
+                Out[i].TotalAllocs += Counted.TotalAllocs;
+                Out[i].TotalFrees  += Counted.TotalFrees;
+
+                // Only sampled here, since the owner keeps no high-water mark of its own.
+                UpdatePeak(gCategories[i].PeakBytes, Out[i].LiveBytes);
+                Out[i].PeakBytes = gCategories[i].PeakBytes.load(Atomic::MemoryOrderRelaxed);
+            }
         }
         return Count;
     }
 
-    uint64 GetTrackedLiveBytes()      { return gGlobalLiveBytes.load(Atomic::MemoryOrderRelaxed); }
-    uint64 GetTrackedLiveCount()      { return gGlobalLiveCount.load(Atomic::MemoryOrderRelaxed); }
+    uint64 GetTrackedLiveBytes()      { return gGlobalLiveBytes.load(Atomic::MemoryOrderRelaxed) + SumCountedCategories().LiveBytes; }
+    uint64 GetTrackedLiveCount()      { return gGlobalLiveCount.load(Atomic::MemoryOrderRelaxed) + SumCountedCategories().LiveCount; }
     uint64 GetTrackingOverflowCount() { return gOverflowCount.load(Atomic::MemoryOrderRelaxed); }
 
     void Hooks::PushCategory(uint32 CategoryId)

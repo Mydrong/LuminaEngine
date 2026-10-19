@@ -401,8 +401,6 @@ namespace Lumina
         bool                                    bGameViewMode = false;
         bool                                    bSavedWorldGridEnabled = true;
         bool                                    bSavedShowComponentVisualizers = true;
-        bool                                    bSavedDrawBillboards = true;
-        bool                                    bSavedDrawAABB = true;
 
         FDelegateHandle                         WorldTraveledHandle;
         FDelegateHandle                         GameQuitHandle;

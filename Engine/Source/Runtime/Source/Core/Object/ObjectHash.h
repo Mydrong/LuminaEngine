@@ -1,6 +1,6 @@
 #pragma once
-#include "Containers/HashTable.h"
 #include "Containers/Name.h"
+#include "Containers/Vector.h"
 #include "Core/Singleton/Singleton.h"
 #include "Core/Threading/Thread.h"
 #include "GUID/GUID.h"
@@ -15,12 +15,53 @@ namespace Lumina
 
 namespace Lumina
 {
-    using FObjectHashBucket = TFixedHashSet<CObjectBase*, 4>;
+    // Open-addressed multiset of objects under a hash of a key they carry, so the key is read back from the object instead of stored.
+    class FObjectIndexTable
+    {
+    public:
 
-    template<typename TKey>
-    using TObjectHashMap = TFixedHashMap<TKey, FObjectHashBucket, 12>;
-    
-    using FObjectGUIDMap = TFixedHashMap<FGuid, CObjectBase*, 12>; 
+        struct FSlot
+        {
+            CObjectBase* Object = nullptr;
+            uint64       Hash   = 0;
+        };
+
+        void Insert(CObjectBase* Object, uint64 Hash);
+
+        // False when the object was not in the table under that hash.
+        bool Remove(const CObjectBase* Object, uint64 Hash);
+
+        // Visits every object stored under Hash until Visit returns true, and returns that object.
+        template<typename TVisit>
+        CObjectBase* FindFirst(uint64 Hash, TVisit&& Visit) const
+        {
+            if (Slots.empty())
+            {
+                return nullptr;
+            }
+
+            const uint64 Mask = Slots.size() - 1;
+            for (uint64 Index = Hash & Mask; Slots[Index].Object != nullptr; Index = (Index + 1) & Mask)
+            {
+                if (Slots[Index].Hash == Hash && Visit(Slots[Index].Object))
+                {
+                    return Slots[Index].Object;
+                }
+            }
+            return nullptr;
+        }
+
+        void Clear();
+
+        size_t GetAllocatedBytes() const { return Slots.capacity() * sizeof(FSlot); }
+
+    private:
+
+        void Grow();
+
+        TVector<FSlot> Slots;
+        uint32         Count = 0;
+    };
 
     class FObjectHashTables : public TSingleton<FObjectHashTables>
     {
@@ -42,25 +83,19 @@ namespace Lumina
         static constexpr uint32 ShardBits = 6;
         static constexpr uint32 ShardCount = 1u << ShardBits;
 
-        struct alignas(64) FGuidShard
+        struct alignas(64) FShard
         {
             mutable FSharedMutex Mutex;
-            FObjectGUIDMap       Objects;
+            FObjectIndexTable    Objects;
         };
 
-        struct alignas(64) FNameShard
-        {
-            mutable FSharedMutex   Mutex;
-            TObjectHashMap<FName>  Objects;
-        };
+        // The shard comes from the top bits and the slot from the bottom, so the two never correlate.
+        static uint32 ShardOf(uint64 Hash) noexcept { return static_cast<uint32>(Hash >> (64 - ShardBits)); }
 
-        template<typename TKey>
-        static uint32 ShardOf(const TKey& Key) noexcept
-        {
-            return static_cast<uint32>((GetTypeHash(Key) * 0x9E3779B97F4A7C15ull) >> (64 - ShardBits));
-        }
+        static uint64 HashOf(const FGuid& GUID) noexcept { return Containers::MixHash64(GetTypeHash(GUID)); }
+        static uint64 HashOf(const FName& Name) noexcept { return GetTypeHash(Name); }
 
-        FGuidShard GuidShards[ShardCount];
-        FNameShard NameShards[ShardCount];
+        FShard GuidShards[ShardCount];
+        FShard NameShards[ShardCount];
     };
 }

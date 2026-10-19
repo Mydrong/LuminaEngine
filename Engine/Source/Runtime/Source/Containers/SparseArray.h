@@ -2,6 +2,7 @@
 
 #include <stdexcept>
 #include "Vector.h"
+#include "Optional.h"
 #include "Containers/Algorithm.h"
 #include "Memory/Construct.h"
 
@@ -20,53 +21,9 @@ namespace Lumina
     
         TSparseArray() = default;
         
-        TSparseArray(const TSparseArray& other) 
-        {
-            Data.reserve(other.Data.size());
-            for (Index i = 0; i < other.Data.size(); ++i)
-            {
-                if (other.Occupied[i])
-                {
-                    Index newIdx = Data.size();
-                    Data.emplace_back_uninit();
-                    Memory::ConstructAt(reinterpret_cast<T*>(&Data[newIdx]), *reinterpret_cast<const T*>(&other.Data[i]));
-                    Occupied.push_back(true);
-                    
-                    if (i != newIdx)
-                    {
-                        while (Data.size() <= i)
-                        {
-                            Data.emplace_back_uninit();
-                            Occupied.push_back(false);
-                            if (Data.size() - 1 != i)
-                            {
-                                FreeList.push_back(Data.size() - 1);
-                            }
-                        }
-                        if (!Occupied[i])
-                        {
-                            FreeList.erase(Algo::Remove(FreeList, i), FreeList.end());
-                            Memory::ConstructAt(reinterpret_cast<T*>(&Data[i]), *reinterpret_cast<const T*>(&other.Data[i]));
-                            Occupied[i] = true;
-                        }
-                    }
-                }
-            }
-            for (Index idx : other.FreeList) 
-            {
-                if (idx < Data.size() && !Occupied[idx]) 
-                {
-                    FreeList.push_back(idx);
-                }
-            }
-        }
-        
-        TSparseArray(TSparseArray&& other) noexcept
-            : Data(std::move(other.Data))
-            , Occupied(std::move(other.Occupied))
-            , FreeList(std::move(other.FreeList))
-        {}
-        
+        TSparseArray(const TSparseArray& other) = default;
+        TSparseArray(TSparseArray&& other) noexcept = default;
+
         TSparseArray& operator=(const TSparseArray& other)
         {
             if (this != &other)
@@ -83,7 +40,6 @@ namespace Lumina
             {
                 Clear();
                 Data = std::move(other.Data);
-                Occupied = std::move(other.Occupied);
                 FreeList = std::move(other.FreeList);
             }
             return *this;
@@ -101,16 +57,13 @@ namespace Lumina
             if (!FreeList.empty())
             {
                 idx = FreeList.back();
+                Data[idx].emplace(std::forward<Args>(args)...);
                 FreeList.pop_back();
-                Memory::ConstructAt(reinterpret_cast<T*>(&Data[idx]), std::forward<Args>(args)...);
-                Occupied[idx] = true;
             }
             else
             {
                 idx = Data.size();
-                Data.emplace_back();
-                Occupied.push_back(true);
-                Memory::ConstructAt(reinterpret_cast<T*>(&Data[idx]), std::forward<Args>(args)...);
+                Data.emplace_back(Containers::InPlace, std::forward<Args>(args)...);
             }
             return idx;
         }
@@ -127,78 +80,68 @@ namespace Lumina
     
         bool Erase(Index idx)
         {
-            if (idx >= Data.size() || !Occupied[idx])
+            if (idx >= Data.size() || !Data[idx].has_value())
             {
                 return false;
             }
             
-            reinterpret_cast<T*>(&Data[idx])->~T();
-            Occupied[idx] = false;
             FreeList.push_back(idx);
+            Data[idx].reset();
             return true;
         }
     
         T* Get(Index idx) noexcept
         {
-            return (idx < Data.size() && Occupied[idx]) ? reinterpret_cast<T*>(&Data[idx]) : nullptr;
+            return (idx < Data.size() && Data[idx].has_value()) ? Data[idx].operator->() : nullptr;
         }
     
         const T* Get(Index idx) const noexcept
         {
-            return (idx < Data.size() && Occupied[idx]) ? reinterpret_cast<const T*>(&Data[idx]) : nullptr;
+            return (idx < Data.size() && Data[idx].has_value()) ? Data[idx].operator->() : nullptr;
         }
     
         T& At(Index idx)
         {
-            if (idx >= Data.size() || !Occupied[idx])
+            if (idx >= Data.size() || !Data[idx].has_value())
             {
                 throw std::out_of_range("TSparseArray::At: invalid index");
             }
-            return *reinterpret_cast<T*>(&Data[idx]);
+            return *Data[idx].operator->();
         }
     
         const T& At(Index idx) const
         {
-            if (idx >= Data.size() || !Occupied[idx])
+            if (idx >= Data.size() || !Data[idx].has_value())
             {
                 throw std::out_of_range("TSparseArray::At: invalid index");
             }
-            return *reinterpret_cast<const T*>(&Data[idx]);
+            return *Data[idx].operator->();
         }
     
         T& operator[](Index idx) noexcept
         {
-            return *reinterpret_cast<T*>(&Data[idx]);
+            return *Data[idx].operator->();
         }
     
         const T& operator[](Index idx) const noexcept
         {
-            return *reinterpret_cast<const T*>(&Data[idx]);
+            return *Data[idx].operator->();
         }
     
         bool IsValid(Index idx) const noexcept
         {
-            return idx < Data.size() && Occupied[idx];
+            return idx < Data.size() && Data[idx].has_value();
         }
     
         void Clear() noexcept
         {
-            for (Index i = 0; i < Data.size(); ++i)
-            {
-                if (Occupied[i])
-                {
-                    reinterpret_cast<T*>(&Data[i])->~T();
-                }
-            }
             Data.clear();
-            Occupied.clear();
             FreeList.clear();
         }
     
         void Reserve(size_type capacity)
         {
             Data.reserve(capacity);
-            Occupied.reserve(capacity);
         }
 
         void ShrinkToFit()
@@ -231,12 +174,10 @@ namespace Lumina
             Index readIdx = 0;
 
             while (readIdx < Data.size()) {
-                if (Occupied[readIdx]) {
+                if (Data[readIdx].has_value()) {
                     if (writeIdx != readIdx) {
-                        Memory::ConstructAt(reinterpret_cast<T*>(&Data[writeIdx]), std::move(*reinterpret_cast<T*>(&Data[readIdx])));
-                        reinterpret_cast<T*>(&Data[readIdx])->~T();
-                        Occupied[writeIdx] = true;
-                        Occupied[readIdx] = false;
+                        Data[writeIdx].emplace(std::move(*Data[readIdx]));
+                        Data[readIdx].reset();
                     }
                     ++writeIdx;
                 }
@@ -244,9 +185,10 @@ namespace Lumina
             }
 
             Data.resize(writeIdx);
-            Occupied.resize(writeIdx);
             FreeList.clear();
         }
+
+        class const_iterator;
 
         class iterator
         {
@@ -279,12 +221,12 @@ namespace Lumina
     
             reference operator*() const
             {
-                return *reinterpret_cast<T*>(&Owner->Data[IndexValue]);
+                return *Owner->Data[IndexValue].operator->();
             }
     
             pointer operator->() const
             {
-                return reinterpret_cast<T*>(&Owner->Data[IndexValue]);
+                return Owner->Data[IndexValue].operator->();
             }
     
             bool operator==(const iterator& other) const
@@ -303,12 +245,14 @@ namespace Lumina
             
             void SkipHoles()
             {
-                while (IndexValue < Owner->Data.size() && !Owner->Occupied[IndexValue])
+                while (IndexValue < Owner->Data.size() && !Owner->Data[IndexValue].has_value())
                 {
                     ++IndexValue;
                 }
             }
     
+            friend class const_iterator;
+
             TSparseArray* Owner;
             Index IndexValue;
         };
@@ -345,12 +289,12 @@ namespace Lumina
     
             reference operator*() const
             {
-                return *reinterpret_cast<const T*>(&Owner->Data[IndexValue]);
+                return *Owner->Data[IndexValue].operator->();
             }
     
             pointer operator->() const
             {
-                return reinterpret_cast<const T*>(&Owner->Data[IndexValue]);
+                return Owner->Data[IndexValue].operator->();
             }
     
             bool operator==(const const_iterator& other) const
@@ -369,7 +313,7 @@ namespace Lumina
             
             void SkipHoles()
             {
-                while (IndexValue < Owner->Data.size() && !Owner->Occupied[IndexValue])
+                while (IndexValue < Owner->Data.size() && !Owner->Data[IndexValue].has_value())
                 {
                     ++IndexValue;
                 }
@@ -388,13 +332,7 @@ namespace Lumina
     
     private:
         
-        struct alignas(T) FSparseArrayStorage
-        {
-            uint8 Bytes[sizeof(T)];
-        };
-    
-        TVector<FSparseArrayStorage> Data;
-        Containers::TVector<bool> Occupied;
+        TVector<Containers::TOptional<T>> Data;
         TVector<Index> FreeList;
     };
 }

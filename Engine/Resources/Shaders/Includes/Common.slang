@@ -30,6 +30,8 @@ static const float INV_PI = 0.31830988618;
 #define CULL_VIEW_FLAG_ORTHOGRAPHIC_LOD BIT(9)
 // Grass and painted foliage drop out, so they neither roof the ground under them nor shelter it.
 #define CULL_VIEW_FLAG_NO_FOLIAGE       BIT(10)
+// Only instances drawn into custom depth survive, and nothing occludes them.
+#define CULL_VIEW_FLAG_CUSTOM_DEPTH_ONLY BIT(11)
 
 
 #define BIT(X) (1u << (X))
@@ -477,13 +479,15 @@ struct FInstanceCullEntry
     float  MaxDrawDistance;   // 0 never distance-culls
     uint   LODAndThinning;    // Lumina::PackLODAndThinning
 
-    property int ForcedLODIndex { get { return int(LODAndThinning & 0xFFu) - 1; } }
+    property int ForcedLODIndex { get { return int(LODAndThinning & INSTANCE_FORCED_LOD_MASK) - 1; } }
 
     // Past this camera distance a foliage instance thins out, 0 never.
     property float ThinningStartDistance { get { return f16tof32(LODAndThinning >> 16u); } }
 
     // Clear for the Default layer, which is nearly everything, so only the rest load their mask from FInstanceStatic.
     property bool bCustomLayers { get { return (LODAndThinning & INSTANCE_CUSTOM_LAYERS_BIT) != 0u; } }
+
+    property uint CustomDepthStencil { get { return (LODAndThinning >> INSTANCE_CUSTOM_DEPTH_SHIFT) & CUSTOM_DEPTH_WORD_MASK; } }
 
     bool HasFlag(EInstanceFlags Flag)
     {
@@ -663,9 +667,13 @@ struct FGPUInstance
     uint                    RenderLayers;
     // Copied from the skinned frame data, so the meshlet cull reads it without that array.
     uint                    SkinnedBoundsBase;
-    uint                    _Pad0;
+    // Lumina::PackCustomDepthStencil, zero when the instance draws no custom depth.
+    uint                    CustomDepthStencil;
 
     property float4x4 ModelMatrix { get { return Transform.ToMatrix(); } }
+
+    property bool bCustomDepth  { get { return (CustomDepthStencil & CUSTOM_DEPTH_ENABLED_BIT) != 0u; } }
+    property uint CustomStencil { get { return CustomDepthStencil & CUSTOM_DEPTH_STENCIL_MASK; } }
 
     // Matches Lumina::PackDrawIDAndFlags, DrawID in the low 16 bits and flags in the high 16.
     bool HasFlag(EInstanceFlags Flag)

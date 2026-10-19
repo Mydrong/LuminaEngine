@@ -65,7 +65,7 @@ namespace Lumina
         }
 
         // Before the first bake (world just loaded) fall back to the live camera so frame one still draws.
-        if (const SCameraComponent* Camera = World->GetActiveCamera())
+        if (const SCameraComponent* Camera = World->GetCamera()->GetActiveCamera())
         {
             State.Frustum    = Camera->GetViewVolume().GetFrustum();
             State.ViewOrigin = Camera->GetPosition();

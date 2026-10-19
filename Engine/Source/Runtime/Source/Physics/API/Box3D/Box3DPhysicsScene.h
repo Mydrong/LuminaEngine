@@ -297,7 +297,10 @@ namespace Lumina::Physics
 
     private:
 
-        void DrawRayDebug(const SRayCastSettings& Settings, const TSpan<SRayResult>& Hits) const;
+        TOptional<SRayResult> CastRayClosest(const SRayCastSettings& Settings);
+
+        // The ray to its first hit in the hit color and past it in the miss color, with each hit's normal.
+        void DrawRayDebug(const SRayCastSettings& Settings, TSpan<const SRayResult> Hits) const;
 
         uint32 FindEntityBody(ECS::FEntity Entity) const;
         b3BodyId ResolveTarget(const SPhysicsBodyTarget& Target) const;

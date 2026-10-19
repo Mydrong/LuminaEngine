@@ -72,7 +72,7 @@ namespace Lumina::MCP
 
         float GroundAt(CWorld* World, float X, float Z)
         {
-            const SRayResult Hit = World->Raycast(FVector3(X, 5000.0f, Z), FVector3(X, -5000.0f, Z), ECS::NullEntity);
+            const SRayResult Hit = World->GetPhysics()->Raycast(FVector3(X, 5000.0f, Z), FVector3(X, -5000.0f, Z), ECS::NullEntity);
             return Hit.bHit ? Hit.Location.y : NoGround;
         }
 
@@ -90,7 +90,7 @@ namespace Lumina::MCP
                 return true;
             }
 
-            const ECS::FEntity Camera = World->GetActiveCameraEntity();
+            const ECS::FEntity Camera = World->GetCamera()->GetActiveCameraEntity();
             const STransformComponent* Transform = Camera != ECS::NullEntity && World->IsValidEntity(Camera)
                 ? World->TryGetComponent<STransformComponent>(Camera) : nullptr;
             const SCameraComponent* CameraComponent = Transform != nullptr ? World->TryGetComponent<SCameraComponent>(Camera) : nullptr;
@@ -105,7 +105,7 @@ namespace Lumina::MCP
             constexpr float TraceDistance = 2000.0f;
             const FVector3 Eye = Transform->GetWorldLocation();
             const FVector3 Forward = CameraComponent->GetForwardVector();
-            const SRayResult Hit = World->Raycast(Eye, Eye + Forward * TraceDistance, ECS::NullEntity);
+            const SRayResult Hit = World->GetPhysics()->Raycast(Eye, Eye + Forward * TraceDistance, ECS::NullEntity);
             const FVector3 Target = Hit.bHit ? Hit.Location : Eye + Forward * FallbackDistance;
             OutCenter = FVector2(Target.x, Target.z);
             return true;
@@ -183,7 +183,7 @@ namespace Lumina::MCP
         // Ground position of the live camera, or none when the world has no camera.
         TOptional<FVector2> CameraGround(CWorld* World)
         {
-            const ECS::FEntity Camera = World->GetActiveCameraEntity();
+            const ECS::FEntity Camera = World->GetCamera()->GetActiveCameraEntity();
             const STransformComponent* Transform = Camera != ECS::NullEntity && World->IsValidEntity(Camera)
                 ? World->TryGetComponent<STransformComponent>(Camera) : nullptr;
             if (Transform == nullptr)

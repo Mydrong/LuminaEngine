@@ -1015,7 +1015,7 @@ namespace Lumina
         uint32          RetainedSlot;           //        112
         uint32          RenderLayers;           //        116
         uint32          SkinnedBoundsBase;      //        120
-        uint32          _Pad0;                  //        124
+        uint32          CustomDepthStencil;     //        124  PackCustomDepthStencil
     };
 
     static_assert(sizeof(FGPUInstance) == 128, "FGPUInstance layout must match shader");
@@ -1080,12 +1080,22 @@ namespace Lumina
     // Handed out per skinned binding, so the skinned frame data is as long as the live skinned instances.
     constexpr uint32 kNoSkinnedIndex = Constants::kIndexNoneU32;
 
-    // The forced LOD plus one in the low byte (0 is automatic), the custom layer bit, and the foliage thinning start distance as a half float in the high half.
-    inline uint32 PackLODAndThinning(int32 ForcedLODIndex, float ThinningStartDistance, uint32 RenderLayers = RENDER_LAYER_DEFAULT_MASK)
+    // The enable bit above the stencil byte, so zero means the instance draws no custom depth.
+    constexpr uint32 PackCustomDepthStencil(bool bRenderCustomDepth, uint8 StencilValue)
     {
-        const uint32 LOD    = (uint32)Math::Clamp(ForcedLODIndex + 1, 0, 255);
+        return bRenderCustomDepth ? (CUSTOM_DEPTH_ENABLED_BIT | StencilValue) : 0u;
+    }
+
+    static_assert(MESHLET_MAX_LODS < INSTANCE_FORCED_LOD_MASK, "A forced LOD plus one must fit INSTANCE_FORCED_LOD_MASK");
+
+    // The forced LOD plus one in the low bits (0 is automatic), the custom layer bit, the custom depth word, and the foliage thinning start distance as a half float in the high half.
+    inline uint32 PackLODAndThinning(int32 ForcedLODIndex, float ThinningStartDistance, uint32 RenderLayers = RENDER_LAYER_DEFAULT_MASK,
+                                     uint32 CustomDepthStencil = 0u)
+    {
+        const uint32 LOD    = (uint32)Math::Clamp(ForcedLODIndex + 1, 0, (int32)INSTANCE_FORCED_LOD_MASK);
         const uint32 Layers = RenderLayers != RENDER_LAYER_DEFAULT_MASK ? INSTANCE_CUSTOM_LAYERS_BIT : 0u;
-        return LOD | Layers | ((uint32)FHalf(Math::Clamp(ThinningStartDistance, 0.0f, 65000.0f)).Bits << 16);
+        return LOD | Layers | (CustomDepthStencil << INSTANCE_CUSTOM_DEPTH_SHIFT)
+             | ((uint32)FHalf(Math::Clamp(ThinningStartDistance, 0.0f, 65000.0f)).Bits << 16);
     }
 
     constexpr uint32 PackDrawIDAndFlags(uint32 DrawID, EInstanceFlags Flags)
@@ -1172,7 +1182,6 @@ namespace Lumina
     VERIFY_SSBO_ALIGNMENT(FCullData);
 
     // Bits inside FCullView::Flags. Must match CULL_VIEW_FLAG_* in Common.slang.
-    // Must match CULL_VIEW_FLAG_* in Common.slang.
     namespace ECullViewFlags
     {
         enum Type : uint32
@@ -1189,6 +1198,7 @@ namespace Lumina
             FarCascade      = BIT(8),
             OrthographicLOD = BIT(9),
             NoFoliage       = BIT(10),
+            CustomDepthOnly = BIT(11),
         };
     }
 
@@ -1485,29 +1495,5 @@ namespace Lumina
         uint8 bGTAO:1            = false;
     };
 
-    // Owned by the world as a registry singleton, so it outlives a renderer that is destroyed and rebuilt.
-    struct FSceneRenderSettings
-    {
-        ERenderSceneDebugFlags Flags    = ERenderSceneDebugFlags::None;
-        uint8 bUseInstancing:1          = true;
-        uint8 bDrawAABB:1               = false;
-        uint8 bFrustumCull:1            = true;
-        uint8 bConeCull:1               = true;
-        uint8 bOcclusionCull:1          = true;
-        // Per-MESHLET Hi-Z, resolved across the two VisBuffer phases. Separate from bOcclusionCull so the
-        // instance-level cull (which is single-phase and costs nothing extra) can stay on while this one
-        // is A/B'd -- turning it off collapses the frame back to a single geometry phase.
-        uint8 bMeshletOcclusionCull:1   = true;
-        uint8 bShadowOcclusionCull:1    = true;
-        uint8 bWireframe:1              = false;
-        uint8 bDrawBillboards:1         = true;
-        uint8 bCPUInstanceCull:1        = true;
-        // Rejects a local light whose attenuation sphere reaches no shading volume, before it takes a slot.
-        uint8 bCullLights:1             = true;
-        uint8 bUseLODs:1                = true;
-        // Debug: keep culling against the inputs captured when this went on, so the selected set holds
-        // still while the camera flies free. See FDefaultSceneRenderer::ApplyCullFreeze.
-        uint8 bFreezeCulling:1          = false;
-    };
     
 }

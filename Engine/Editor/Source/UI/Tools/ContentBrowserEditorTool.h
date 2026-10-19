@@ -245,6 +245,9 @@ namespace Lumina
         // would mint a second asset called "<Name>_1" and leave every existing reference on the old one.
         void DrawReimportAssetMenuItem(const FContentBrowserTileViewItem* ContentItem, bool bIsProtected);
 
+        // Asks for a folder, then writes each asset back out as the file it was imported from.
+        void ExportAssets(const TVector<FGuid>& Assets);
+
         // Runs the importer's normal parse + options dialogue against an existing asset, then performs the
         // swap. AssetGUID rather than a pointer: the parse is async, and the asset can be destroyed
         // (project reload, asset deleted) before it comes back.
@@ -263,6 +266,9 @@ namespace Lumina
         // Files still waiting on an options window. Drained one at a time by ProcessNextImport.
         TVector<FFixedString> PendingImports;
         bool bImportWindowOpen = false;
+
+        // Where the last export went, so the next one starts there.
+        FString LastExportDirectory;
         bool bApplyImportSettingsToAll = false;
         
         void DrawDirectoryBrowser(bool bIsFocused, ImVec2 Size);

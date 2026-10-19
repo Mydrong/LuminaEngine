@@ -6,22 +6,105 @@
 
 namespace Lumina
 {
+    void FObjectIndexTable::Insert(CObjectBase* Object, uint64 Hash)
+    {
+        // Three quarters full at most, which keeps the linear probe runs short.
+        if ((uint64)(Count + 1) * 4 > (uint64)Slots.size() * 3)
+        {
+            Grow();
+        }
+
+        const uint64 Mask = Slots.size() - 1;
+        uint64 Index = Hash & Mask;
+        while (Slots[Index].Object != nullptr)
+        {
+            Index = (Index + 1) & Mask;
+        }
+
+        Slots[Index] = { Object, Hash };
+        ++Count;
+    }
+
+    bool FObjectIndexTable::Remove(const CObjectBase* Object, uint64 Hash)
+    {
+        if (Slots.empty())
+        {
+            return false;
+        }
+
+        const uint64 Mask = Slots.size() - 1;
+        uint64 Hole = Hash & Mask;
+        while (Slots[Hole].Object != Object)
+        {
+            if (Slots[Hole].Object == nullptr)
+            {
+                return false;
+            }
+            Hole = (Hole + 1) & Mask;
+        }
+
+        // Shifting the run back instead of leaving a tombstone keeps every probe ending at the first empty slot.
+        for (uint64 Next = (Hole + 1) & Mask; Slots[Next].Object != nullptr; Next = (Next + 1) & Mask)
+        {
+            const uint64 Home = Slots[Next].Hash & Mask;
+            if (((Next - Home) & Mask) >= ((Next - Hole) & Mask))
+            {
+                Slots[Hole] = Slots[Next];
+                Hole = Next;
+            }
+        }
+
+        Slots[Hole] = {};
+        --Count;
+        return true;
+    }
+
+    void FObjectIndexTable::Grow()
+    {
+        TVector<FSlot> Old = Move(Slots);
+        Slots.clear();
+        Slots.resize(Old.empty() ? 16 : Old.size() * 2);
+
+        const uint64 Mask = Slots.size() - 1;
+        for (const FSlot& Slot : Old)
+        {
+            if (Slot.Object == nullptr)
+            {
+                continue;
+            }
+
+            uint64 Index = Slot.Hash & Mask;
+            while (Slots[Index].Object != nullptr)
+            {
+                Index = (Index + 1) & Mask;
+            }
+            Slots[Index] = Slot;
+        }
+    }
+
+    void FObjectIndexTable::Clear()
+    {
+        Slots = {};
+        Count = 0;
+    }
+
     void FObjectHashTables::AddObject(CObjectBase* Object)
     {
         LUMINA_PROFILE_SCOPE();
 
         const FGuid& ObjectGUID = Object->GetGUID();
         {
-            FGuidShard& Shard = GuidShards[ShardOf(ObjectGUID)];
+            const uint64 Hash = HashOf(ObjectGUID);
+            FShard& Shard = GuidShards[ShardOf(Hash)];
             FWriteScopeLock Lock(Shard.Mutex);
-            ASSERT(Shard.Objects.find(ObjectGUID) == Shard.Objects.end());
-            Shard.Objects.emplace(ObjectGUID, Object);
+            ASSERT(Shard.Objects.FindFirst(Hash, [&](const CObjectBase* Other) { return Other->GetGUID() == ObjectGUID; }) == nullptr);
+            Shard.Objects.Insert(Object, Hash);
         }
         {
-            const FName Name = Object->GetName();
-            FNameShard& Shard = NameShards[ShardOf(Name)];
+            const uint64 Hash = HashOf(Object->GetName());
+            FShard& Shard = NameShards[ShardOf(Hash)];
             FWriteScopeLock Lock(Shard.Mutex);
-            Shard.Objects[Name].emplace(Object);
+            Shard.Objects.Insert(Object, Hash);
         }
     }
 
@@ -29,105 +112,72 @@ namespace Lumina
     {
         LUMINA_PROFILE_SCOPE();
 
-        const FGuid& ObjectGUID = Object->GetGUID();
         {
-            FGuidShard& Shard = GuidShards[ShardOf(ObjectGUID)];
+            const uint64 Hash = HashOf(Object->GetGUID());
+            FShard& Shard = GuidShards[ShardOf(Hash)];
             FWriteScopeLock Lock(Shard.Mutex);
-            auto It = Shard.Objects.find(ObjectGUID);
-            ASSERT(It != Shard.Objects.end());
-            Shard.Objects.erase(It);
+            const bool bRemoved = Shard.Objects.Remove(Object, Hash);
+            ASSERT(bRemoved);
         }
         {
             // Uses the object's current name, since HandleNameChange removes before it mutates.
-            const FName Name = Object->GetName();
-            FNameShard& Shard = NameShards[ShardOf(Name)];
+            const uint64 Hash = HashOf(Object->GetName());
+            FShard& Shard = NameShards[ShardOf(Hash)];
             FWriteScopeLock Lock(Shard.Mutex);
-            auto It = Shard.Objects.find(Name);
-            if (It != Shard.Objects.end())
-            {
-                It->second.erase(Object);
-                if (It->second.empty())
-                {
-                    Shard.Objects.erase(It);
-                }
-            }
+            Shard.Objects.Remove(Object, Hash);
         }
     }
 
     CObjectBase* FObjectHashTables::FindObject(const FGuid& GUID)
     {
         LUMINA_PROFILE_SCOPE();
-        const FGuidShard& Shard = GuidShards[ShardOf(GUID)];
+        const uint64 Hash = HashOf(GUID);
+        const FShard& Shard = GuidShards[ShardOf(Hash)];
         FReadScopeLock Lock(Shard.Mutex);
 
-        auto It = Shard.Objects.find(GUID);
-        if (It == Shard.Objects.end() || It->second->HasAnyFlag(OF_MarkedDestroy))
-        {
-            return nullptr;
-        }
-        return It->second;
+        CObjectBase* Found = Shard.Objects.FindFirst(Hash, [&](const CObjectBase* Object) { return Object->GetGUID() == GUID; });
+        return (Found != nullptr && !Found->HasAnyFlag(OF_MarkedDestroy)) ? Found : nullptr;
     }
 
     CObjectBase* FObjectHashTables::FindObject(const FName& Name, CClass* Class)
     {
         LUMINA_PROFILE_SCOPE();
-        const FNameShard& Shard = NameShards[ShardOf(Name)];
+        const uint64 Hash = HashOf(Name);
+        const FShard& Shard = NameShards[ShardOf(Hash)];
         FReadScopeLock Lock(Shard.Mutex);
 
-        auto It = Shard.Objects.find(Name);
-        if (It == Shard.Objects.end())
+        // A subclass matches, since a minted class answers as a CScriptClass and FindObject<T> asks for a base.
+        return Shard.Objects.FindFirst(Hash, [&](const CObjectBase* Object)
         {
-            return nullptr;
-        }
-
-        for (CObjectBase* Object : It->second)
-        {
-            // Subclasses count: FindObject<T> asks for a base, and a minted class answers as a CScriptClass
-            // rather than a CClass, so an exact compare would stop finding it by name.
-            if (Object->GetClass() != nullptr && Object->GetClass()->IsChildOf(Class)
-                && !Object->HasAnyFlag(OF_MarkedDestroy))
-            {
-                return Object;
-            }
-        }
-
-        return nullptr;
+            return Object->GetName() == Name && Object->GetClass() != nullptr && Object->GetClass()->IsChildOf(Class)
+                && !Object->HasAnyFlag(OF_MarkedDestroy);
+        });
     }
 
     CObjectBase* FObjectHashTables::FindObject(const FName& Name, const CPackage* Package)
     {
         LUMINA_PROFILE_SCOPE();
-        const FNameShard& Shard = NameShards[ShardOf(Name)];
+        const uint64 Hash = HashOf(Name);
+        const FShard& Shard = NameShards[ShardOf(Hash)];
         FReadScopeLock Lock(Shard.Mutex);
 
-        auto It = Shard.Objects.find(Name);
-        if (It == Shard.Objects.end())
+        return Shard.Objects.FindFirst(Hash, [&](const CObjectBase* Object)
         {
-            return nullptr;
-        }
-
-        for (CObjectBase* Object : It->second)
-        {
-            if (Object->GetPackage() == Package && !Object->HasAnyFlag(OF_MarkedDestroy))
-            {
-                return Object;
-            }
-        }
-
-        return nullptr;
+            return Object->GetName() == Name && Object->GetPackage() == Package && !Object->HasAnyFlag(OF_MarkedDestroy);
+        });
     }
 
     void FObjectHashTables::Clear()
     {
-        for (FGuidShard& Shard : GuidShards)
+        for (FShard& Shard : GuidShards)
         {
             FWriteScopeLock Lock(Shard.Mutex);
-            Shard.Objects.clear();
+            Shard.Objects.Clear();
         }
-        for (FNameShard& Shard : NameShards)
+        for (FShard& Shard : NameShards)
         {
             FWriteScopeLock Lock(Shard.Mutex);
-            Shard.Objects.clear();
+            Shard.Objects.Clear();
         }
     }
 }

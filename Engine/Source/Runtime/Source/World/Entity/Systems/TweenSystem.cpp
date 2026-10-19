@@ -1,7 +1,7 @@
 #include "RuntimePCH.h"
 #include "TweenSystem.h"
 
-#include "World/Subsystems/TweenManager.h"
+#include "World/Subsystems/TweenSubsystem.h"
 #include "World/World.h"
 
 namespace Lumina
@@ -16,21 +16,15 @@ namespace Lumina
 
     bool STweenSystem::HasWork(const SSystemContext& Context)
     {
-        const FTweenManager* Tweens = GetWorld() != nullptr ? GetWorld()->GetEntityRegistry().Ctx().Find<FTweenManager>() : nullptr;
-        return Tweens != nullptr && Tweens->HasTweens();
+        return GetWorld() != nullptr && GetWorld()->GetTweens()->GetTweenManager().HasTweens();
     }
 
     void STweenSystem::OnUpdate(const SSystemContext& Context)
     {
         LUMINA_PROFILE_SCOPE();
 
-        ECS::FRegistry& Registry = Context.GetRegistry();
-
-        FTweenManager& Tweens = Registry.Ctx().Get<FTweenManager>();
-        Tweens.SetWorldRegistry(&Registry);
-
-        const bool  bPaused  = Context.GetUpdateStage() == EUpdateStage::Paused;
-        const float Unscaled = GetWorld() != nullptr ? (float)GetWorld()->GetRealDeltaTime() : (float)Context.GetDeltaTime();
-        Tweens.Tick(bPaused ? 0.0f : (float)Context.GetDeltaTime(), Unscaled);
+        CWorld* World = Context.GetWorld();
+        const bool bPaused = Context.GetUpdateStage() == EUpdateStage::Paused;
+        World->GetTweens()->GetTweenManager().Tick(bPaused ? 0.0f : (float)Context.GetDeltaTime(), (float)World->GetRealDeltaTime());
     }
 }

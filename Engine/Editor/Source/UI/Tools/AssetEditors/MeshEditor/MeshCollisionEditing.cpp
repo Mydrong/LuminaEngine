@@ -1034,7 +1034,7 @@ namespace Lumina
         SMeshCollision* Collision = GetCollision();
         TickViewportDrop(World, ViewportOrigin, ViewportSize);
 
-        SCameraComponent* Camera = World != nullptr ? World->GetActiveCamera() : nullptr;
+        SCameraComponent* Camera = World != nullptr ? World->GetCamera()->GetActiveCamera() : nullptr;
         if (Camera == nullptr || Collision == nullptr || !bDrawShapes)
         {
             HandleState.ActiveHandle = EShapeHandle::None;

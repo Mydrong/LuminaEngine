@@ -652,7 +652,7 @@ namespace Lumina
                 }
 
                 // Before the pyramid, so custom geometry occludes the late cull like terrain does.
-                CustomDepthPass(CL);
+                CallbackDepthPass(CL);
                 
                 if (!FrameSettings.bFreezeCulling)
                 {
@@ -665,6 +665,11 @@ namespace Lumina
                 {
                     SCENE_GPU_SCOPE(CL, "VisBuffer Late");
                     VisBufferPass(CL, CurrentCameraEarlyView, /*bClear*/ false, ECullPhase::Late);
+                }
+
+                {
+                    SCENE_GPU_SCOPE(CL, "Custom Depth");
+                    CustomDepthStencilPass(CL);
                 }
 
                 // Near cascades cull only now, against everything the finished depth shows the camera can see, and ahead of GTAO so it cannot starve them.
@@ -1750,6 +1755,9 @@ namespace Lumina
         case ENamedImage::TemporalHistoryA:   return "Scene.TemporalHistoryA";
         case ENamedImage::TemporalHistoryB:   return "Scene.TemporalHistoryB";
         case ENamedImage::UpscaledHDR:        return "Scene.UpscaledHDR";
+        case ENamedImage::CustomDepth:        return "Scene.CustomDepth";
+        case ENamedImage::CustomDepthVis:     return "Scene.CustomDepthVis";
+        case ENamedImage::CustomStencil:      return "Scene.CustomStencil";
 
         #if USING(WITH_EDITOR)
         case ENamedImage::PointLightIcon:       return "Scene.PointLightIcon";
@@ -1807,6 +1815,9 @@ namespace Lumina
         case ENamedImage::SSRMipLevel:
         case ENamedImage::FogShaft:
         case ENamedImage::FogShaftDepth:
+        case ENamedImage::CustomDepth:
+        case ENamedImage::CustomDepthVis:
+        case ENamedImage::CustomStencil:
             return true;
         default:
             return false;
@@ -1926,6 +1937,21 @@ namespace Lumina
             OutDesc.Usage     = RHI::EImageUsageFlags::Sampled | RHI::EImageUsageFlags::Storage;
             return true;
 
+        // Reverse-Z like the scene depth, so the two compare directly.
+        case ENamedImage::CustomDepth:
+            OutDesc.Format = EFormat::D32;
+            OutDesc.Usage  = RHI::EImageUsageFlags::DepthAttachment | RHI::EImageUsageFlags::Sampled;
+            return true;
+
+        // The visibility ids the custom depth geometry drew, which the stencil resolve turns into stencil values.
+        case ENamedImage::CustomDepthVis:
+            OutDesc.Format = EFormat::R32_UINT;
+            return true;
+
+        case ENamedImage::CustomStencil:
+            OutDesc.Format = EFormat::R8_UINT;
+            return true;
+
         case ENamedImage::GTAOWorkingDepth:
         {
             const FUIntVector2 Size = GetGTAOTraceExtent(Extent);
@@ -2026,6 +2052,11 @@ namespace Lumina
         const bool bFogShafts = Frame.Volumetrics.bHasFog && Frame.Volumetrics.FarShaftSteps > 0u;
         Want(ENamedImage::FogShaft,         bFogShafts, /*bMipUAVs*/ true);
         Want(ENamedImage::FogShaftDepth,    bFogShafts, /*bMipUAVs*/ true);
+
+        const bool bCustomDepth = View.bIsPrimary && Frame.Views.CustomDepthCullView != Constants::kIndexNoneU32;
+        Want(ENamedImage::CustomDepth,      bCustomDepth);
+        Want(ENamedImage::CustomDepthVis,   bCustomDepth);
+        Want(ENamedImage::CustomStencil,    bCustomDepth);
 
         // A freshly created pair holds whatever the allocator handed back, which is not a previous frame.
         if (bTemporal && !bHadTemporalTargets)

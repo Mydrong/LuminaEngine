@@ -2072,6 +2072,7 @@ namespace Lumina
             FrozenCull.CascadeViewBase   = Frame.Views.CascadeViewBase;
             FrozenCull.NumCascadeViews   = Frame.Views.NumCascadeViews;
             FrozenCull.NumNearCascadeViews = Frame.Views.NumNearCascadeViews;
+            FrozenCull.CustomDepthCullView = Frame.Views.CustomDepthCullView;
             FrozenCull.bValid            = true;
             return;
         }
@@ -2081,6 +2082,7 @@ namespace Lumina
         Frame.Views.CascadeViewBase = FrozenCull.CascadeViewBase;
         Frame.Views.NumCascadeViews = FrozenCull.NumCascadeViews;
         Frame.Views.NumNearCascadeViews = FrozenCull.NumNearCascadeViews;
+        Frame.Views.CustomDepthCullView = FrozenCull.CustomDepthCullView;
 
         Cull.CullCameraPosition   = FrozenCull.CameraPosition;
         Cull.CullCameraView       = FrozenCull.CameraView;
@@ -2254,7 +2256,7 @@ namespace Lumina
     // The mesh-local error the camera tolerates here, which is what picks a skinned LOD and how much of the skeleton may hold still.
     static float ResolveBoneLODTolerance(const FScenePrimitive& Prim, const FSurfaceBinding* Bindings,
                                          const FSurfaceDescGPU* SurfaceDescs, uint32 NumSurfaceDescs,
-                                         const FSceneRenderSettings& Settings, const FCullView* CameraView,
+                                         const SWorldRenderSettings& Settings, const FCullView* CameraView,
                                          const FVector4& Sphere, float MaxScale)
     {
         // A forced LOD previews the cut that LOD's own error allows.
@@ -2312,7 +2314,7 @@ namespace Lumina
                                       uint32 NumSurfaceDescs,
                                       uint32 BoneArenaBase,
                                       const FSkinnedFrameDataTarget& Target,
-                                      const FSceneRenderSettings& Settings,
+                                      const SWorldRenderSettings& Settings,
                                       const FCullView* CameraView,
                                       const FVector4& Sphere,
                                       float MaxScale)
@@ -3470,7 +3472,8 @@ namespace Lumina
                                          + SunViews                               // CSM cascades (late, phase 2)
                                          + 1u                                     // Camera (late, phase 1)
                                          + (uint32)Frame.Views.CaptureViews.size()
-                                         + (Frame.ReflectionProbes.BakingProbe >= 0 ? 6u : 0u);
+                                         + (Frame.ReflectionProbes.BakingProbe >= 0 ? 6u : 0u)
+                                         + (HasCustomDepthPrimitives() ? 1u : 0u);
             const uint32 AvailableViews  = (ReservedViews >= (uint32)GMaxCullViews)
                                          ? 0u
                                          : ((uint32)GMaxCullViews - ReservedViews);
@@ -3737,6 +3740,8 @@ namespace Lumina
         uint32& CascadeViewBase        = Frame.Views.CascadeViewBase;
         Frame.Views.NumCascadeViews    = 0;
         Frame.Views.NumNearCascadeViews = 0;
+        Frame.Views.CustomDepthCullView = Constants::kIndexNoneU32;
+        const bool bCustomDepthView    = HasCustomDepthPrimitives();
 
         const float CameraTolerance   = CameraLODPixels();
         const float ShadowTolerance   = ShadowLODTexels();
@@ -3791,7 +3796,8 @@ namespace Lumina
             (uint32)PackedShadows[(uint32)ELightType::Spot].size() +
             (uint32)Frame.Views.CaptureViews.size() +                         // Capture cameras (frustum-only)
             (Frame.ReflectionProbes.BakingProbe >= 0 ? 6u : 0u) +             // Reflection-probe cube faces
-            (Frame.Weather.OcclusionShadowDataIndex != Constants::kIndexNone ? 1u : 0u);
+            (Frame.Weather.OcclusionShadowDataIndex != Constants::kIndexNone ? 1u : 0u) +
+            (bCustomDepthView ? 1u : 0u);
 
         ASSERT(NumViews <= (uint32)GMaxCullViews);
         LUMINA_PROFILE_VALUE("Shadows/PointFaceViews", (int64)NumPointFaceViews);
@@ -3806,10 +3812,10 @@ namespace Lumina
         SpotShadowCullViewBases.reserve(PackedShadows[(uint32)ELightType::Spot].size());
         
         const uint32 ConeFlag = FrameSettings.bConeCull ? (uint32)ECullViewFlags::Cone : 0u;
+        const FMatrix4 CameraVP = ViewVolume.GetProjectionMatrix() * ViewVolume.GetViewMatrix();
+        uint32 CameraFlags = ConeFlag;
         
         {
-            const FMatrix4 CameraVP = ViewVolume.GetProjectionMatrix() * ViewVolume.GetViewMatrix();
-            uint32 CameraFlags = ConeFlag;
             if (FrameSettings.bFrustumCull)
             {
                 CameraFlags |= ECullViewFlags::Frustum;
@@ -3942,6 +3948,15 @@ namespace Lumina
             const FMatrix4& RainVP = Frame.Weather.OcclusionViewProjection;
             Frame.Weather.OcclusionCullView = PushView(RainVP, ViewVolume.GetViewPosition(), RainFlags,
                 MakeLODErrorScale(RainVP, (float)Frame.Weather.OcclusionResolution, ShadowTolerance));
+        }
+
+        // The camera's own rejects minus the Hi-Z, since custom depth has to hold what the scene hides.
+        if (bCustomDepthView)
+        {
+            PushLayers = Layers.CullMask;
+            const uint32 CustomDepthFlags = (CameraFlags & ~(uint32)ECullViewFlags::MeshletHiZ) | ECullViewFlags::CustomDepthOnly;
+            Frame.Views.CustomDepthCullView = PushView(CameraVP, ViewVolume.GetViewPosition(), CustomDepthFlags,
+                                                       Frame.Views.CameraLODView.LODErrorScale);
         }
 
         if (Frame.ReflectionProbes.BakingProbe >= 0)

@@ -513,7 +513,7 @@ namespace Lumina::UIScripts
         {
             if (Open.CursorLease != 0)
             {
-                Open.World->GetInputModeLeases().Release(Open.CursorLease);
+                Open.World->GetInput()->ReleaseInputMode(Open.CursorLease);
                 Open.CursorLease = 0;
             }
         }
@@ -530,7 +530,7 @@ namespace Lumina::UIScripts
             RmlUi::ShowDocument(Open.Document, false, bInteractive);
             if (bInteractive && Open.CursorLease == 0 && Open.World != nullptr)
             {
-                Open.CursorLease = Open.World->GetInputModeLeases().Acquire(EInputMode::GameAndUI, EMouseMode::Normal);
+                Open.CursorLease = Open.World->GetInput()->AcquireInputMode(EInputMode::GameAndUI, EMouseMode::Normal);
             }
         }
 

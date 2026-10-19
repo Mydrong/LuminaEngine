@@ -24,7 +24,7 @@ public readonly struct FPhysicsConstraint
     {
         if (Id != 0)
         {
-            World.DestroyConstraint(Id);
+            World.Physics.DestroyConstraint(Id);
         }
     }
 
@@ -33,7 +33,7 @@ public readonly struct FPhysicsConstraint
     {
         if (Id != 0)
         {
-            World.SetConstraintEnabled(Id, Enabled);
+            World.Physics.SetConstraintEnabled(Id, Enabled);
         }
     }
 
@@ -42,7 +42,7 @@ public readonly struct FPhysicsConstraint
     {
         if (Id != 0)
         {
-            World.SetConstraintMotor(Id, Lumina.Physics.EConstraintMotorMode.Velocity, Target);
+            World.Physics.SetConstraintMotor(Id, Lumina.Physics.EConstraintMotorMode.Velocity, Target);
         }
     }
 
@@ -51,7 +51,7 @@ public readonly struct FPhysicsConstraint
     {
         if (Id != 0)
         {
-            World.SetConstraintMotor(Id, Lumina.Physics.EConstraintMotorMode.Position, Target);
+            World.Physics.SetConstraintMotor(Id, Lumina.Physics.EConstraintMotorMode.Position, Target);
         }
     }
 
@@ -60,13 +60,13 @@ public readonly struct FPhysicsConstraint
     {
         if (Id != 0)
         {
-            World.SetConstraintMotor(Id, Lumina.Physics.EConstraintMotorMode.Off, 0.0f);
+            World.Physics.SetConstraintMotor(Id, Lumina.Physics.EConstraintMotorMode.Off, 0.0f);
         }
     }
 
     /// True once a breakable joint exceeded its break force and was auto-disabled.
-    public bool IsBroken => Id != 0 && World.IsConstraintBroken(Id);
+    public bool IsBroken => Id != 0 && World.Physics.IsConstraintBroken(Id);
 
     /// A hinge's angle in radians or a slider's position in meters. Zero for the types without one.
-    public float CurrentValue => Id != 0 ? World.GetConstraintValue(Id) : 0.0f;
+    public float CurrentValue => Id != 0 ? World.Physics.GetConstraintValue(Id) : 0.0f;
 }

@@ -484,7 +484,7 @@ namespace Lumina
                         {
                             const ECS::FEntity Parent = Registry.GetHierarchy().GetParent(Data.Entity);
                             BeginRelationshipTransaction({ Data.Entity }, Parent);
-                            World->AttachEntityToSocket(Data.Entity, Parent, Socket);
+                            World->GetAnimation()->AttachEntityToSocket(Data.Entity, Parent, Socket);
                             EndTransaction("Attach to Socket");
                             if (Data.Entity == DetailsEntity)
                             {
@@ -1104,7 +1104,7 @@ namespace Lumina
         DefaultScene::PopulateShadowRangeDemo(DemoWorld);
 
         const DefaultScene::FCameraPose Pose = DefaultScene::GetShadowRangeCameraPose();
-        const ECS::FEntity Camera = DemoWorld->GetActiveCameraEntity();
+        const ECS::FEntity Camera = DemoWorld->GetCamera()->GetActiveCameraEntity();
         STransformComponent* Transform = Camera != ECS::NullEntity && DemoWorld->IsValidEntity(Camera)
             ? DemoWorld->TryGetComponent<STransformComponent>(Camera) : nullptr;
         if (Transform != nullptr)
@@ -1116,43 +1116,24 @@ namespace Lumina
 
     void FWorldEditorTool::ToggleGameViewMode()
     {
-        FSceneRenderSettings* Settings = nullptr;
-        if (IRenderScene* RenderScene = World ? World->GetRenderer() : nullptr)
-        {
-            Settings = &RenderScene->GetSceneRenderSettings();
-        }
-
         if (!bGameViewMode)
         {
             bSavedWorldGridEnabled = bWorldGridEnabled;
             bSavedShowComponentVisualizers = bShowComponentVisualizers;
-            if (Settings)
-            {
-                bSavedDrawBillboards = Settings->bDrawBillboards;
-                bSavedDrawAABB = Settings->bDrawAABB;
-            }
-
             bWorldGridEnabled = false;
             bShowComponentVisualizers = false;
-            if (Settings)
-            {
-                Settings->bDrawBillboards = false;
-                Settings->bDrawAABB = false;
-            }
-
             bGameViewMode = true;
         }
         else
         {
             bWorldGridEnabled = bSavedWorldGridEnabled;
             bShowComponentVisualizers = bSavedShowComponentVisualizers;
-            if (Settings)
-            {
-                Settings->bDrawBillboards = bSavedDrawBillboards;
-                Settings->bDrawAABB = bSavedDrawAABB;
-            }
-
             bGameViewMode = false;
+        }
+
+        if (World != nullptr && World->GetRenderer() != nullptr)
+        {
+            World->GetRenderSettings().bHideEditorOverlays = bGameViewMode;
         }
     }
 
@@ -3562,7 +3543,7 @@ namespace Lumina
             }
 
             // Captured BEFORE SetupWorldForTool, whose last step makes the editor entity active.
-            PossessedCameraEntity = World->GetActiveCameraEntity();
+            PossessedCameraEntity = World->GetCamera()->GetActiveCameraEntity();
 
             FTransform CameraPose;
             bool bHasPose = false;
@@ -3606,7 +3587,7 @@ namespace Lumina
             // Re-activated first, so the world is never left with a resolved view on a dead entity.
             if (PossessedCameraEntity != ECS::NullEntity && World->IsValidEntity(PossessedCameraEntity))
             {
-                World->SetActiveCamera(PossessedCameraEntity);
+                World->GetCamera()->SetActiveCamera(PossessedCameraEntity);
             }
             else
             {

@@ -85,7 +85,7 @@ namespace Lumina
         // @TODO figure out why this needs to exist..
         if (World->GetRenderer())
         {
-            World->GetRenderer()->GetSceneRenderSettings().bDrawBillboards = false;
+            World->GetRenderSettings().bDrawBillboards = false;
         }
     }
 

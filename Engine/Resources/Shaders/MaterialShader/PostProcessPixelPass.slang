@@ -10,6 +10,28 @@ struct FSceneTex
     float4 SampleLevel(float2 uv, float l)  { return Tex.SampleLevel(Smp, uv, l); }
 };
 
+// Reads as nothing drawn, raw depth zero and stencil zero, while no mesh draws custom depth.
+struct FCustomDepthTex
+{
+    FTexture2D Tex;
+    float Sample(float2 uv) { return Tex.IsValid() ? Tex.SampleLevel(Samplers::PointClamp, uv, 0.0).r : 0.0; }
+};
+
+// Integer, so it is loaded at the render resolution texel under the UV rather than filtered.
+struct FCustomStencilTex
+{
+    FTexture2DUInt Tex;
+    uint Load(float2 uv)
+    {
+        if (!Tex.IsValid())
+        {
+            return 0u;
+        }
+        const uint2 Size = GetScreenSize();
+        return Tex.Load(int2(min(uint2(saturate(uv) * float2(Size)), Size - 1u)));
+    }
+};
+
 struct PSInput
 {
     float4 Position : SV_Position;
@@ -22,6 +44,8 @@ struct FPostProcessPushConstants
     FTexture2D SceneColor;      // ping-pong source (linear-clamp)
     FTexture2D SceneDepth;      // opaque depth (point-clamp)
     FTexture2D HDR;             // pre-tone-map HDR (linear-clamp)
+    FTexture2D     CustomDepth;
+    FTexture2DUInt CustomStencil;
 };
 
 FPostProcessPushConstants* Pass() { return GetPassArgs<FPostProcessPushConstants>(); }
@@ -33,6 +57,8 @@ float4 FragmentMain(PSInput Input) : SV_Target0
     FSceneTex uSceneColor;    uSceneColor.Tex    = Pass().SceneColor; uSceneColor.Smp    = Samplers::LinearClamp;
     FSceneTex uSceneDepth;    uSceneDepth.Tex    = Pass().SceneDepth; uSceneDepth.Smp    = Samplers::PointClamp;
     FSceneTex uHDRSceneColor; uHDRSceneColor.Tex = Pass().HDR;        uHDRSceneColor.Smp = Samplers::LinearClamp;
+    FCustomDepthTex   uCustomDepth;   uCustomDepth.Tex   = Pass().CustomDepth;
+    FCustomStencilTex uCustomStencil; uCustomStencil.Tex = Pass().CustomStencil;
 
     uint   MaterialIndex = Pass().MaterialIndex;
     float2 UV0           = Input.UV;

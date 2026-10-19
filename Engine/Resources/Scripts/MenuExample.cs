@@ -49,7 +49,7 @@ public sealed class MenuExample : CUIScript
         if (!_Settings.IsValid)
         {
             // It binds to the "menu" model this script already registered, so it needs no model of its own.
-            _Settings = new UIDocument(World, World.LoadUIDocument(SettingsDocument));
+            _Settings = new UIDocument(World, World.UI.LoadDocument(SettingsDocument));
             if (!_Settings.IsValid)
             {
                 Debug.LogError($"MenuExample: failed to load '{SettingsDocument}'.");

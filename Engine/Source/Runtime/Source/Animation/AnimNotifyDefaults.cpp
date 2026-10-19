@@ -91,7 +91,7 @@ namespace Lumina
 
         if (bAttachToSocket && !Socket.empty())
         {
-            World->SpawnParticleSystemAttached(ParticleSystem.Get(), Entity, FName(Socket.c_str()), Offset, Lifetime);
+            World->GetSpawner()->SpawnParticleSystemAttached(ParticleSystem.Get(), Entity, FName(Socket.c_str()), Offset, Lifetime);
             return;
         }
 
@@ -101,7 +101,7 @@ namespace Lumina
             return;
         }
 
-        const ECS::FEntity Spawned = World->SpawnParticleSystem(ParticleSystem.Get(), SpawnTransform, Lifetime);
+        const ECS::FEntity Spawned = World->GetSpawner()->SpawnParticleSystem(ParticleSystem.Get(), SpawnTransform, Lifetime);
         if (Spawned != ECS::NullEntity)
         {
             World->GetComponent<SParticleSystemComponent>(Spawned).EmitterOffset = Offset;

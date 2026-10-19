@@ -205,7 +205,7 @@ public sealed class UIShowcaseExample : CEntityScript
             return;
         }
 
-        _Doc = new UIDocument(World, World.LoadUIDocument(Document));
+        _Doc = new UIDocument(World, World.UI.LoadDocument(Document));
         if (!_Doc.IsValid)
         {
             Debug.LogError($"UIShowcaseExample: failed to load '{Document}'.");
@@ -216,8 +216,8 @@ public sealed class UIShowcaseExample : CEntityScript
         _Doc.Show();
 
         // The tabs, sliders and text fields all need a real cursor and keyboard focus.
-        World.SetInputMode(Lumina.EInputMode.GameAndUI);
-        World.SetMouseMode(Lumina.EMouseMode.Normal);
+        World.Input.SetInputMode(Lumina.EInputMode.GameAndUI);
+        World.Input.SetMouseMode(Lumina.EMouseMode.Normal);
         Debug.Log("UIShowcaseExample: showcase open. Walk the tabs; the last two are live-bound.");
     }
 
@@ -234,7 +234,7 @@ public sealed class UIShowcaseExample : CEntityScript
         // Reverse order, so the managed callbacks outlive the document that can still fire them.
         _Doc.Close();
         _Binding?.Dispose();
-        World.SetInputMode(Lumina.EInputMode.Game);
-        World.SetMouseMode(Lumina.EMouseMode.Captured);
+        World.Input.SetInputMode(Lumina.EInputMode.Game);
+        World.Input.SetMouseMode(Lumina.EMouseMode.Captured);
     }
 }

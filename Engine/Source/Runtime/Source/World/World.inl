@@ -1,6 +1,7 @@
 #pragma once
 
 #include "World/Entity/Components/SceneFolderComponent.h"
+#include "World/Subsystems/EngineSubsystems.h"
 
 namespace Lumina
 {
@@ -156,7 +157,7 @@ namespace Lumina
         EntityRegistry.Ctx().Erase<T>();
     }
 
-    //~ Registry, deferred commands, events and messages.
+    //~ Registry, deferred commands and events.
 
     auto& CWorld::GetEntityRegistry(this auto& Self)
     {
@@ -173,33 +174,6 @@ namespace Lumina
         return Self.EventQueues;
     }
 
-    auto& CWorld::GetMessageBus(this auto& Self)
-    {
-        return Self.MessageBus;
-    }
-
-    //~ Per-world managers.
-
-    auto& CWorld::GetTimerManager(this auto& Self)
-    {
-        return Self.template GetSingleton<FTimerManager>();
-    }
-
-    auto& CWorld::GetTweenManager(this auto& Self)
-    {
-        return Self.template GetSingleton<FTweenManager>();
-    }
-
-    auto& CWorld::GetCoroutineManager(this auto& Self)
-    {
-        return Self.template GetSingleton<FCoroutineManager>();
-    }
-
-    auto& CWorld::GetInputModeLeases(this auto& Self)
-    {
-        return Self.template GetSingleton<FInputModeLeases>();
-    }
-
     //~ Subsystems.
 
     template<typename T>
@@ -208,11 +182,24 @@ namespace Lumina
         return static_cast<T*>(GetSubsystem(T::StaticClass()));
     }
 
+    template<typename T>
+    T* CWorld::EnsureSubsystem()
+    {
+        return static_cast<T*>(EnsureSubsystem(T::StaticClass()));
+    }
+
     //~ Rendering and scene folders.
 
     auto& CWorld::GetRenderCallbacks(this auto& Self)
     {
         return Self.RenderCallbacks;
+    }
+
+    auto* CWorld::FindRenderSettings(this auto& Self)
+    {
+        return Self.EntityRegistry.IsValid(Self.SingletonEntity)
+            ? Self.EntityRegistry.template TryGet<SWorldRenderSettings>(Self.SingletonEntity)
+            : nullptr;
     }
 
     auto* CWorld::FindSceneFolders(this auto& Self)

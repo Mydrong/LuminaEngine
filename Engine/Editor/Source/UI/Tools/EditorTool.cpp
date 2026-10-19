@@ -245,7 +245,7 @@ namespace Lumina
             return;
         }
 
-        SCameraComponent* Camera = World->GetActiveCamera();
+        SCameraComponent* Camera = World->GetCamera()->GetActiveCamera();
         if (Camera == nullptr)
         {
             return;
@@ -520,7 +520,7 @@ namespace Lumina
         CameraTransform.SetLocation(CameraLocation);
         CameraTransform.SetRotation(Math::FindLookAtRotation(CameraTarget, CameraLocation));
 
-        World->SetActiveCamera(EditorEntity);
+        World->GetCamera()->SetActiveCamera(EditorEntity);
     }
 
     void FEditorTool::GetDefaultCameraPose(FVector3& OutLocation, FVector3& OutTarget) const
@@ -898,12 +898,12 @@ namespace Lumina
         t = Math::Clamp(t, 0.0f, 1.0f);
         const float NewFOV = Math::Mix(120.0f, 50.0f, t);
 
-        if (SCameraComponent* CameraComponent = World->GetActiveCamera())
+        if (SCameraComponent* CameraComponent = World->GetCamera()->GetActiveCamera())
         {
             CameraComponent->SetAspectRatio(AspectRatio);
 
             // Only the editor's own camera takes the width-derived FOV, since a game or cinematic camera authors its own lens.
-            if (World->GetActiveCameraEntity() == EditorEntity)
+            if (World->GetCamera()->GetActiveCameraEntity() == EditorEntity)
             {
                 CameraComponent->SetFOV(NewFOV);
             }
@@ -1194,7 +1194,10 @@ namespace Lumina
 
         if (ImGui::BeginMenu("Rendering"))
         {
-            FSceneRenderSettings& Settings = RenderScene->GetSceneRenderSettings();
+            SWorldRenderSettings& Settings = World->GetRenderSettings();
+
+            // The toggles save with the world, so a change dirties its package. The debug views do not.
+            bool bSavedSettingChanged = false;
 
             if (ImGui::BeginMenu("View Mode"))
             {
@@ -1287,7 +1290,6 @@ namespace Lumina
             // Each entry says what it costs to disable, so nobody leaves one off and reports a frame-rate bug.
             if (ImGui::BeginMenu("Culling"))
             {
-                // Spelled out per entry, since these are bitfields and there is no pointer to one.
                 static const char* const kNames[] =
                 {
                     "Frustum Cull",
@@ -1309,52 +1311,38 @@ namespace Lumina
                     "Distance-based LOD selection.\nOff: always LOD 0, full detail.",
                 };
 
-                bool bValues[] =
+                bool* const Toggles[] =
                 {
-                    (bool)Settings.bFrustumCull,
-                    (bool)Settings.bConeCull,
-                    (bool)Settings.bOcclusionCull,
-                    (bool)Settings.bMeshletOcclusionCull,
-                    (bool)Settings.bShadowOcclusionCull,
-                    (bool)Settings.bCPUInstanceCull,
-                    (bool)Settings.bUseLODs,
+                    &Settings.bFrustumCull,
+                    &Settings.bConeCull,
+                    &Settings.bOcclusionCull,
+                    &Settings.bMeshletOcclusionCull,
+                    &Settings.bShadowOcclusionCull,
+                    &Settings.bCPUInstanceCull,
+                    &Settings.bUseLODs,
                 };
-                static_assert(std::size(kNames) == std::size(kTooltips), "Cull toggle names and tooltips must pair up.");
+                static_assert(std::size(kNames) == std::size(kTooltips) && std::size(kNames) == std::size(Toggles), "Cull toggle names, tooltips and fields must pair up.");
 
-                bool bChanged[std::size(kNames)] = {};
                 for (size_t i = 0; i < std::size(kNames); ++i)
                 {
-                    bChanged[i] = ImGui::MenuItem(kNames[i], nullptr, &bValues[i]);
+                    bSavedSettingChanged |= ImGui::MenuItem(kNames[i], nullptr, Toggles[i]);
                     if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
                     {
                         ImGui::SetTooltip("%s", kTooltips[i]);
                     }
                 }
 
-                if (bChanged[0]) { Settings.bFrustumCull          = bValues[0]; }
-                if (bChanged[1]) { Settings.bConeCull             = bValues[1]; }
-                if (bChanged[2]) { Settings.bOcclusionCull        = bValues[2]; }
-                if (bChanged[3]) { Settings.bMeshletOcclusionCull = bValues[3]; }
-                if (bChanged[4]) { Settings.bShadowOcclusionCull  = bValues[4]; }
-                if (bChanged[5]) { Settings.bCPUInstanceCull      = bValues[5]; }
-                if (bChanged[6]) { Settings.bUseLODs              = bValues[6]; }
-
                 ImGui::Separator();
 
                 // Whatever is still missing with all of these off was not culled, which beats any single toggle.
-                const bool bAllOff = !Settings.bFrustumCull && !Settings.bConeCull && !Settings.bOcclusionCull
-                                  && !Settings.bMeshletOcclusionCull && !Settings.bShadowOcclusionCull
-                                  && !Settings.bCPUInstanceCull && !Settings.bUseLODs;
+                const bool bAllOff = Algo::NoneOf(Toggles, [](const bool* Toggle) { return *Toggle; });
                 if (ImGui::MenuItem("Disable All Culling", nullptr, bAllOff))
                 {
-                    const uint8 bEnable = bAllOff ? 1u : 0u;
-                    Settings.bFrustumCull          = bEnable;
-                    Settings.bConeCull             = bEnable;
-                    Settings.bOcclusionCull        = bEnable;
-                    Settings.bMeshletOcclusionCull = bEnable;
-                    Settings.bShadowOcclusionCull  = bEnable;
-                    Settings.bCPUInstanceCull      = bEnable;
-                    Settings.bUseLODs              = bEnable;
+                    for (bool* Toggle : Toggles)
+                    {
+                        *Toggle = bAllOff;
+                    }
+                    bSavedSettingChanged = true;
                 }
                 if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
                 {
@@ -1365,11 +1353,7 @@ namespace Lumina
                 ImGui::Separator();
 
                 // This pins every stage's inputs rather than turning one off, so you can fly out and look.
-                bool bFrozen = (bool)Settings.bFreezeCulling;
-                if (ImGui::MenuItem("Freeze Culling", nullptr, &bFrozen))
-                {
-                    Settings.bFreezeCulling = bFrozen;
-                }
+                ImGui::MenuItem("Freeze Culling", nullptr, &Settings.bFreezeCulling);
                 if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
                 {
                     ImGui::SetTooltip("Pins the cull to the camera, frustums and depth pyramid as they are now, "
@@ -1383,22 +1367,13 @@ namespace Lumina
 
             ImGui::Separator();
 
-            bool bWireframe = Settings.bWireframe;
-            if (ImGui::MenuItem("Wireframe", nullptr, &bWireframe))
-            {
-                Settings.bWireframe = bWireframe;
-            }
+            ImGui::MenuItem("Wireframe", nullptr, &Settings.bWireframe);
 
-            bool bDrawBillboards = Settings.bDrawBillboards;
-            if (ImGui::MenuItem("Draw Billboards", nullptr, &bDrawBillboards))
-            {
-                Settings.bDrawBillboards = bDrawBillboards;
-            }
+            bSavedSettingChanged |= ImGui::MenuItem("Draw Billboards", nullptr, &Settings.bDrawBillboards);
 
-            bool bDrawAABB = Settings.bDrawAABB;
-            if (ImGui::MenuItem("Draw Bounds", nullptr, &bDrawAABB))
+            if (bSavedSettingChanged && World->GetPackage() != nullptr)
             {
-                Settings.bDrawAABB = bDrawAABB;
+                World->GetPackage()->MarkDirty();
             }
 
             // Tool-specific view-mode items, such as the world's Entity Debug Info and Game View.
@@ -1534,7 +1509,7 @@ namespace Lumina
         // UpdateViewportInput rebuilds the projection per frame, so a non-drawing tool keeps a stale one.
         if (!bOrthographic && HasEditorCameraControl())
         {
-            if (SCameraComponent* Camera = World->GetActiveCamera())
+            if (SCameraComponent* Camera = World->GetCamera()->GetActiveCamera())
             {
                 Camera->SetPerspectiveProjection();
             }
@@ -2482,7 +2457,7 @@ namespace Lumina
         }
 
         // Falls back to the EditorEntity, since asset editors often own the camera there directly.
-        const SCameraComponent* Camera = World->GetActiveCamera();
+        const SCameraComponent* Camera = World->GetCamera()->GetActiveCamera();
         if (Camera == nullptr && EditorEntity != ECS::NullEntity && World->IsValidEntity(EditorEntity))
         {
             Camera = World->TryGetComponent<SCameraComponent>(EditorEntity);
@@ -2569,7 +2544,7 @@ namespace Lumina
             return false;
         }
 
-        const SCameraComponent* Camera = World->GetActiveCamera();
+        const SCameraComponent* Camera = World->GetCamera()->GetActiveCamera();
         if (Camera == nullptr && EditorEntity != ECS::NullEntity && World->IsValidEntity(EditorEntity))
         {
             Camera = World->TryGetComponent<SCameraComponent>(EditorEntity);
@@ -2663,7 +2638,7 @@ namespace Lumina
             return Hit(SurfaceLocation);
         }
 
-        const SCameraComponent* Camera = World->GetActiveCamera();
+        const SCameraComponent* Camera = World->GetCamera()->GetActiveCamera();
         if (Camera == nullptr && EditorEntity != ECS::NullEntity && World->IsValidEntity(EditorEntity))
         {
             Camera = World->TryGetComponent<SCameraComponent>(EditorEntity);

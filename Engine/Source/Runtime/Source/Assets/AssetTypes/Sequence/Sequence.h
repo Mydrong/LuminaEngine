@@ -223,7 +223,7 @@ namespace Lumina
         FString Payload;
     };
 
-    // An event that fired, handed to script through CWorld::ConsumeSequenceEvents.
+    // An event that fired, handed to script through CSequenceSubsystem::ConsumeEvents.
     REFLECT()
     struct RUNTIME_API SSequenceFiredEvent
     {

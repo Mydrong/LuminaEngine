@@ -122,7 +122,8 @@ namespace Lumina::Reflection
     X(Bind,                     Flag,  Runtime, "A command a UI document runs from data-event-*, or a computed {{ value }} when it takes nothing and returns one.") \
     X(SuppressGCTransition,     Flag,  Script, "Skips the GC transition on the generated C# call. Only valid on a short leaf function that never calls back into managed code.") \
     X(NoSuppressGCTransition,   Flag,  Script, "Opts one function back out of a type-wide REFLECT(ScriptFastCalls).") \
-    X(ScriptInternal,           Flag,  Script, "Binds the generated C# method as internal, for plumbing only a typed C# helper calls.")
+    X(ScriptInternal,           Flag,  Script, "Binds the generated C# method as internal, for plumbing only a typed C# helper calls.") \
+    X(ScriptProperty,          Either, Script, "Binds a getter that takes nothing as a C# read-only property, named by the value or by the function name without Get, and keeps the method internal.")
 
 #define LUMINA_SCRIPT_EXPORT_SPECIFIERS(X) \
     X(Class,                Value, Script, "Required. The C# static class the free function binds to, optionally namespaced.") \

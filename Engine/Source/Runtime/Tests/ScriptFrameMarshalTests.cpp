@@ -357,6 +357,22 @@ TEST_F(FFrameMarshalTest, AnOverloadedScriptFunctionIsRefusedWhereItIsDeclared)
     EXPECT_EQ(Count, 1) << "the distinctly named function should still be described";
 }
 
+// An override shares its parent's storage, so the subclass schema must not add a second copy of the property.
+TEST_F(FFrameMarshalTest, AnOverriddenPropertyStaysInItsParentsSchema)
+{
+    using FCountsFn = void(*)(int32*, int32*, int32*, int32*);
+    auto* Counts = (FCountsFn)DotNet::ResolveManagedExport("Test_OverriddenPropertySchemaCounts");
+    ASSERT_NE(Counts, nullptr);
+
+    int32 Override = -1, Own = -1, Inherited = -1, AbstractOverride = -1;
+    Counts(&Override, &Own, &Inherited, &AbstractOverride);
+
+    EXPECT_EQ(Override, 0) << "an override of a stored property was minted again on the subclass";
+    EXPECT_EQ(Own, 1) << "the subclass's own property should still be minted";
+    EXPECT_EQ(Inherited, 0) << "an inherited property belongs to the parent's minted class";
+    EXPECT_EQ(AbstractOverride, 1) << "an abstract property has no storage, so its override must be minted";
+}
+
 TEST_F(FFrameMarshalTest, AParameterCarriesItsDirectionOntoTheMintedProperty)
 {
     Scripting::FScriptExportSchema Params;
@@ -1842,9 +1858,7 @@ TEST_F(FFrameMarshalTest, ScriptTweenBuilderDrivesEveryStepKind)
     TStrongObjectPtr<CWorld> World(NewObject<CWorld>(nullptr, FName("ScriptTweenWorld"), FGuid::New(), OF_Transient));
     ECS::FRegistry& Registry = World->GetEntityRegistry();
 
-    // The world's initialization makes this, and a bare test world never runs it.
-    FTweenManager& Manager = Registry.Ctx().Emplace<FTweenManager>();
-    Manager.SetWorldRegistry(&Registry);
+    FTweenManager& Manager = World->GetTweens()->GetTweenManager();
 
     const ECS::FEntity Entity = Registry.Create();
     Registry.Emplace<STransformComponent>(Entity);

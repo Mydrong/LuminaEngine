@@ -3,6 +3,7 @@
 #include "ObjectBase.h"
 
 #include "Class.h"          // CField, for the shutdown type-object ordering below
+#include "Containers/HashPrimitives.h"
 #include "Memory/Memory.h"
 #include "Memory/MemoryTracking.h"
 
@@ -136,8 +137,10 @@ namespace Lumina::Object::Internal
         
         ChunkedArray.Initialize(MaxObjects);
             
-        FreeIndices.reserve(MaxObjects / 4);
-        QuarantinedIndices.reserve(QuarantineCapacity);
+        for (FSlotShard& Shard : SlotShards)
+        {
+            Shard.QuarantinedIndices.reserve(QuarantineCapacity);
+        }
 
         bInitialized = true;
     }
@@ -200,96 +203,118 @@ namespace Lumina::Object::Internal
         });
 
         ChunkedArray.Shutdown();
-        FreeIndices.clear();
-        QuarantinedIndices.clear();
-        QuarantineCursor = 0;
+        for (FSlotShard& Shard : SlotShards)
+        {
+            FScopeLock ShardLock(Shard.Mutex);
+            Shard.FreeIndices.clear();
+            Shard.QuarantinedIndices.clear();
+            Shard.QuarantineCursor = 0;
+        }
         bInitialized = false;
+    }
+
+    FCObjectArray::FSlotShard& FCObjectArray::SlotShardForThisThread() const
+    {
+        return SlotShards[Containers::MixHash64(Threading::GetThreadID()) % SlotShardCount];
+    }
+
+    int32 FCObjectArray::ReclaimQuarantinedIndex()
+    {
+        for (FSlotShard& Shard : SlotShards)
+        {
+            FScopeLock Lock(Shard.Mutex);
+            for (int32 Quarantined : Shard.QuarantinedIndices)
+            {
+                Shard.FreeIndices.push_back(Quarantined);
+            }
+            Shard.QuarantinedIndices.clear();
+            Shard.QuarantineCursor = 0;
+
+            if (!Shard.FreeIndices.empty())
+            {
+                const int32 Index = Shard.FreeIndices.back();
+                Shard.FreeIndices.pop_back();
+                return Index;
+            }
+        }
+        return Constants::kIndexNone;
     }
 
     FObjectHandle FCObjectArray::AllocateObject(CObjectBase* Object)
     {
-        FRecursiveScopeLock Lock(Mutex);
-        
         DEBUG_ASSERT(bInitialized && "Object pool not initialized!");
         DEBUG_ASSERT(Object != nullptr);
-            
-        int32 Index;
-        int32 Generation;
 
-        // Capacity beats the quarantine window, so give the delayed slots up rather than hit the ceiling.
-        if (FreeIndices.empty() && !QuarantinedIndices.empty()
-            && ChunkedArray.GetNumElements() >= ChunkedArray.GetMaxElements())
+        int32 Index = Constants::kIndexNone;
         {
-            for (int32 Quarantined : QuarantinedIndices)
+            FSlotShard& Shard = SlotShardForThisThread();
+            FScopeLock Lock(Shard.Mutex);
+            if (!Shard.FreeIndices.empty())
             {
-                FreeIndices.push_back(Quarantined);
+                Index = Shard.FreeIndices.back();
+                Shard.FreeIndices.pop_back();
             }
-            QuarantinedIndices.clear();
-            QuarantineCursor = 0;
         }
 
-        if (!FreeIndices.empty())
+        if (Index == Constants::kIndexNone)
         {
-            Index = FreeIndices.back();
-            FreeIndices.pop_back();
+            Index = ChunkedArray.ClaimFreshIndex();
+            if (Index != Constants::kIndexNone)
+            {
+                ChunkedArray.EnsureChunkFor(Index);
 
-            FCObjectEntry* Item = ChunkedArray.GetItem(Index);
-            DEBUG_ASSERT(Item != nullptr);
-            DEBUG_ASSERT(Item->GetObj() == nullptr);
+                FCObjectEntry* Item = ChunkedArray.GetItem(Index);
+                DEBUG_ASSERT(Item != nullptr);
 
-            Item->IncrementGeneration();
-            Generation = Item->GetGeneration();
+                constexpr int32 Generation = 1;
+                Item->Generation.store(Generation, std::memory_order_release);
+                Item->ResetRefCount();
+                Item->SetObj(Object);
+                return FObjectHandle(Index, Generation);
+            }
 
-            Item->ResetRefCount();
-            Item->SetObj(Object);
+            Index = ReclaimQuarantinedIndex();
+            ASSERT(Index != Constants::kIndexNone, "Object pool capacity exceeded!");
         }
-        else
-        {
-            Index = ChunkedArray.GetNumElements();
 
-            // Strictly less, or a full pool passes the check and GetItem hands back the null it dereferences.
-            ASSERT(Index < ChunkedArray.GetMaxElements(), "Object pool capacity exceeded!");
-            ChunkedArray.EnsureChunkFor(Index);
+        FCObjectEntry* Item = ChunkedArray.GetItem(Index);
+        DEBUG_ASSERT(Item != nullptr);
+        DEBUG_ASSERT(Item->GetObj() == nullptr);
 
-            FCObjectEntry* Item = ChunkedArray.GetItem(Index);
-            DEBUG_ASSERT(Item != nullptr);
+        Item->IncrementGeneration();
+        const int32 Generation = Item->GetGeneration();
 
-            Generation = 1;
-            Item->Generation.store(Generation, std::memory_order_release);
-            Item->ResetRefCount();
-            Item->SetObj(Object);
-
-            ChunkedArray.IncrementElementCount();
-        }
-    
+        Item->ResetRefCount();
+        Item->SetObj(Object);
 
         return FObjectHandle(Index, Generation);
     }
 
     void FCObjectArray::DeallocateObject(int32 Index)
     {
-        FRecursiveScopeLock Lock(Mutex);
-
         DEBUG_ASSERT(bInitialized, "Object pool not initialized!");
-            
+
+        // Nothing else can reach the slot until it is pushed below, so the entry is reset outside the lock.
         FCObjectEntry* Item = ChunkedArray.GetItem(Index);
         DEBUG_ASSERT(Item != nullptr);
         DEBUG_ASSERT(Item->GetObj() != nullptr);
-    
-        Item->SetObj(nullptr);
 
+        Item->SetObj(nullptr);
         Item->IncrementGeneration();
 
-        if ((int32)QuarantinedIndices.size() < QuarantineCapacity)
+        FSlotShard& Shard = SlotShardForThisThread();
+        FScopeLock Lock(Shard.Mutex);
+
+        if ((int32)Shard.QuarantinedIndices.size() < QuarantineCapacity)
         {
-            QuarantinedIndices.push_back(Index);
+            Shard.QuarantinedIndices.push_back(Index);
             return;
         }
 
         // A ring, since erasing the front of the vector would memmove the whole window on every free.
-        FreeIndices.push_back(QuarantinedIndices[QuarantineCursor]);
-        QuarantinedIndices[QuarantineCursor] = Index;
-        QuarantineCursor = (QuarantineCursor + 1) % QuarantineCapacity;
+        Shard.FreeIndices.push_back(Shard.QuarantinedIndices[Shard.QuarantineCursor]);
+        Shard.QuarantinedIndices[Shard.QuarantineCursor] = Index;
+        Shard.QuarantineCursor = (Shard.QuarantineCursor + 1) % QuarantineCapacity;
     }
 
     void FCObjectArray::AddReinstanceRedirect(const FObjectHandle& From, const FObjectHandle& To)
@@ -511,8 +536,6 @@ namespace Lumina::Object::Internal
             return nullptr;
         }
 
-        FRecursiveScopeLock Lock(Mutex);
-
         FCObjectEntry* Item = ChunkedArray.GetItem(Handle.Index);
         if (!Item || Item->GetGeneration() != Handle.Generation)
         {
@@ -528,6 +551,14 @@ namespace Lumina::Object::Internal
         // Refused outright once the destroy is claimed, so there is no resurrection after free.
         if (!Item->AddStrongRefIfAlive())
         {
+            return nullptr;
+        }
+
+        // No lock orders this against a free, so the slot could have changed hands since the checks above.
+        if (Item->GetGeneration() != Handle.Generation || Item->GetObj() != Object)
+        {
+            int32 Unused = 0;
+            (void)Item->ReleaseStrongRef(Unused);
             return nullptr;
         }
         return Object;
@@ -571,25 +602,19 @@ namespace Lumina::Object::Internal
             return false;
         }
 
+        FCObjectEntry* Item = ChunkedArray.GetItem(Object->GetInternalIndex());
+        if (!OwnsSlot(Object, Item, Site))
         {
-            FRecursiveScopeLock Lock(Mutex);
-
-            FCObjectEntry* Item = ChunkedArray.GetItem(Object->GetInternalIndex());
-            if (!OwnsSlot(Object, Item, Site))
-            {
-                return false; // freed already, and the slot has moved on
-            }
-
-            // The claim, not the lock, is what makes this exactly once across every destroy path.
-            if (!(bForced ? Item->TryClaimDestroyForced() : Item->TryClaimDestroyIfUnreferenced()))
-            {
-                return false;
-            }
-
-            Object->SetFlag(OF_MarkedDestroy);
+            return false; // freed already, and the slot has moved on
         }
 
-        // Outside the lock, since OnDestroy runs arbitrary teardown.
+        // The claim is exactly once across every destroy path, and a weak upgrade either beats it or is refused by it.
+        if (!(bForced ? Item->TryClaimDestroyForced() : Item->TryClaimDestroyIfUnreferenced()))
+        {
+            return false;
+        }
+
+        Object->SetFlag(OF_MarkedDestroy);
         Object->DestroyInternal();
         return true;
     }
@@ -609,7 +634,13 @@ namespace Lumina::Object::Internal
     int32 FCObjectArray::GetNumAliveObjects() const
     {
         // Quarantined slots hold no object either, they are just held back from reuse for a while.
-        return ChunkedArray.GetNumElements() - (int32)FreeIndices.size() - (int32)QuarantinedIndices.size();
+        int32 Empty = 0;
+        for (FSlotShard& Shard : SlotShards)
+        {
+            FScopeLock Lock(Shard.Mutex);
+            Empty += (int32)Shard.FreeIndices.size() + (int32)Shard.QuarantinedIndices.size();
+        }
+        return ChunkedArray.GetNumElements() - Empty;
     }
 
     int32 FCObjectArray::GetMaxObjects() const

@@ -28,12 +28,12 @@ public static class Fx
 
     /// Bursts System at a full transform, so a scaled or pre-rotated effect keeps its authored orientation.
     public static FEntity Play(CParticleSystem? System, FTransform Transform, float Lifetime = AutoLifetime)
-        => System == null ? FEntity.Null : Engine.World.SpawnParticleSystem(System, Transform, Lifetime);
+        => System == null ? FEntity.Null : Engine.World.Spawner.SpawnParticleSystem(System, Transform, Lifetime);
 
     /// Parents the effect to Target so it follows, optionally on a named socket or bone.
     public static FEntity PlayAttached(CParticleSystem? System, FEntity Target, string Socket = "",
         FVector3 Offset = default, float Lifetime = AutoLifetime)
-        => System == null ? FEntity.Null : Engine.World.SpawnParticleSystemAttached(System, Target, Socket, Offset, Lifetime);
+        => System == null ? FEntity.Null : Engine.World.Spawner.SpawnParticleSystemAttached(System, Target, Socket, Offset, Lifetime);
 
     /// Resolves the reference (asset-manager cached) and plays it; a null or unset reference is a no-op.
     public static FEntity Play(TSoftObjectPtr<CParticleSystem> System, FVector3 Location, float Lifetime = AutoLifetime)

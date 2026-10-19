@@ -577,8 +577,11 @@ namespace Lumina
             uint32 SceneColorIndex;   // bindless SRV of the ping-pong source
             uint32 SceneDepthIndex;   // bindless SRV of opaque depth
             uint32 HDRIndex;          // bindless SRV of pre-tone-map HDR
+            // Invalid while no mesh draws custom depth, which the template reads as nothing drawn.
+            uint32 CustomDepthIndex;
+            uint32 CustomStencilIndex;
         };
-        static_assert(sizeof(FPostProcessMaterialPushConstants) == 16,
+        static_assert(sizeof(FPostProcessMaterialPushConstants) == 24,
             "FPostProcessMaterialPushConstants must match the slang push block.");
     }
 
@@ -594,8 +597,12 @@ namespace Lumina
 
         LUMINA_PROFILE_SECTION_COLORED("Post Process Material Pass", tracy::Color::Magenta);
 
-        const FSceneImage& DepthTex = GetNamedImage(ENamedImage::DepthAttachment);
-        const FSceneImage& HDRTex   = GetPostInputImage();
+        const FSceneImage& DepthTex         = GetNamedImage(ENamedImage::DepthAttachment);
+        const FSceneImage& HDRTex           = GetPostInputImage();
+        const FSceneImage& CustomDepthTex   = GetNamedImage(ENamedImage::CustomDepth);
+        const FSceneImage& CustomStencilTex = GetNamedImage(ENamedImage::CustomStencil);
+        const bool         bCustomDepth     = Frame.Views.CustomDepthCullView != Constants::kIndexNoneU32
+                                           && CustomDepthTex.IsValid() && CustomStencilTex.IsValid();
 
         const bool bSMAAEnabled = GetViewSMAAMode(*CurrentView) != ESMAAMode::Off;
 
@@ -643,6 +650,8 @@ namespace Lumina
             PC.SceneColorIndex  = (uint32)Source->GetResourceID();
             PC.SceneDepthIndex  = (uint32)DepthTex.GetResourceID();
             PC.HDRIndex         = (uint32)HDRTex.GetResourceID();
+            PC.CustomDepthIndex   = bCustomDepth ? (uint32)CustomDepthTex.GetResourceID()   : RHI::kInvalidHeapSlot;
+            PC.CustomStencilIndex = bCustomDepth ? (uint32)CustomStencilTex.GetResourceID() : RHI::kInvalidHeapSlot;
 
             RHI::CmdDraw(CL, MakeArgs(PC), 3, 1, 0, 0);
             RHI::CmdEndRenderPass(CL);

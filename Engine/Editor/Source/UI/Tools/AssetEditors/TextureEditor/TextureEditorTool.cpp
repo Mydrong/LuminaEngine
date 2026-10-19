@@ -1,6 +1,8 @@
 #include "TextureEditorTool.h"
 
 #include "Assets/AssetTypes/Textures/Texture.h"
+#include "Platform/Process/PlatformProcess.h"
+#include "Tools/Export/AssetExport.h"
 #include "Assets/AssetTypes/Textures/TextureArray.h"
 #include "Assets/Factories/TextureFactory/TextureFactory.h"
 #include "Assets/Factories/TextureFactory/TextureArrayFactory.h"
@@ -808,9 +810,22 @@ namespace Lumina
             ImGui::Spacing();
             if (ImGui::Button("Export to File...", ImVec2(-1, 0)))
             {
-                // TODO Implement export
+                FFixedString Directory;
+                if (Platform::OpenFileDialogue(Directory, "Export To Folder", nullptr))
+                {
+                    FString Written;
+                    FString Error;
+                    if (AssetExport::Export(Texture, FStringView(Directory.c_str(), Directory.size()), Written, Error))
+                    {
+                        ImGuiX::Notifications::NotifySuccess("Exported '{0}' to {1}", Texture->GetName().c_str(), Written);
+                    }
+                    else
+                    {
+                        ImGuiX::Notifications::NotifyWarning("'{0}' {1}", Texture->GetName().c_str(), Error);
+                    }
+                }
             }
-            ImGuiX::TextTooltip("Export the texture to disk.");
+            ImGuiX::TextTooltip("Write the image this texture was imported from to a folder on disk.");
             
             if (ImGui::Button("Analyze Color Distribution", ImVec2(-1, 0)))
             {

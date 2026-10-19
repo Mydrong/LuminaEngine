@@ -17,10 +17,10 @@ public static class Navigation
     /// Same, but Result says why, including for the null return, so a failure can be logged with a reason.
     public static NavPath? FindPath(CWorld World, FVector3 Start, FVector3 End, out ENavPathResult Result)
     {
-        Result = World.GetPathResult(Start, End, MaxPathCorners);
+        Result = World.Navigation.GetPathResult(Start, End, MaxPathCorners);
 
         System.Span<FVector3> Buffer = stackalloc FVector3[MaxPathCorners];
-        int Count = World.FindPath(Start, End, Buffer);
+        int Count = World.Navigation.FindPath(Start, End, Buffer);
         if (Count <= 0)
         {
             return null;

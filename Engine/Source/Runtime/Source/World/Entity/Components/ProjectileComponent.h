@@ -34,7 +34,7 @@ namespace Lumina
 
     // A moving projectile. SProjectileSystem sweeps it forward each frame (continuous, so it can't tunnel
     // through thin geometry), reports the first hit through OnHit, and optionally destroys it. Spawn one
-    // with CWorld::SpawnProjectile, or add this component to any entity.
+    // with CSpawnSubsystem::SpawnProjectile, or add this component to any entity.
     REFLECT(Component, Category = "Gameplay")
     struct RUNTIME_API SProjectileComponent
     {

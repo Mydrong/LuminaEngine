@@ -153,7 +153,16 @@ namespace Lumina::Containers
         requires (IndexOf<TDecayed> != kInvalidIndex && !std::is_same_v<TDecayed, TVariant>)
         TVariant& operator=(T&& Value)
         {
-            Emplace<TDecayed>(std::forward<T>(Value));
+            if constexpr (std::is_assignable_v<TDecayed&, T&&>)
+            {
+                if (Is<TDecayed>())
+                {
+                    Get<TDecayed>() = std::forward<T>(Value);
+                    return *this;
+                }
+            }
+            TDecayed Staged(std::forward<T>(Value));
+            Emplace<TDecayed>(std::move_if_noexcept(Staged));
             return *this;
         }
 

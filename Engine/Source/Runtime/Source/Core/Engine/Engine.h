@@ -44,6 +44,7 @@ namespace Lumina
         
         RUNTIME_API virtual bool Init();
         RUNTIME_API virtual bool Shutdown();
+        void EnableCookedRuntimeStartup() { bStartCookedRuntime = true; }
 
         /** Opens the frame clock at the true top of the loop, so the frame-rate cap absorbs the GPU wait. */
         RUNTIME_API void MarkLoopStart();
@@ -237,6 +238,7 @@ namespace Lumina
         
         bool                    bCloseRequested = false;
         bool                    bEngineReadyToClose = false;
+        bool                    bStartCookedRuntime = false;
     };
     
     RUNTIME_API extern FEngine* GEngine;

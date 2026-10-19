@@ -46,7 +46,7 @@ namespace Lumina::MCP
         {
             { "Transform",    &CSequenceTrack_Transform::StaticClass,    true,  "Keys the binding's Location, Rotation (pitch, yaw, roll degrees) and Scale." },
             { "CameraCut",    &CSequenceTrack_CameraCut::StaticClass,    false, "Which camera binding is live over each time range, with optional blends." },
-            { "Event",        &CSequenceTrack_Event::StaticClass,        false, "Named moments gameplay reacts to through World.ConsumeSequenceEvents." },
+            { "Event",        &CSequenceTrack_Event::StaticClass,        false, "Named moments gameplay reacts to through World.GetSequences().ConsumeEvents." },
             { "Property",     &CSequenceTrack_Property::StaticClass,     true,  "A curve driving one reflected number on one component, such as SCameraComponent FOV." },
             { "Audio",        &CSequenceTrack_Audio::StaticClass,        false, "Sounds started as the playhead passes them, at the binding when there is one." },
             { "Fade",         &CSequenceTrack_Fade::StaticClass,         false, "Fades the whole picture toward Color, holding across cuts." },
@@ -400,7 +400,7 @@ namespace Lumina::MCP
                 return NoGround;
             }
 
-            const SRayResult Hit = World->Raycast(FVector3(X, 5000.0f, Z), FVector3(X, -5000.0f, Z), ECS::NullEntity);
+            const SRayResult Hit = World->GetPhysics()->Raycast(FVector3(X, 5000.0f, Z), FVector3(X, -5000.0f, Z), ECS::NullEntity);
             return Hit.bHit ? Hit.Location.y : NoGround;
         }
 
@@ -1069,7 +1069,7 @@ namespace Lumina::MCP
         {
             Agent::FToolRegistry::Get().Register<SAddSequenceEventParams, SSequenceIndexResult>(
                 Owner, "sequence.add_event",
-                "Fire a named event at a time, for gameplay to react to through World.ConsumeSequenceEvents, such as an explosion on a beat.",
+                "Fire a named event at a time, for gameplay to react to through World.GetSequences().ConsumeEvents, such as an explosion on a beat.",
                 Agent::EToolEffect::Mutating, Agent::EToolThread::GameThread,
                 [](const SAddSequenceEventParams& In, SSequenceIndexResult& Out)
                 {
@@ -1390,9 +1390,9 @@ namespace Lumina::MCP
                         return Agent::FToolResult::Error(Error);
                     }
 
-                    ForEachPlayer(World, Sequence, [World](ECS::FEntity Player) { World->StopSequence(Player); });
+                    ForEachPlayer(World, Sequence, [World](ECS::FEntity Player) { World->GetSequences()->StopSequence(Player); });
 
-                    const ECS::FEntity Player = World->PlaySequence(Sequence, In.bLoop, In.PlayRate);
+                    const ECS::FEntity Player = World->GetSequences()->PlaySequence(Sequence, In.bLoop, In.PlayRate);
                     SSequencePlayerComponent& Component = World->GetComponent<SSequencePlayerComponent>(Player);
                     if (In.StartTime > 0.0f)
                     {
@@ -1475,7 +1475,7 @@ namespace Lumina::MCP
                         ++Touched;
                         if (Action == "Stop")
                         {
-                            World->StopSequence(Entity);
+                            World->GetSequences()->StopSequence(Entity);
                             return;
                         }
 
@@ -1561,8 +1561,8 @@ namespace Lumina::MCP
                     if (Sequence != nullptr)
                     {
                         // Held on its first frame through the warmup, so streaming and exposure settle on the opening shot.
-                        ForEachPlayer(World, nullptr, [World](ECS::FEntity Player) { World->StopSequence(Player); });
-                        const ECS::FEntity Player = World->PlaySequence(Sequence, false, 1.0f);
+                        ForEachPlayer(World, nullptr, [World](ECS::FEntity Player) { World->GetSequences()->StopSequence(Player); });
+                        const ECS::FEntity Player = World->GetSequences()->PlaySequence(Sequence, false, 1.0f);
                         World->GetComponent<SSequencePlayerComponent>(Player).Pause();
 
                         Settings.OnRecordingStarted = [Sequence]()
@@ -1639,7 +1639,7 @@ namespace Lumina::MCP
                         return Agent::FToolResult::Error(Error.empty() ? FString("No world is open.") : Error);
                     }
 
-                    const ECS::FEntity Camera = World->GetActiveCameraEntity();
+                    const ECS::FEntity Camera = World->GetCamera()->GetActiveCameraEntity();
                     const STransformComponent* Transform = Camera != ECS::NullEntity && World->IsValidEntity(Camera)
                         ? World->TryGetComponent<STransformComponent>(Camera) : nullptr;
                     if (Transform == nullptr)
@@ -1689,7 +1689,7 @@ namespace Lumina::MCP
                         return Agent::FToolResult::Error(Error.empty() ? FString("No world is open.") : Error);
                     }
 
-                    const ECS::FEntity Camera = World->GetActiveCameraEntity();
+                    const ECS::FEntity Camera = World->GetCamera()->GetActiveCameraEntity();
                     STransformComponent* Transform = Camera != ECS::NullEntity && World->IsValidEntity(Camera)
                         ? World->TryGetComponent<STransformComponent>(Camera) : nullptr;
                     if (Transform == nullptr)

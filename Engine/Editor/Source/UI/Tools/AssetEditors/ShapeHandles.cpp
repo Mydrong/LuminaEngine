@@ -161,7 +161,7 @@ namespace Lumina::ShapeHandles
     bool BuildViewportRay(CWorld* World, const ImVec2& ViewportOrigin, const ImVec2& ViewportSize,
                           const ImVec2& ScreenPos, FVector3& OutOrigin, FVector3& OutDirection)
     {
-        SCameraComponent* Camera = (World != nullptr) ? World->GetActiveCamera() : nullptr;
+        SCameraComponent* Camera = (World != nullptr) ? World->GetCamera()->GetActiveCamera() : nullptr;
         if (Camera == nullptr)
         {
             return false;

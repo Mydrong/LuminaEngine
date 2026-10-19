@@ -119,12 +119,75 @@ namespace Lumina
                         RHI::EAccessFlags::ShaderRead | RHI::EAccessFlags::ShaderWrite | RHI::EAccessFlags::IndexRead);
     }
 
+    const char* FDefaultSceneRenderer::FindMissingMeshletDrawBuffer() const
+    {
+        return GetMeshletDrawList().Gpu == 0 ? "MeshletDrawList"
+             : SceneBindings.Instances == 0  ? "Instances (visible-instance ring)"
+             : GetRenderBuckets().Gpu == 0   ? "RenderBuckets"
+                                             : nullptr;
+    }
+
+    FShaderH FDefaultSceneRenderer::GetVisBufferPixelShader()
+    {
+        static const FString  VertexPathDefine("MESHLET_VERTEX_PATH");
+        static const FShaderH VisPixel = FShaderLibrary::Get("VisBufferPixel.slang",
+            RHI::SupportsMeshShaders() ? TSpan<const FString>() : TSpan<const FString>(&VertexPathDefine, 1));
+        return VisPixel;
+    }
+
+    void FDefaultSceneRenderer::DrawVisBufferBatches(RHI::FCmdListH CL, uint32 ViewIndex, EMeshletSlice Slice,
+                                                     const FUIntVector2& Extent, EFormat VisFormat)
+    {
+        const FShaderH VisPixel = GetVisBufferPixelShader();
+
+        FMeshletPassContext Ctx;
+        Ctx.CullViewIndex = ViewIndex;
+        Ctx.ViewportW     = (float)Extent.x;
+        Ctx.ViewportH     = (float)Extent.y;
+        Ctx.Slice         = Slice;
+
+        ForEachMeshletBatch(CL, RenderFrame->Geometry.OpaqueDrawList, Ctx,
+            [&](FGraphicsPipelineKey& Key, const FMeshDrawCommand& Batch)
+            {
+                const bool bMaskedClip = Batch.bMasked
+                                      && Batch.MaskedVisBufferPixelShader != nullptr
+                                      && Batch.VisBufferMeshShaderMasked != nullptr;
+
+                Key.MS               = bMaskedClip ? Batch.VisBufferMeshShaderMasked : Batch.VisBufferMeshShader;
+                Key.PS               = bMaskedClip ? Batch.MaskedVisBufferPixelShader : VisPixel;
+                Key.bVisBufferMasked = bMaskedClip;   // interpolants only when actually masked-clipping
+                Key.bWireframe       = FrameSettings.bWireframe;
+                // The backface bit must agree with the CmdSetCullMode below or two-sided geometry vanishes.
+                Key.TriCullMode      = (uint8)((Batch.bTwoSided ? 0u : (uint32)TriCull_Backface)
+                                             | ((FrameSettings.bWireframe || Key.SampleCount > 1) ? 0u : (uint32)TriCull_SmallPrim));
+                Key.DepthFormat      = EFormat::D32;
+                Key.ColorTargets.push_back({ VisFormat, {} });
+                return true;
+            },
+            [&](const FMeshDrawCommand& Batch)
+            {
+                if (FrameSettings.bWireframe)
+                {
+                    RHI::CmdSetLineWidth(CL, 1.5f);
+                }
+
+                // Two-sided materials must rasterize both faces into the VisBuffer.
+                RHI::CmdSetCullMode(CL, Batch.bTwoSided ? RHI::ECullMode::None : RHI::ECullMode::Back);
+            },
+            [&](FGraphicsPipelineKey& Key, const FMeshDrawCommand&)
+            {
+                Key.MS               = DefaultMaterialStage(EMaterialShaderStage::VisBufferMesh);
+                Key.PS               = VisPixel;
+                Key.bVisBufferMasked = false;
+                return Key.MS != nullptr;
+            });
+    }
+
     void FDefaultSceneRenderer::VisBufferPass(RHI::FCmdListH CL, uint32 ViewIndex, bool bClear,
                                             ECullPhase::Type Phase)
     {
         const FFrameData& Frame             = *RenderFrame;
         const auto& DrawCommands            = Frame.Geometry.DrawCommands;
-        const auto& OpaqueDrawList          = Frame.Geometry.OpaqueDrawList;
 
         if (ViewIndex == Constants::kIndexNoneU32)
         {
@@ -148,34 +211,22 @@ namespace Lumina
             }
         }
 
+        if (const char* MissingBuffer = FindMissingMeshletDrawBuffer(); bHasDraws && MissingBuffer != nullptr)
         {
-            const RHI::GPUPtr DrawListAddr  = GetMeshletDrawList().Gpu;
-            const RHI::GPUPtr InstancesAddr = SceneBindings.Instances;
-            const RHI::GPUPtr BucketsAddr   = GetRenderBuckets().Gpu;
-            const char* MissingBuffer = DrawListAddr == 0  ? "MeshletDrawList"
-                                      : InstancesAddr == 0 ? "Instances (visible-instance ring)"
-                                      : BucketsAddr == 0   ? "RenderBuckets"
-                                                           : nullptr;
-            if (bHasDraws && MissingBuffer != nullptr)
+            static FName LastMissing;
+            const FName Missing(MissingBuffer);
+            if (Missing != LastMissing)
             {
-                static FName LastMissing;
-                const FName Missing(MissingBuffer);
-                if (Missing != LastMissing)
-                {
-                    LastMissing = Missing;
-                    LOG_ERROR("VisBuffer: '{}' has no device address this frame; skipping the draws. "
-                              "Drawing would page-fault the GPU inside the mesh shader.", MissingBuffer);
-                }
-                bHasDraws = false;
+                LastMissing = Missing;
+                LOG_ERROR("VisBuffer: '{}' has no device address this frame; skipping the draws. "
+                          "Drawing would page-fault the GPU inside the mesh shader.", MissingBuffer);
             }
+            bHasDraws = false;
         }
 
         LUMINA_PROFILE_SECTION_COLORED("VisBuffer Geometry Pass", tracy::Color::Red);
 
-        static const FString  VertexPathDefine("MESHLET_VERTEX_PATH");
-        static const FShaderH VisPixel = FShaderLibrary::Get("VisBufferPixel.slang",
-            RHI::SupportsMeshShaders() ? TSpan<const FString>() : TSpan<const FString>(&VertexPathDefine, 1));
-        bHasDraws = bHasDraws && VisPixel != nullptr;
+        bHasDraws = bHasDraws && GetVisBufferPixelShader() != nullptr;
         if (!bHasDraws && !bClear)
         {
             return;
@@ -189,7 +240,7 @@ namespace Lumina
         const FSceneImage& VisRT   = GetNamedImage(ENamedImage::VisBuffer);
         const FSceneImage& DepthRT = GetNamedImage(ENamedImage::DepthAttachment);
         const FUIntVector2 Extent  = GetNamedImage(ENamedImage::HDR).GetExtent();
-        
+
         const RHI::ELoadOp GeomLoadOp = bClear ? RHI::ELoadOp::Clear : RHI::ELoadOp::Load;
 
         RHI::FRenderAttachment Color;
@@ -213,52 +264,114 @@ namespace Lumina
         DepthDesc.DepthTest = RHI::EOp::Greater;
         RHI::CmdSetDepthStencil(CL, (DepthDesc));
 
-        FMeshletPassContext Ctx;
-        Ctx.CullViewIndex     = ViewIndex;
-        Ctx.ViewportW         = (float)Extent.x;
-        Ctx.ViewportH         = (float)Extent.y;
-        // The two phases append into the same bucket, so each rasterizes only what its own cull added.
-        Ctx.Slice             = (Phase == ECullPhase::Late) ? EMeshletSlice::Late : EMeshletSlice::Early;
-
         if (bHasDraws)
         {
-        ForEachMeshletBatch(CL, OpaqueDrawList, Ctx,
-            [&](FGraphicsPipelineKey& Key, const FMeshDrawCommand& Batch)
-            {
-                const bool bMaskedClip = Batch.bMasked
-                                      && Batch.MaskedVisBufferPixelShader != nullptr
-                                      && Batch.VisBufferMeshShaderMasked != nullptr;
-
-                Key.MS               = bMaskedClip ? Batch.VisBufferMeshShaderMasked : Batch.VisBufferMeshShader;
-                Key.PS               = bMaskedClip ? Batch.MaskedVisBufferPixelShader : VisPixel;
-                Key.bVisBufferMasked = bMaskedClip;   // interpolants only when actually masked-clipping
-                Key.bWireframe       = FrameSettings.bWireframe;
-                // The backface bit must agree with the CmdSetCullMode below or two-sided geometry vanishes.
-                Key.TriCullMode      = (uint8)((Batch.bTwoSided ? 0u : (uint32)TriCull_Backface)
-                                             | ((FrameSettings.bWireframe || Key.SampleCount > 1) ? 0u : (uint32)TriCull_SmallPrim));
-                Key.DepthFormat      = EFormat::D32;
-                Key.ColorTargets.push_back({ VisRT.Desc.Format, {} });
-                return true;
-            },
-            [&](const FMeshDrawCommand& Batch)
-            {
-                if (FrameSettings.bWireframe)
-                {
-                    RHI::CmdSetLineWidth(CL, 1.5f);
-                }
-
-                // Two-sided materials must rasterize both faces into the VisBuffer.
-                RHI::CmdSetCullMode(CL, Batch.bTwoSided ? RHI::ECullMode::None : RHI::ECullMode::Back);
-            },
-            [&](FGraphicsPipelineKey& Key, const FMeshDrawCommand&)
-            {
-                Key.MS               = DefaultMaterialStage(EMaterialShaderStage::VisBufferMesh);
-                Key.PS               = VisPixel;
-                Key.bVisBufferMasked = false;
-                return Key.MS != nullptr;
-            });
+            // The two phases append into the same bucket, so each rasterizes only what its own cull added.
+            DrawVisBufferBatches(CL, ViewIndex, (Phase == ECullPhase::Late) ? EMeshletSlice::Late : EMeshletSlice::Early,
+                                 Extent, VisRT.Desc.Format);
         }
 
+        RHI::CmdEndRenderPass(CL);
+        Barriers::RasterToRead(CL);
+    }
+
+    void FDefaultSceneRenderer::CustomDepthStencilPass(RHI::FCmdListH CL)
+    {
+        const FFrameData& Frame = *RenderFrame;
+        const uint32 ViewIndex  = Frame.Views.CustomDepthCullView;
+        if (ViewIndex == Constants::kIndexNoneU32 || !CurrentView->bIsPrimary)
+        {
+            return;
+        }
+
+        const FSceneImage& DepthRT   = GetNamedImage(ENamedImage::CustomDepth);
+        const FSceneImage& VisRT     = GetNamedImage(ENamedImage::CustomDepthVis);
+        const FSceneImage& StencilRT = GetNamedImage(ENamedImage::CustomStencil);
+        if (!DepthRT.IsValid() || !VisRT.IsValid() || !StencilRT.IsValid())
+        {
+            return;
+        }
+
+        static const FShaderH FullscreenVS = FShaderLibrary::Get("FullscreenQuad.slang");
+        static const FShaderH ResolvePS    = FShaderLibrary::Get("CustomStencilResolve.slang");
+        if (!FullscreenVS || !ResolvePS)
+        {
+            return;
+        }
+
+        LUMINA_PROFILE_SECTION_COLORED("Custom Depth Pass", tracy::Color::Red);
+
+        const bool bHasDraws = !Frame.Geometry.DrawCommands.empty() && FindMissingMeshletDrawBuffer() == nullptr
+                            && GetVisBufferPixelShader() != nullptr;
+
+        RHI::CmdBarrier(CL,
+            RHI::EStageFlags::Compute, RHI::EAccessFlags::ShaderWrite,
+            RHI::EStageFlags::MeshShader | RHI::EStageFlags::VertexShader | RHI::EStageFlags::IndirectArguments | RHI::EStageFlags::PixelShader,
+            RHI::EAccessFlags::ShaderRead | RHI::EAccessFlags::ShaderWrite | RHI::EAccessFlags::IndirectRead);
+
+        const FUIntVector2 Extent = DepthRT.GetExtent();
+
+        {
+            RHI::FRenderAttachment Color;
+            Color.Texture = VisRT.Texture;
+            Color.LoadOp  = RHI::ELoadOp::Clear;
+            Color.StoreOp = RHI::EStoreOp::Store;
+
+            RHI::FRenderPassDesc Pass;
+            Pass.ColorAttachments         = TSpan<const RHI::FRenderAttachment>(&Color, 1);
+            Pass.DepthAttachment.Texture  = DepthRT.Texture;
+            Pass.DepthAttachment.LoadOp   = RHI::ELoadOp::Clear;
+            Pass.DepthAttachment.StoreOp  = RHI::EStoreOp::Store;
+            Pass.DepthAttachment.Color[0] = 0.0f;
+            Pass.RenderArea               = Extent;
+
+            RHI::CmdBeginRenderPass(CL, Pass);
+            SetViewportScissor(CL, Extent);
+
+            RHI::FDepthStencilDesc DepthDesc;
+            DepthDesc.DepthMode = RHI::EDepthFlags::Read | RHI::EDepthFlags::Write;
+            DepthDesc.DepthTest = RHI::EOp::Greater;
+            RHI::CmdSetDepthStencil(CL, DepthDesc);
+
+            if (bHasDraws)
+            {
+                DrawVisBufferBatches(CL, ViewIndex, EMeshletSlice::All, Extent, VisRT.Desc.Format);
+            }
+
+            RHI::CmdEndRenderPass(CL);
+            Barriers::RasterToRead(CL);
+        }
+
+        RHI::FRenderAttachment Stencil;
+        Stencil.Texture = StencilRT.Texture;
+        Stencil.LoadOp  = RHI::ELoadOp::Undefined;   // every pixel is written, background included
+        Stencil.StoreOp = RHI::EStoreOp::Store;
+
+        RHI::FRenderPassDesc Pass;
+        Pass.ColorAttachments = TSpan<const RHI::FRenderAttachment>(&Stencil, 1);
+        Pass.RenderArea       = Extent;
+
+        RHI::CmdBeginRenderPass(CL, Pass);
+        SetViewportScissor(CL, Extent);
+        RHI::CmdSetDepthStencil(CL, (RHI::FDepthStencilDesc{}));
+        RHI::CmdSetCullMode(CL, RHI::ECullMode::None);
+
+        FGraphicsPipelineKey Key;
+        Key.VS = FullscreenVS;
+        Key.PS = ResolvePS;
+        Key.ColorTargets.push_back({ StencilRT.Desc.Format, {} });
+        RHI::CmdSetPipeline(CL, GetOrCreatePipeline(Key));
+
+        struct FCustomStencilResolvePC
+        {
+            uint32 VisBufferIndex;
+            uint32 DrawListCount;
+        } PC = {};
+        static_assert(sizeof(FCustomStencilResolvePC) == 8, "FCustomStencilResolvePC must match CustomStencilResolve.slang.");
+        PC.VisBufferIndex = (uint32)VisRT.GetResourceID();
+        PC.DrawListCount  = DrawListCapacity;
+
+        RHI::CmdDraw(CL, MakeArgs(PC), 3, 1, 0, 0);
         RHI::CmdEndRenderPass(CL);
         Barriers::RasterToRead(CL);
     }

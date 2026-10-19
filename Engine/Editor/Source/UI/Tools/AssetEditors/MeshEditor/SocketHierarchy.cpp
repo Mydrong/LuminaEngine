@@ -432,7 +432,7 @@ namespace Lumina
                                         bool bViewportHovered, bool bSuppressClicks, float MarkerRadius)
     {
         PickRadius = MarkerRadius * 1.8f;
-        SCameraComponent* Camera = World != nullptr ? World->GetActiveCamera() : nullptr;
+        SCameraComponent* Camera = World != nullptr ? World->GetCamera()->GetActiveCamera() : nullptr;
         if (Camera == nullptr || BoneWorldTransforms.empty())
         {
             return;

@@ -2,7 +2,7 @@
 
 #include "Core/Object/ObjectCore.h"
 #include "GUID/GUID.h"
-#include "Input/InputModeLeases.h"
+#include "Input/ScopedInputMode.h"
 #include "Input/InputQuery.h"
 #include "Input/InputViewport.h"
 #include "World/World.h"
@@ -20,11 +20,6 @@ namespace
 
         FLeaseFixture()
         {
-            ECS::FRegistry& WorldRegistry = World->GetEntityRegistry();
-            if (WorldRegistry.Ctx().Find<FInputModeLeases>() == nullptr)
-            {
-                WorldRegistry.Ctx().Emplace<FInputModeLeases>(World);
-            }
             Viewport.SetWorld(World);
             Registry.Register(&Viewport);
             Input::SetInputMode(World, EInputMode::Game);
@@ -36,7 +31,7 @@ namespace
             Registry.Unregister(&Viewport);
         }
 
-        FInputModeLeases& Leases() const { return World->GetInputModeLeases(); }
+        CInputSubsystem& Leases() const { return *World->GetInput(); }
 
         void ExpectModes(EInputMode InputMode, EMouseMode MouseMode) const
         {
@@ -50,30 +45,30 @@ TEST(InputModeLeases, ReleasingOneHolderKeepsTheOther)
 {
     FLeaseFixture Fixture;
 
-    const uint64 Bag = Fixture.Leases().Acquire(EInputMode::UI, EMouseMode::Normal);
-    const uint64 Hud = Fixture.Leases().Acquire(EInputMode::GameAndUI, EMouseMode::Normal);
+    const uint64 Bag = Fixture.Leases().AcquireInputMode(EInputMode::UI, EMouseMode::Normal);
+    const uint64 Hud = Fixture.Leases().AcquireInputMode(EInputMode::GameAndUI, EMouseMode::Normal);
     Fixture.ExpectModes(EInputMode::UI, EMouseMode::Normal);
 
-    EXPECT_TRUE(Fixture.Leases().Release(Bag));
+    EXPECT_TRUE(Fixture.Leases().ReleaseInputMode(Bag));
     Fixture.ExpectModes(EInputMode::GameAndUI, EMouseMode::Normal);
 
-    EXPECT_TRUE(Fixture.Leases().Release(Hud));
+    EXPECT_TRUE(Fixture.Leases().ReleaseInputMode(Hud));
     Fixture.ExpectModes(EInputMode::Game, EMouseMode::Captured);
-    EXPECT_EQ(Fixture.Leases().Num(), 0);
+    EXPECT_EQ(Fixture.Leases().NumInputModeLeases(), 0);
 }
 
 TEST(InputModeLeases, ReleasingTwiceOrAStrangerIsIgnored)
 {
     FLeaseFixture Fixture;
 
-    const uint64 Bag = Fixture.Leases().Acquire(EInputMode::UI, EMouseMode::Normal);
-    const uint64 Map = Fixture.Leases().Acquire(EInputMode::UI, EMouseMode::Normal);
-    EXPECT_TRUE(Fixture.Leases().Release(Bag));
-    EXPECT_FALSE(Fixture.Leases().Release(Bag));
-    EXPECT_FALSE(Fixture.Leases().Release(0));
+    const uint64 Bag = Fixture.Leases().AcquireInputMode(EInputMode::UI, EMouseMode::Normal);
+    const uint64 Map = Fixture.Leases().AcquireInputMode(EInputMode::UI, EMouseMode::Normal);
+    EXPECT_TRUE(Fixture.Leases().ReleaseInputMode(Bag));
+    EXPECT_FALSE(Fixture.Leases().ReleaseInputMode(Bag));
+    EXPECT_FALSE(Fixture.Leases().ReleaseInputMode(0));
     Fixture.ExpectModes(EInputMode::UI, EMouseMode::Normal);
 
-    EXPECT_TRUE(Fixture.Leases().Release(Map));
+    EXPECT_TRUE(Fixture.Leases().ReleaseInputMode(Map));
     Fixture.ExpectModes(EInputMode::Game, EMouseMode::Captured);
 }
 
@@ -82,9 +77,9 @@ TEST(InputModeLeases, LastReleaseRestoresTheModesFromBeforeTheFirst)
     FLeaseFixture Fixture;
     Input::SetMouseMode(Fixture.World, EMouseMode::Hidden);
 
-    const uint64 Panel = Fixture.Leases().Acquire(EInputMode::UI, EMouseMode::Normal);
+    const uint64 Panel = Fixture.Leases().AcquireInputMode(EInputMode::UI, EMouseMode::Normal);
     Fixture.ExpectModes(EInputMode::UI, EMouseMode::Normal);
-    Fixture.Leases().Release(Panel);
+    Fixture.Leases().ReleaseInputMode(Panel);
     Fixture.ExpectModes(EInputMode::Game, EMouseMode::Hidden);
 }
 
@@ -100,9 +95,9 @@ TEST(InputModeLeases, ScopedLeaseReleasesOnDestructionAndClearDropsAll)
     }
     Fixture.ExpectModes(EInputMode::Game, EMouseMode::Captured);
 
-    Fixture.Leases().Acquire(EInputMode::UI, EMouseMode::Normal);
-    Fixture.Leases().Acquire(EInputMode::GameAndUI, EMouseMode::Hidden);
-    Fixture.Leases().Clear();
-    EXPECT_EQ(Fixture.Leases().Num(), 0);
+    Fixture.Leases().AcquireInputMode(EInputMode::UI, EMouseMode::Normal);
+    Fixture.Leases().AcquireInputMode(EInputMode::GameAndUI, EMouseMode::Hidden);
+    Fixture.Leases().ClearInputModes();
+    EXPECT_EQ(Fixture.Leases().NumInputModeLeases(), 0);
     Fixture.ExpectModes(EInputMode::Game, EMouseMode::Captured);
 }

@@ -58,7 +58,7 @@ public static class GameTask
             // A torn-down world has already dropped its waits, and reaching for one there would touch a dead world.
             if (WaitWorld != null && Wait != 0 && WaitWorld.IsValid)
             {
-                WaitWorld.CancelWait(Wait);
+                WaitWorld.Timers.CancelWait(Wait);
             }
             Source.TrySetCanceled();
         }
@@ -127,12 +127,12 @@ public static class GameTask
 
     // Counts unpaused frames only, like the native Coro::Ticks.
     public static System.Threading.Tasks.Task Ticks(int Count, CancellationToken Token = default)
-        => Schedule(Token, (World, Done) => World.WaitTicks(Count, Done));
+        => Schedule(Token, (World, Done) => World.Timers.WaitTicks(Count, Done));
 
     public static System.Threading.Tasks.Task NextFrame(CancellationToken Token = default) => Ticks(1, Token);
 
     public static System.Threading.Tasks.Task Seconds(double Duration, ECoroutineClock Clock = ECoroutineClock.World, CancellationToken Token = default)
-        => Schedule(Token, (World, Done) => World.WaitSeconds(Duration, Clock, Done));
+        => Schedule(Token, (World, Done) => World.Timers.WaitSeconds(Duration, Clock, Done));
 
     public static System.Threading.Tasks.Task DelaySeconds(float Duration, CancellationToken Token = default) => Seconds(Duration, ECoroutineClock.World, Token);
 

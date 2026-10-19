@@ -395,6 +395,10 @@ namespace Lumina
         {
             --BonelessSkinnedCount;
         }
+        if (Primitives[Index].CustomDepthStencil != 0u)
+        {
+            --CustomDepthCount;
+        }
 
         ReleaseBindings(Index);
         ReleaseBoneSlice(Primitives[Index]);
@@ -1149,7 +1153,7 @@ namespace Lumina
             NewCull.DrawIDAndFlags   = PackDrawIDAndFlags(Binding.BatchIndex, Flags);
             NewCull.SurfaceDescIndex = Binding.SurfaceDescIndex;
             NewCull.MaxDrawDistance  = Cull.MaxDrawDistance;
-            NewCull.LODAndThinning   = PackLODAndThinning(Prim.ForcedLODIndex, 0.0f, Prim.RenderLayers);
+            NewCull.LODAndThinning   = PackLODAndThinning(Prim.ForcedLODIndex, 0.0f, Prim.RenderLayers, Prim.CustomDepthStencil);
 
             const FTransform3x4 NewTransform = PackTransform3x4(InstanceTransformOf(Prim));
 
@@ -1545,6 +1549,7 @@ namespace Lumina
             Prim.bCastShadow     = Component.bCastShadow;
             Prim.bCastFarShadow  = Component.bCastFarShadow;
             Prim.RenderLayers    = Component.RenderLayers.Bits;
+            Prim.CustomDepthStencil = PackCustomDepthStencil(Component.bRenderCustomDepth, Component.CustomDepthStencilValue);
 
             Cull.MaxDrawDistance = Component.MaxDrawDistance;
             Cull.bCastShadow     = Component.bCastShadow ? 1u : 0u;
@@ -1590,6 +1595,7 @@ namespace Lumina
         const TVector<FResolvedSurface>* OldSurfaces = Prim.Surfaces;
         const uint32                     OldHandle   = Prim.ResolveHandle;
         const uint32                     OldGen      = Prim.ResolveGeneration;
+        const bool                       bHadCustomDepth = Prim.CustomDepthStencil != 0u;
 
         Prim.Surfaces = nullptr;
         Prim.EntityID = (Prim.Entity).Value;
@@ -1712,6 +1718,11 @@ namespace Lumina
 
         default:
             break;
+        }
+
+        if ((Prim.CustomDepthStencil != 0u) != bHadCustomDepth)
+        {
+            CustomDepthCount += bHadCustomDepth ? ~0u : 1u;
         }
 
         const bool bSurfacesChanged = (Prim.Surfaces != OldSurfaces)
@@ -2598,6 +2609,7 @@ namespace Lumina
         LinksByEntityIndex.clear();
         SkinnedCount = 0;
         BonelessSkinnedCount = 0;
+        CustomDepthCount = 0;
         RetainedCullEntries.clear();
         RetainedTransforms.clear();
         RetainedStatic.clear();
@@ -3314,6 +3326,7 @@ namespace Lumina
         LinksByEntityIndex.clear();
         SkinnedCount = 0;
         BonelessSkinnedCount = 0;
+        CustomDepthCount = 0;
         RetainedCullEntries.clear();
         RetainedTransforms.clear();
         RetainedStatic.clear();

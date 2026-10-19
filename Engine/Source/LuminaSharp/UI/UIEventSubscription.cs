@@ -41,7 +41,7 @@ public sealed class UIEventSubscription : IDisposable
         Binding.Dispose();
         Binding = default;
 
-        UIWorld.FromHandle(World).RemoveUIEventListener(Listener);
+        UIWorld.FromHandle(World).UI.RemoveEventListener(Listener);
         Listener = default;
     }
 }

@@ -47,7 +47,7 @@ namespace Lumina
             SCameraComponent& Camera = Registry.Get<SCameraComponent>(Entity);
             if (Camera.bAutoActivate)
             {
-                World->SetActiveCamera(Entity);
+                World->GetCamera()->SetActiveCamera(Entity);
             }
         }
 

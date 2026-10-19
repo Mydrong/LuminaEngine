@@ -1,4 +1,5 @@
 ﻿#include <gtest/gtest.h>
+#include <string>
 #include "Containers/Name.h"
 
 using namespace Lumina;
@@ -275,4 +276,22 @@ TEST(FNameTests, CaseInsensitiveWithNumber)
 
     EXPECT_EQ(a, b);
     EXPECT_EQ(a.GetNumber(), 5u);
+}
+
+TEST(FNameTests, PrefixesRemainDistinct)
+{
+    FName Short("CaseFoldPrefix");
+    FName Long("CaseFoldPrefixMore");
+
+    EXPECT_NE(Short, Long);
+    EXPECT_EQ(Short, FName("CASEFOLDPREFIX"));
+    EXPECT_EQ(Long, FName("CASEFOLDPREFIXMORE"));
+}
+
+TEST(FNameTests, LongCaseFoldedNamesShareAnIndex)
+{
+    const std::string Lower(300, 'a');
+    const std::string Upper(300, 'A');
+
+    EXPECT_EQ(FName(FStringView(Lower.data(), Lower.size())), FName(FStringView(Upper.data(), Upper.size())));
 }

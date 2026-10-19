@@ -5,13 +5,9 @@
 
 namespace Lumina
 {
-    FSceneRenderSettings& IRenderScene::GetSceneRenderSettings()
-    {
-        return World->GetOrEmplaceSingleton<FSceneRenderSettings>();
-    }
-
     void IRenderScene::RefreshFrameSettings()
     {
-        FrameSettings = GetSceneRenderSettings();
+        const SWorldRenderSettings* Settings = World->FindRenderSettings();
+        FrameSettings = Settings != nullptr ? *Settings : SWorldRenderSettings{};
     }
 }

@@ -219,6 +219,8 @@ namespace Lumina
 
         int32                               ForcedLODIndex = -1;
         uint32                              RenderLayers = RenderLayers::kDefaultMask;
+        // PackCustomDepthStencil, zero when it draws no custom depth.
+        uint32                              CustomDepthStencil = 0;
         EInstanceFlags                      BaseFlags = EInstanceFlags::None;
         EPrimitiveSource                    Source = EPrimitiveSource::StaticMesh;
         bool                                bCastShadow = true;
@@ -278,6 +280,9 @@ namespace Lumina
         uint64                              GetStructureGeneration() const { return StructureGeneration; }
 
         uint32                              GetSkinnedPrimitiveCount() const { return SkinnedCount; }
+
+        // Primitives drawn into custom depth, so the renderer adds the view and the pass only while one exists.
+        uint32                              GetCustomDepthPrimitiveCount() const { return CustomDepthCount; }
 
         // Dense skeletal primitive indices, ascending; rebuilt only when the set changes shape.
         const TVector<uint32>&              GetSkeletalIndices();
@@ -713,6 +718,7 @@ namespace Lumina
 
         uint64                              StructureGeneration = 1;
         uint32                              SkinnedCount = 0;
+        uint32                              CustomDepthCount = 0;
         bool                                bResolveTableChanged = false;
 
         struct FSyncStats

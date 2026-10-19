@@ -1,6 +1,7 @@
 #include "RuntimePCH.h"
 #include "TimerSystem.h"
-#include "World/Subsystems/TimerManager.h"
+#include "World/Subsystems/TimerSubsystem.h"
+#include "World/World.h"
 
 namespace Lumina
 {
@@ -14,8 +15,7 @@ namespace Lumina
 
     void STimerSystem::OnUpdate(const SSystemContext& Context)
     {
-
         LUMINA_PROFILE_SCOPE();
-        Context.GetRegistry().Ctx().Get<FTimerManager>().Tick((float)Context.GetDeltaTime(), &Context.GetCommandBus());
+        Context.GetWorld()->GetTimers()->GetTimerManager().Tick((float)Context.GetDeltaTime(), &Context.GetCommandBus());
     }
 }

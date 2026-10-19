@@ -1,4 +1,5 @@
 ﻿#include "RuntimePCH.h"
+#include <bit>
 #include <string>
 #include "GUID.h"
 
@@ -169,10 +170,7 @@ namespace Lumina
         // Per-thread, since a shared unsynchronized generator could hand two threads the same GUID.
         FRandomStream& Random = Math::ThreadRandomStream();
 
-        ByteArray bytes;
-        uint64_t* ptr = reinterpret_cast<uint64_t*>(bytes.data());
-        ptr[0] = Random.NextUInt64();
-        ptr[1] = Random.NextUInt64();
+        ByteArray bytes = std::bit_cast<ByteArray>(TArray<uint64, 2>{Random.NextUInt64(), Random.NextUInt64()});
         
         // Set version (4) and variant bits
         bytes[6] = (bytes[6] & 0x0F) | 0x40;

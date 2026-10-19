@@ -28,6 +28,7 @@
 #include "Tools/UI/ImGui/ImGuiFonts.h"
 #include "Tools/UI/ImGui/EditorColors.h"
 #include "Tools/UI/ImGui/ImGuiX.h"
+#include "Tools/Export/AssetExport.h"
 #include "World/WorldManager.h"
 #include <string.h>
 #include <cstdarg>
@@ -2984,6 +2985,35 @@ namespace Lumina
         return FFixedString(Item->GetVirtualPath().data(), Item->GetVirtualPath().size());
     }
 
+    void FContentBrowserEditorTool::ExportAssets(const TVector<FGuid>& Assets)
+    {
+        FFixedString Directory;
+        if (Assets.empty() || !Platform::OpenFileDialogue(Directory, "Export To Folder", nullptr, LastExportDirectory.empty() ? nullptr : LastExportDirectory.c_str()))
+        {
+            return;
+        }
+        LastExportDirectory = FString(Directory.c_str());
+
+        int32 Exported = 0;
+        for (const FGuid& AssetGUID : Assets)
+        {
+            CObject* Asset = LoadObject<CObject>(AssetGUID);
+            FString Written;
+            FString Error;
+            if (AssetExport::Export(Asset, FStringView(Directory.c_str(), Directory.size()), Written, Error))
+            {
+                ++Exported;
+                continue;
+            }
+            ImGuiX::Notifications::NotifyWarning("'{0}' {1}", Asset != nullptr ? Asset->GetName().c_str() : "An asset", Error);
+        }
+
+        if (Exported > 0)
+        {
+            ImGuiX::Notifications::NotifySuccess("Exported {0} of {1} asset(s) to {2}", Exported, Assets.size(), Directory.c_str());
+        }
+    }
+
     void FContentBrowserEditorTool::DrawReimportAssetMenuItem(const FContentBrowserTileViewItem* ContentItem, bool bIsProtected)
     {
         const FFixedString AssetPath(ContentItem->GetVirtualPath().data(), ContentItem->GetVirtualPath().size());
@@ -3454,6 +3484,17 @@ namespace Lumina
             DrawCreateVariantMenuItem(ContentItem);
             DrawReimportAssetMenuItem(ContentItem, bIsProtected);
 
+            const FFixedString ExportPath(ContentItem->GetVirtualPath().data(), ContentItem->GetVirtualPath().size());
+            const FAssetData* ExportData = FAssetRegistry::Get().GetAssetByPath(ExportPath);
+            if (ExportData != nullptr && AssetExport::CanExport(FindObject<CClass>(ExportData->AssetClass)))
+            {
+                if (ImGui::MenuItem(LE_ICON_EXPORT " Export..."))
+                {
+                    ExportAssets({ ExportData->AssetGUID });
+                }
+                ImGuiX::TextTooltip("Write the file this asset was imported from to a folder on disk.");
+            }
+
             bReplaceReferencesClicked = ImGui::MenuItem(LE_ICON_LINK_VARIANT " Replace References...");
             ImGuiX::TextTooltip("Point everything that references this asset at a different one, or null them.");
         }
@@ -3604,6 +3645,32 @@ namespace Lumina
             ImGui::SetClipboardText(Clipboard.c_str());
             ImGuiX::Notifications::NotifyInfo("{0} paths copied to clipboard", Items.size());
         }
+
+        // Decided from the registry's class names, so drawing the menu never loads an asset.
+        TVector<FGuid> Exportable;
+        for (FTileViewItem* Item : Items)
+        {
+            const auto* ContentItem = static_cast<const FContentBrowserTileViewItem*>(Item);
+            if (!ContentItem->IsAsset())
+            {
+                continue;
+            }
+            const FFixedString AssetPath(ContentItem->GetVirtualPath().data(), ContentItem->GetVirtualPath().size());
+            const FAssetData* Data = FAssetRegistry::Get().GetAssetByPath(AssetPath);
+            if (Data != nullptr && AssetExport::CanExport(FindObject<CClass>(Data->AssetClass)))
+            {
+                Exportable.push_back(Data->AssetGUID);
+            }
+        }
+
+        DrawMenuSection("EXPORT");
+
+        const FFixedString ExportLabel(Format(LE_ICON_EXPORT " Export {} Asset{}...", Exportable.size(), Exportable.size() == 1 ? "" : "s").c_str());
+        if (ImGui::MenuItem(ExportLabel.c_str(), nullptr, false, !Exportable.empty()))
+        {
+            ExportAssets(Exportable);
+        }
+        ImGuiX::TextTooltip("Write each texture, sound and font back out as the file it was imported from. Other selected items are skipped.");
 
         ImGui::Spacing();
         ImGui::Separator();

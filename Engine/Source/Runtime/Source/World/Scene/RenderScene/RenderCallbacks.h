@@ -126,6 +126,9 @@ namespace Lumina
         FRenderTexture  SceneColor;
         FRenderTexture  SceneDepth;
         FRenderTexture  Velocity;
+        // Invalid until the custom depth pass has run, and while no mesh draws custom depth.
+        FRenderTexture  CustomDepth;
+        FRenderTexture  CustomStencil;
 
         // Uploads Value for this frame only, which is how shaders receive their pass arguments.
         template<typename T>

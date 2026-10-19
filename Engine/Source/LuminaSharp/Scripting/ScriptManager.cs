@@ -549,7 +549,7 @@ internal sealed class ScriptManager
         }
 
         // Each process-static holder of script state would otherwise pin the collectible generation across the unload.
-        CWorld.ClearAllManagedTimers();      // world timers whose Action captures a script instance
+        CTimerSubsystem.ClearAllManaged();      // world timers whose Action captures a script instance
         UIDataModel.DisposeAll();             // MVVM bindings (user ViewModel + native data model)
         ScriptAsync.Clear();                  // tokens for async functions still running in the old generation
         GameTaskRegistry.CancelAll();         // pending awaits, whose continuations close over unloading code

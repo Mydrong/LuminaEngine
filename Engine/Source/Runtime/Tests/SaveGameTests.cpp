@@ -377,7 +377,7 @@ TEST(SaveGame, RequestsRunAtTheSystemUpdateAndReportThroughEventsAndSystems)
     CSaveGameTest* Game = NewObject<CSaveGameTest>(nullptr, NAME_None, FGuid::New(), OF_Transient);
     Game->Score = 77;
 
-    Session.Level.World->RequestSaveGame(Game, Slot, 0);
+    Session.Level.World->GetSaveGames()->RequestSaveGame(Game, Slot, 0);
     EXPECT_EQ(Session.Listener->SavingCount, 0);
     Session.Level.World->FlushCommands();
     EXPECT_TRUE(Session.Saver->HasWork(FWorldTestAccess::SystemContext(*Session.Level.World)));
@@ -393,7 +393,7 @@ TEST(SaveGame, RequestsRunAtTheSystemUpdateAndReportThroughEventsAndSystems)
     EXPECT_TRUE(CSaveGameLibrary::DoesSaveGameExist(Slot, 0));
 
     FRunningWorld Fresh;
-    Fresh.Level.World->RequestLoadGame(Slot, 0);
+    Fresh.Level.World->GetSaveGames()->RequestLoadGame(Slot, 0);
     Fresh.EndFrame();
     ASSERT_EQ(Fresh.Log.Completed.size(), 1u);
     const SSaveGameCompletedEvent& Loaded = Fresh.Log.Completed[0];
@@ -408,7 +408,7 @@ TEST(SaveGame, RequestsRunAtTheSystemUpdateAndReportThroughEventsAndSystems)
     EXPECT_TRUE(CSaveGameLibrary::DeleteGameInSlot(Slot, 0));
     EXPECT_FALSE(CSaveGameLibrary::DoesSaveGameExist(Slot, 0));
 
-    Fresh.Level.World->RequestLoadGame(Slot, 0);
+    Fresh.Level.World->GetSaveGames()->RequestLoadGame(Slot, 0);
     Fresh.EndFrame();
     ASSERT_EQ(Fresh.Log.Completed.size(), 2u);
     EXPECT_FALSE(Fresh.Log.Completed[1].bSucceeded);

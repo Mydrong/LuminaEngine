@@ -21,6 +21,7 @@ struct FMeshletCullContext
     bool     bFoliage;
     bool     bShadowOnly;
     bool     bTwoSided;
+    bool     bCustomDepth;
     uint     Layers;
     float4x4 Model;
     float    MaxScale;
@@ -47,6 +48,7 @@ FMeshletCullContext MakeMeshletCullContext(FGPUInstance* Inst)
     Ctx.bFoliage    = I.HasFlag(EInstanceFlags::Foliage);
     Ctx.bShadowOnly = I.HasFlag(EInstanceFlags::ShadowOnly);
     Ctx.bTwoSided   = I.HasFlag(EInstanceFlags::TwoSided);
+    Ctx.bCustomDepth = I.bCustomDepth;
     Ctx.Layers      = I.RenderLayers;
 
     Ctx.Model = I.ModelMatrix;
@@ -166,6 +168,7 @@ bool TestMeshletAgainstView(FMeshletCullContext Ctx, FCullView View,
               && !(bShadowView && !Ctx.bCaster)
               && !(View.HasFlag(CULL_VIEW_FLAG_FAR_CASCADE) && !Ctx.bFarCaster)
               && !(View.HasFlag(CULL_VIEW_FLAG_NO_FOLIAGE) && Ctx.bFoliage)
+              && !(View.HasFlag(CULL_VIEW_FLAG_CUSTOM_DEPTH_ONLY) && !Ctx.bCustomDepth)
               && !(!bShadowView && Ctx.bShadowOnly)
               && !(View.HasFlag(CULL_VIEW_FLAG_DISTANCE) && (Ctx.DistToCamera - Ctx.InstRadius > Ctx.MaxShadowDist));
 

@@ -442,7 +442,7 @@ public class MeshBuilder
         }
 
         (FVector2[] UVs, FVector4[] Linear) = BuildStreams();
-        return World.CreateStaticMesh(MemoryMarshal.Cast<FVector3, float>(CollectionsMarshal.AsSpan(Positions)),
+        return World.Spawner.CreateStaticMesh(MemoryMarshal.Cast<FVector3, float>(CollectionsMarshal.AsSpan(Positions)),
             MemoryMarshal.Cast<FVector3, float>(CollectionsMarshal.AsSpan(Normals)),
             MemoryMarshal.Cast<FVector2, float>(UVs),
             MemoryMarshal.Cast<FVector4, float>(Linear),

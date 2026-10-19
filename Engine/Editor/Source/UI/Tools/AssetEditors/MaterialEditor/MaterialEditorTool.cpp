@@ -153,7 +153,7 @@ namespace Lumina
     void FMaterialEditorTool::SetupWorldForTool()
     {
         FAssetEditorTool::SetupWorldForTool();
-        World->GetRenderer()->GetSceneRenderSettings().bDrawBillboards = false;
+        World->GetRenderSettings().bDrawBillboards = false;
 
         DirectionalLightEntity = World->ConstructEntity("Directional Light");
         auto& Directional = World->EmplaceComponent<SDirectionalLightComponent>(DirectionalLightEntity);
@@ -197,7 +197,7 @@ namespace Lumina
         SStaticMeshComponent& StaticMeshComponent = World->GetComponent<SStaticMeshComponent>(MeshEntity);
         StaticMeshComponent.MaterialOverrides.clear();
 
-        SCameraComponent* Camera = World->GetActiveCamera();
+        SCameraComponent* Camera = World->GetCamera()->GetActiveCamera();
         if (Camera)
         {
             Camera->PostProcessMaterials.clear();
@@ -342,15 +342,13 @@ namespace Lumina
         const ImVec2 CursorScreenPos = ImGui::GetCursorScreenPos();
         const ImVec2 WindowBottomRight = { CursorScreenPos.x + ViewportSize.x, CursorScreenPos.y + ViewportSize.y };
 
-        if (IRenderScene* Scene = World ? World->GetRenderer() : nullptr)
+        if (World != nullptr && World->GetRenderer() != nullptr)
         {
-            FSceneRenderSettings& Settings = Scene->GetSceneRenderSettings();
-            Settings.bDrawBillboards = false;
-            Settings.bDrawAABB       = false;
-            bWorldGridEnabled        = false;
+            World->GetRenderSettings().bDrawBillboards = false;
+            bWorldGridEnabled = false;
         }
 
-        if (SCameraComponent* CameraComponent = World->GetActiveCamera())
+        if (SCameraComponent* CameraComponent = World->GetCamera()->GetActiveCamera())
         {
             CameraComponent->SetFOV(60.0f);
         }

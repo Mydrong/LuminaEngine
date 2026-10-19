@@ -127,6 +127,14 @@ namespace Lumina
         const FSceneImage& Depth = View.Images[(int)ENamedImage::DepthAttachment];
         Context.SceneDepth  = Depth.GetExtent() == Color->GetExtent() ? ToRenderTexture(Depth) : FRenderTexture{};
         Context.Velocity   = ToRenderTexture(View.Images[(int)ENamedImage::Velocity]);
+
+        const bool bCustomDepthDrawn = RenderFrame->Views.CustomDepthCullView != Constants::kIndexNoneU32
+                                    && Stage != ERenderStage::FrameStart && Stage != ERenderStage::Depth && Stage != ERenderStage::ShadowDepth;
+        if (bCustomDepthDrawn)
+        {
+            Context.CustomDepth   = ToRenderTexture(View.Images[(int)ENamedImage::CustomDepth]);
+            Context.CustomStencil = ToRenderTexture(View.Images[(int)ENamedImage::CustomStencil]);
+        }
         return Context;
     }
 
@@ -179,7 +187,7 @@ namespace Lumina
         RestoreAfterRenderCallbacks(CL);
     }
 
-    void FDefaultSceneRenderer::CustomDepthPass(RHI::FCmdListH CL)
+    void FDefaultSceneRenderer::CallbackDepthPass(RHI::FCmdListH CL)
     {
         if (!HasRenderCallbacks(ERenderStage::Depth))
         {

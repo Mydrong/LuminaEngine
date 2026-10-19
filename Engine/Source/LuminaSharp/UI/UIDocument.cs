@@ -46,7 +46,7 @@ public readonly struct UIDocument : IDisposable
     {
         if (IsValid)
         {
-            UIWorld.FromHandle(World).UnloadUIDocument(Handle);
+            UIWorld.FromHandle(World).UI.UnloadDocument(Handle);
         }
     }
 

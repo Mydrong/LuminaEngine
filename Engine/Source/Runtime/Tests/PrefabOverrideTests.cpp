@@ -488,7 +488,7 @@ TEST(PrefabInstances, SpawnLoadedPrefabPlacesAndParentsTheRoot)
     Registry.Emplace<STransformComponent>(Holder);
 
     const FTransform Placement(FVector3(3.0f, 4.0f, 5.0f));
-    const ECS::FEntity Root = World->SpawnLoadedPrefabAt(Prefab, Placement, Holder);
+    const ECS::FEntity Root = World->GetSpawner()->SpawnLoadedPrefabAt(Prefab, Placement, Holder);
     ASSERT_TRUE(Registry.IsValid(Root));
 
     const SPrefabInstanceComponent* Instance = Registry.TryGet<SPrefabInstanceComponent>(Root);
@@ -502,5 +502,5 @@ TEST(PrefabInstances, SpawnLoadedPrefabPlacesAndParentsTheRoot)
     EXPECT_FLOAT_EQ(Location.y, 4.0f);
     EXPECT_FLOAT_EQ(Location.z, 5.0f);
 
-    EXPECT_EQ(World->SpawnLoadedPrefab(nullptr), ECS::NullEntity);
+    EXPECT_EQ(World->GetSpawner()->SpawnLoadedPrefab(nullptr), ECS::NullEntity);
 }

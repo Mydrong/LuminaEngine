@@ -6,11 +6,14 @@
 #include <rpmalloc.h>
 #include "Construct.h"
 #include <utility>
+#include <new>
+#include <limits>
 #include <xmmintrin.h>
 #include <cstring>
 
 #include "Core/LuminaMacros.h"
 #include "Core/Math/Scalar.h"
+#include "Core/Templates/NumericLimits.h"
 #include "Platform/GenericPlatform.h"
 #include "Platform/Platform.h"
 #include "tracy/TracyC.h"
@@ -31,7 +34,6 @@ namespace Lumina::Memory
         void Free(void* Memory);
     };
     
-    RUNTIME_API extern FMalloc* GMalloc;
     
     
     inline void Memzero(void* Ptr, size_t Size)
@@ -61,15 +63,14 @@ namespace Lumina::Memory
         return std::memcmp(A, B, sizeof(T)) == 0;
     }
 
-    // Hint the cache to pull the line containing Ptr into every level. A pure scheduling hint:
-    // safe on any address (never faults), never required for correctness.
+    // Hint the cache to pull the line containing Ptr into every level.
     FORCEINLINE void Prefetch(const void* Ptr)
     {
-#if defined(_MSC_VER) || defined(__SSE__)
+        #if defined(_MSC_VER) || defined(__SSE__)
         _mm_prefetch(static_cast<const char*>(Ptr), _MM_HINT_T0);
-#else
+        #else
         __builtin_prefetch(Ptr);
-#endif
+        #endif
     }
 
     // Prefetch every cache line of [Ptr, Ptr + Size); Size is typically sizeof(*Ptr).
@@ -121,6 +122,16 @@ namespace Lumina::Memory
     
     NODISCARD RUNTIME_API LUMINA_ALLOCATION LUMINA_RESTRICT_RETURN void* Malloc(size_t Size, size_t Alignment = DEFAULT_ALIGNMENT) LUMINA_ALLOC_SIZE(1);
 
+    inline void* MallocOrThrow(size_t Size, size_t Alignment = DEFAULT_ALIGNMENT)
+    {
+        if (void* Allocation = Malloc(Size == 0 ? 1 : Size, Alignment))
+        {
+            return Allocation;
+        }
+        throw std::bad_alloc();
+    }
+
+
     // No restrict here, since a reallocation is allowed to hand back the pointer it was given.
     NODISCARD RUNTIME_API LUMINA_ALLOCATION void* Realloc(void* Memory, size_t NewSize, size_t OriginalAlignment = DEFAULT_ALIGNMENT) LUMINA_ALLOC_SIZE(2);
 
@@ -131,6 +142,10 @@ namespace Lumina::Memory
     NODISCARD RUNTIME_API bool TryExpandInPlace(void* Memory, size_t NewSize);
 
     RUNTIME_API void Free(void*& Memory);
+
+    // Skips the per-allocation tracking ledger, for an owner that counts its own allocations as a category.
+    NODISCARD RUNTIME_API LUMINA_ALLOCATION LUMINA_RESTRICT_RETURN void* MallocUntracked(size_t Size, size_t Alignment = DEFAULT_ALIGNMENT) LUMINA_ALLOC_SIZE(1);
+    RUNTIME_API void FreeUntracked(void* Memory);
 
     // The calling thread's scratch arena, reachable without Allocator.h, which the containers cannot include.
     NODISCARD RUNTIME_API LUMINA_ALLOCATION LUMINA_RESTRICT_RETURN void* ScratchAllocate(size_t Size, size_t Alignment) LUMINA_ALLOC_SIZE(1);
@@ -147,78 +162,98 @@ namespace Lumina::Memory
     }
 
     
+    namespace Private
+    {
+        template<typename T, typename TConstructor>
+        T* ConstructArray(size_t NumElements, TConstructor&& Constructor)
+        {
+            constexpr size_t Alignment = Math::Max(alignof(T), size_t(16));
+            constexpr size_t HeaderSize = Math::Max(Alignment, sizeof(size_t));
+            if (NumElements > (TNumericLimits<size_t>::Max() - HeaderSize) / sizeof(T))
+            {
+                throw std::bad_array_new_length();
+            }
+            void* Allocation = MallocOrThrow(HeaderSize + sizeof(T) * NumElements, Alignment);
+            auto* Elements = reinterpret_cast<T*>(static_cast<uint8*>(Allocation) + HeaderSize);
+            std::memcpy(reinterpret_cast<uint8*>(Elements) - sizeof(size_t), &NumElements, sizeof(size_t));
+            size_t Constructed = 0;
+            try
+            {
+                for (; Constructed < NumElements; ++Constructed)
+                {
+                    Constructor(Elements + Constructed);
+                }
+            }
+            catch (...)
+            {
+                while (Constructed != 0)
+                {
+                    DestroyAt(Elements + --Constructed);
+                }
+                Free(Allocation);
+                throw;
+            }
+            return Elements;
+        }
+    }
+
     template<typename T, typename ... TArgs>
     NODISCARD FORCEINLINE T* NewArray(const size_t NumElements, TArgs&&... Args)
     {
-        const size_t RequiredAlignment = Math::Max(alignof(T), size_t(16));
-        const size_t RequiredExtraMemory = Math::Max(RequiredAlignment, size_t(4));
-        const size_t RequiredMemory = sizeof(T) * NumElements + RequiredExtraMemory;
-
-        uint8* pOriginalAddress = (uint8*) Malloc(RequiredMemory, RequiredAlignment);
-
-        T* pArrayAddress = reinterpret_cast<T*>(pOriginalAddress + RequiredExtraMemory);
-        for (size_t i = 0; i < NumElements; i++)
+        return Private::ConstructArray<T>(NumElements, [&](T* Element)
         {
-            ConstructAt(pArrayAddress + i, std::forward<TArgs>(Args)...);
-        }
-
-        uint32* pNumElements = reinterpret_cast<uint32_t*>( pArrayAddress ) - 1;
-        *pNumElements = uint32(NumElements);
-
-        return reinterpret_cast<T*>( pArrayAddress );
+            ConstructAt(Element, std::forward<TArgs>(Args)...);
+        });
     }
 
     template<typename T>
     NODISCARD FORCEINLINE T* NewArray(const size_t NumElements, const T& Value)
     {
-        const size_t RequiredAlignment = Math::Max(alignof(T), size_t(16));
-        const size_t RequiredExtraMemory = Math::Max(RequiredAlignment, size_t(4));
-        const size_t RequiredMemory = sizeof(T) * NumElements + RequiredExtraMemory;
-
-        uint8* pOriginalAddress = (uint8*) Malloc(RequiredMemory, RequiredAlignment);
-
-        T* pArrayAddress = reinterpret_cast<T*>(pOriginalAddress + RequiredExtraMemory);
-        for (size_t i = 0; i < NumElements; i++)
+        return Private::ConstructArray<T>(NumElements, [&](T* Element)
         {
-            ConstructAt(pArrayAddress + i, Value);
-        }
-
-        uint32* pNumElements = reinterpret_cast<uint32_t*>( pArrayAddress ) - 1;
-        *pNumElements = uint32(NumElements);
-
-        return pArrayAddress;
+            ConstructAt(Element, Value);
+        });
     }
 
     template<typename T>
     FORCEINLINE void DeleteArray(T* Array)
     {
-        const size_t RequiredAlignment = Math::Max(alignof(T), static_cast<size_t>(16));
-        const size_t RequiredExtraMemory = Math::Max(RequiredAlignment, static_cast<size_t>(4));
-
-        const uint32 NumElements = *(reinterpret_cast<uint32*>(Array) - 1);
-        
-        DestroyN(Array, NumElements);
-
-        uint8* OriginalAddress = reinterpret_cast<uint8*>(Array) - RequiredExtraMemory;
-        Free((void*&)OriginalAddress);
+        if (Array == nullptr)
+        {
+            return;
+        }
+        constexpr size_t Alignment = Math::Max(alignof(T), size_t(16));
+        constexpr size_t HeaderSize = Math::Max(Alignment, sizeof(size_t));
+        size_t NumElements;
+        std::memcpy(&NumElements, reinterpret_cast<uint8*>(Array) - sizeof(size_t), sizeof(size_t));
+        while (NumElements != 0)
+        {
+            DestroyAt(Array + --NumElements);
+        }
+        void* Allocation = reinterpret_cast<uint8*>(Array) - HeaderSize;
+        Free(Allocation);
     }
-    
+
     template<typename T>
     void Delete(T* Type)
     {
-        if constexpr (!std::is_trivially_destructible_v<T>)
+        if (Type == nullptr)
         {
-            Type->~T();
+            return;
         }
-        
-        Free((void*&)Type);
+        DestroyAt(Type);
+        void* Allocation = const_cast<void*>(static_cast<const void*>(Type));
+        Free(Allocation);
     }
 
-    template< typename T >
+    template<typename T>
     void Free(T*& Type)
     {
-        Free((void*&)Type);
+        void* Allocation = const_cast<void*>(static_cast<const void*>(Type));
+        Free(Allocation);
+        Type = nullptr;
     }
+
 }
 
 #if defined(LE_PLATFORM_WINDOWS) || defined(REFLECTION_PARSER)
@@ -237,12 +272,12 @@ extern "C"
 
 
 #define DECLARE_MODULE_ALLOCATOR_OVERRIDES() \
-    void* operator new(std::size_t size) { return Lumina::Memory::Malloc(size); } \
+    void* operator new(std::size_t size) { return Lumina::Memory::MallocOrThrow(size); } \
     void operator delete(void* ptr) noexcept { Lumina::Memory::Free(ptr); } \
-    void* operator new[](std::size_t size) { return Lumina::Memory::Malloc(size); } \
+    void* operator new[](std::size_t size) { return Lumina::Memory::MallocOrThrow(size); } \
     void operator delete[](void* ptr) noexcept { Lumina::Memory::Free(ptr); } \
-    void* operator new(std::size_t size, std::align_val_t align) { return Lumina::Memory::Malloc(size, static_cast<size_t>(align)); } \
-    void* operator new[](std::size_t size, std::align_val_t align) { return Lumina::Memory::Malloc(size, static_cast<size_t>(align)); } \
+    void* operator new(std::size_t size, std::align_val_t align) { return Lumina::Memory::MallocOrThrow(size, static_cast<size_t>(align)); } \
+    void* operator new[](std::size_t size, std::align_val_t align) { return Lumina::Memory::MallocOrThrow(size, static_cast<size_t>(align)); } \
     void operator delete(void* ptr, std::align_val_t) noexcept { Lumina::Memory::Free(ptr); } \
     void operator delete[](void* ptr, std::align_val_t) noexcept { Lumina::Memory::Free(ptr); } \
     void* operator new(std::size_t size, const std::nothrow_t&) noexcept { return Lumina::Memory::Malloc(size); } \

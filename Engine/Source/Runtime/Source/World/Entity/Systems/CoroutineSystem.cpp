@@ -1,5 +1,6 @@
 #include "RuntimePCH.h"
 #include "CoroutineSystem.h"
+#include "World/Subsystems/TimerSubsystem.h"
 #include "World/World.h"
 
 namespace Lumina
@@ -21,6 +22,6 @@ namespace Lumina
             return;
         }
         const bool bPaused = Context.GetUpdateStage() == EUpdateStage::Paused;
-        World->GetCoroutineManager().Tick(World->GetWorldDeltaTime(), World->GetRealDeltaTime(), bPaused);
+        World->GetTimers()->GetCoroutineManager().Tick(World->GetWorldDeltaTime(), World->GetRealDeltaTime(), bPaused);
     }
 }

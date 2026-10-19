@@ -1836,8 +1836,22 @@ namespace Lumina::Reflection
                 Writer.Linef("[global::LuminaSharp.NativeCall(Module = \"%s\", EntryPoint = \"%s\")]",
                     Module.c_str(), CallThunk.c_str());
             }
-            Writer.Linef("%s %spartial %s %s(%s);", FunctionHasMetadata(Fn, "ScriptInternal") ? "internal" : "public",
+            // A getter that takes nothing reads as a property, so World.Physics stands for World.GetPhysics().
+            const std::string* PropertyName = FindMetadata(Fn.Metadata, "ScriptProperty");
+            const bool bProperty = PropertyName != nullptr && SigParams.empty() && !FB.bVoid && VectorOutCS.empty();
+            Writer.Linef("%s %spartial %s %s(%s);", (bProperty || FunctionHasMetadata(Fn, "ScriptInternal")) ? "internal" : "public",
                 bStatic ? "static " : "", RetCS.c_str(), Name.c_str(), SigParams.c_str());
+
+            if (bProperty)
+            {
+                std::string Property = *PropertyName;
+                if (Property.empty() || Property == "true")
+                {
+                    Property = Name.rfind("Get", 0) == 0 && Name.size() > 3 ? Name.substr(3) : Name;
+                }
+                EmitDocSummary(Writer, Fn.Metadata);
+                Writer.Linef("public %s%s %s => %s();", bStatic ? "static " : "", RetCS.c_str(), Property.c_str(), Name.c_str());
+            }
         }
 
         // A C# Span arrives as (T* pinned, int Length); a TVector param is rebuilt from that pair for the call.

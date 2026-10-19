@@ -3266,66 +3266,68 @@ namespace Lumina
 		}
 
 	// Other domains have no such binding, so emit a graph error rather than a shader that fails to link.
-	void FMaterialCompiler::SceneColor(const FString& ID, CMaterialInput* UV)
+	bool FMaterialCompiler::RequirePostProcess(const FString& ID, CMaterialInput* UV, const char* NodeName, const char* Type, const char* Fallback)
 	{
-		if (CurrentMaterialType != EMaterialType::PostProcess)
+		if (CurrentMaterialType == EMaterialType::PostProcess)
 		{
-			EdNodeGraph::FError Error;
-			Error.Name        = "SceneColor";
-			Error.Description = "SceneColor is only valid in materials with MaterialType = PostProcess.";
-			Error.Node        = UV ? UV->GetOwningNode() : nullptr;
-			Errors.push_back(Error);
-			GetActiveChunk().append("float4 " + ID + " = float4(0.0, 0.0, 0.0, 1.0);\n");
-			return;
+			return true;
 		}
 
+		EdNodeGraph::FError Error;
+		Error.Name        = NodeName;
+		Error.Description = FString(NodeName) + " is only valid in materials with MaterialType = PostProcess.";
+		Error.Node        = UV ? UV->GetOwningNode() : nullptr;
+		Errors.push_back(Error);
+		GetActiveChunk().append(FString(Type) + " " + ID + " = " + Fallback + ";\n");
+		return false;
+	}
+
+	FString FMaterialCompiler::ScreenUV(CMaterialInput* UV)
+	{
 		FInputValue UVValue = GetTypedInputValue(UV, "UV0");
-		FString UVStr = (UV && UV->HasConnection()) ? (UVValue.Value + ".xy") : FString("UV0");
-		GetActiveChunk().append("float4 " + ID + " = uSceneColor.Sample(" + UVStr + ");\n");
+		return (UV && UV->HasConnection()) ? (UVValue.Value + ".xy") : FString("UV0");
+	}
+
+	void FMaterialCompiler::SceneColor(const FString& ID, CMaterialInput* UV)
+	{
+		if (RequirePostProcess(ID, UV, "SceneColor", "float4", "float4(0.0, 0.0, 0.0, 1.0)"))
+		{
+			GetActiveChunk().append("float4 " + ID + " = uSceneColor.Sample(" + ScreenUV(UV) + ");\n");
+		}
 	}
 
 	void FMaterialCompiler::SceneDepth(const FString& ID, CMaterialInput* UV, bool bLinear)
 	{
-		if (CurrentMaterialType != EMaterialType::PostProcess)
+		if (RequirePostProcess(ID, UV, "SceneDepth", "float", "1.0"))
 		{
-			EdNodeGraph::FError Error;
-			Error.Name        = "SceneDepth";
-			Error.Description = "SceneDepth is only valid in materials with MaterialType = PostProcess.";
-			Error.Node        = UV ? UV->GetOwningNode() : nullptr;
-			Errors.push_back(Error);
-			GetActiveChunk().append("float " + ID + " = 1.0;\n");
-			return;
-		}
-
-		FInputValue UVValue = GetTypedInputValue(UV, "UV0");
-		FString UVStr = (UV && UV->HasConnection()) ? (UVValue.Value + ".xy") : FString("UV0");
-		FString Raw = "uSceneDepth.Sample(" + UVStr + ").r";
-		if (bLinear)
-		{
-			GetActiveChunk().append("float " + ID + " = LinearizeSceneDepth(" + Raw + ");\n");
-		}
-		else
-		{
-			GetActiveChunk().append("float " + ID + " = " + Raw + ";\n");
+			const FString Raw = "uSceneDepth.Sample(" + ScreenUV(UV) + ").r";
+			GetActiveChunk().append("float " + ID + " = " + (bLinear ? "LinearizeSceneDepth(" + Raw + ")" : Raw) + ";\n");
 		}
 	}
 
 	void FMaterialCompiler::SceneHDRColor(const FString& ID, CMaterialInput* UV)
 	{
-		if (CurrentMaterialType != EMaterialType::PostProcess)
+		if (RequirePostProcess(ID, UV, "SceneHDRColor", "float4", "float4(0.0, 0.0, 0.0, 1.0)"))
 		{
-			EdNodeGraph::FError Error;
-			Error.Name        = "SceneHDRColor";
-			Error.Description = "SceneHDRColor is only valid in materials with MaterialType = PostProcess.";
-			Error.Node        = UV ? UV->GetOwningNode() : nullptr;
-			Errors.push_back(Error);
-			GetActiveChunk().append("float4 " + ID + " = float4(0.0, 0.0, 0.0, 1.0);\n");
-			return;
+			GetActiveChunk().append("float4 " + ID + " = uHDRSceneColor.Sample(" + ScreenUV(UV) + ");\n");
 		}
+	}
 
-		FInputValue UVValue = GetTypedInputValue(UV, "UV0");
-		FString UVStr = (UV && UV->HasConnection()) ? (UVValue.Value + ".xy") : FString("UV0");
-		GetActiveChunk().append("float4 " + ID + " = uHDRSceneColor.Sample(" + UVStr + ");\n");
+	void FMaterialCompiler::CustomDepth(const FString& ID, CMaterialInput* UV, bool bLinear)
+	{
+		if (RequirePostProcess(ID, UV, "CustomDepth", "float", "0.0"))
+		{
+			const FString Raw = "uCustomDepth.Sample(" + ScreenUV(UV) + ")";
+			GetActiveChunk().append("float " + ID + " = " + (bLinear ? "LinearizeSceneDepth(" + Raw + ")" : Raw) + ";\n");
+		}
+	}
+
+	void FMaterialCompiler::CustomStencil(const FString& ID, CMaterialInput* UV)
+	{
+		if (RequirePostProcess(ID, UV, "CustomStencil", "float", "0.0"))
+		{
+			GetActiveChunk().append("float " + ID + " = float(uCustomStencil.Load(" + ScreenUV(UV) + "));\n");
+		}
 	}
 
 	void FMaterialCompiler::NumericConstant(const FString& ID, float Value)

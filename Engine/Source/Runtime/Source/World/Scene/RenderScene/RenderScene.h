@@ -2,6 +2,7 @@
 
 #include "World/ECS/Registry.h"
 #include "SceneRenderTypes.h"
+#include "WorldRenderSettings.h"
 #include "RenderCallbacks.h"
 #include "Platform/GenericPlatform.h"
 #include "Renderer/PrimitiveDrawInterface.h"
@@ -100,9 +101,6 @@ namespace Lumina
 
         const FSceneRenderStats&  GetRenderStats() const        { return RenderStats; }
 
-        // The world's copy, which is what a UI edit must write; the scene reads FrameSettings instead.
-        RUNTIME_API FSceneRenderSettings& GetSceneRenderSettings();
-
         // The scene's shadow atlas, or null if the scene has none.
         virtual const FShadowAtlas* GetShadowAtlas() const { return nullptr; }
 
@@ -115,7 +113,7 @@ namespace Lumina
 
         CWorld*                 World = nullptr;
         FSceneRenderStats       RenderStats;
-        FSceneRenderSettings    FrameSettings;
+        SWorldRenderSettings    FrameSettings;
         FSceneFrameFlags        FrameFlags;
     };
 }

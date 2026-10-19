@@ -34,6 +34,46 @@ namespace Lumina::Platform
     {
         TVector<FString> GDLLSearchPaths;
 
+        struct FScopedComApartment
+        {
+            const HRESULT Result = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+
+            ~FScopedComApartment()
+            {
+                if (SUCCEEDED(Result))
+                {
+                    CoUninitialize();
+                }
+            }
+
+            FScopedComApartment() = default;
+            FScopedComApartment(const FScopedComApartment&) = delete;
+            FScopedComApartment& operator=(const FScopedComApartment&) = delete;
+        };
+
+        void BuildDialogFilters(const char* Filter, TVector<FWString>& Storage, TVector<COMDLG_FILTERSPEC>& FileTypes)
+        {
+            if (Filter == nullptr)
+            {
+                return;
+            }
+
+            const char* Cursor = Filter;
+            while (*Cursor != '\0')
+            {
+                Storage.emplace_back(UTF8_TO_TCHAR(Cursor));
+                Cursor += strlen(Cursor) + 1;
+                Storage.emplace_back(UTF8_TO_TCHAR(Cursor));
+                Cursor += strlen(Cursor) + 1;
+            }
+
+            FileTypes.reserve(Storage.size() / 2);
+            for (size_t Index = 0; Index < Storage.size(); Index += 2)
+            {
+                FileTypes.push_back({ Storage[Index].c_str(), Storage[Index + 1].c_str() });
+            }
+        }
+
         // GDLLSearchPaths only locates the file asked for, not the imports the loader resolves first.
         void RegisterLoaderDirectory(const FString& Directory)
         {
@@ -290,13 +330,45 @@ namespace Lumina::Platform
 
     int LaunchProcess(const TCHAR* URL, const TCHAR* Params, bool bLaunchDetached)
     {
-        if (!URL)
+        if (!URL || URL[0] == 0)
         {
             return -1;
         }
 
         FWString URLString(URL);
+        if (URLString.size() >= 2 && URLString.front() == L'"' && URLString.back() == L'"')
+        {
+            URLString = URLString.substr(1, URLString.size() - 2);
+        }
+        if (URLString.empty())
+        {
+            return ERROR_INVALID_PARAMETER;
+        }
         Algo::Replace(URLString, '/', '\\');
+
+        if (URLString.find(L'\\') == FWString::npos)
+        {
+            const DWORD Required = SearchPathW(nullptr, URLString.c_str(), L".exe", 0, nullptr, nullptr);
+            if (Required == 0)
+            {
+                return static_cast<int>(GetLastError());
+            }
+            TVector<wchar_t> Resolved(Required);
+            const DWORD Written = SearchPathW(nullptr, URLString.c_str(), L".exe", Required, Resolved.data(), nullptr);
+            if (Written == 0)
+            {
+                return static_cast<int>(GetLastError());
+            }
+            if (Written >= Required)
+            {
+                return ERROR_INSUFFICIENT_BUFFER;
+            }
+            URLString.assign(Resolved.data(), Written);
+        }
+
+        FWString CommandLine = L"\"";
+        CommandLine += URLString;
+        CommandLine += L"\"";
         
         STARTUPINFOW si{};
         PROCESS_INFORMATION pi{};
@@ -305,8 +377,8 @@ namespace Lumina::Platform
 
         if (Params)
         {
-            URLString += L" ";
-            URLString += Params;
+            CommandLine += L" ";
+            CommandLine += Params;
         }
 
         // Detached here means the child owns its own console and outlives the parent.
@@ -317,11 +389,11 @@ namespace Lumina::Platform
         }
 
         // CreateProcessW modifies the command line string, so make a writable buffer
-        TVector<wchar_t> cmdBuffer(URLString.begin(), URLString.end());
+        TVector<wchar_t> cmdBuffer(CommandLine.begin(), CommandLine.end());
         cmdBuffer.push_back(L'\0');
 
         BOOL result = CreateProcessW(
-            nullptr,                  // lpApplicationName
+            URLString.c_str(),
             cmdBuffer.data(),         // lpCommandLine
             nullptr,                  // lpProcessAttributes
             nullptr,                  // lpThreadAttributes
@@ -947,17 +1019,23 @@ namespace Lumina::Platform
 
     bool OpenFileDialogue(FFixedString& OutFile, const char* Title, const char* Filter, const char* InitialDir)
     {
+        FScopedComApartment Apartment;
+        if (FAILED(Apartment.Result))
+        {
+            LOG_ERROR("Could not initialize COM for the file dialog (HRESULT {}).", static_cast<uint32>(Apartment.Result));
+            return false;
+        }
 
         IFileDialog* FileDialog = nullptr;
         HRESULT Result = CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_ALL, IID_IFileDialog, reinterpret_cast<void**>(&FileDialog));
 
         if (FAILED(Result))
         {
-            CoUninitialize();
-            PANIC("Failed to create File Open Dialog");
+            LOG_ERROR("Could not create the file dialog (HRESULT {}).", static_cast<uint32>(Result));
+            return false;
         }
         
-        DWORD Options;
+        DWORD Options = 0;
         FileDialog->GetOptions(&Options);
 
         if (!Filter)
@@ -987,34 +1065,7 @@ namespace Lumina::Platform
         TVector<COMDLG_FILTERSPEC> fileTypes;
         TVector<FWString> StringStorage;
 
-        if (Filter && strlen(Filter) > 0)
-        {
-            const char* p = Filter;
-            while (*p)
-            {
-                size_t NameLen = strlen(p);
-                FWString wideName = UTF8_TO_TCHAR(std::string(p, NameLen).c_str());
-                p += NameLen + 1;
-
-                size_t specLen = strlen(p);
-                FWString wideSpec = UTF8_TO_TCHAR(std::string(p, specLen).c_str());
-                p += specLen + 1;
-
-                StringStorage.push_back(wideName);
-                StringStorage.push_back(wideSpec);
-
-                fileTypes.push_back({ 
-                    StringStorage[StringStorage.size() - 2].c_str(),
-                    StringStorage[StringStorage.size() - 1].c_str() 
-                });
-            }
-        }
-
-        if (!fileTypes.empty())
-        {
-            FileDialog->SetFileTypes(static_cast<UINT>(fileTypes.size()), fileTypes.data());
-        }
-
+        BuildDialogFilters(Filter, StringStorage, fileTypes);
         if (!fileTypes.empty())
         {
             FileDialog->SetFileTypes(static_cast<UINT>(fileTypes.size()), fileTypes.data());
@@ -1041,7 +1092,6 @@ namespace Lumina::Platform
         }
 
         FileDialog->Release();
-        CoUninitialize();
         return bResult;
     }
 
@@ -1050,6 +1100,12 @@ namespace Lumina::Platform
     bool OpenFileDialogueMulti(TVector<FFixedString>& OutFiles, const char* Title, const char* Filter, const char* InitialDir)
     {
         OutFiles.clear();
+        FScopedComApartment Apartment;
+        if (FAILED(Apartment.Result))
+        {
+            LOG_ERROR("Could not initialize COM for the file dialog (HRESULT {}).", static_cast<uint32>(Apartment.Result));
+            return false;
+        }
 
         IFileOpenDialog* Dialog = nullptr;
         if (FAILED(CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_ALL, IID_IFileOpenDialog, reinterpret_cast<void**>(&Dialog))))
@@ -1080,22 +1136,7 @@ namespace Lumina::Platform
         TVector<COMDLG_FILTERSPEC> FileTypes;
         TVector<FWString>          Storage;
 
-        if (Filter && strlen(Filter) > 0)
-        {
-            const char* Cursor = Filter;
-            while (*Cursor)
-            {
-                const size_t NameLen = strlen(Cursor);
-                Storage.push_back(UTF8_TO_TCHAR(std::string(Cursor, NameLen).c_str()));
-                Cursor += NameLen + 1;
-
-                const size_t SpecLen = strlen(Cursor);
-                Storage.push_back(UTF8_TO_TCHAR(std::string(Cursor, SpecLen).c_str()));
-                Cursor += SpecLen + 1;
-
-                FileTypes.push_back({ Storage[Storage.size() - 2].c_str(), Storage[Storage.size() - 1].c_str() });
-            }
-        }
+        BuildDialogFilters(Filter, Storage, FileTypes);
 
         if (!FileTypes.empty())
         {
@@ -1135,7 +1176,6 @@ namespace Lumina::Platform
         }
 
         Dialog->Release();
-        CoUninitialize();
 
         return !OutFiles.empty();
     }

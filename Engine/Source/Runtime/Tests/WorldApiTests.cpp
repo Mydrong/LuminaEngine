@@ -68,3 +68,17 @@ TEST(WorldApi, TransformsOfAMissingEntityAreDefaults)
     EXPECT_EQ(World->GetEntityScale(Gone), FVector3(1.0f));
     EXPECT_EQ(World->GetEntityTransform(Gone).GetLocation(), FVector3(0.0f));
 }
+
+TEST(WorldApi, EngineSubsystemsExistEvenForAnUninitializedWorld)
+{
+    CWorld* World = NewWorld();
+    ASSERT_EQ(World->GetSubsystem<CPhysicsSubsystem>(), nullptr) << "a bare world starts with no subsystems";
+
+    CPhysicsSubsystem* Physics = World->GetPhysics();
+    ASSERT_NE(Physics, nullptr);
+    EXPECT_EQ(Physics->GetWorld(), World);
+    EXPECT_EQ(World->GetPhysics(), Physics) << "a second read finds the same one rather than creating another";
+    EXPECT_EQ(World->GetSubsystem<CPhysicsSubsystem>(), Physics);
+    EXPECT_NE(World->GetTweens(), nullptr);
+    EXPECT_NE(World->GetMessageBus(), nullptr);
+}
