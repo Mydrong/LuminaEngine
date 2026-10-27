@@ -40,24 +40,25 @@ namespace Lumina::MCP
                 return false;
             }
 
-            // An emitter asset is edited through a transient system holding only it, as the particle editor does.
             CParticleEmitter* EmitterAsset = Cast<CParticleEmitter>(Asset);
-            // Only the wrapper is held, since releasing a ref to a loaded system nothing else holds would free it.
-            if (EmitterAsset != nullptr)
-            {
-                // The wrapper's ref is the emitter's only one, so the session keeps it or the edit dies with the wrapper.
-                if (MCP::FServer* Server = FMCPEditorModule::GetServer())
-                {
-                    Server->KeepLoaded(EmitterAsset);
-                }
-                Held = ParticleOps::WrapEmitter(EmitterAsset);
-            }
-            Out = Held ? Held.Get() : Cast<CParticleSystem>(Asset);
-            if (Out == nullptr)
+            if (EmitterAsset == nullptr && Cast<CParticleSystem>(Asset) == nullptr)
             {
                 OutError = Lumina::Format("'{}' is a {}, not a particle system or emitter.", Guid, Asset->GetClass()->GetName());
                 return false;
             }
+
+            // A tool's refs are short-lived, a compile job's included, and the last one released frees an asset nothing else holds.
+            if (MCP::FServer* Server = FMCPEditorModule::GetServer())
+            {
+                Server->KeepLoaded(Asset);
+            }
+
+            // An emitter asset is edited through a transient system holding only it, as the particle editor does.
+            if (EmitterAsset != nullptr)
+            {
+                Held = ParticleOps::WrapEmitter(EmitterAsset);
+            }
+            Out = Held ? Held.Get() : Cast<CParticleSystem>(Asset);
 
             // The open editor keeps its own list of stacks, which an edit made here would silently diverge from.
             if (Access == EParticleAccess::Write)
