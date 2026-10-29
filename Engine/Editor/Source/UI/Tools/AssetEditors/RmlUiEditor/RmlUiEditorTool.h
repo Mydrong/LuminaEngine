@@ -10,7 +10,8 @@
 #include "Platform/Filesystem/DirectoryWatcher.h"
 #include "Renderer/RHITexture.h"
 #include "UI/RmlUiBridge.h"
-#include "UI/ColorTextEdit/TextEditor.h"
+#include "UI/CodeEditor/CodeEditor.h"
+#include "UI/CodeEditor/Languages/RmlLanguage.h"
 #include "UI/Tools/AssetEditors/AssetEditorTool.h"
 #include "RmlBindingAnalysis.h"
 #include "Tools/UI/ImGui/Widgets/TreeListView.h"
@@ -57,7 +58,6 @@ namespace Lumina
     private:
 
         enum class EBgMode : uint8 { Checker, Solid, Transparent };
-        enum class EPalette : uint8 { Dark, Light };
 
         void LoadFromDisk();
         // bAlwaysReport: report the parse outcome even when it matches the previous reload. Pass it for a
@@ -67,10 +67,8 @@ namespace Lumina
         void EnsurePreviewTarget(uint32 Width, uint32 Height);
         void TearDownPreview();
         void StartWatching();
-        // Copy persisted CRmlUiEditorSettings values into the cached member fields. Run at construction
-        // and on the OnSettingsSaved live-refresh.
+        // Takes the persisted CRmlUiEditorSettings, at construction and whenever they are saved.
         void PullSettings();
-        void ApplyEditorSettings();
         void DrawPreviewToolbar();
         void DrawPreviewCanvas();
         void DrawEditorToolbar();
@@ -81,7 +79,6 @@ namespace Lumina
         void DrawGotoLinePopup();
         void HandleEditorShortcuts();
         void InsertSnippet(const char* Snippet);
-        void PersistSettings() const;
 
         // A read-only view of the document, since editing happens by typing in the code editor.
         struct FCompSlot
@@ -124,7 +121,7 @@ namespace Lumina
         void ReleaseDesignObjects();
         void ApplyBindingMarkers();
         void ConfigureAutoComplete();
-        void OnAutoComplete(TextEditor::AutoCompleteState& State);
+        void GatherBindingCompletions(const FCodeCompletionRequest& Request, TVector<FCodeCompletionItem>& Out);
         void DrawDataPanel();
         void DrawModelSection(int32 ModelIndex);
         void DrawElementBindings();
@@ -157,10 +154,9 @@ namespace Lumina
         // Rebuilt from the source text, so any edit that changes the markup has to invalidate it.
         bool                 bHierarchyDirty = true;
 
-        // Assignment parse is keyed on the undo index so the buffer is copied only when it actually
-        // changed; slot geometry still refreshes every frame (cheap DOM walk, no text copy).
+        // Assignment parse is keyed on the buffer version so the text is copied only when it changed.
         std::string          CompAssignText;
-        size_t               CompAssignUndoIndex = ~size_t(0);
+        uint64               CompAssignVersion = ~0ull;
         bool                 bCompAssignDirty = true;
 
         FString                     VirtualPath;
@@ -181,8 +177,8 @@ namespace Lumina
         // their own -- the preview wraps them in a component specimen.
         bool                        bIsStylesheet = false;
 
-        TextEditor                  CodeEditor;
-        TextEditor::AutoCompleteConfig AutoCompleteConfig;
+        FRmlLanguage                Language;
+        FCodeEditor                 CodeEditor;
 
         // What the document binds and the models the preview stands in with, one Described flag per model.
         RmlBinding::FDocumentBindings      Bindings;
@@ -206,10 +202,6 @@ namespace Lumina
         std::string                 LastSyncedText;     // matches disk + last preview reload
         bool                        bBufferDirty = false;
         bool                        bAutoReload = true;
-
-        // Per-frame churn guard: the status bar's byte count is recomputed only when the undo index moves.
-        size_t                      CachedDocBytes = 0;             // status-bar byte count
-        size_t                      CachedStatusUndoIndex = ~size_t(0);
 
         Rml::Context*               PreviewContext = nullptr;
         RHI::FManagedTexture        PreviewTarget;
@@ -258,21 +250,7 @@ namespace Lumina
 
         bool                        bShowRulers = false;
 
-        float                       EditorFontScale = 1.25f;
-        int                         EditorTabSize = 4;
-        float                       EditorLineSpacing = 1.0f;
-        bool                        bEditorShowWhitespace = false;
-        bool                        bEditorShowLineNumbers = true;
-        bool                        bEditorShowMiniMap = true;
-        bool                        bEditorReadOnly = false;
-        bool                        bAutoIndent = true;
-        bool                        bShowMatchingBrackets = true;
-        bool                        bCompletePairedGlyphs = true;
-        bool                        bInsertSpacesOnTabs = false;
-        bool                        bTrimTrailingOnSave = false;
-        EPalette                    EditorPalette = EPalette::Dark;
-
-        int                         GotoLineBuffer = 1;
+        int                        GotoLineBuffer = 1;
         bool                        bRequestOpenGoto = false;
 
         FDirectoryWatcher           FileWatcher;

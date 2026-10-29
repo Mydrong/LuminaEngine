@@ -283,6 +283,25 @@ namespace Lumina
                 bool                    bReportCollisions   = false;
                 float                   RaisedEventRate     = 0.0f;
                 TVector<FParticleEventGPU> ScriptEmits;
+
+                // Zero channels when the emitter has no grid, in which case the fields after it are unset.
+                uint32                  GridChannels        = 0u;
+                FUIntVector2            GridResolution      = FUIntVector2(0u);
+                FVector2                GridWorldSize       = FVector2(0.0f);
+                bool                    bGridWraps          = false;
+                TVector<int32>          GridStageIterations;
+                uint32                  GridTargetSlot      = RHI::kInvalidHeapSlot;
+                FUIntVector2            GridTargetExtent    = FUIntVector2(0u);
+                bool                    bReadBackGrid       = false;
+
+                // Every array the emitter declares packed back to back, with an offset and count per array.
+                TVector<FVector4>       ArrayData;
+                TVector<FUIntVector2>   ArrayRanges;
+
+                // Zero cells when no module looks particles up by their neighbors.
+                uint32                  NeighborResolution  = 0u;
+                uint32                  NeighborsPerCell    = 0u;
+                float                   NeighborCellSize    = 0.0f;
             };
 
             struct FCaptureViewData
@@ -342,6 +361,11 @@ namespace Lumina
                     uint32                      MaxSurfaceDescMeshlets = 0;
 
                     uint32                      MeshletVisibilityWords = 0;
+
+                    // Moved instances the extract wrote straight to GPU-visible memory, scattered after the uploads above.
+                    RHI::FGPURange              StreamRecords;
+                    RHI::FGPURange              StreamSlots;
+                    uint32                      StreamCount = 0;
                 } RetainedUpload;
             } Geometry;
 
@@ -474,7 +498,36 @@ namespace Lumina
                 FVector3                         FallDirection            = FVector3(0.0f, -1.0f, 0.0f);
                 uint32                           NumDrops                 = 0;
                 uint32                           NumSplashes              = 0;
+                uint32                           NumFlakes                = 0;
             } Weather;
+
+            // What Weather Interactors did to the world, cleared rather than reassigned so its arrays keep their capacity.
+            struct FWeatherInteraction
+            {
+                // The field simulates while contacts disturb it and for a while after, so ripples settle rather than freeze.
+                bool                             bField                   = false;
+                // The field was idle, so its images hold stale ripples and are cleared before this frame's step.
+                bool                             bReset                   = false;
+                // The first of this frame's passes also advances the waves, rather than only taking this frame's contacts.
+                bool                             bFirstPassSteps          = false;
+                // Snow lies on the ground, so prints fade over minutes rather than seconds.
+                bool                             bSnow                    = false;
+                uint32                           Passes                   = 0;
+                // Images the first pass reads and the last one writes.
+                uint32                           InputImage               = 0;
+                uint32                           OutputImage              = 0;
+                uint32                           Resolution               = 0;
+                float                            TexelWorld               = 0.0f;
+                FIntVector2                      OriginTexel              = FIntVector2(0);
+                // Texels the window moved since the last frame, which the first pass reads its input through.
+                FIntVector2                      Shift                    = FIntVector2(0);
+                uint32                           Serial                   = 0;
+                TVector<FWeatherContactGPU>      Contacts;
+                TVector<FWeatherImpactGPU>       Impacts;
+                TVector<FUIntVector2>            InteractorTable;
+                TVector<FVector4>                InteractorRecords;
+                TVector<FWeatherWaterBodyGPU>    WaterBodies;
+            } WeatherInteraction;
 
             // Splines uploaded this frame. Headers index into the two shared arrays; everything is world
             // space (SSplineComponent authors in entity-local space and the extract bakes the transform in).
@@ -587,6 +640,8 @@ namespace Lumina
             CloudNoise,
             CloudScatter,
             CloudDepth,
+            CloudScatterHistory,
+            CloudDepthHistory,
             CloudShadow,
             BRDFLut,
             SkyCube,
@@ -638,6 +693,9 @@ namespace Lumina
             FSceneImage                                     BloomChainImage;
             // CloudNoise is per-view, so a renderer-wide flag leaves view two sampling an unbaked volume.
             bool                                            bCloudNoiseBaked = false;
+            // Picks which texel of each 2x2 block the clouds march this frame, the rest coming from history.
+            uint32                                          CloudFrame = 0;
+            bool                                            bCloudHistoryValid = false;
             RHI::EQueueType                                 CloudNoiseQueue  = RHI::EQueueType::Graphics;
             RHI::FGPUAllocation                                    ClusterBuffer;
             RHI::FGPUAllocation                                    ClusterLightMaskBuffer;
@@ -1018,6 +1076,7 @@ namespace Lumina
         void ExtractSkyLight(ECS::FRegistry& Registry, FFrameData& Frame, const SEnvironmentComponent* ActiveEnv);
         void ExtractFog(ECS::FRegistry& Registry, FFrameData& Frame);
         void ExtractWeather(ECS::FRegistry& Registry, FFrameData& Frame);
+        void ExtractWeatherInteraction(ECS::FRegistry& Registry, FFrameData& Frame);
         void ApplyWeatherToClouds(FFrameData& Frame);
 
         // Render-phase half: buffer resize + upload commands; reads extract-phase state.
@@ -1537,6 +1596,13 @@ namespace Lumina
         TArray<FSceneBuffer, RHI::kFramesInFlight> SkinWorkEntryRing = MakeSceneRing<RHI::kFramesInFlight>("Skinning.WorkEntry", 1.5f);
         TArray<FSceneBuffer, RHI::kFramesInFlight> SkinDispatchArgsRing = MakeSceneRing<RHI::kFramesInFlight>("Cull.SkinDispatchArgs", 1.0f);
         TArray<FSceneBuffer, RHI::kFramesInFlight> MeshletCullDispatchArgsRing = MakeSceneRing<RHI::kFramesInFlight>("Cull.MeshletCullDispatchArgs", 1.0f);
+        // One slice more than frames in flight, since movers fill the next frame's slice before that frame waits on its fence.
+        static constexpr uint32 kTransformStreamSlices = RHI::kFramesInFlight + 1;
+        // CPU-written per frame, the moved transforms the movers and the extract stream for the GPU to scatter.
+        TArray<FSceneBuffer, kTransformStreamSlices> TransformStreamRing = MakeSceneRing<kTransformStreamSlices>("Scene.TransformStream", 1.25f);
+        uint32                                       TransformStreamSlot = 0;
+        // Counts extracts, which picks each frame's slice so a slice is reused only after its frame's fence.
+        uint64                                       TransformStreamSerial = 0;
         TArray<FSceneBuffer, RHI::kFramesInFlight> InstanceViewRangeRing = MakeSceneRing<RHI::kFramesInFlight>("Cull.InstanceViewRanges", 1.25f);
         TArray<FSceneBuffer, RHI::kFramesInFlight> TotalsRing = MakeSceneRing<RHI::kFramesInFlight>("Cull.Totals", 1.0f);
         TArray<bool, RHI::kFramesInFlight>                                  TotalsZeroed = {};
@@ -1552,12 +1618,17 @@ namespace Lumina
         FSceneBuffer SunDFCellItemBuffer  { "SunDF.CellItems",  1.0f, EBufferInit::Undefined, false };
         FSceneBuffer SunDFCounterBuffer   { "SunDF.Counters",   1.0f, EBufferInit::Zeroed,    false };
         FSceneBuffer SunDFBlockListBuffer { "SunDF.Blocks",     1.5f, EBufferInit::Undefined };
+        FSceneBuffer SunDFLargeObjectBuffer { "SunDF.LargeObjects", 1.0f, EBufferInit::Undefined, false };
         static constexpr uint32 kSunDFGridDimension = 128u;
         static constexpr uint32 kSunDFCellCapacity  = 32u;
         static constexpr uint32 kSunDFMaxObjects    = 16384u;
+        static constexpr uint32 kTransformStreamGroupSize = 64u;
+        // A caster past this count bins in the cull pass itself, slower but never dropped.
+        static constexpr uint32 kSunDFMaxLargeCasters = 256u;
         bool                    bSunDFGridReady     = false;
         TVector<FInstanceBlockBounds> InstanceBlockBounds;
         TVector<uint32>               DirtyInstanceBlocks;
+        TVector<uint32>               BlockMergeScratch;
         // Per block, whether it holds a distance-field caster, and the compact list the sun's distance-field cull walks.
         TVector<uint8>                InstanceBlockHasDF;
         TVector<uint32>               DistanceFieldBlocks;
@@ -1624,6 +1695,12 @@ namespace Lumina
 
         void PublishRetainedUpload();
 
+        // Room for this many moved records in this frame slot's stream, or an empty target when it cannot be had.
+        FTransformStreamTarget ReserveTransformStream(uint64 Serial, uint32 NumMoved);
+        // Opens the next frame's slice to the movers, when this frame moved enough to be worth it.
+        void ArmTransformStream(ECS::FRegistry& Registry);
+        void ScatterTransformStream(RHI::FCmdListH CL, const FFrameData::FGeometry::FRetainedUpload& Upload);
+
         std::atomic<uint32>                                 RetainedDeviceCapacity{0};
 
         std::atomic<bool>                                   bDepthPyramidValid{false};
@@ -1651,10 +1728,31 @@ namespace Lumina
         FSceneBuffer                                        RainSplashBuffer   { "Weather.Splashes", 1.0f, EBufferInit::Zeroed };
         uint32                                              RainSplashCursor   = 0;
         uint32                                              WeatherIdleFrames  = 0;
+        FSceneBuffer                                        SnowVisibleBuffer  { "Weather.SnowVisible", 1.25f };
+        FSceneBuffer                                        SnowArgsBuffer     { "Weather.SnowArgs", 1.0f };
+
+        // Ping-pong ripple, foam and trail field the interaction pass steps around the camera.
+        FSceneImage                                         WeatherFieldImages[2];
+        FSceneBuffer                                        WeatherSplashBuffer { "Weather.InteractionSplashes", 1.0f, EBufferInit::Zeroed };
+        uint32                                              WeatherSplashCursor        = 0;
+        // Frames since the last splash spawned, so the draw stops once every splash has run its course.
+        uint32                                              WeatherSplashQuietFrames   = ~0u;
+        uint32                                              WeatherFieldSimulatedSerial = 0;
+
+        // Kept by the extract, which decides each frame's passes, images and window ahead of the render.
+        uint32                                              WeatherFieldParity         = 0;
+        uint32                                              WeatherFieldQuietFrames    = ~0u;
+        uint32                                              WeatherFieldSerial         = 0;
+        float                                               WeatherFieldAccumulator    = 0.0f;
+        FIntVector2                                         WeatherFieldOriginTexel    = FIntVector2(0);
+        uint32                                              WeatherFieldResolution     = 0;
+        float                                               WeatherFieldTexelWorld     = 0.0f;
 
         void PublishWeatherGlobals(FSceneGlobalData& Globals);
         void WeatherOcclusionPass(RHI::FCmdListH CL);
-        void RainPass(RHI::FCmdListH CL);
+        void WeatherInteractionPass(RHI::FCmdListH CL);
+        // Rain streaks and splashes, snow flakes and interaction splashes, all in one pass over the HDR target.
+        void WeatherDrawPass(RHI::FCmdListH CL);
         void ReleaseIdleWeatherResources();
 
         FMatrix4                                            CascadeHZBViewProjection[NumCascades] = {};
@@ -1783,6 +1881,19 @@ namespace Lumina
         THashMap<ECS::FEntity, TVector<SParticleCollision>> ParticleCollisionResults;
         void ReadParticleCollisions();
         void CopyParticleCollisions(RHI::FCmdListH CL);
+
+        // One frame slot's copies of the grids of emitters that read theirs back, laid out one after another in Buffer.
+        struct FParticleGridReadback
+        {
+            RHI::FGPUAllocation             Buffer = {};
+            TVector<FParticleGridSnapshot>  Layouts;
+            TVector<RHI::GPUPtr>            Grids;
+            TVector<ECS::FEntity>           Owners;
+        };
+        TArray<FParticleGridReadback, RHI::kFramesInFlight> ParticleGridReadback = {};
+        THashMap<ECS::FEntity, TVector<FParticleGridSnapshot>> ParticleGridResults;
+        void ReadParticleGrids();
+        void CopyParticleGrids(RHI::FCmdListH CL);
         THashMap<uint64, TVector<RHI::FGPUAllocation>>    ParticleBufferPool;
         uint64                                            ParticlePoolBytes = 0;
         // Set once a pooled buffer is handed out this frame, since its previous frame's reads need a barrier before the clear.
@@ -1800,6 +1911,11 @@ namespace Lumina
             RHI::GPUPtr     SpawnCounter = 0;
             RHI::GPUPtr     EventCounts = 0;
             uint32          Groups = 0;
+            // Where Groups starts within the emitter, for work split across dispatches by the group limit.
+            uint32          FirstGroup = 0;
+            // Zeroed before the dispatch, the way the neighbor counts are before particles are bucketed again.
+            RHI::GPUPtr     ClearAddress = 0;
+            uint64          ClearBytes = 0;
             bool            bBarrierAfter = false;
         };
         // Spawn counters for every batched emitter, so one fill clears them all.

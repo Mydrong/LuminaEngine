@@ -1,6 +1,7 @@
 #pragma once
 #include "SceneGlobals.slang"
 #include "Noise.slang"
+#include "WaveAtomics.slang"
 
 // Structs must stay byte-identical to CParticleSystem and FParticleSimArgs in DefaultSceneRenderer.cpp.
 
@@ -93,6 +94,10 @@ struct FParticleSimParams
     float4  EventParams;         // x=continuous events per second raised, y=parent velocity inherited
     uint4   EventInfo;           // x=event lists raised, y=list consumed, z=emission mesh slot, w=particles per event
     uint4   RibbonInfo;          // x=segments, y=head sample, z=head advanced this step
+    uint4   GridInfo;            // x=width, y=height, z=PARTICLE_STAGE, w=PARTICLE_GRID_FLAG bits
+    float4  GridParams;          // xy=world size, z=iteration within the stage
+    uint4   GridTarget;          // x=render target storage slot, y=width, z=height
+    float4  NeighborParams;      // x=cell size, y=cells per axis, z=indices per cell
 };
 
 // A parent particle's death, contact or tick for a sub-emitter, and the payload of a script EmitParticle.
@@ -144,6 +149,17 @@ struct FParticleSimArgs
     GPUSpan<FParticleShape> Attractors;
     GPUSpan<FParticleShape> Colliders;
     GPUSpan<FParticleTerrain> Terrains;
+    // The grid stages read and the one they write, which swap after every stage dispatch.
+    GPUSpan<float>          GridRead;
+    GPUSpan<float>          GridWrite;
+    // What particles added this step, in fixed point, folded in by the next stage.
+    GPUSpan<int>            GridDeposit;
+    // Every array the stack declares, back to back, and each one's offset and count.
+    GPUSpan<float4>         ArrayData;
+    GPUSpan<uint2>          ArrayRanges;
+    // Particle indices bucketed by cell at the end of the previous step, empty when no module looks for neighbors.
+    GPUSpan<uint>           NeighborCounts;
+    GPUSpan<uint>           NeighborIndices;
 };
 
 // One dispatch simulates every emitter that shares a shader, and each workgroup finds its emitter in Groups.
@@ -203,8 +219,8 @@ void RaiseParticleEvent(uint List, FGPUParticle P)
         return;
     }
 
-    uint Slot;
-    InterlockedAdd(SimArgs().OwnEventCounts.At(List)[0], 1u, Slot);
+    // Every call site passes a constant List, so the wave shares one counter.
+    const uint Slot = WaveInterlockedAdd(SimArgs().OwnEventCounts.At(List), 1u);
     if (Slot < PARTICLE_EVENT_CAPACITY)
     {
         FParticleEvent Event;
@@ -223,8 +239,7 @@ void RaiseParticleCollision(FGPUParticle P, float3 Normal, float ImpactSpeed)
         return;
     }
 
-    uint Slot;
-    InterlockedAdd(SimArgs().OwnEventCounts.At(PARTICLE_EVENT_COLLISION)[0], 1u, Slot);
+    const uint Slot = WaveInterlockedAdd(SimArgs().OwnEventCounts.At(PARTICLE_EVENT_COLLISION), 1u);
     if (Slot < PARTICLE_EVENT_CAPACITY)
     {
         FParticleEvent Event;
@@ -593,6 +608,19 @@ bool CollideWithSceneDepth(inout float3 Position, inout float3 Velocity, float D
 float3 EmitterToWorld(float3 Local)
 {
     return SimParams().EmitterRight.xyz * Local.x + SimParams().EmitterUp.xyz * Local.y + SimParams().EmitterForward.xyz * Local.z;
+}
+
+// World offset from the emitter into its local frame, the inverse of EmitterToWorld.
+float3 WorldToEmitter(float3 World)
+{
+    return float3(dot(World, SimParams().EmitterRight.xyz), dot(World, SimParams().EmitterUp.xyz), dot(World, SimParams().EmitterForward.xyz));
+}
+
+// A 0 to 1 value fixed for one particle's whole life, different for each Salt, for update code that has no Seed.
+float StableRandom(float ParticleSeed, uint Salt)
+{
+    uint State = PCGHash(asuint(ParticleSeed) ^ (Salt * 2654435761u));
+    return RandUnit(State);
 }
 
 // Signed remap of the shared value noise, which is what the turbulence field expects.

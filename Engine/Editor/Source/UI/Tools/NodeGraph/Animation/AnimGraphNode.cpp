@@ -1,6 +1,7 @@
 #include "AnimGraphNode.h"
 #include "AnimationGraphCompiler.h"
 #include "AnimationGraphNodeGraph.h"
+#include "AnimGraphDebugView.h"
 #include "Core/Object/Class.h"
 #include "Core/Object/Cast.h"
 #include "Core/Object/Package/Package.h"
@@ -113,7 +114,7 @@ namespace Lumina
             return;
         }
 
-        // The list is drawn by the graph, since imgui-node-editor does not host popup windows reliably inside a node.
+        // The list is drawn by the graph, since a popup window cannot open from inside the zoomed canvas.
         Pin->InlineEditor = [this, Items, Get, Set]()
         {
             const int Count = (int)Items.size();
@@ -187,31 +188,68 @@ namespace Lumina
 
     uint16 CAnimGraphNode::ResolveValueInput(CEdNodeGraphPin* InputPin, FAnimationGraphCompiler& Compiler)
     {
-        if (InputPin != nullptr && InputPin->HasConnection())
+        uint16 Register = 0;
+        if (InputPin == nullptr || !InputPin->HasConnection() || !Compiler.TryGetPinRegister(InputPin->GetConnection(0), Register))
         {
-            CEdNodeGraphPin* Source = InputPin->GetConnection(0);
-            uint16 Register;
-            if (Compiler.TryGetPinRegister(Source, Register))
+            float Default = 0.0f;
+            if (CAnimGraphPin* AnimPin = Cast<CAnimGraphPin>(InputPin))
             {
-                return Register;
+                Default = AnimPin->DefaultValue;
+                if (CAnimGraphNode* Node = Cast<CAnimGraphNode>(AnimPin->GetOwningNode()))
+                {
+                    Default = Node->GetValuePinDefault(AnimPin);
+                }
             }
+            Register = Compiler.EmitLoadConst(Default);
         }
 
-        float Default = 0.0f;
-        if (CAnimGraphPin* AnimPin = Cast<CAnimGraphPin>(InputPin))
-        {
-            Default = AnimPin->DefaultValue;
-            if (CAnimGraphNode* Node = Cast<CAnimGraphNode>(AnimPin->GetOwningNode()))
-            {
-                Default = Node->GetValuePinDefault(AnimPin);
-            }
-        }
-        return Compiler.EmitLoadConst(Default);
+        // Kept for the input as well, so the debug view can read what an unconnected default resolved to.
+        Compiler.SetPinRegister(InputPin, Register);
+        return Register;
     }
 
     uint16 CAnimGraphNode::ResolveAlphaInput(CEdNodeGraphPin* InputPin, FAnimationGraphCompiler& Compiler,
         EAnimAlphaEasing Easing)
     {
-        return Compiler.EmitEaseAlpha(ResolveValueInput(InputPin, Compiler), Easing);
+        const uint16 Register = Compiler.EmitEaseAlpha(ResolveValueInput(InputPin, Compiler), Easing);
+        Compiler.SetPinRegister(InputPin, Register);
+        return Register;
+    }
+
+    float CAnimGraphNode::ReadValueInput(const CAnimGraphPin* Pin, const FAnimGraphDebugView* View) const
+    {
+        if (View != nullptr)
+        {
+            if (TOptional<float> Live = View->ReadPin(Pin); Live.has_value())
+            {
+                return Live.value();
+            }
+        }
+        return GetValuePinDefault(Pin);
+    }
+
+    const CAnimGraphPin* CAnimGraphNode::FindFirstValueOutput() const
+    {
+        for (const auto& PinRef : GetOutputPins())
+        {
+            const CAnimGraphPin* Pin = Cast<CAnimGraphPin>(PinRef.Get());
+            if (Pin != nullptr && Pin->GetPinType() == EAnimPinType::Value)
+            {
+                return Pin;
+            }
+        }
+        return nullptr;
+    }
+
+    bool CAnimGraphNode::HasPreview() const
+    {
+        return FindFirstValueOutput() != nullptr;
+    }
+
+    void CAnimGraphNode::DrawPreview(const FAnimGraphDebugView* View)
+    {
+        const CAnimGraphPin* Output = FindFirstValueOutput();
+        const FAnimValueHistory* History = View != nullptr ? View->FindHistory(Output) : nullptr;
+        AnimDebugDraw::Plot(History != nullptr ? *History : FAnimValueHistory(), ImVec2(kAnimNodePreviewWidth, 54.0f), Output->GetPinColor());
     }
 }

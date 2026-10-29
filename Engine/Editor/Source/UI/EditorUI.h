@@ -17,6 +17,7 @@
 namespace Lumina
 {
     class FGamePreviewTool;
+    class FCodeWorkspaceTool;
     class FEditorToolModal;
     class FContentBrowserEditorTool;
     class FPrimitiveDrawManager;
@@ -79,6 +80,10 @@ namespace Lumina
 
         void OpenAssetEditor(const FGuid& AssetGUID) override;
         void OpenFileEditor(FStringView VirtualPath) override;
+        FEditorTool* FindFileEditor(FStringView VirtualPath) const override;
+
+        // The code workspace, opened and recorded in the session when it is not already up.
+        FCodeWorkspaceTool* OpenCodeWorkspace();
         void BrowseToAsset(FStringView VirtualPath) override;
         bool BrowseToFolder(FStringView Folder, FStringView Search);
         const FAssetData* GetContentBrowserSelectedAsset() const override;
@@ -157,6 +162,9 @@ namespace Lumina
         // File > Save All: every dirty package, routed through its open editor tool when there is one
         // so type-specific save work still runs.
         void SaveAllDirtyPackages() override;
+        void SavePackages(TVector<CPackage*> Packages) override;
+        void OpenPropertyMatrix(TVector<FGuid> Assets) override;
+        void OpenSettings(CClass* Page) override;
         bool ConfirmWritable(TVector<FString> VirtualPaths, TMoveOnlyFunction<void()> Then, bool bThenSaves = true) override;
 
         struct FSaveAllResult

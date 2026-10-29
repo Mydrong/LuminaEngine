@@ -1,7 +1,6 @@
 ﻿#include <string>
 #include <string_view>
 #include "MaterialEditorTool.h"
-#include "imgui-node-editor/imgui_node_editor.h"
 #include "Assets/AssetTypes/Material/Material.h"
 #include "Assets/AssetTypes/Textures/Texture.h"
 #include "Core/Engine/Engine.h"
@@ -12,6 +11,7 @@
 #include "Tools/UI/ImGui/EditorColors.h"
 #include "Tools/UI/ImGui/ImGuiFonts.h"
 #include "Tools/UI/ImGui/ImGuiDesignIcons.h"
+#include "UI/CodeEditor/CodeEditorPreferences.h"
 #include "UI/Tools/NodeGraph/Material/Nodes/MaterialNode_CustomSlang.h"
 #include "UI/Tools/NodeGraph/Material/Nodes/MaterialNode_Function.h"
 #include "Material/MaterialOps.h"
@@ -85,6 +85,10 @@ namespace Lumina
 
         NodeGraph = MaterialOps::FindOrCreateGraph(Cast<CMaterial>(Asset.Get()));
         NodeGraph->SetMaterial(Cast<CMaterial>(Asset.Get()));
+        NodeGraph->NodePreviewSource = [this](int64 NodeID, ImTextureRef& OutTexture, const char*& OutStatus)
+        {
+            return NodePreviews.GetTexture(NodeID, OutTexture, OutStatus);
+        };
         NodeGraph->Initialize();
         NodeGraph->SetTransactionManager(&GetTransactionManager());
         NodeGraph->SetNodeSelectedCallback( [this] (CEdGraphNode* Node)
@@ -269,7 +273,7 @@ namespace Lumina
         }
         else
         {
-            StaticMeshComponent.MaterialOverrides.push_back(MaterialInterface);
+            StaticMeshComponent.MaterialOverrides.push_back(bShowingPinPreview ? ViewportPreview.GetMaterial() : MaterialInterface);
         }
     }
 
@@ -341,6 +345,7 @@ namespace Lumina
         const ImVec2 ViewportSize(Math::Max(ContentRegion.x, 64.0f), Math::Max(ContentRegion.y, 64.0f));
         const ImVec2 CursorScreenPos = ImGui::GetCursorScreenPos();
         const ImVec2 WindowBottomRight = { CursorScreenPos.x + ViewportSize.x, CursorScreenPos.y + ViewportSize.y };
+        UpdatePixelProbe(CursorScreenPos, ViewportSize);
 
         if (World != nullptr && World->GetRenderer() != nullptr)
         {
@@ -431,6 +436,22 @@ namespace Lumina
 
         ImGui::SameLine();
         DrawCameraModeSelector();
+
+        const CEdNodeGraphPin* PreviewPin = NodeGraph->PreviewPinID != 0 ? NodeGraph->FindPinByGUID(NodeGraph->PreviewPinID) : nullptr;
+        if (PreviewPin != nullptr)
+        {
+            const FString PinName = PreviewPin->GetPinName().empty() ? FString() : FString(".") + PreviewPin->GetPinName();
+            const FString Label   = Lumina::Format(LE_ICON_EYE " {}{}{}  " LE_ICON_CLOSE, PreviewPin->GetOwningNode()->GetNodeTitleText(), PinName,
+                ViewportPreview.IsCompiling() ? " (compiling)" : "");
+            ImGui::SameLine();
+            ImGui::PushStyleColor(ImGuiCol_Button, EditorColors::WithAlpha(EditorColors::Accent(), 0.35f));
+            if (ImGui::Button(Label.c_str()))
+            {
+                NodeGraph->PreviewPinID = 0;
+            }
+            ImGui::PopStyleColor();
+            ImGuiX::TextTooltip("{}", "The preview mesh shows this pin as unlit color. Click to go back to the whole material.");
+        }
     }
 
     void FMaterialEditorTool::OnAssetLoadFinished()
@@ -461,12 +482,79 @@ namespace Lumina
             ImGui::PopStyleColor();
             ImGuiX::TextTooltip("{}", "This material has changes that are not in its compiled shader yet.");
         }
+
+        if (ImGui::MenuItem(LE_ICON_FIRE " Cost", nullptr, NodeGraph->bShowCostHeat))
+        {
+            NodeGraph->bShowCostHeat = !NodeGraph->bShowCostHeat;
+        }
+        ImGuiX::TextTooltip("{}", "Marks each node with the shader work it added in the last compile, red for the most expensive.");
     }
 
     void FMaterialEditorTool::DrawMaterialGraph()
     {
         DrawCompileErrorBanner();
+        UpdatePreviews();
         NodeGraph->DrawGraph();
+    }
+
+    void FMaterialEditorTool::UpdatePixelProbe(ImVec2 ImageMin, ImVec2 ImageSize)
+    {
+        const ImVec2 Mouse = ImGui::GetMousePos();
+        const ImVec2 UV((Mouse.x - ImageMin.x) / ImageSize.x, (Mouse.y - ImageMin.y) / ImageSize.y);
+        const bool   bWanted = bShowingPinPreview && bViewportHovered && UV.x >= 0.0f && UV.y >= 0.0f && UV.x < 1.0f && UV.y < 1.0f;
+        PixelProbe.Tick(World != nullptr ? World->GetRenderer() : nullptr, bWanted, UV);
+
+        ImVec4 Value;
+        if (!bWanted || !PixelProbe.GetValue(Value))
+        {
+            return;
+        }
+
+        const float Swatch = ImGui::GetFontSize();
+        ImGui::BeginTooltip();
+        ImGui::ColorButton("##ProbeSwatch", ImVec4(Math::Saturate(Value.x), Math::Saturate(Value.y), Math::Saturate(Value.z), 1.0f),
+            ImGuiColorEditFlags_NoTooltip | ImGuiColorEditFlags_NoPicker, ImVec2(Swatch, Swatch));
+        ImGui::SameLine();
+        ImGui::Text("%.3f  %.3f  %.3f", Value.x, Value.y, Value.z);
+        ImGui::EndTooltip();
+    }
+
+    void FMaterialEditorTool::UpdatePreviews()
+    {
+        const CMaterial* Material = Cast<CMaterial>(Asset.Get());
+        if (NodeGraph->PreviewPinID != 0 && Material != nullptr && Material->GetMaterialType() != EMaterialType::PBR)
+        {
+            ImGuiX::Notifications::NotifyInfo("Pin previews draw on the preview mesh, which only surface materials use.");
+            NodeGraph->PreviewPinID = 0;
+        }
+
+        bool bReapply = false;
+        if (ViewportPreview.Poll())
+        {
+            bReapply = true;
+            if (!ViewportPreview.IsReady())
+            {
+                ImGuiX::Notifications::NotifyWarning("Could not preview that pin. {}", ViewportPreview.GetError());
+                NodeGraph->PreviewPinID = 0;
+            }
+        }
+
+        const uint32 Wanted = NodeGraph->PreviewPinID;
+        const bool   bStale = ViewportPreview.GetPinID() != Wanted || ViewportPreview.GetVersion() != NodeGraph->GetContentVersion();
+        if (Wanted != 0 && bStale && !ViewportPreview.IsCompiling() && !ViewportPreview.Launch(NodeGraph.Get(), Wanted))
+        {
+            ImGuiX::Notifications::NotifyWarning("Could not preview that pin. {}", ViewportPreview.GetError());
+            NodeGraph->PreviewPinID = 0;
+        }
+
+        const bool bShowPin = NodeGraph->PreviewPinID != 0 && ViewportPreview.IsReady();
+        if (bReapply || bShowPin != bShowingPinPreview)
+        {
+            bShowingPinPreview = bShowPin;
+            ApplyMaterialToPreview();
+        }
+
+        NodePreviews.Tick(NodeGraph.Get());
     }
 
     void FMaterialEditorTool::DrawCompileErrorBanner()
@@ -524,76 +612,7 @@ namespace Lumina
     
     namespace
     {
-        // Copied from the HLSL definition, since its file-static helpers cannot be reached from here.
-        const TextEditor::Language& GetSlangLanguageBase()
-        {
-            static bool bInitialized = false;
-            static TextEditor::Language Language;
-
-            if (bInitialized)
-            {
-                return Language;
-            }
-
-            Language = *TextEditor::Language::Hlsl();
-            Language.name = "Slang";
-
-            // Slang-only syntax the HLSL set has no reason to know about.
-            static const char* const SlangKeywords[] =
-            {
-                "__generic", "__init", "__subscript", "__exported", "associatedtype", "extension",
-                "interface", "property", "typealias", "func", "let", "var", "enum", "is", "as",
-                "where", "This", "no_diff", "nodiff", "differentiable", "bwd_diff", "fwd_diff",
-                "module", "import", "implementing", "public", "internal", "private", "override",
-                "dynamic_uniform", "groupshared", "ConstantBuffer", "ParameterBlock", "StructuredBuffer",
-                "Ptr", "Optional", "none", "each", "expand", "reinterpret", "spirv_asm",
-                "int8_t", "int16_t", "int32_t", "int64_t", "uint8_t", "uint16_t", "uint32_t", "uint64_t",
-                "float16_t", "float32_t", "float64_t", "matrix", "vector",
-            };
-            for (const char* Keyword : SlangKeywords)
-            {
-                Language.keywords.insert(Keyword);
-            }
-
-            // The HLSL definition ships keywords only, so intrinsics rendered as plain text before this.
-            static const char* const Intrinsics[] =
-            {
-                "abs", "acos", "all", "any", "asin", "atan", "atan2", "ceil", "clamp", "cos", "cosh",
-                "cross", "ddx", "ddy", "degrees", "determinant", "distance", "dot", "exp", "exp2",
-                "faceforward", "floor", "fmod", "frac", "frexp", "fwidth", "isfinite", "isinf", "isnan",
-                "ldexp", "length", "lerp", "log", "log2", "log10", "mad", "max", "min", "modf", "mul",
-                "normalize", "pow", "radians", "rcp", "reflect", "refract", "round", "rsqrt", "saturate",
-                "sign", "sin", "sincos", "sinh", "smoothstep", "sqrt", "step", "tan", "tanh", "transpose",
-                "trunc", "clip", "countbits", "firstbithigh", "firstbitlow", "reversebits", "asfloat",
-                "asint", "asuint", "f16tof32", "f32tof16", "select", "InterlockedAdd", "InterlockedOr",
-                "GroupMemoryBarrierWithGroupSync", "AllMemoryBarrierWithGroupSync",
-                "WaveActiveSum", "WaveActiveMax", "WaveActiveMin", "WaveActiveCountBits",
-                "WavePrefixCountBits", "WaveReadLaneFirst", "WaveIsFirstLane", "WaveGetLaneIndex",
-            };
-            for (const char* Intrinsic : Intrinsics)
-            {
-                Language.identifiers.insert(Intrinsic);
-            }
-
-            // The compiler substitutes these around the node, so they are in scope whether declared or not.
-            static const char* const EngineIdentifiers[] =
-            {
-                "MaterialIndex", "EntityID", "UV0", "UV0_DDX", "UV0_DDY", "WorldPosition", "WorldNormal",
-                "WorldTangent", "ViewPosition", "VertexColor", "Material", "Inst", "ModelMatrix",
-                "SampleTexture2D", "SampleTexture2DGrad", "SampleTexture2DLevel", "SampleTexture2DArray",
-                "SampleTextureCube", "GetMaterialTexture", "GetMaterialScalar", "GetMaterialVector",
-                "GetCameraPosition", "GetCameraForward", "GetTime", "Scene",
-            };
-            for (const char* Identifier : EngineIdentifiers)
-            {
-                Language.identifiers.insert(Identifier);
-            }
-
-            bInitialized = true;
-            return Language;
-        }
-
-        // Covers pin NAMES only, since the node's own hash folds in types that cannot change a color.
+        // Covers pin names only, since the node's own hash folds in types that cannot change a color.
         uint64 HashPinNames(const CMaterialExpression_CustomSlang* Node)
         {
             uint64 Hash = 1469598103934665603ull;   // FNV-1a
@@ -617,39 +636,26 @@ namespace Lumina
 
     void FMaterialEditorTool::ConfigureCodeEditor()
     {
-        // SetTabSize is honored only while the document is empty, so it has to run before the first SetText.
-        CodeEditor.SetTabSize(4);
-        CodeEditor.SetInsertSpacesOnTabs(true);
-        CodeEditor.SetAutoIndentEnabled(true);
-        CodeEditor.SetShowLineNumbersEnabled(true);
-        CodeEditor.SetShowMatchingBrackets(true);
-        CodeEditor.SetCompletePairedGlyphs(true);
-        CodeEditor.SetShowScrollbarMiniMapEnabled(true);
-        CodeEditor.SetPalette(TextEditor::GetDarkPalette());
-
-        CodeEditorLanguage = GetSlangLanguageBase();
         CodeEditor.SetLanguage(&CodeEditorLanguage);
     }
 
     void FMaterialEditorTool::RebuildCodeEditorLanguage(const CMaterialExpression_CustomSlang* Node)
     {
-        CodeEditorLanguage = GetSlangLanguageBase();
-
         // A misspelled output is otherwise a silent no-op that only surfaces as nothing changing.
+        TVector<FCLikeLanguage::FContextSymbol> Symbols;
         if (Node != nullptr)
         {
             for (const SCustomSlangPin& Pin : Node->Inputs)
             {
-                CodeEditorLanguage.identifiers.insert(Pin.Name.c_str());
+                Symbols.push_back({ FString(Pin.Name.c_str()), "input pin" });
             }
             for (const SCustomSlangPin& Pin : Node->Outputs)
             {
-                CodeEditorLanguage.identifiers.insert(Pin.Name.c_str());
+                Symbols.push_back({ FString(Pin.Name.c_str()), "output pin, assign it" });
             }
         }
-
-        // SetLanguage raises the dirty flag that re-runs the colorizer, which picks up the new identifiers.
-        CodeEditor.SetLanguage(&CodeEditorLanguage);
+        CodeEditorLanguage.SetContextSymbols(Move(Symbols));
+        CodeEditor.InvalidateHighlight();
     }
 
     void FMaterialEditorTool::DrawCustomCodeEditor()
@@ -682,8 +688,8 @@ namespace Lumina
         {
             CodeEditorBoundNode = Node;
             RebuildCodeEditorLanguage(Node);
-            CodeEditor.SetText(std::string_view(Node->Code.c_str(), Node->Code.size()));
-            LastCodeEditorUndoIndex = CodeEditor.GetUndoIndex();
+            CodeEditor.SetText(Node->Code.View());
+            LastCodeEditorVersion = CodeEditor.GetVersion();
             CodeEditorPinSignature = HashPinNames(Node);
         }
         else if (const uint64 Signature = HashPinNames(Node); Signature != CodeEditorPinSignature)
@@ -736,35 +742,37 @@ namespace Lumina
         // Find and replace has no discoverable entry point, so it gets a button as well as its shortcut.
         if (ImGui::SmallButton(LE_ICON_MAGNIFY " Find"))
         {
-            CodeEditor.OpenFindReplaceWindow();
+            CodeEditor.OpenFind(false);
         }
-        if (ImGui::IsItemHovered())
-        {
-            ImGui::SetTooltip("Find / replace (Ctrl+F)");
-        }
+        const CCodeEditorShortcuts& Keys = *GetDefault<CCodeEditorShortcuts>();
+        ImGui::SetItemTooltip("Find (%s), or find and replace (%s)", Keys.Find.GetLabel().c_str(), Keys.Replace.GetLabel().c_str());
 
         ImGui::SameLine();
-        bool bShowWhitespace = CodeEditor.IsShowWhitespacesEnabled();
-        if (ImGui::Checkbox("Whitespace", &bShowWhitespace))
+        if (ImGui::SmallButton(LE_ICON_CODE_BRACES " View"))
         {
-            CodeEditor.SetShowWhitespacesEnabled(bShowWhitespace);
+            ImGui::OpenPopup("##CustomSlangView");
+        }
+        ImGui::SetItemTooltip("Theme and display options for every code editor, and the keyboard shortcuts.");
+        if (ImGui::BeginPopup("##CustomSlangView"))
+        {
+            CodeEditorPreferences::DrawQuickSettings(ToolContext);
+            ImGui::EndPopup();
         }
 
         ImGui::SameLine();
         if (ImGui::SmallButton("Tabs " LE_ICON_ARROW_RIGHT " Spaces"))
         {
-            CodeEditor.TabsToSpaces();
+            CodeEditor.ConvertIndentation(true);
         }
         if (ImGui::IsItemHovered())
         {
             ImGui::SetTooltip("Converts leading tabs to spaces at the editor's tab size.");
         }
 
-        // The language name is worth showing, since the highlight includes THIS node's pin names.
-        const TextEditor::CursorPosition Cursor = CodeEditor.GetCursorPosition(0);
+        const FCodePosition Cursor = CodeEditor.GetCursor();
         FFixedString Status;
         FormatTo(Status, "{}  |  Ln {}, Col {}  |  {} lines",
-            CodeEditor.GetLanguageName().c_str(), Cursor.line + 1, Cursor.column + 1, CodeEditor.GetLineCount());
+            FString(CodeEditorLanguage.GetName()).c_str(), Cursor.Line + 1, Cursor.Column + 1, CodeEditor.GetLineCount());
 
         const float StatusWidth = ImGui::CalcTextSize(Status.c_str()).x;
         const float StatusX     = ToolbarWidth - StatusWidth;
@@ -775,18 +783,15 @@ namespace Lumina
             ImGui::TextColored(EditorColors::TextDim(), "%s", Status.c_str());
         }
 
-        // Column alignment is the point of a code view, and the proportional UI font makes it unreadable.
-        ImGuiX::Font::PushFont(ImGuiX::Font::EFont::Mono);
-        CodeEditor.Render("##CustomSlangCode", ImGui::GetContentRegionAvail(), false);
-        ImGuiX::Font::PopFont();
+        CodeEditor.Render("##CustomSlangCode", ImGui::GetContentRegionAvail());
 
-        // The text is compared before writing, since the undo cursor also moves on undo and redo.
-        if (CodeEditor.GetUndoIndex() != LastCodeEditorUndoIndex)
+        // The text is compared before writing, since undo and redo also move the version.
+        if (CodeEditor.GetVersion() != LastCodeEditorVersion)
         {
-            LastCodeEditorUndoIndex = CodeEditor.GetUndoIndex();
+            LastCodeEditorVersion = CodeEditor.GetVersion();
 
-            const std::string Text = CodeEditor.GetText();
-            if (Node->Code.size() != Text.size() || memcmp(Node->Code.data(), Text.data(), Text.size()) != 0)
+            const FString Text = CodeEditor.GetText();
+            if (Node->Code.View() != Text.View())
             {
                 // The editor keeps its own per-keystroke undo, so the graph takes one step per typing session.
                 if (!bCodeEditOpen && NodeGraph != nullptr)
@@ -795,7 +800,7 @@ namespace Lumina
                     bCodeEditOpen = true;
                 }
 
-                Node->Code.assign(Text.c_str(), Text.size());
+                Node->Code = Text;
                 Node->NotifyValueEdited();
 
                 if (CPackage* Package = Node->GetPackage())
@@ -1268,7 +1273,7 @@ namespace Lumina
             return;
         }
 
-        NodeGraph->QueueFocusNode(Node);
+        NodeGraph->FocusNode(Node);
 
         // The jump is invisible when the graph is tabbed behind the code editor.
         ImGui::SetWindowFocus(GetToolWindowName(MaterialGraphName).c_str());

@@ -1,6 +1,7 @@
 ﻿#include "RuntimePCH.h"
 #include "SceneRendererInternal.h"
 #include "World/Scene/RenderScene/SunShadowMath.h"
+#include "Assets/AssetTypes/Textures/TextureRenderTarget.h"
 
 #include <bit>
 
@@ -185,6 +186,10 @@ namespace Lumina
         // Below zero when upscaling, so textures pick the mips the display resolution would have.
         SceneGlobalData.TextureMipBias                  = PrimarySize.x < DisplaySize.x
                                                         ? Math::Log2((float)PrimarySize.x / (float)DisplaySize.x) : 0.0f;
+        const CRendererSettings* RenderSettings         = GetDefault<CRendererSettings>();
+        const bool bSpecularAA                          = RenderSettings != nullptr && RenderSettings->bSpecularAntiAliasing;
+        SceneGlobalData.SpecularAAVariance              = bSpecularAA ? Math::Clamp(RenderSettings->SpecularAntiAliasingStrength, 0.0f, 1.0f) : 0.0f;
+        SceneGlobalData.SpecularAAThreshold             = bSpecularAA ? Math::Clamp(RenderSettings->SpecularAntiAliasingLimit, 0.0f, 1.0f) : 0.0f;
         SceneGlobalData.GridSize                        = ComputeClusterGrid(PrimarySize);
         SceneGlobalData.Time                            = (float)World->GetTimeSinceWorldCreation();
         SceneGlobalData.DeltaTime                       = Frame.CachedWorldDeltaTime;
@@ -687,17 +692,84 @@ namespace Lumina
 
         ScenePrimitives.SetForegroundView(ExtractFrame->ViewVolume, ExtractFrame->ViewLayers);
 
+        ++TransformStreamSerial;
         MovedTransformScratch.clear();
-        ECS::Utils::DrainMovedTransforms(Registry, MovedTransformConsumer, MovedTransformScratch);
+        {
+            LUMINA_PROFILE_SECTION("Drain Moved Transforms");
+            ECS::Utils::DrainMovedTransforms(Registry, MovedTransformConsumer, MovedTransformScratch);
+        }
+        // An armed stream already holds what the movers wrote, and takes the drained rest after it.
+        if (!ScenePrimitives.IsMoveStreamArmed())
+        {
+            ScenePrimitives.SetTransformStream(ReserveTransformStream(TransformStreamSerial, (uint32)MovedTransformScratch.size()));
+        }
         ScenePrimitives.Sync(*World, TSpan<const ECS::FEntity>(MovedTransformScratch.data(), MovedTransformScratch.size()));
 
         PublishRetainedUpload();
+        ArmTransformStream(Registry);
         LaunchInstanceBlockBounds();
+    }
+
+    void FDefaultSceneRenderer::ArmTransformStream(ECS::FRegistry& Registry)
+    {
+        // Below this many movers a frame, the drained list costs less than a slice of write-combined memory per renderer.
+        constexpr uint32 kMinArmedMoves = 1024;
+
+        const uint32 Moved = ScenePrimitives.GetMoveTimeRecords() + (uint32)MovedTransformScratch.size();
+        const FTransformStreamTarget Target = Moved >= kMinArmedMoves
+            ? ReserveTransformStream(TransformStreamSerial + 1, Moved + Moved / 4u)
+            : FTransformStreamTarget{};
+        if (Target.Records == nullptr)
+        {
+            ScenePrimitives.SetTransformStream({});
+            return;
+        }
+        ScenePrimitives.ArmMoveStream(Registry, Target, MovedTransformConsumer);
+    }
+
+    FTransformStreamTarget FDefaultSceneRenderer::ReserveTransformStream(uint64 Serial, uint32 NumMoved)
+    {
+        if (NumMoved == 0u || TryRender() == nullptr)
+        {
+            return {};
+        }
+
+        // Its last frame is at least kFramesInFlight extracts old, whose fence the loop already waited on.
+        TransformStreamSlot = (uint32)(Serial % kTransformStreamSlices);
+        FSceneBuffer& Stream = TransformStreamRing[TransformStreamSlot];
+
+        constexpr uint64 BytesPerMove = sizeof(FTransformStreamRecord) + sizeof(uint32);
+        const uint64 Needed = (uint64)NumMoved * BytesPerMove;
+        if (Stream.Size < Needed || Stream.Cpu == nullptr)
+        {
+            const uint64 Bytes = Stream.SlackedBytes(Needed);
+            // A small CPU-visible aperture without ReBAR cannot spare it, so those moves take the CPU path.
+            if (Bytes > RHI::GetCPUWriteSliceCap(kTransformStreamSlices))
+            {
+                return {};
+            }
+            Stream.Release();
+            const RHI::FGPUAllocation Allocation = RHI::Malloc(Bytes, alignof(FTransformStreamRecord), RHI::EMemoryType::CPUWrite);
+            if (!Allocation || Allocation.Cpu == nullptr)
+            {
+                return {};
+            }
+            RHI::SetDebugName(Allocation.Gpu, Stream.DebugName);
+            Stream.Adopt(Allocation);
+        }
+
+        const uint64 Capacity = Stream.Size / BytesPerMove;
+        FTransformStreamTarget Target;
+        Target.Records  = reinterpret_cast<FTransformStreamRecord*>(Stream.Cpu);
+        Target.Slots    = reinterpret_cast<uint32*>(Stream.Cpu + Capacity * sizeof(FTransformStreamRecord));
+        Target.Capacity = (uint32)Math::Min<uint64>(Capacity, 0xFFFFFFFFull);
+        return Target;
     }
 
     // Collects what changed in the retained scene, before the render phase uploads it.
     void FDefaultSceneRenderer::PublishRetainedUpload()
     {
+        LUMINA_PROFILE_SCOPE();
         FFrameData::FGeometry::FRetainedUpload& Out = ExtractFrame->Geometry.RetainedUpload;
 
         // Ahead of everything below, since a base that moves marks its slot static-dirty.
@@ -794,6 +866,18 @@ namespace Lumina
                     Out.DeactivatedSlots.push_back(Slot);
                 }
             }
+        }
+
+        // Records sit at the front of the slot's buffer and their slots after room for every record it can hold.
+        Out.StreamCount = ScenePrimitives.GetTransformStreamCount();
+        Out.StreamRecords = {};
+        Out.StreamSlots = {};
+        if (Out.StreamCount > 0)
+        {
+            const FSceneBuffer& Stream = TransformStreamRing[TransformStreamSlot];
+            const uint64 Capacity = Stream.Size / (sizeof(FTransformStreamRecord) + sizeof(uint32));
+            Out.StreamRecords = Stream.Sub(0, (uint64)Out.StreamCount * sizeof(FTransformStreamRecord));
+            Out.StreamSlots   = Stream.Sub(Capacity * sizeof(FTransformStreamRecord), (uint64)Out.StreamCount * sizeof(uint32));
         }
 
         // Interned; a full instance re-send also re-sends these, since a replaced device buffer loses them.
@@ -1380,6 +1464,7 @@ namespace Lumina
 
         // Takes a shadow slot for the rain occlusion view, so it runs before the counter is read back.
         ExtractWeather(Registry, Frame);
+        ExtractWeatherInteraction(Registry, Frame);
 
         // Same overshoot as LightCount, and this is the last writer of the shadow counter.
         NumLiveShadows = Math::Min(Frame.Lighting.ShadowDataCount.load(std::memory_order_acquire),
@@ -1636,6 +1721,29 @@ namespace Lumina
 
             CParticleSystem* PS = Component.ParticleSystem.Get();
 
+            // A grid copy replaces only that emitter's last one, since a frame with no new copy keeps the old.
+            if (auto Grids = ParticleGridResults.find(Entity); Grids != ParticleGridResults.end())
+            {
+                for (FParticleGridSnapshot& Snapshot : Grids->second)
+                {
+                    if (PS != nullptr && Snapshot.EmitterIndex < (int32)PS->Emitters.size() && PS->Emitters[Snapshot.EmitterIndex] != nullptr)
+                    {
+                        Snapshot.ChannelNames = PS->Emitters[Snapshot.EmitterIndex]->GridChannelNames;
+                    }
+
+                    auto Existing = Algo::FindIf(Component.GridSnapshots, [&](const FParticleGridSnapshot& Old) { return Old.EmitterIndex == Snapshot.EmitterIndex; });
+                    if (Existing != Component.GridSnapshots.end())
+                    {
+                        *Existing = Move(Snapshot);
+                    }
+                    else
+                    {
+                        Component.GridSnapshots.push_back(Move(Snapshot));
+                    }
+                }
+                ParticleGridResults.erase(Grids);
+            }
+
             const bool bForceBurst = Component.bForceBurst;
             const bool bForceReset = Component.bForceReset;
             Component.bForceBurst = false;
@@ -1702,6 +1810,14 @@ namespace Lumina
                 Item.AttributeFloatCount = 1u;
                 Item.Resolved            = FResolvedParticleParams{};
                 Item.ModuleParamValues.clear();
+                Item.GridChannels        = 0u;
+                Item.GridStageIterations.clear();
+                Item.GridTargetSlot      = RHI::kInvalidHeapSlot;
+                Item.GridTargetExtent    = FUIntVector2(0u);
+                Item.bReadBackGrid       = false;
+                Item.ArrayData.clear();
+                Item.ArrayRanges.clear();
+                Item.NeighborResolution  = 0u;
 
                 Item.Entity              = Entity;
                 Item.EmitterIndex        = EmitterIdx;
@@ -1750,6 +1866,44 @@ namespace Lumina
                         {
                             Item.RenderAttrSlots[A] = Emitter->GetRenderAttributeSlot((ParticleRenderAttribute::Type)A);
                         }
+
+                        for (const FName& ArrayName : Emitter->ArrayNames)
+                        {
+                            const auto Input = Algo::FindIf(Component.ArrayInputs, [&](const FParticleArrayInput& Candidate) { return Candidate.Name == ArrayName; });
+                            const uint32 Count = Input != Component.ArrayInputs.end() ? (uint32)Input->Values.size() : 0u;
+                            Item.ArrayRanges.push_back(FUIntVector2((uint32)Item.ArrayData.size(), Count));
+                            if (Count > 0u)
+                            {
+                                Item.ArrayData.insert(Item.ArrayData.end(), Input->Values.begin(), Input->Values.end());
+                            }
+                        }
+
+                        if (Emitter->bUsesNeighborGrid)
+                        {
+                            Item.NeighborResolution = (uint32)Math::Clamp(Emitter->NeighborGridResolution, 1, 64);
+                            Item.NeighborsPerCell   = (uint32)Math::Clamp(Emitter->NeighborsPerCell, 1, 32);
+                            Item.NeighborCellSize   = Math::Max(Emitter->NeighborCellSize, 0.01f);
+                        }
+
+                        Item.GridChannels = Emitter->GridChannelCount;
+                        if (Item.GridChannels > 0u)
+                        {
+                            Item.GridResolution      = FUIntVector2((uint32)Math::Clamp(Emitter->GridWidth, 1, ParticleGridMaxResolution),
+                                                                    (uint32)Math::Clamp(Emitter->GridHeight, 1, ParticleGridMaxResolution));
+                            Item.GridWorldSize       = Emitter->GridWorldSize;
+                            Item.bGridWraps          = Emitter->bGridWraps;
+                            Item.GridStageIterations = Emitter->GridStageIterations;
+                            Item.bReadBackGrid       = Emitter->bReadBackGrid;
+
+                            // Sized from the image itself, since an edited Width or Height waits for a rebuild to reach it.
+                            const CTextureRenderTarget* Target = Emitter->GridRenderTarget.Get();
+                            if (Target != nullptr && Target->GetTextureResource().NewTexture.IsValid())
+                            {
+                                const RHI::FManagedTexture& Image = Target->GetTextureResource().NewTexture;
+                                Item.GridTargetSlot   = RHI::Textures::StorageSlot(Image, 0);
+                                Item.GridTargetExtent = FUIntVector2(RHI::GetTextureDesc(Image.Texture).Dimension);
+                            }
+                        }
                     }
                     if (CTexture* Tex = Emitter->Texture.Get())
                     {
@@ -1787,6 +1941,7 @@ namespace Lumina
 
         // Whatever no component claimed belongs to one that is gone.
         ParticleCollisionResults.clear();
+        ParticleGridResults.clear();
     }
 
     const SEnvironmentComponent* FDefaultSceneRenderer::ExtractEnvironment(ECS::FRegistry& Registry, FFrameData& Frame)

@@ -2,6 +2,7 @@
 #include "Includes/GlobalRHI.slang"
 #include "Includes/Weather.slang"
 #include "Includes/RainCommon.slang"
+#include "Includes/WaveAtomics.slang"
 
 struct FPushConstants
 {
@@ -9,8 +10,8 @@ struct FPushConstants
     GPUSpan<uint>  Args;
     uint           NumDrops;
     float          Exposure;
+    uint           bSnow;
     uint           _Pad0;
-    uint           _Pad1;
 };
 
 FPushConstants* Pass() { return GetPassArgs<FPushConstants>(); }
@@ -39,9 +40,10 @@ void ComputeMain(uint3 DTid : SV_DispatchThreadID)
 
     const FWeatherData W      = GetWeather();
     const float3       Camera = GetCameraPosition();
-    const FRainDrop    Drop   = EvaluateRainDrop(W, Index, Camera);
+    const bool         bSnow  = Pass().bSnow != 0u;
+    const FRainDrop    Drop   = bSnow ? EvaluateSnowFlake(W, Index, Camera) : EvaluateRainDrop(W, Index, Camera);
 
-    const float Radius = W.RainTint.w;
+    const float Radius = bSnow ? W.SnowLook.z : W.RainTint.w;
     const float Dist   = length(Drop.Position - Camera);
     if (Dist > Radius || Dist < kRainNearClip)
     {
@@ -63,7 +65,6 @@ void ComputeMain(uint3 DTid : SV_DispatchThreadID)
     const float Fade = saturate((Radius - Dist) / (Radius * 0.25)) * saturate((Dist - kRainNearClip) / 1.2);
     const float3 Light = RainLightAt(Drop.Position);
 
-    uint Slot;
-    InterlockedAdd(Pass().Args.At(1u)[0], 1u, Slot);
+    const uint Slot = WaveInterlockedAdd(Pass().Args.At(1u), 1u);
     Pass().Visible.Set(Slot, uint4(Index, PackHalf2(Light.rg), PackHalf2(float2(Light.b, Fade)), 0u));
 }

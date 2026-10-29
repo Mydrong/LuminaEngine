@@ -44,6 +44,7 @@
 #include <World/Entity/Systems/CameraSystem.h>
 #include "Config/EngineSettings.h"
 #include "Input/Key.h"
+#include "Physics/PhysicsTypes.h"
 #include "Renderer/RenderLayers.h"
 #include "implot.h"
 #include "LuminaEditor.h"
@@ -86,6 +87,7 @@
 #include "Platform/CrashReporter.h"
 #include "Platform/Process/PlatformProcess.h"
 #include "Properties/Customizations/CoreTypeCustomization.h"
+#include "Properties/Customizations/CodeEditorCustomizations.h"
 #include "Properties/NamePicker.h"
 #include "Properties/Customizations/EntityScriptComponentCustomization.h"
 #include "Properties/Customizations/CurveGradientCustomization.h"
@@ -111,6 +113,7 @@
 #include "Thumbnails/ThumbnailManager.h"
 #include "Tools/ConsoleLogEditorTool.h"
 #include "Tools/ContentBrowserEditorTool.h"
+#include "Tools/PropertyMatrixTool.h"
 #include "Tools/EditorAssetActions.h"
 #include "Tools/UI/ImGui/EditorColors.h"
 #include "Tools/UI/ImGui/ImGuiDragDrop.h"
@@ -165,6 +168,7 @@
 #include "Tools/AssetEditors/ParticleSystemEditor/ParticleSystemEditorTool.h"
 #include "Tools/AssetEditors/PrefabEditor/PrefabEditorTool.h"
 #include "Tools/AssetEditors/RmlUiEditor/RmlUiEditorTool.h"
+#include "Tools/CodeWorkspace/CodeWorkspaceTool.h"
 #include "Tools/AssetEditors/TextureEditor/TextureEditorTool.h"
 #include "Tools/AssetEditors/FontEditor/FontEditorTool.h"
 #include "Tools/AssetEditors/SpriteSheetEditor/SpriteSheetEditorTool.h"
@@ -618,9 +622,24 @@ namespace Lumina
            return FKeyPropertyCustomization::MakeInstance();
         });
 
+        PropertyCustomizationRegistry->RegisterPropertyCustomization(SShortcut::StaticStruct()->GetName(), []
+        {
+           return FShortcutPropertyCustomization::MakeInstance();
+        });
+
+        PropertyCustomizationRegistry->RegisterPropertyCustomization(SCodeEditorTheme::StaticStruct()->GetName(), []
+        {
+           return FCodeEditorThemePropertyCustomization::MakeInstance();
+        });
+
         PropertyCustomizationRegistry->RegisterPropertyCustomization(SRenderLayerMask::StaticStruct()->GetName(), []
         {
            return FRenderLayerMaskPropertyCustomization::MakeInstance();
+        });
+
+        PropertyCustomizationRegistry->RegisterPropertyCustomization(StaticEnum<ECollisionProfiles>()->GetName(), []
+        {
+           return FCollisionLayersPropertyCustomization::MakeInstance();
         });
 
         PropertyCustomizationRegistry->RegisterPropertyCustomization(SInputActionHandle::StaticStruct()->GetName(), []
@@ -1060,7 +1079,9 @@ namespace Lumina
         }
 
         // Gated on no active text input so it cannot fire out of a rename field or a search box.
-        if (ImGui::GetIO().KeyCtrl && !ImGui::GetIO().KeyShift && !ImGui::GetIO().WantTextInput
+        // The code workspace takes Ctrl+P for its own quick open while it has focus.
+        const bool bCodeFocused = LastActiveTool != nullptr && LastActiveTool->GetUniqueTypeID() == FCodeWorkspaceTool::s_toolTypeID;
+        if (ImGui::GetIO().KeyCtrl && !ImGui::GetIO().KeyShift && !ImGui::GetIO().WantTextInput && !bCodeFocused
             && ImGui::IsKeyPressed(ImGuiKey_P, false))
         {
             OpenAssetSearchModal();
@@ -1421,6 +1442,7 @@ namespace Lumina
             case EScriptEditor::VSCode:           { static FString Found = FindVSCode(); Exe = Found; break; }
             case EScriptEditor::Rider:            { static FString Found = FindRider(); Exe = Found; break; }
             case EScriptEditor::SystemDefault:    break;
+            case EScriptEditor::BuiltIn:          break;
             }
         }
 
@@ -1453,13 +1475,30 @@ namespace Lumina
 
     void FEditorUI::OpenScriptEditor(FStringView ScriptPath)
     {
+        const CScriptEditorSettings* Settings = GetDefault<CScriptEditorSettings>();
+        if (Settings->ScriptEditor == EScriptEditor::BuiltIn && Settings->CustomEditorPath.empty())
+        {
+            const FFixedString VirtualPath = VFS::ResolveToVirtualPath(ScriptPath);
+            if (!VirtualPath.empty())
+            {
+                OpenFileEditor(FStringView(VirtualPath.c_str(), VirtualPath.size()));
+                return;
+            }
+        }
         OpenScriptInExternalEditor(ScriptPath);
+    }
+
+    FEditorTool* FEditorUI::FindFileEditor(FStringView VirtualPath) const
+    {
+        const auto Found = ActiveFileTools.find(FString(VirtualPath));
+        return Found != ActiveFileTools.end() ? Found->second : nullptr;
     }
 
     namespace
     {
         constexpr const char* GSessionAssetPrefix = "asset:";
         constexpr const char* GSessionFilePrefix  = "file:";
+        constexpr const char* GSessionCodeWorkspace = "tool:code";
 
         bool SessionKeyHasPrefix(const FString& Key, const char* Prefix)
         {
@@ -1580,12 +1619,25 @@ namespace Lumina
                 RestoredSessionTabs.insert(Tab);
                 OpenAssetEditor(*Guid);
             }
+            else if (Tab == GSessionCodeWorkspace)
+            {
+                Survivors.push_back(Tab);
+                RestoredSessionTabs.insert(Tab);
+                OpenCodeWorkspace();
+            }
             else if (SessionKeyHasPrefix(Tab, GSessionFilePrefix))
             {
                 const FString Path = Tab.substr(strlen(GSessionFilePrefix));
                 if (!VFS::Exists(FStringView(Path.c_str(), Path.size())))
                 {
                     continue;   // the file is genuinely gone, so drop it
+                }
+
+                // The workspace keeps its own list of files, so this tab becomes one of them.
+                if (FCodeWorkspaceTool::Handles(FStringView(Path.c_str(), Path.size())))
+                {
+                    OpenFileEditor(FStringView(Path.c_str(), Path.size()));
+                    continue;
                 }
 
                 Survivors.push_back(Tab);
@@ -1973,6 +2025,12 @@ namespace Lumina
             return;
         }
 
+        if (FCodeWorkspaceTool::Handles(VirtualPath))
+        {
+            OpenCodeWorkspace()->OpenDocument(VirtualPath);
+            return;
+        }
+
         FString Key(VirtualPath.data(), VirtualPath.size());
 
         auto Itr = ActiveFileTools.find(Key);
@@ -1995,6 +2053,18 @@ namespace Lumina
 
         RecordSessionTab(NewTool, FString(GSessionFilePrefix) + Key);
         ActiveFileTools.insert_or_assign(Move(Key), NewTool);
+    }
+
+    FCodeWorkspaceTool* FEditorUI::OpenCodeWorkspace()
+    {
+        if (FCodeWorkspaceTool* Existing = FindTool<FCodeWorkspaceTool>())
+        {
+            ImGui::SetWindowFocus(Existing->GetToolName().c_str());
+            return Existing;
+        }
+        FCodeWorkspaceTool* Workspace = CreateTool<FCodeWorkspaceTool>(this);
+        RecordSessionTab(Workspace, GSessionCodeWorkspace);
+        return Workspace;
     }
 
     void FEditorUI::BrowseToAsset(FStringView VirtualPath)
@@ -3450,33 +3520,53 @@ namespace Lumina
         return Result;
     }
 
+    void FEditorUI::OpenPropertyMatrix(TVector<FGuid> Assets)
+    {
+        CreateTool<FPropertyMatrixTool>(this, Move(Assets));
+    }
+
     void FEditorUI::SaveAllDirtyPackages()
     {
         TVector<CPackage*> DirtyPackages;
         for (TObjectIterator<CPackage> Itr; Itr; ++Itr)
         {
-            CPackage* Package = *Itr;
-            // Marked for destroy = a deleted asset awaiting the deferred drain; nothing to write.
-            if (Package->HasAnyFlag(OF_MarkedDestroy) || !Package->IsDirty())
-            {
-                continue;
-            }
-            DirtyPackages.push_back(Package);
+            DirtyPackages.push_back(*Itr);
         }
+        SavePackages(Move(DirtyPackages));
+    }
 
-        if (DirtyPackages.empty())
+    void FEditorUI::OpenSettings(CClass* Page)
+    {
+        FSettingsEditorTool* Settings = FindTool<FSettingsEditorTool>();
+        if (Settings == nullptr)
+        {
+            Settings = CreateTool<FSettingsEditorTool>(this);
+        }
+        Settings->Select(Page);
+        FocusTargetWindowName = Settings->GetToolName().c_str();
+    }
+
+    void FEditorUI::SavePackages(TVector<CPackage*> Packages)
+    {
+        // Marked for destroy = a deleted asset awaiting the deferred drain; nothing to write.
+        Packages.erase(Algo::RemoveIf(Packages, [](CPackage* Package)
+        {
+            return Package == nullptr || Package->HasAnyFlag(OF_MarkedDestroy) || !Package->IsDirty();
+        }), Packages.end());
+
+        if (Packages.empty())
         {
             ImGuiX::Notifications::NotifySuccess("Nothing to save; everything is up to date.");
             return;
         }
 
         TVector<FString> Paths;
-        Paths.reserve(DirtyPackages.size());
-        for (CPackage* Package : DirtyPackages)
+        Paths.reserve(Packages.size());
+        for (CPackage* Package : Packages)
         {
             Paths.emplace_back(Package->GetPackagePath().c_str());
         }
-        if (!ConfirmWritable(Move(Paths), [this] { SaveAllDirtyPackages(); }))
+        if (!ConfirmWritable(Move(Paths), [this, Packages] { SavePackages(Packages); }))
         {
             return;
         }
@@ -3491,7 +3581,7 @@ namespace Lumina
             }
 
             CPackage* Package = Asset->GetPackage();
-            if (Package != nullptr && Package->IsDirty() && !Package->HasAnyFlag(OF_MarkedDestroy))
+            if (Package != nullptr && Package->IsDirty() && Algo::Contains(Packages, Package))
             {
                 Tool->OnSave();
                 HandledByTool.insert(Package);
@@ -3500,7 +3590,7 @@ namespace Lumina
 
         uint32 Saved  = 0;
         uint32 Failed = 0;
-        for (CPackage* Package : DirtyPackages)
+        for (CPackage* Package : Packages)
         {
             if (HandledByTool.find(Package) != HandledByTool.end())
             {
@@ -3519,11 +3609,11 @@ namespace Lumina
 
         if (Failed > 0)
         {
-            ImGuiX::Notifications::NotifyError("Save All: {0} package(s) saved, {1} failed.", Saved, Failed);
+            ImGuiX::Notifications::NotifyError("Saved {0} package(s), {1} failed.", Saved, Failed);
         }
         else if (Saved > 0)
         {
-            ImGuiX::Notifications::NotifySuccess("Save All: {0} package(s) saved.", Saved);
+            ImGuiX::Notifications::NotifySuccess("Saved {0} package(s).", Saved);
         }
         // Zero saved with no failures means every dirty package belonged to a tool that reported itself.
     }
@@ -4051,6 +4141,17 @@ namespace Lumina
         ImGui::Separator();
 
         DrawToolMenuItem<FTerminalEditorTool>(LE_ICON_CONSOLE_LINE " Terminal", this);
+        if (ImGui::MenuItem(LE_ICON_CODE_BRACES " Code", nullptr, IsToolActive<FCodeWorkspaceTool>()))
+        {
+            if (FCodeWorkspaceTool* Workspace = FindTool<FCodeWorkspaceTool>())
+            {
+                RequestCloseTool(Workspace);
+            }
+            else
+            {
+                OpenCodeWorkspace();
+            }
+        }
 
         ImGui::Spacing();
 

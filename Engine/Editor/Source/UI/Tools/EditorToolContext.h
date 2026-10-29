@@ -8,8 +8,10 @@
 
 namespace Lumina
 {
+    class FEditorTool;
     class CObject;
     class CClass;
+    class CPackage;
     class FAssetRegistry;
     struct FAssetData;
 }
@@ -32,6 +34,8 @@ namespace Lumina
         virtual void OpenFileEditor(FStringView VirtualPath) = 0;
 
         virtual void OpenScriptEditor(FStringView ScriptPath) = 0;
+        // The open file editor for VirtualPath, or null.
+        virtual FEditorTool* FindFileEditor(FStringView VirtualPath) const = 0;
 
         /** Reveals a VFS path in the Content Browser: shows the panel, navigates to the containing
          *  folder, then selects and scrolls to the item. */
@@ -46,6 +50,15 @@ namespace Lumina
 
         /** Writes every dirty package through its open tool, which is what a standalone launch reads from disk. */
         virtual void SaveAllDirtyPackages() = 0;
+
+        // Saves the dirty ones among Packages the way SaveAllDirtyPackages saves everything.
+        virtual void SavePackages(TVector<CPackage*> Packages) = 0;
+
+        // Opens a property matrix over the assets, for viewing and editing their shared properties side by side.
+        virtual void OpenPropertyMatrix(TVector<FGuid> Assets) = 0;
+
+        // Opens the Settings panel on one settings class, such as CCodeEditorShortcuts.
+        virtual void OpenSettings(CClass* Page) = 0;
 
         // Asks before touching files that are read-only on disk and runs Then once they are writable. True when none were, so the caller goes ahead now.
         virtual bool ConfirmWritable(TVector<FString> VirtualPaths, TMoveOnlyFunction<void()> Then, bool bThenSaves = true) = 0;

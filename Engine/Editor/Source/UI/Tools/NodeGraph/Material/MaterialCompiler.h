@@ -19,6 +19,7 @@ namespace Lumina
     class CMaterialGraphNode;
     class CMaterialInput;
     class CMaterialOutput;
+    struct FMaterialFormula;
     struct FMaterialUniforms;
     struct SMaterialParameter;
     struct SKeyedCurve;
@@ -107,11 +108,6 @@ namespace Lumina
             uint32 TextureSamples        = 0;   // count of ".Sample(" call sites
             uint32 MathOps               = 0;   // sin/cos/lerp/normalize/dot/...
             uint32 NoiseOps              = 0;   // value/gradient/perlin/voronoi/simple noise + hash*
-            // Texture samples whose UV chain had no derivable gradient, so they fell back to UV0's. Correct
-            // in the forward lanes (implicit derivatives) but APPROXIMATE in the deferred VisBuffer pass:
-            // the mip is picked from UV0's rate of change rather than the sampled UV's. A tiled or otherwise
-            // transformed UV that lands here samples too fine a mip, which costs texture bandwidth and
-            // aliases. Non-zero means some node in that chain has no derivative rule yet.
             uint32 UVGradientFallbacks   = 0;
             uint32 ScalarParameters      = 0;
             uint32 VectorParameters      = 0;
@@ -234,10 +230,6 @@ namespace Lumina
 
         // Texture operations
         void DefineTextureSample(const FString& ID);
-        // Node is the sampling node, carried only so a UV-gradient fallback warning can name and focus it.
-        // SamplerName is the SAMPLER_* identifier from GlobalRHI.slang, emitted verbatim. Taken as a string
-        // rather than the node's EMaterialSampler because MaterialNode_TextureSample.h reaches this header
-        // through MaterialNodeExpression.h -- including it back would be circular.
         void TextureSample(const FString& ID, CTexture* Texture, CMaterialInput* Input, CEdGraphNode* Node = nullptr,
                            FStringView SamplerName = "SAMPLER_LINEAR_WRAP");
         void TextureSampleParameter(const FString& ID, const FName& ParamID, CTexture* Texture, CMaterialInput* Input,
@@ -246,11 +238,7 @@ namespace Lumina
         // Raises a non-fatal warning when UVValue carries no analytic derivative, so the deferred pass has
         // to sample it with UV0's gradient. No-op when the derivative is valid.
         void WarnUVGradientFallback(const FInputValue& UVValue, CEdGraphNode* Node);
-
-        // Claim a material texture slot WITHOUT emitting a sample, for nodes that need the bindless index
-        // itself (a ray-march samples the same texture many times at its own UVs/mip). Deduped exactly
-        // like TextureSample's binding, so a texture used by both paths still binds once.
-        // Returns -1 when every texture slot is already spoken for; the caller emits its neutral value.
+        
         int32 BindTexture(CTexture* Texture, CEdGraphNode* Node = nullptr);
         int32 BindTextureParameter(const FName& ParamID, CTexture* Texture, CEdGraphNode* Node = nullptr);
 
@@ -304,12 +292,7 @@ namespace Lumina
         void TriplanarSample(const FString& ID, CMaterialGraphNode* Node, int32 TextureIndex,
                              const FTriplanarInputs& Inputs, FStringView SamplerName, bool bNormalMap);
 
-        // Mesh distance field (Includes/DistanceField.slang). All three read the CURRENT primitive's own
-        // baked SDF volume through its meshlet header, so they are surface-domain, pixel-stage nodes; the
-        // helpers below emit the shared per-node preamble that resolves the instance and its volume.
-        //
-        // A material may use several of these; the preamble is emitted once per node and each binds its
-        // own outputs by ResolvedVar, so no cross-node ordering assumption exists.
+        // Mesh distance field.
         void MeshDistanceField(CMaterialGraphNode* Node, CMaterialInput* Position,
                                CMaterialOutput* DistanceOut, CMaterialOutput* GradientOut, CMaterialOutput* ValidOut);
 
@@ -465,6 +448,9 @@ namespace Lumina
         void If(CMaterialInput* X, CMaterialInput* Y, CMaterialInput* GreaterThan, CMaterialInput* EqualTo, CMaterialInput* LessThan, float Threshold);
         void Compare(const FString& Op, CMaterialInput* A, CMaterialInput* B);
 
+        // Values holds each input's unwired value by pin index.
+        void EmitFormula(CMaterialGraphNode* Node, const FMaterialFormula& Formula, const TVector<float>& Values);
+
         // Advanced shading helpers
         void Fresnel(CMaterialInput* Exponent, CMaterialInput* BaseReflect, CMaterialInput* Normal);
         void DepthFade(CMaterialInput* FadeDistance);
@@ -506,6 +492,13 @@ namespace Lumina
         // Computes shader complexity / cost metrics from the current chunk state. Call after
         // CompileGraph so the chunks are populated. Cheap (single linear scan per chunk).
         FShaderStats GetStats() const;
+
+        // Compiles only what feeds Pin, shown as unlit emissive, in place of the material itself.
+        void SetPreviewOutput(CMaterialOutput* Pin) { PreviewOutput = Pin; }
+        CMaterialOutput* GetPreviewOutput() const { return PreviewOutput; }
+
+        // The same weighting GetStats uses, for any slice of generated code such as one node's share.
+        static uint32 EstimateCost(const FString& PixelCode, const FString& VertexCode);
 
         FORCEINLINE bool HasErrors() const { return !Errors.empty(); }
         FORCEINLINE void AddError(const EdNodeGraph::FError& Error) { Errors.push_back(Error); }
@@ -653,6 +646,7 @@ namespace Lumina
         FString VertexOutputChunks;
 
         EMaterialCompileStage CurrentStage = EMaterialCompileStage::Pixel;
+        CMaterialOutput* PreviewOutput = nullptr;
         bool bMasked = false;
 
         TVector<TStrongObjectPtr<CTexture>> BoundImages;

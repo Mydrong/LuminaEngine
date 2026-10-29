@@ -743,13 +743,14 @@ namespace Lumina
         FVector4 FoamAbsorb;        // x = shoreline foam width, y = crest foam amount, z = depth fade, w = absorption
         FVector4 SSRSpecOpacity;    // x = ssr max dist, y = ssr step count, z = specular intensity, w = opacity
         FVector4 DetailParams;      // x = detail tiling, y = detail scroll speed, z = foam tiling, w = unused
+        FVector4 InteractionParams; // x = interaction ripple scale, y = interaction foam scale, z = rain ripple scale, w = unused
         uint32   DetailNormalIndex; // bindless 2D SRV, ~0u if none
         uint32   FoamTextureIndex;  // bindless 2D SRV, ~0u if none
         uint32   GridResolution;    // verts per side of the procedural grid
         float    HorizonScale;      // outer ring's distance as a multiple of the body's, 1 when it has no horizon skirt
     };
 
-    static_assert(sizeof(FGPUWater) == 288, "FGPUWater layout must match Includes/Water.slang");
+    static_assert(sizeof(FGPUWater) == 304, "FGPUWater layout must match Includes/Water.slang");
     VERIFY_SSBO_ALIGNMENT(FGPUWater);
 
     struct alignas(16) FWaterUnderwaterParams
@@ -1245,7 +1246,7 @@ namespace Lumina
     // Above the EParticleBlendMode byte of the sprite pass RenderFlags, must match ParticleSpriteCommon.slang.
     static constexpr uint32 PARTICLE_RENDER_FLAG_LIT = 1u << 8;
 
-    // 288 byte layout, must match FParticleSimParams in ParticleSimulate.slang / ParticleSimulateTemplate.slang.
+    // Must match FParticleSimParams in ParticleSimulate.slang / ParticleSimulateTemplate.slang.
     struct alignas(16) FParticleSimParamsGPU
     {
         FVector4  EmitterPosition;
@@ -1270,8 +1271,20 @@ namespace Lumina
         FVector4  EventParams;         // x=continuous events per second raised, y=parent velocity inherited
         FUIntVector4 EventInfo;        // x=event lists raised, y=list consumed, z=emission mesh slot, w=particles per event
         FUIntVector4 RibbonInfo;       // x=segments, y=head sample, z=head advanced this step
+        FUIntVector4 GridInfo;         // x=width, y=height, z=PARTICLE_STAGE, w=PARTICLE_GRID_FLAG bits
+        FVector4  GridParams;          // xy=world size, z=iteration within the stage
+        FUIntVector4 GridTarget;       // x=render target storage slot, y=width, z=height
+        FVector4  NeighborParams;      // x=cell size, y=cells per axis, z=indices per cell
     };
-    static_assert(sizeof(FParticleSimParamsGPU) == 400, "FParticleSimParamsGPU layout must match shader");
+    static_assert(sizeof(FParticleSimParamsGPU) == 464, "FParticleSimParamsGPU layout must match shader");
+
+    // Which part of a generated simulation a dispatch runs, in GridInfo.z, must match ParticleSimulateTemplate.slang.
+    static constexpr uint32 PARTICLE_STAGE_PARTICLES = 0u;
+    static constexpr uint32 PARTICLE_STAGE_TARGET    = Constants::kIndexNoneU32;
+    static constexpr uint32 PARTICLE_STAGE_NEIGHBORS = Constants::kIndexNoneU32 - 1u;
+
+    static constexpr uint32 PARTICLE_GRID_FLAG_ABSORB = 1u << 0;
+    static constexpr uint32 PARTICLE_GRID_FLAG_WRAP   = 1u << 1;
 
     // Mirrors FParticleEvent in ParticleSimCommon.slang, and doubles as an EmitParticle call from script.
     struct alignas(16) FParticleEventGPU
@@ -1378,7 +1391,46 @@ namespace Lumina
         float _Pad0             = 0.0f;
     };
 
-    // Mirrors FWeatherData in Common.slang. Absent unless a weather component is rendering this frame.
+    // A water body the interaction field ripples. Mirrors FWeatherWaterBody in WeatherFieldSim.slang.
+    struct FWeatherWaterBodyGPU
+    {
+        // Rows of the world to body transform that give local x and z, inside the body while both stay within half a unit.
+        FVector4 WorldToWaterX;
+        FVector4 WorldToWaterZ;
+        // x = surface height, y = interaction ripple scale, z = interaction foam scale, w = rain ripple scale.
+        FVector4 Params;
+    };
+    static_assert(sizeof(FWeatherWaterBodyGPU) == 48, "FWeatherWaterBodyGPU must match FWeatherWaterBody in WeatherFieldSim.slang.");
+
+    // A contact sphere the interaction field reads. Mirrors FWeatherContact in WeatherFieldSim.slang.
+    struct FWeatherContactGPU
+    {
+        FVector3 Position;
+        float    Radius;
+        FVector3 PrevPosition;
+        float    SurfaceY;
+        float    PrevSurfaceY;
+        float    RippleStrength;
+        float    FoamStrength;
+        float    TrailStrength;
+        uint32   Surface;
+        uint32   _Pad[3];
+    };
+    static_assert(sizeof(FWeatherContactGPU) == 64, "FWeatherContactGPU must match FWeatherContact in WeatherFieldSim.slang.");
+
+    // A contact striking water hard enough to splash. Mirrors FWeatherImpact in WeatherImpactSpawn.slang.
+    struct FWeatherImpactGPU
+    {
+        FVector3 Position;
+        float    Scale;
+        FVector3 Normal;
+        uint32   Surface;
+        uint32   Seed;
+        uint32   _Pad[3];
+    };
+    static_assert(sizeof(FWeatherImpactGPU) == 48, "FWeatherImpactGPU must match FWeatherImpact in WeatherImpactSpawn.slang.");
+
+    // Mirrors FWeatherData in Common.slang. Absent unless a weather component plays or something disturbs the world's water.
     struct FWeatherGPU
     {
         FMatrix4 RainViewProjection;
@@ -1405,9 +1457,29 @@ namespace Lumina
         float    OcclusionTexelWorld = 0.1f;
         uint32   NumDrops = 0;
         uint32   DebugMode = 0;
-        uint32   _Pad[3] = {};
+        // The ripple, foam and trail field around the camera, kIndexNoneU32 while nothing disturbs the world.
+        uint32   InteractionField = Constants::kIndexNoneU32;
+        // Slots in InteractorTable minus one, a power of two less one, so a probe wraps with a mask.
+        uint32   InteractorTableMask = 0;
+        uint32   _Pad0 = 0;
+        // xy = world XZ of the field's first texel corner, z = one over the field width in meters, w = texel size in meters.
+        FVector4 FieldParams = FVector4(0.0f);
+        // x = ripple normal gain, y = foam gain, z = trail gain, w = unused.
+        FVector4 FieldShading = FVector4(0.0f);
+        // x = intensity, y = flakes per cubic meter, z = flake size in mm, w = size variation.
+        FVector4 Snow = FVector4(0.0f);
+        // x = fall speed, y = flutter in meters, z = wind influence, w = wrapped vertical fall offset.
+        FVector4 SnowMotion = FVector4(0.0f);
+        // x = brightness, y = opacity, z = flake radius around the camera, w = flake field tile size.
+        FVector4 SnowLook = FVector4(0.0f);
+        // x = cover, y = drift pattern size in meters, z = print depth, w = unused.
+        FVector4 SnowSurface = FVector4(0.0f);
+        // Entity id and record index pairs, open addressed by entity id, empty slots holding kIndexNoneU32.
+        RHI::TGPUSpan<FUIntVector2>         InteractorTable;
+        // x = root height, y = rain soak, z = water line above the root, w = wetness under the water line.
+        RHI::TGPUSpan<FVector4>             Interactors;
     };
-    static_assert(sizeof(FWeatherGPU) == 288, "FWeatherGPU must match FWeatherData in Common.slang.");
+    static_assert(sizeof(FWeatherGPU) == 416, "FWeatherGPU must match FWeatherData in Common.slang.");
 
     struct FSceneGlobalData
     {
@@ -1439,7 +1511,10 @@ namespace Lumina
         uint32          DBufferAIndex     = Constants::kIndexNoneU32;
         uint32          DBufferBIndex     = Constants::kIndexNoneU32;
         uint32          DBufferCIndex     = Constants::kIndexNoneU32;
-        uint32          _PadFogParams[3]  = {};
+        // Geometric specular antialiasing, off while the variance scale is zero.
+        float           SpecularAAVariance  = 0.0f;
+        float           SpecularAAThreshold = 0.0f;
+        uint32          _PadFogParams     = 0;
 
         // The translucent passes fog themselves, since the composite runs first and sees only opaque depth.
         FExponentialHeightFogParams FogParams = {};

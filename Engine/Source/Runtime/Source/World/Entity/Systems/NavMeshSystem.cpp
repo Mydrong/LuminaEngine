@@ -1,5 +1,7 @@
 #include "RuntimePCH.h"
 #include "NavMeshSystem.h"
+#include "BlockoutSystem.h"
+#include "FoliageTerrainSystem.h"
 
 #include <algorithm>
 
@@ -42,6 +44,8 @@ namespace Lumina
     {
         RequireUpdate(EUpdateStage::FrameStart);
         RequireUpdate(EUpdateStage::Paused);
+        // Rebuilt tiles read the terrain, foliage and blockout meshes those systems settle.
+        RunsAfter<SFoliageTerrainSystem, SBlockoutSystem>();
         Writes<SNavMeshComponent>();
         Reads<SRigidBodyComponent, SBoxColliderComponent, SSphereColliderComponent, SMeshColliderComponent, SCapsuleColliderComponent, SCylinderColliderComponent, SCharacterPhysicsComponent, STerrainColliderComponent, STerrainComponent, STransformComponent, SStaticMeshComponent, SDynamicMeshColliderComponent, SDynamicMeshComponent, SCompoundColliderComponent, SNavModifierComponent, SNavLinkComponent, SFoliageComponent>();
     }
@@ -1627,7 +1631,9 @@ namespace Lumina
             Sources.RecordElement.reserve(All.size());
             for (FNavSourceEntry& Entry : All)
             {
-                Sources.KeysOfEntity[EntityOfSourceKey(Entry.Key)].push_back(Entry.Key);
+                const ECS::FEntity Owner = EntityOfSourceKey(Entry.Key);
+                Sources.KeysOfEntity[Owner].push_back(Entry.Key);
+                ECS::Utils::SetMovedTransformInterest(Context.GetRegistry(), Sources.MovedConsumer, Owner, true);
                 AddSourceRecord(Sources, std::move(Entry));
             }
             RebuildSweepOrder(Sources);
@@ -1707,6 +1713,7 @@ namespace Lumina
                 {
                     Sources.KeysOfEntity.erase(KeysIt);
                 }
+                ECS::Utils::SetMovedTransformInterest(Context.GetRegistry(), Sources.MovedConsumer, Entity, false);
                 return;
             }
             if (KeysIt == Sources.KeysOfEntity.end())
@@ -1714,6 +1721,7 @@ namespace Lumina
                 Sources.SweepOrder.push_back(Entity);
             }
             Sources.KeysOfEntity[Entity] = std::move(Kept);
+            ECS::Utils::SetMovedTransformInterest(Context.GetRegistry(), Sources.MovedConsumer, Entity, true);
         }
 
         // Spread over the workers since a streamed world carries tens of thousands, and only a version not seen last poll reaches IsStale.
@@ -2553,7 +2561,8 @@ namespace Lumina
             TUniquePtr<FNavSourceTracker>& Sources = Registry.Ctx().Emplace<TUniquePtr<FNavSourceTracker>>(MakeUnique<FNavSourceTracker>());
             // A few threads keep up with a world full of moving obstacles, and every extra one is a thread the frame's workers share cores with.
             Sources->BuildPool = MakeUnique<FNavBuildPool>(Math::Clamp(Jobs::GetNumWorkers() / 8, 1u, 4u));
-            Sources->MovedConsumer = ECS::Utils::AddMovedTransformConsumer(Registry);
+            // Filtered to the entities that contribute a source, so a world of moving props never reaches the drain.
+            Sources->MovedConsumer = ECS::Utils::AddMovedTransformConsumer(Registry, true);
         }
         WatchSourceComponents<SBoxColliderComponent, SSphereColliderComponent, SMeshColliderComponent, SCapsuleColliderComponent, SCylinderColliderComponent,
             SCharacterPhysicsComponent, STerrainColliderComponent, STerrainComponent, SStaticMeshComponent, SDynamicMeshColliderComponent, SDynamicMeshComponent,
