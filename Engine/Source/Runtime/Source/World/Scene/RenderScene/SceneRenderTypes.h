@@ -131,7 +131,8 @@ namespace Lumina
         WireframeOverlay    = 29,
         Velocity            = 30,
         QuadEfficiency      = 31,
-        Num                 = 32,
+        ScreenSpaceGI       = 32,
+        Num                 = 33,
     };
 
     constexpr FStringView RenderFlagsAsString(ERenderSceneDebugFlags Flags)
@@ -169,6 +170,7 @@ namespace Lumina
             case ERenderSceneDebugFlags::WireframeOverlay:  return "Wireframe Overlay";
             case ERenderSceneDebugFlags::Velocity:          return "Velocity";
             case ERenderSceneDebugFlags::QuadEfficiency:    return "Quad Efficiency";
+            case ERenderSceneDebugFlags::ScreenSpaceGI:     return "Screen Space GI";
             default:                                        return "Lit";
         }
     }
@@ -243,13 +245,13 @@ namespace Lumina
         Spot        = BIT(2),
         CastShadow  = BIT(3),
         Volumetric  = BIT(4),
-        // Screen-space contact trace on top of this light's shadow map; local lights only.
+        // Screen-space contact trace on top of this light's shadow map; local lights only, reach at LIGHT_CONTACT_LENGTH_SHIFT.
         ContactShadow = BIT(5),
         // Masked by a light-function material whose atlas tile sits at LIGHT_FUNCTION_SLOT_SHIFT.
         LightFunction = BIT(6),
         // A one-sided rectangle. Angles holds its half width and height, and VolumetricScatteringRadius its packed right axis.
         Area        = BIT(7),
-        // Bits 8-15 and 24-31 are not free, see LIGHT_FUNCTION_SLOT_SHIFT and kLightMinRoughnessShift.
+        // Bits 8-31 are not free, see LIGHT_FUNCTION_SLOT_SHIFT, LIGHT_CONTACT_LENGTH_SHIFT and kLightMinRoughnessShift.
     };
 
     ENUM_CLASS_FLAGS(ELightFlags);
@@ -261,6 +263,17 @@ namespace Lumina
     {
         const uint32 Quantized = (uint32)(Math::Clamp(MinRoughness, 0.0f, 1.0f) * 255.0f + 0.5f);
         return (ELightFlags)((uint32)Flags | (Quantized << kLightMinRoughnessShift));
+    }
+
+    // Whole centimeters keep the reach in one byte of FLight::Flags, up to 2.55 m.
+    inline ELightFlags PackLightContactShadow(ELightFlags Flags, bool bContactShadows, float LengthMeters)
+    {
+        if (!bContactShadows)
+        {
+            return Flags;
+        }
+        const uint32 Centimeters = (uint32)Math::Clamp(LengthMeters * 100.0f + 0.5f, 1.0f, (float)LIGHT_CONTACT_LENGTH_MASK);
+        return (ELightFlags)((uint32)(Flags | ELightFlags::ContactShadow) | (Centimeters << LIGHT_CONTACT_LENGTH_SHIFT));
     }
 
     struct FSceneImage
@@ -562,6 +575,25 @@ namespace Lumina
         FVector4 Color;
     };
 
+    // Sun cascade tuning forwarded to the lit shaders, mirrored by FSunShadowParams in Common.slang.
+    struct FSunShadowParams
+    {
+        float  NormalBias = 1.0f;
+        float  DepthBias = 0.0f;
+        float  FilterRadiusTexels = 2.0f;   // in cascade-0 texels
+        float  CascadeBlend = 0.0f;
+        float  DistanceFade = 0.1f;         // fraction of the last cascade the shadow fades out over
+        uint32 FilterTaps = 4;
+        uint32 ActiveCascadeCount = NumCascades;
+        uint32 bFarCascade = 0;             // 1 when the last active cascade is the far one
+        float  TanSunRadius = 0.0f;         // tangent of the sun's angular radius, which sets the penumbra per meter of gap
+        uint32 BlockerTaps = 0;             // near cascade blocker search taps, 0 keeps the fixed-width kernel
+        float  MinFilterRadiusTexels = 0.0f; // narrowest contact-hardened kernel, in cascade-0 texels
+        uint32 _Pad = 0;
+    };
+
+    static_assert(sizeof(FSunShadowParams) == 48, "FSunShadowParams layout must match FSunShadowParams in Common.slang");
+
     // Header only; the arrays hang off it by address so a frame uploads the live prefix, not the cap.
     struct FSceneLightData
     {
@@ -581,10 +613,7 @@ namespace Lumina
         // Ortho depth range of each cascade, which turns a shadow-map NDC z delta into world units.
         FVector4           CascadeDepthRanges{};
 
-        // x = normal-bias scale, y = constant depth bias, z = PCF radius in cascade-0 texels, w = cascade blend fraction.
-        FVector4           ShadowParams{ 1.0f, 0.0f, 2.0f, 0.0f };
-        // x = far-cascade distance-fade fraction, y = PCF tap count, z = active cascade count, w = 1 when the last cascade is the far one.
-        FVector4           ShadowParams2{ 0.1f, 4.0f, (float)NumCascades, 0.0f };
+        FSunShadowParams   SunShadow{};
 
         FVector4           AmbientLight{};
 
@@ -597,11 +626,11 @@ namespace Lumina
         uint32                          _LightFunctionPad[3]{};
     };
 
-    static_assert(sizeof(FSceneLightData) == 208, "FSceneLightData layout must match FLightData in Common.slang");
+    static_assert(sizeof(FSceneLightData) == 224, "FSceneLightData layout must match FLightData in Common.slang");
     static_assert(offsetof(FSceneLightData, SunDirection) == 16, "SunDirection must sit at 16, matching the scalar layout in Common.slang");
     VERIFY_SSBO_ALIGNMENT(FSceneLightData);
     // Relaxed block layout rejects a vector straddling 16, so the spans must follow the last one.
-    static_assert(offsetof(FSceneLightData, Lights) == 144, "Lights must sit at 144");
+    static_assert(offsetof(FSceneLightData, Lights) == 160, "Lights must sit at 160");
     
     struct FLineBatch
     {
@@ -624,7 +653,8 @@ namespace Lumina
         uint32 AOTextureIndex = Constants::kIndexNoneU32;
         // Sun occlusion traced past the cascades, read pixel for pixel by the opaque lighting.
         uint32 SunShadowMaskIndex = Constants::kIndexNoneU32;
-        uint32 _Pad1 = 0;
+        // Half resolution bounced light in rgb and the hemisphere fraction it covers in a, set only on frames that traced it.
+        uint32 IndirectDiffuseIndex = Constants::kIndexNoneU32;
         uint32 _Pad2 = 0;
     };
 
@@ -956,11 +986,13 @@ namespace Lumina
     struct alignas(16) FInstanceProxy
     {
         FVector3    LocalCenter;
-        float       LocalRadius;
+        // Half the side of a square as large as the surface's mean projected area.
+        float       SplatHalfSize;
         uint32      PackedNormal;       // PackNormal
         uint32      PackedUV;           // PackHalf2x16
         uint32      Color;              // PackColor
-        uint32      Flags;
+        // The foliage thinning start the cull widens survivors from, 0 never.
+        float       ThinningStartDistance;
     };
     static_assert(sizeof(FInstanceProxy) == 32, "FInstanceProxy layout must match shader");
     VERIFY_SSBO_ALIGNMENT(FInstanceProxy);

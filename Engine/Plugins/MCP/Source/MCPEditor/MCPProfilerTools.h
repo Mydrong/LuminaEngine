@@ -1,8 +1,12 @@
 #pragma once
 
+#include "Containers/HashTable.h"
 #include "Containers/String.h"
 #include "Containers/Vector.h"
 #include "Core/Object/ObjectMacros.h"
+#include "Core/Threading/Sync.h"
+#include "Core/Threading/Thread.h"
+#include "Memory/SmartPtr.h"
 
 #include "MCPProfilerTools.generated.h"
 
@@ -221,6 +225,40 @@ namespace Lumina
 
     namespace MCP
     {
+        // One capture at a time runs on its own thread, so the scene it measures can still be driven through other tools.
+        struct FProfilerCaptureJob
+        {
+            FString File;
+            FString Failure;
+            int32 Seconds = 0;
+            bool bCaptured = false;
+            FThread Worker;
+        };
+
+        // Owned by FMCPEditorModule, which shuts it down before the DLL unloads.
+        struct FProfilerToolsState
+        {
+            FMutex Mutex;
+            TUniquePtr<FProfilerCaptureJob> Job;
+            FString LastCaptureFile;
+
+            void Shutdown();
+        };
+
+        struct FProfilerZoneTotals
+        {
+            double TotalNs = 0.0;
+            double MaxNs = 0.0;
+            int64 Count = 0;
+        };
+
+        MCPEDITOR_API TVector<FStringView> SplitProfilerFields(FStringView Line);
+
+        // Adds one tracy-csvexport line to the totals, skipping the line while bHeaderPending is set and clearing it.
+        MCPEDITOR_API void AddTracyZoneLine(FStringView Line, bool bGpuRows, bool& bHeaderPending, THashMap<FString, FProfilerZoneTotals>& Out);
+
+        MCPEDITOR_API TVector<SProfilerZone> RankProfilerZones(const THashMap<FString, FProfilerZoneTotals>& Zones, int32 Frames, int32 Top, const FString& Filter);
+
         void RegisterProfilerTools(FStringView Owner);
     }
 }

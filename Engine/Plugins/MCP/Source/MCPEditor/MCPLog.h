@@ -42,6 +42,9 @@ namespace Lumina::MCP
         PlatformTime::FDateTime FirstSeen;
         PlatformTime::FDateTime LastSeen;
 
+        // Orders connections by recency where LastSeen, at millisecond resolution, would tie.
+        uint64 LastSeenRevision = 0;
+
         uint32 Requests = 0;
         uint32 Errors   = 0;
         bool   bOpen    = true;
@@ -74,15 +77,17 @@ namespace Lumina::MCP
         // Bumps on every change, so a reader can skip copying when nothing happened.
         NODISCARD uint64 GetRevision() const { return Revision.load(std::memory_order_acquire); }
 
-        // Entries come out oldest first and are shared, so the copy holds the lock only for pointer copies.
-        void Snapshot(TVector<TSharedPtr<const FTransaction>>& OutTransactions, TVector<FConnection>& OutConnections) const;
+        // Entries come out oldest first and are shared; returns the all-time recorded count, which Clear and a full ring never lower.
+        uint64 Snapshot(TVector<TSharedPtr<const FTransaction>>& OutTransactions, TVector<FConnection>& OutConnections) const;
 
     private:
 
+        FConnection* FindConnection(FStringView Session);
         FConnection& FindOrAddConnection(FStringView Session, const PlatformTime::FDateTime& Now);
 
         TRingBuffer<TSharedPtr<const FTransaction>> Transactions;
         TVector<FConnection> Connections;
+        uint64 RecordedCount = 0;
 
         mutable FMutex Mutex;
         TAtomic<uint64> Revision { 0 };

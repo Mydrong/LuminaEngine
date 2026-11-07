@@ -1,5 +1,6 @@
 #include "MCPLog.h"
 
+#include "Containers/Algorithm.h"
 #include "Containers/StringFormat.h"
 #include "Core/Json/Json.h"
 #include "GUID/GUID.h"
@@ -114,13 +115,14 @@ namespace Lumina::MCP
             }
 
             Connection.LastSeen = Transaction->Time;
+            Connection.LastSeenRevision = Revision.fetch_add(1, std::memory_order_release) + 1;
             ++Connection.Requests;
             Connection.Errors += Transaction->IsError() ? 1 : 0;
 
             Transactions.Add(Move(Transaction));
+            ++RecordedCount;
         }
 
-        Revision.fetch_add(1, std::memory_order_release);
         return Opened;
     }
 
@@ -134,14 +136,17 @@ namespace Lumina::MCP
         {
             TScopeLock Lock(Mutex);
 
-            FConnection& Connection = FindOrAddConnection(Session, Transaction->Time);
-            Connection.LastSeen = Transaction->Time;
-            Connection.bOpen = false;
+            const uint64 Seen = Revision.fetch_add(1, std::memory_order_release) + 1;
+            if (FConnection* Connection = FindConnection(Session))
+            {
+                Connection->LastSeen = Transaction->Time;
+                Connection->LastSeenRevision = Seen;
+                Connection->bOpen = false;
+            }
 
             Transactions.Add(Move(Transaction));
+            ++RecordedCount;
         }
-
-        Revision.fetch_add(1, std::memory_order_release);
     }
 
     void FLog::Clear()
@@ -154,7 +159,7 @@ namespace Lumina::MCP
         Revision.fetch_add(1, std::memory_order_release);
     }
 
-    void FLog::Snapshot(TVector<TSharedPtr<const FTransaction>>& OutTransactions, TVector<FConnection>& OutConnections) const
+    uint64 FLog::Snapshot(TVector<TSharedPtr<const FTransaction>>& OutTransactions, TVector<FConnection>& OutConnections) const
     {
         TScopeLock Lock(Mutex);
 
@@ -166,21 +171,29 @@ namespace Lumina::MCP
         }
 
         OutConnections = Connections;
+        return RecordedCount;
+    }
+
+    FConnection* FLog::FindConnection(FStringView Session)
+    {
+        const auto Found = Algo::FindIf(Connections, [Session](const FConnection& Each) { return Each.Session == Session; });
+        return Found != Connections.end() ? &*Found : nullptr;
     }
 
     FConnection& FLog::FindOrAddConnection(FStringView Session, const PlatformTime::FDateTime& Now)
     {
-        for (FConnection& Connection : Connections)
+        if (FConnection* Found = FindConnection(Session))
         {
-            if (Connection.Session == Session)
-            {
-                return Connection;
-            }
+            return *Found;
         }
 
         if (Connections.Num() >= kMaxConnections)
         {
-            Connections.RemoveAt(0);
+            const auto Evicted = Algo::MinElement(Connections, [](const FConnection& A, const FConnection& B)
+            {
+                return A.bOpen != B.bOpen ? !A.bOpen : A.LastSeenRevision < B.LastSeenRevision;
+            });
+            Connections.RemoveAt(static_cast<int32>(Evicted - Connections.begin()));
         }
 
         FConnection& Added = Connections.AddGetRef(FConnection());

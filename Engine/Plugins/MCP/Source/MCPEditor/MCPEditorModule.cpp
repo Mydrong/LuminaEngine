@@ -48,6 +48,21 @@ namespace Lumina
         return GModule != nullptr ? &GModule->PackageTools : nullptr;
     }
 
+    MCP::FProfilerToolsState* FMCPEditorModule::GetProfilerTools()
+    {
+        return GModule != nullptr ? &GModule->ProfilerTools : nullptr;
+    }
+
+    MCP::FEditorInputState* FMCPEditorModule::GetEditorInput()
+    {
+        return GModule != nullptr ? &GModule->EditorInput : nullptr;
+    }
+
+    MCP::FLookDevFixtureState* FMCPEditorModule::GetLookDevFixture()
+    {
+        return GModule != nullptr ? &GModule->LookDevFixture : nullptr;
+    }
+
     void FMCPEditorModule::StartupModule()
     {
         GModule = this;
@@ -96,7 +111,8 @@ namespace Lumina
         // The transport owns a thread that calls back into this DLL, so it has to stop before unload.
         FCoreDelegates::OnEngineShutdownStarted.Remove(ShutdownStartedHandle);
         Server.Stop();
-        PackageTools.JoinWorker();
+        PackageTools.Shutdown();
+        ProfilerTools.Shutdown();
 
         GModule = nullptr;
     }

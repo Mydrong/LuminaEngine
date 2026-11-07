@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -34,8 +35,7 @@ public static class JsonStore
     {
         try
         {
-            PathUtils.EnsureDirectoryForFile(FilePath);
-            File.WriteAllText(FilePath, JsonSerializer.Serialize(Value, Options));
+            PathUtils.WriteFileAtomic(FilePath, JsonSerializer.Serialize(Value, Options), new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
         }
         catch (Exception Ex) when (Ex is IOException or UnauthorizedAccessException)
         {

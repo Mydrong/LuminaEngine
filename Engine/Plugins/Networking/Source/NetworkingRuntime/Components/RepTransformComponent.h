@@ -13,8 +13,7 @@ namespace Lumina
         FQuat    Rot;
     };
 
-    // Per-entity ring of recent samples for a SimulatedProxy. The client renders InterpDelay behind the
-    // newest server time, lerping between bracketing samples and (optionally) extrapolating past the newest.
+    // Per-entity ring of a SimulatedProxy's recent samples, rendered InterpDelay behind the newest server time.
     struct FNetInterpState
     {
         static constexpr int Capacity = 12;
@@ -25,9 +24,7 @@ namespace Lumina
         const FNetInterpSample& Logical(int Index) const { return Samples[(Head + Index) % Capacity]; }
         const FNetInterpSample& Newest() const { return Samples[(Head + Count - 1) % Capacity]; }
 
-        // Average spacing between buffered samples (seconds), i.e. this entity's effective send interval.
-        // 0 when there aren't yet two samples. Drives the adaptive interp delay so low-rate (LOD-far) proxies
-        // buffer enough to interpolate instead of extrapolate.
+        // Effective send interval in seconds, so low-rate proxies buffer enough to interpolate instead of extrapolate.
         double AverageInterval() const
         {
             if (Count < 2)
@@ -53,8 +50,13 @@ namespace Lumina
             }
         }
 
-        // Pose at RenderTime. Holds at the low end, lerps between bracketing samples, and past the newest
-        // sample extrapolates position from the last velocity (capped) when bExtrapolate; rotation is held.
+        // A jump this far was a teleport, so it lands at B's time instead of sliding or extrapolating along it.
+        static bool IsTeleport(const FNetInterpSample& A, const FNetInterpSample& B, float TeleportDistance)
+        {
+            return TeleportDistance > 0.0f && Math::Length(B.Pos - A.Pos) > TeleportDistance;
+        }
+
+        // Pose at RenderTime, held at either end, lerped between samples, or extrapolated past the newest.
         void Evaluate(double RenderTime, FVector3& OutPos, FQuat& OutRot, bool bExtrapolate, double MaxExtrapolation,
             float TeleportDistance = 0.0f) const
         {
@@ -69,9 +71,9 @@ namespace Lumina
             if (RenderTime >= Logical(Count - 1).Time)
             {
                 const FNetInterpSample& Last = Logical(Count - 1);
-                if (bExtrapolate)
+                const FNetInterpSample& Prev = Logical(Count - 2);
+                if (bExtrapolate && !IsTeleport(Prev, Last, TeleportDistance))
                 {
-                    const FNetInterpSample& Prev = Logical(Count - 2);
                     const double Span = Last.Time - Prev.Time;
                     if (Span > 1e-9)
                     {
@@ -91,8 +93,7 @@ namespace Lumina
                 const FNetInterpSample& B = Logical(i + 1);
                 if (RenderTime >= A.Time && RenderTime <= B.Time)
                 {
-                    // A jump this far was a teleport, so it lands at B's time instead of sliding across the gap.
-                    if (TeleportDistance > 0.0f && Math::Length(B.Pos - A.Pos) > TeleportDistance)
+                    if (IsTeleport(A, B, TeleportDistance))
                     {
                         OutPos = A.Pos; OutRot = A.Rot; return;
                     }
@@ -131,6 +132,20 @@ namespace Lumina
         // Ring.AverageInterval()) so the render clock stays behind this entity's actual sample rate (no routine
         // extrapolation/snap) and a tier/rate change ramps the delay instead of rewinding. -1 = uninitialized.
         double SmoothedInterpDelay = -1.0;
+
+        // Per second, so a 60 fps tick eases the delay by the same 10% the old per-tick factor did.
+        static constexpr float InterpDelayEaseRate = 6.32f;
+
+        // The first sample snaps to TargetDelay so a new proxy does not ramp up from zero.
+        double EasedInterpDelay(double TargetDelay, double DeltaTime) const
+        {
+            if (SmoothedInterpDelay < 0.0)
+            {
+                return TargetDelay;
+            }
+            return Math::Damp(static_cast<float>(SmoothedInterpDelay), static_cast<float>(TargetDelay), InterpDelayEaseRate,
+                static_cast<float>(DeltaTime));
+        }
 
         // Latest received scale (not interpolated; applied directly). Valid once bHasScale is set.
         NetQuantize::FQuantizedVector CurrentScaleQ;

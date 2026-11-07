@@ -400,7 +400,7 @@ namespace Lumina
         PROPERTY(Editable, Category = "Virtual Geometry", ClampMin = 0.0f, ClampMax = 16.0f, Delta = 0.25f)
         float ProxyTransitionPixels = 2.0f;
 
-        // Sun shadow filtering; a low sun stretches each shadow texel along the ground, which only more taps hide.
+        // Sun shadow filtering and contact march steps, with the march off at Low; a low sun stretches each shadow texel along the ground, which only more taps hide.
         PROPERTY(Editable, Category = "Shadows")
         EShadowQuality ShadowQuality = EShadowQuality::High;
 
@@ -554,5 +554,13 @@ namespace Lumina
         /** Trades depth-pyramid bandwidth against thin-object accuracy and temporal stability. */
         PROPERTY(Editable, Category = "Ambient Occlusion|Heuristics", ClampMin = 0.0f, ClampMax = 30.0f)
         float GTAODepthMipSamplingOffset = 3.3f;
+
+        // Half resolution indirect diffuse gathered along GTAO's horizon slices from last frame's lit color; needs GTAO on.
+        PROPERTY(Editable, Category = "Global Illumination")
+        bool bScreenSpaceGI = false;
+
+        // World distance the indirect diffuse trace searches for surfaces to bounce light from.
+        PROPERTY(Editable, Category = "Global Illumination", ClampMin = 0.01f)
+        float ScreenSpaceGIRadius = 2.0f;
     };
 }

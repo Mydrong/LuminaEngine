@@ -76,7 +76,8 @@ public static class TestMode
             return 0;
         }
 
-        return RunSuites(Suites, Arguments, Directories, Assembly, TypeValue, PlatformValue, ConfigurationValue, Timer);
+        return await RunSuitesAsync(Suites, Arguments, Directories, Assembly, TypeValue, PlatformValue, ConfigurationValue, Timer, Cancellation)
+            .ConfigureAwait(false);
     }
 
     private static void ListSuites(RulesAssembly Assembly)
@@ -118,7 +119,7 @@ public static class TestMode
             + string.Join(", ", Assembly.DiscoveredTestSuites.Keys.OrderBy(K => K, StringComparer.OrdinalIgnoreCase)));
     }
 
-    private static int RunSuites(
+    private static async Task<int> RunSuitesAsync(
         IReadOnlyList<TestSuite> Suites,
         CommandLine Arguments,
         BuildDirectories Directories,
@@ -126,7 +127,8 @@ public static class TestMode
         TargetType TypeValue,
         BuildPlatform PlatformValue,
         BuildConfiguration ConfigurationValue,
-        Stopwatch Timer)
+        Stopwatch Timer,
+        CancellationToken Cancellation)
     {
         IBuildPlatform PlatformSupport = BuildPlatformRegistry.Get(PlatformValue);
         BuildOptions Options = BuildOptions.Load(Directories, Arguments);
@@ -169,7 +171,7 @@ public static class TestMode
                 .Select(M => M.OutputDirectory));
             string LibraryPath = string.Join(Path.PathSeparator, SearchDirectories.Distinct(StringComparer.OrdinalIgnoreCase));
 
-            if (Launch(Executable, SuiteArguments, LibraryPath) != 0)
+            if (await LaunchAsync(Executable, SuiteArguments, LibraryPath, Cancellation).ConfigureAwait(false) != 0)
             {
                 Failed.Add(Suite.SuiteName);
             }
@@ -185,19 +187,23 @@ public static class TestMode
         return 0;
     }
 
-    private static int Launch(string Executable, IReadOnlyList<string> LaunchArguments, string EngineBinaries)
+    private static async Task<int> LaunchAsync(
+        string Executable, IReadOnlyList<string> LaunchArguments, string LibrarySearchPath, CancellationToken Cancellation)
     {
+        Cancellation.ThrowIfCancellationRequested();
+
         ProcessStartInfo StartInfo = new(Executable)
         {
             UseShellExecute = false,
             WorkingDirectory = Path.GetDirectoryName(Executable) ?? string.Empty,
         };
 
-        // A project's suite links the engine's module DLLs but sits beside the project's binaries, so the loader needs this.
-        if (EngineBinaries.Length > 0)
+        // Windows finds DLLs through PATH, while the Linux loader reads only LD_LIBRARY_PATH beyond the rpath.
+        if (LibrarySearchPath.Length > 0)
         {
-            string Existing = Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
-            StartInfo.Environment["PATH"] = EngineBinaries + Path.PathSeparator + Existing;
+            string Variable = OperatingSystem.IsWindows() ? "PATH" : "LD_LIBRARY_PATH";
+            string Existing = Environment.GetEnvironmentVariable(Variable) ?? string.Empty;
+            StartInfo.Environment[Variable] = Existing.Length > 0 ? LibrarySearchPath + Path.PathSeparator + Existing : LibrarySearchPath;
         }
 
         foreach (string Argument in LaunchArguments)
@@ -215,7 +221,18 @@ public static class TestMode
                 return 1;
             }
 
-            Runner.WaitForExit();
+            try
+            {
+                await Runner.WaitForExitAsync(Cancellation).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                Runner.Kill(entireProcessTree: true);
+                throw;
+            }
+
+            // Ctrl+C on the shared console can end the suite before the cancel handler runs.
+            Cancellation.ThrowIfCancellationRequested();
             return Runner.ExitCode;
         }
         catch (Exception Ex) when (Ex is System.ComponentModel.Win32Exception or IOException)

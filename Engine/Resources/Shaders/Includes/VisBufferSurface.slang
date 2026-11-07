@@ -1,6 +1,7 @@
 #pragma once
 #include "SceneGlobals.slang"
 #include "MeshletGeometry.slang"
+#include "Culling.slang"
 
 // Every VisID decode lives here, since the five shaders that read it must agree bit for bit.
 
@@ -90,6 +91,17 @@ FVisProxy ResolveVisProxy(uint VisRaw)
                                                  : float4x4(1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0);
     Out.bValid = bValid;
     return Out;
+}
+
+// Widened across the ground exactly as the cull widens a thinned instance's meshlets, so the drawn quad and its shading agree.
+float3 ProxyWidenedCenter(float4x4 Model, FInstanceProxy Proxy, out float3 GroundWiden)
+{
+    const float3 Center = mul(Model, float4(Proxy.LocalCenter, 1.0)).xyz;
+    const float3 Pivot  = mul(Model, float4(0.0, 0.0, 0.0, 1.0)).xyz;
+    const float3 ToCam  = Center - GetCullCameraPosition();
+    const float  Widen  = rsqrt(ThinningKeep(dot(ToCam, ToCam), Proxy.ThinningStartDistance));
+    GroundWiden = float3(Widen, 1.0, Widen);
+    return Pivot + (Center - Pivot) * GroundWiden;
 }
 
 // Returns ~0u for background, for a far proxy, and for any entry this frame did not write.
@@ -356,6 +368,30 @@ float3 OrientVisNormal(FMeshletRef Ref, float3 NormalWS, float3 WorldPosition)
 
     const float3 ViewDir = IsCameraOrthographic() ? -GetCameraForward() : normalize(GetCameraPosition() - WorldPosition);
     return (dot(NormalWS, ViewDir) < 0.0) ? -NormalWS : NormalWS;
+}
+
+// Decodes the terrain normal, distance blend and root darkening GrassScatter.slang packs; painted foliage carries zero and keeps its surface.
+void ApplyGrassShading(FMeshletRef Ref, float4x4 Model, float3 WorldPositionNoOffset, inout float3 Normal, inout float AmbientOcclusion)
+{
+    if (!Ref.InstHasFlag(EInstanceFlags::Foliage))
+    {
+        return;
+    }
+
+    const float4 Shading       = Ref.Inst.CustomData.AsColor;
+    const float2 TerrainXZ     = Shading.xy * 2.0 - 1.0;
+    const float3 TerrainNormal = float3(TerrainXZ.x, sqrt(saturate(1.0 - dot(TerrainXZ, TerrainXZ))), TerrainXZ.y);
+    const float3 Blended       = lerp(Normal, TerrainNormal, Shading.z);
+    Normal = dot(Blended, Blended) > 1e-8 ? normalize(Blended) : TerrainNormal;
+
+    // Blades scatter with uniform scale, so projecting onto the up column recovers the mesh-local height.
+    const float3 Up     = float3(Model[0].y, Model[1].y, Model[2].y);
+    const float3 Root   = float3(Model[0].w, Model[1].w, Model[2].w);
+    const float  LocalY = dot(WorldPositionNoOffset - Root, Up) / max(dot(Up, Up), 1e-12);
+    FMeshletHeader* Header = Ref.Header;
+    const float  Span   = Header.LocalMaxY - Header.LocalMinY;
+    const float  Height = Span > 0.0 ? saturate((LocalY - Header.LocalMinY) / Span) : 1.0;
+    AmbientOcclusion *= 1.0 - Shading.w * (1.0 - Height);
 }
 
 // 16 bits per axis, so a target wider than 65535 would alias two pixels onto one entry.

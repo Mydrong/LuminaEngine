@@ -8,13 +8,12 @@
 #include "Core/Engine/Engine.h"
 #include "Core/Math/Math.h"
 #include "Log/Log.h"
+#include "MCPEditorModule.h"
 #include "MCPTextMatch.h"
 #include "Paths/Paths.h"
 #include "Platform/Process/PlatformProcess.h"
 #include "Platform/Time/PlatformTime.h"
 #include "Core/Profiler/Profile.h"
-#include "Core/Threading/Thread.h"
-#include "Memory/SmartPtr.h"
 
 #include <cstdlib>
 
@@ -28,35 +27,89 @@ namespace Lumina::MCP
         constexpr const char* TracyLimiterZone = "Frame-Rate-Limiter";
         constexpr const char* TracyGpuWaitZone = "Frame Fence (GPU)";
 
-        struct FProfilerZoneTotals
-        {
-            double TotalNs = 0.0;
-            double MaxNs = 0.0;
-            int64 Count = 0;
-        };
-
-        TVector<FStringView> SplitProfilerFields(FStringView Line)
-        {
-            TVector<FStringView> Fields;
-            int32 Start = 0;
-            while (Start <= Line.Len())
-            {
-                const int32 End = Line.Find(TracySeparator, Start);
-                Fields.Add(Line.Mid(Start, End == Constants::kIndexNone ? Constants::kIndexNone : End - Start));
-                if (End == Constants::kIndexNone)
-                {
-                    break;
-                }
-                Start = End + 1;
-            }
-            return Fields;
-        }
-
         double ProfilerNumber(FStringView Field)
         {
             const FString Text(Field.GetData(), Field.Len());
             return std::strtod(*Text, nullptr);
         }
+    }
+
+    TVector<FStringView> SplitProfilerFields(FStringView Line)
+    {
+        TVector<FStringView> Fields;
+        int32 Start = 0;
+        while (Start <= Line.Len())
+        {
+            const int32 End = Line.Find(MCPProfilerToolsInternal::TracySeparator, Start);
+            Fields.Add(Line.Mid(Start, (End == Constants::kIndexNone ? Line.Len() : End) - Start));
+            if (End == Constants::kIndexNone)
+            {
+                break;
+            }
+            Start = End + 1;
+        }
+        return Fields;
+    }
+
+    void AddTracyZoneLine(FStringView Line, bool bGpuRows, bool& bHeaderPending, THashMap<FString, FProfilerZoneTotals>& Out)
+    {
+        using MCPProfilerToolsInternal::ProfilerNumber;
+        if (bHeaderPending)
+        {
+            bHeaderPending = false;
+            return;
+        }
+
+        const TVector<FStringView> Fields = SplitProfilerFields(Line);
+        if (Fields.Num() < (bGpuRows ? 4 : 9))
+        {
+            return;
+        }
+
+        FProfilerZoneTotals& Totals = Out.FindOrAdd(FString(Fields[0].GetData(), Fields[0].Len()));
+        if (bGpuRows)
+        {
+            const double Ns = ProfilerNumber(Fields[3]);
+            Totals.TotalNs += Ns;
+            Totals.MaxNs = Math::Max(Totals.MaxNs, Ns);
+            Totals.Count += 1;
+        }
+        else
+        {
+            Totals.TotalNs += ProfilerNumber(Fields[3]);
+            Totals.Count += (int64)ProfilerNumber(Fields[5]);
+            Totals.MaxNs = Math::Max(Totals.MaxNs, ProfilerNumber(Fields[8]));
+        }
+    }
+
+    TVector<SProfilerZone> RankProfilerZones(const THashMap<FString, FProfilerZoneTotals>& Zones, int32 Frames, int32 Top, const FString& Filter)
+    {
+        TVector<SProfilerZone> Ranked;
+        for (const auto& [Name, Totals] : Zones)
+        {
+            if (Totals.Count == 0 || !ContainsTextFold(Name, Filter))
+            {
+                continue;
+            }
+
+            SProfilerZone& Zone = Ranked.EmplaceGetRef();
+            Zone.Name = Name;
+            Zone.Count = (int32)Totals.Count;
+            Zone.MsPerFrame = (float)(Totals.TotalNs / 1.0e6 / Math::Max(Frames, 1));
+            Zone.MeanUs = (float)(Totals.TotalNs / 1.0e3 / (double)Totals.Count);
+            Zone.MaxUs = (float)(Totals.MaxNs / 1.0e3);
+        }
+
+        Algo::Sort(Ranked, [](const SProfilerZone& A, const SProfilerZone& B) { return A.MsPerFrame > B.MsPerFrame; });
+        if (Ranked.Num() > Top)
+        {
+            Ranked.SetNum(Top);
+        }
+        return Ranked;
+    }
+
+    namespace MCPProfilerToolsInternal
+    {
 
         // Tracy's CLI tools ship beside the engine; off Windows a system install on PATH works too.
         FString TracyToolPath(const char* Name)
@@ -115,63 +168,12 @@ namespace Lumina::MCP
         bool ReadTracyZones(const FString& Executable, const FString& Arguments, bool bGpuRows, THashMap<FString, FProfilerZoneTotals>& Out,
                             FString& OutLastLine)
         {
-            bool bHeader = true;
+            bool bHeaderPending = true;
             return RunTracyTool(Executable, Arguments, [&](FStringView Line)
             {
                 OutLastLine = FString(Line.GetData(), Line.Len());
-                if (bHeader)
-                {
-                    bHeader = false;
-                    return;
-                }
-
-                const TVector<FStringView> Fields = SplitProfilerFields(Line);
-                if (Fields.Num() < (bGpuRows ? 4 : 9))
-                {
-                    return;
-                }
-
-                FProfilerZoneTotals& Totals = Out.FindOrAdd(FString(Fields[0].GetData(), Fields[0].Len()));
-                if (bGpuRows)
-                {
-                    const double Ns = ProfilerNumber(Fields[3]);
-                    Totals.TotalNs += Ns;
-                    Totals.MaxNs = Math::Max(Totals.MaxNs, Ns);
-                    Totals.Count += 1;
-                }
-                else
-                {
-                    Totals.TotalNs += ProfilerNumber(Fields[3]);
-                    Totals.Count += (int64)ProfilerNumber(Fields[5]);
-                    Totals.MaxNs = Math::Max(Totals.MaxNs, ProfilerNumber(Fields[8]));
-                }
+                AddTracyZoneLine(Line, bGpuRows, bHeaderPending, Out);
             });
-        }
-
-        TVector<SProfilerZone> RankProfilerZones(const THashMap<FString, FProfilerZoneTotals>& Zones, int32 Frames, int32 Top, const FString& Filter)
-        {
-            TVector<SProfilerZone> Ranked;
-            for (const auto& [Name, Totals] : Zones)
-            {
-                if (Totals.Count == 0 || !ContainsTextFold(Name, Filter))
-                {
-                    continue;
-                }
-
-                SProfilerZone& Zone = Ranked.EmplaceGetRef();
-                Zone.Name = Name;
-                Zone.Count = (int32)Totals.Count;
-                Zone.MsPerFrame = (float)(Totals.TotalNs / 1.0e6 / Math::Max(Frames, 1));
-                Zone.MeanUs = (float)(Totals.TotalNs / 1.0e3 / (double)Totals.Count);
-                Zone.MaxUs = (float)(Totals.MaxNs / 1.0e3);
-            }
-
-            Algo::Sort(Ranked, [](const SProfilerZone& A, const SProfilerZone& B) { return A.MsPerFrame > B.MsPerFrame; });
-            if (Ranked.Num() > Top)
-            {
-                Ranked.SetNum(Top);
-            }
-            return Ranked;
         }
 
         float ZoneMsPerFrame(const THashMap<FString, FProfilerZoneTotals>& Zones, const char* Name, int32 Frames)
@@ -180,26 +182,18 @@ namespace Lumina::MCP
             return Found == nullptr ? 0.0f : (float)(Found->TotalNs / 1.0e6 / Math::Max(Frames, 1));
         }
 
-        // One capture at a time runs on its own thread, so the scene it measures can still be driven through other tools.
-        struct FProfilerCaptureJob
+        FProfilerToolsState& ProfilerState()
         {
-            FString File;
-            FString Failure;
-            int32 Seconds = 0;
-            bool bCaptured = false;
-            FThread Worker;
-        };
-
-        FMutex ProfilerJobMutex;
-        TUniquePtr<FProfilerCaptureJob> ProfilerJob;
-        FString LastProfilerCaptureFile;
+            return *FMCPEditorModule::GetProfilerTools();
+        }
 
         bool StartProfilerCapture(float Seconds, bool bUncapFrameRate, FString& OutFile, FString& OutError)
         {
-            FScopeLock Lock(ProfilerJobMutex);
-            if (ProfilerJob)
+            FProfilerToolsState& State = ProfilerState();
+            FScopeLock Lock(State.Mutex);
+            if (State.Job)
             {
-                OutError = Lumina::Format("A capture to {} has not been reported yet; call profiler.report first.", ProfilerJob->File);
+                OutError = Lumina::Format("A capture to {} has not been reported yet; call profiler.report first.", State.Job->File);
                 return false;
             }
 
@@ -217,11 +211,11 @@ namespace Lumina::MCP
             FString Directory = Paths::GetEngineDirectory() + "/Saved/Profiling";
             Paths::CreateDirectories(FStringView(*Directory, Directory.Len()));
 
-            ProfilerJob = MakeUnique<FProfilerCaptureJob>();
-            ProfilerJob->File = Lumina::Format("{}/Capture_{}.tracy", Directory, (uint64)(PlatformTime::Seconds() * 1000.0));
-            OutFile = ProfilerJob->File;
+            State.Job = MakeUnique<FProfilerCaptureJob>();
+            State.Job->File = Lumina::Format("{}/Capture_{}.tracy", Directory, (uint64)(PlatformTime::Seconds() * 1000.0));
+            OutFile = State.Job->File;
 
-            FProfilerCaptureJob* Running = ProfilerJob.get();
+            FProfilerCaptureJob* Running = State.Job.get();
             const int32 CaptureSeconds = (int32)Math::Ceil(Math::Clamp(Seconds, 1.0f, MaxProfilerCaptureSeconds));
             Running->Seconds = CaptureSeconds;
             Running->Worker = FThread([Running, CaptureSeconds, bUncapFrameRate, ListenPort]()
@@ -270,10 +264,11 @@ namespace Lumina::MCP
 
         Agent::FToolResult FinishProfilerCapture(int32 TopZones, const FString& Filter, bool bSelfTime, SProfilerCaptureResult& Out)
         {
+            FProfilerToolsState& State = ProfilerState();
             TUniquePtr<FProfilerCaptureJob> Finished;
             {
-                FScopeLock Lock(ProfilerJobMutex);
-                Finished = Move(ProfilerJob);
+                FScopeLock Lock(State.Mutex);
+                Finished = Move(State.Job);
             }
             if (!Finished)
             {
@@ -288,8 +283,8 @@ namespace Lumina::MCP
             Out.CaptureFile = Finished->File;
             if (Finished->bCaptured)
             {
-                FScopeLock Lock(ProfilerJobMutex);
-                LastProfilerCaptureFile = Finished->File;
+                FScopeLock Lock(State.Mutex);
+                State.LastCaptureFile = Finished->File;
             }
             if (!Finished->bCaptured)
             {
@@ -381,8 +376,9 @@ namespace Lumina::MCP
             Out.CaptureFile = In.CaptureFile;
             if (Out.CaptureFile.IsEmpty())
             {
-                FScopeLock Lock(ProfilerJobMutex);
-                Out.CaptureFile = LastProfilerCaptureFile;
+                FProfilerToolsState& State = ProfilerState();
+                FScopeLock Lock(State.Mutex);
+                Out.CaptureFile = State.LastCaptureFile;
             }
             if (Out.CaptureFile.IsEmpty() || !Paths::Exists(Out.CaptureFile))
             {
@@ -601,6 +597,17 @@ namespace Lumina::MCP
     }
 
     using namespace MCPProfilerToolsInternal;
+
+    void FProfilerToolsState::Shutdown()
+    {
+        if (!Job || !Job->Worker.Joinable())
+        {
+            return;
+        }
+        LOG_WARN("[MCP] Waiting for the unreported profiler capture to {} to finish before the editor quits.", Job->File);
+        Job->Worker.Join();
+        Job.reset();
+    }
 
     void RegisterProfilerTools(FStringView Owner)
     {

@@ -5,6 +5,7 @@
 #include "Agent/AgentPropertyPath.h"
 #include "Agent/AgentToolMarshal.h"
 #include "Agent/AgentToolRegistry.h"
+#include "MCPServer.h"
 #include "MCPTextMatch.h"
 #include "Asset/AssetOps.h"
 #include "Assets/AssetEvents.h"
@@ -17,40 +18,17 @@
 #include "Core/Object/Package/Package.h"
 #include "FileSystem/FileSystem.h"
 #include "Paths/Paths.h"
+#include "Platform/Filesystem/PlatformFilesystem.h"
 #include "Session/SessionOps.h"
 #include "Tools/Import/Importer.h"
 #include "Tools/Import/TextureImporter.h"
 #include "UI/Tools/EditorAssetActions.h"
-#include <filesystem>
 
 namespace Lumina::MCP
 {
     namespace MCPAssetToolsInternal
     {
         constexpr const char* GAssetSaveHint = " Save with assets.save to persist.";
-
-        // Rejects the traversal and separator tricks that would take a write outside the mounted roots.
-        bool IsWellFormedAssetPath(const FString& Path, FString& OutError)
-        {
-            if (Path.IsEmpty() || Path[0] != '/')
-            {
-                OutError = "A path has to start at a mount root, such as /Game/Content.";
-                return false;
-            }
-
-            if (Path.Find("..") != Constants::kIndexNone || Path.Find("//") != Constants::kIndexNone)
-            {
-                OutError = "A path cannot contain .. or an empty step.";
-                return false;
-            }
-
-            return true;
-        }
-
-        bool IsWellFormedAssetName(const FString& Name, FString& OutError)
-        {
-            return AssetOps::IsValidLeafName(FStringView(*Name, Name.Len()), &OutError);
-        }
 
         SAssetInfo DescribeAssetData(const FAssetData& Data)
         {
@@ -184,19 +162,20 @@ namespace Lumina::MCP
             return true;
         }
 
-        void ImportAssetFile(const std::filesystem::path& File, const FString& Folder, const SImportAssetsParams& In,
+        void ImportAssetFile(FStringView File, const FString& Folder, const SImportAssetsParams& In,
             const FJsonValue& Settings, SImportAssetsResult& Out)
         {
-            const FString SourcePath = FString(File.generic_string().c_str());
-            const FString FileName = FString(File.filename().string().c_str());
+            const FString SourcePath(File);
+            const FString FileName(VFS::FileName(File));
 
-            CImporter* ImporterCDO = CImporterRegistry::Get().FindImporterForExtension(VFS::Extension(FStringView(SourcePath)));
+            CImporter* ImporterCDO = CImporterRegistry::Get().FindImporterForExtension(VFS::Extension(File));
             if (ImporterCDO == nullptr)
             {
                 return;
             }
 
-            const FFixedString Destination = Paths::Combine(FStringView(Folder), VFS::FileName(FStringView(SourcePath), true));
+            // Sanitized as CPackage::CreatePackage names it, so a non-ASCII file is found again on a rerun.
+            const FFixedString Destination = SanitizeObjectName(Paths::Combine(FStringView(Folder), VFS::FileName(File, true)));
             FFixedString OnDisk = Destination;
             CPackage::AddPackageExt(OnDisk);
             if (!In.ReplaceExisting && (FindObject<CPackage>(Destination) != nullptr || VFS::Exists(OnDisk)))
@@ -270,31 +249,31 @@ namespace Lumina::MCP
             }
         }
 
-        void ImportAssetDirectory(const std::filesystem::path& Directory, const FString& Folder, const SImportAssetsParams& In,
+        void ImportAssetDirectory(FStringView Directory, const FString& Folder, const SImportAssetsParams& In,
             const FJsonValue& Settings, SImportAssetsResult& Out)
         {
-            for (const std::filesystem::directory_entry& Entry : std::filesystem::directory_iterator(Directory))
+            Filesystem::IterateDirectory(Directory, [&](const Filesystem::FDirectoryEntry& Entry)
             {
-                if (!Entry.is_directory())
+                if (!Entry.IsDirectory())
                 {
-                    ImportAssetFile(Entry.path(), Folder, In, Settings, Out);
-                    continue;
+                    ImportAssetFile(Entry.FullPath, Folder, In, Settings, Out);
+                    return;
                 }
 
                 if (!In.Recursive)
                 {
-                    continue;
+                    return;
                 }
 
-                const FString SubFolder = Folder + "/" + FString(Entry.path().filename().string().c_str());
+                const FString SubFolder = Folder + "/" + FString(Entry.Name);
                 if (!VFS::Exists(FStringView(SubFolder)) && !AssetOps::CreateFolder(FStringView(SubFolder)).bSucceeded)
                 {
                     Out.Failed.Add(SubFolder + ": could not create folder");
-                    continue;
+                    return;
                 }
 
-                ImportAssetDirectory(Entry.path(), SubFolder, In, Settings, Out);
-            }
+                ImportAssetDirectory(Entry.FullPath, SubFolder, In, Settings, Out);
+            });
         }
 
         void RegisterAssetsSearch(FStringView Owner)
@@ -480,7 +459,7 @@ namespace Lumina::MCP
                         return Agent::FToolResult::Error(Error);
                     }
 
-                    if (!In.NewName.IsEmpty() && !IsWellFormedAssetName(In.NewName, Error))
+                    if (!In.NewName.IsEmpty() && !AssetOps::IsValidLeafName(FStringView(In.NewName), &Error))
                     {
                         return Agent::FToolResult::Error(Error);
                     }
@@ -588,8 +567,8 @@ namespace Lumina::MCP
                             "Assets belong under /Game/Content, since nothing scans for them elsewhere.");
                     }
 
-                    const std::filesystem::path Source(*In.Source);
-                    if (!std::filesystem::exists(Source))
+                    const FFixedString Source = Paths::Normalize(FStringView(In.Source));
+                    if (!Filesystem::Exists(Source))
                     {
                         return Agent::FToolResult::Error(Lumina::Format("{} does not exist.", In.Source));
                     }
@@ -609,7 +588,7 @@ namespace Lumina::MCP
                         return Agent::FToolResult::Error(Error);
                     }
 
-                    if (std::filesystem::is_directory(Source))
+                    if (Filesystem::IsDirectory(Source))
                     {
                         ImportAssetDirectory(Source, In.DestinationFolder, In, Settings, Out);
                     }
@@ -677,11 +656,6 @@ namespace Lumina::MCP
                 Agent::EToolEffect::Mutating, Agent::EToolThread::GameThread,
                 [](const SCreateAssetParams& In, SAssetInfo& Out)
                 {
-                    if (In.Name.IsEmpty())
-                    {
-                        return Agent::FToolResult::Error("An asset needs a name.");
-                    }
-
                     FString Error;
                     CClass* Class = Agent::FindClassByName(FStringView(In.ClassName), nullptr, Error);
                     if (Class == nullptr)
@@ -696,24 +670,10 @@ namespace Lumina::MCP
                             "{} is not a creatable asset class. Call assets.list_classes.", In.ClassName));
                     }
 
-                    if (!AssetOps::IsAssetLocation(FStringView(In.Folder)))
+                    FFixedString Path;
+                    if (!MakeNewAssetPath(In.Folder, In.Name, Path, Error))
                     {
-                        return Agent::FToolResult::Error(
-                            "Assets belong under /Game/Content, since nothing scans for assets elsewhere.");
-                    }
-
-                    if (!VFS::IsDirectory(In.Folder))
-                    {
-                        return Agent::FToolResult::Error(Lumina::Format(
-                            "{} is not a folder. Use assets.create_folder first.", In.Folder));
-                    }
-
-                    FFixedString Path = Paths::Combine(FStringView(In.Folder), FStringView(In.Name));
-                    CPackage::AddPackageExt(Path);
-
-                    if (VFS::Exists(Path))
-                    {
-                        return Agent::FToolResult::Error(Lumina::Format("{} already exists.", Path));
+                        return Agent::FToolResult::Error(Error);
                     }
 
                     FString CreateError;
@@ -781,7 +741,7 @@ namespace Lumina::MCP
                 {
                     CObject* Asset = nullptr;
                     FString Error;
-                    if (!Agent::ResolveAssetObject(FStringView(In.Asset), Asset, Error))
+                    if (!ResolveEditableAsset(FStringView(In.Asset), Asset, Error))
                     {
                         return Agent::FToolResult::Error(Error);
                     }
