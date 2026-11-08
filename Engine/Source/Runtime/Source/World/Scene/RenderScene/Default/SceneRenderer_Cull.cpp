@@ -12,7 +12,6 @@ namespace Lumina
         TConsoleVar<float> CVarCullDebugCapacityScale("r.Cull.DebugCapacityScale", 1.0f,
             "Scales the meshlet draw and block lists below demand, to exercise the coarse-LOD overflow fallback.");
         #endif
-        TConsoleVar<int32> CVarCullLogStats("r.Cull.LogStats", 0, "Logs the GPU cull readback every 300 frames while nonzero.");
 
         TConsoleVar<int32> CVarCullMeshletVisibility("r.Cull.MeshletVisibility", 1,
             "0 decides the occlusion phase per instance instead of per meshlet, for an A/B against the meshlet bits.");
@@ -85,6 +84,26 @@ namespace Lumina
         uint32 WithHeadroom(uint32 Demand)
         {
             return (uint32)Math::Min<uint64>((uint64)Demand + Demand / 4u, 0xFFFFFFFFull);
+        }
+
+        // Below this the visible-instance rings hold every retained slot, so no instance is ever refused one.
+        uint64 ExactVisibleBoundBytes()
+        {
+            static const uint64 Resolved = []
+            {
+                const uint64 MiB = Math::Max(DeviceLocalVRAMMiB() * 2ull / 100ull, 64ull);
+                LOG_INFO("RenderScene: exact visible-instance bound auto-set to {} MiB, 2% of {} MiB device-local VRAM.",
+                         MiB, DeviceLocalVRAMMiB());
+                return MiB << 20;
+            }();
+
+            return Resolved;
+        }
+
+        // Every ring slot's visible instances plus their per-view ranges.
+        uint64 VisibleInstanceRingBytes(uint64 Instances, uint64 Views)
+        {
+            return Instances * (sizeof(FGPUInstance) + Views * sizeof(FUIntVector2)) * RHI::kFramesInFlight;
         }
 
         bool OverlapsAny(const TVector<FUIntVector2>& Ranges, uint32 First, uint32 End)
@@ -883,10 +902,10 @@ namespace Lumina
         uint32 VisibleCapacityWanted = Math::Max(VisibleDemand, 4096u) + SlotGrowth;
 
         const uint32 VisibleCapacityMax = Math::Max(SlotCount, 1u);
+        const uint32 RangeViews         = Math::Max(NumCullViews, 1u);
 
-        // Every retained slot fits under this, so an instance can never be refused a visible slot.
-        constexpr uint64 ExactVisibleBoundBytes = 64ull << 20;
-        if (LastVisibleInstances == 0u || (uint64)VisibleCapacityMax * sizeof(FGPUInstance) <= ExactVisibleBoundBytes)
+        if (LastVisibleInstances == 0u
+            || SceneRendererCullInternal::VisibleInstanceRingBytes(VisibleCapacityMax, RangeViews) <= SceneRendererCullInternal::ExactVisibleBoundBytes())
         {
             VisibleCapacityWanted = VisibleCapacityMax;
         }
@@ -899,7 +918,6 @@ namespace Lumina
         FrameVisibleInstanceCapacity = (uint32)Math::Min<uint64>(
             VisibleInstanceRing[Slot].Size / sizeof(FGPUInstance), VisibleCapacityMax);
 
-        const uint32 RangeViews = Math::Max(NumCullViews, 1u);
         const SIZE_T InstanceViewRangeSize = Math::Max<SIZE_T>(
             sizeof(uint32) * 2,
             (SIZE_T)FrameVisibleInstanceCapacity * (SIZE_T)RangeViews * sizeof(uint32) * 2);
@@ -965,7 +983,12 @@ namespace Lumina
                      What, Needed, GrownTo);
         };
 
-        if (LastVisibleOverflowed)  { LogOverflow("visible-instance buffer", LastVisibleInstances, FrameVisibleInstanceCapacity); }
+        if (LastVisibleOverflowed)
+        {
+            LOG_WARN("RenderScene: visible-instance buffer overflowed, {} needed, capacity now {}. Instances that did not fit "
+                     "were skipped in every view that frame; this clears once the larger allocation cycles in.",
+                     LastVisibleInstances, FrameVisibleInstanceCapacity);
+        }
         if (LastDrawListOverflowed) { LogOverflow("meshlet draw list",       LastDrawListRequired, DrawListCapacity); }
         if (LastBlocksOverflowed)   { LogOverflow("meshlet block list",      LastBlocksRequested,  BlockListCapacity); }
         if (bPreSkinCapped)
@@ -1431,11 +1454,6 @@ namespace Lumina
             LastPreSkinOverflowed    = Mapped[7];
         }
 
-        if (SceneRendererCullInternal::CVarCullLogStats.GetValue() != 0 && (CullStatsLogCounter++ % 300u) == 0u)
-        {
-            LOG_INFO("RenderScene cull: {} visible instances, {} draw list entries, {} blocks, {} pre-skin vertices.",
-                     LastVisibleInstances, LastDrawListRequired, LastBlocksRequested, LastPreSkinRequested);
-        }
         LUMINA_PROFILE_VALUE("Cull/VisibleInstances",  LastVisibleInstances);
         LUMINA_PROFILE_VALUE("Cull/DrawListEntries",   LastDrawListRequired);
         LUMINA_PROFILE_VALUE("Cull/MeshletBlocks",     LastBlocksRequested);
