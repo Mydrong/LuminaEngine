@@ -250,6 +250,10 @@ namespace Lumina::Physics
         virtual int32 OverlapShape(const SQueryShape& Shape, const FVector3& Center, ECollisionProfiles LayerMask,
                                    TSpan<const ECS::FEntity> IgnoreEntities, TSpan<ECS::FEntity> OutEntities) = 0;
 
+        // Every shape intersecting, one result each with its InstanceIndex; OutHits is cleared first. Location is Center.
+        virtual void OverlapShapeAll(const SQueryShape& Shape, const FVector3& Center, ECollisionProfiles LayerMask,
+                                     TSpan<const ECS::FEntity> IgnoreEntities, TVector<SRayResult>& OutHits) = 0;
+
         // False when the entity has no body.
         virtual bool GetClosestPointOnBody(ECS::FEntity Entity, const FVector3& Point, FVector3& OutPoint) const = 0;
 

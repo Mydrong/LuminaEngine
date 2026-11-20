@@ -244,6 +244,8 @@ namespace Lumina::Physics
                                                ECollisionProfiles LayerMask, TSpan<const ECS::FEntity> IgnoreEntities) override;
         int32 OverlapShape(const SQueryShape& Shape, const FVector3& Center, ECollisionProfiles LayerMask,
                            TSpan<const ECS::FEntity> IgnoreEntities, TSpan<ECS::FEntity> OutEntities) override;
+        void OverlapShapeAll(const SQueryShape& Shape, const FVector3& Center, ECollisionProfiles LayerMask,
+                             TSpan<const ECS::FEntity> IgnoreEntities, TVector<SRayResult>& OutHits) override;
         bool GetClosestPointOnBody(ECS::FEntity Entity, const FVector3& Point, FVector3& OutPoint) const override;
         bool GetBodyBounds(ECS::FEntity Entity, SAABB& OutBounds) const override;
 

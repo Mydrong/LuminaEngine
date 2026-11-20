@@ -203,6 +203,20 @@ namespace Lumina::Physics
             Query.EntityCount = Written + 1;
             return true;
         }
+
+        bool AllShapesOverlapCallback(b3ShapeId ShapeId, void* Context)
+        {
+            FQueryContext& Query = *static_cast<FQueryContext*>(Context);
+            if (IsIgnored(Query.IgnoreEntities, EntityOfBody(b3Shape_GetBody(ShapeId))))
+            {
+                return true;
+            }
+
+            SRayResult& Result = Query.Hits->EmplaceGetRef();
+            FillRayResult(Result, *Query.Scene, ShapeId, Query.Start, Query.Start, 0.0f,
+                          Box3DUtils::ToB3Vec3(Query.Start), b3Vec3{0.0f, 0.0f, 0.0f}, 0.0f);
+            return true;
+        }
     }
 
     int32 FBox3DPhysicsScene::ResolveHitBoneIndex(ECS::FEntity Entity, b3BodyId BodyId) const
@@ -453,6 +467,22 @@ namespace Lumina::Physics
 
         b3World_OverlapShape(WorldId, Box3DUtils::ToB3Vec3(Center), &Proxy, MakeLayerFilter(LayerMask), &OverlapCallback, &Query);
         return Query.EntityCount;
+    }
+
+    void FBox3DPhysicsScene::OverlapShapeAll(const SQueryShape& Shape, const FVector3& Center, ECollisionProfiles LayerMask,
+                                             TSpan<const ECS::FEntity> IgnoreEntities, TVector<SRayResult>& OutHits)
+    {
+        OutHits.Reset();
+        b3Vec3 Points[8];
+        const b3ShapeProxy Proxy = MakeProxy(Shape, Points);
+
+        FQueryContext Query;
+        Query.Scene = this;
+        Query.IgnoreEntities = IgnoreEntities;
+        Query.Hits = &OutHits;
+        Query.Start = Center;
+
+        b3World_OverlapShape(WorldId, Box3DUtils::ToB3Vec3(Center), &Proxy, MakeLayerFilter(LayerMask), &AllShapesOverlapCallback, &Query);
     }
 
     bool FBox3DPhysicsScene::GetClosestPointOnBody(ECS::FEntity Entity, const FVector3& Point, FVector3& OutPoint) const
