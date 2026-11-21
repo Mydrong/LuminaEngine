@@ -14,18 +14,9 @@
 #include "Renderer/MeshQuantization.h"
 #include "Renderer/SkeletonResource.h"
 #include "Tools/Import/ClusterLODBuilder.h"
-#include "Tools/Import/VoxelFarBuilder.h"
 
 namespace Lumina::Import::Mesh
 {
-    void ApplyVirtualGeometrySettings(FMeshResource& Resource, const SVirtualGeometryBuildSettings& Settings)
-    {
-        Resource.bClusterLODs       = Settings.bClusterLOD && !Resource.bSkinnedMesh;
-        Resource.VoxelFarResolution = Settings.bVoxelFarRepresentation && !Resource.bSkinnedMesh
-                                    ? Math::Clamp(Settings.VoxelResolution, 4u, 128u) : 0u;
-        Resource.VoxelErrorScale    = Math::Clamp(Settings.VoxelErrorScale, 0.25f, 8.0f);
-    }
-
     FMeshImportData::FMeshImportData() = default;
     FMeshImportData::FMeshImportData(FMeshImportData&&) noexcept = default;
     FMeshImportData& FMeshImportData::operator=(FMeshImportData&&) noexcept = default;
@@ -402,15 +393,6 @@ namespace Lumina::Import::Mesh
 
     namespace
     {
-        // Level i aims at this share of the surface's triangles raised to the power i.
-        constexpr float  kLODTriangleRatio    = 0.5f;
-        // A level keeping more than this share of the previous level's triangles is not worth a switch.
-        constexpr float  kLODMinReduction     = 0.85f;
-        // Selection reads the measured error, so this only bounds how far a level may stray.
-        constexpr float  kLODMaxRelativeError = 1.0f;
-        // ~5 triangles minimum; below this we drop the LOD and fall back to coarser.
-        constexpr size_t kLODMinIndices       = 15u;
-
         // Normal xyz then UV xy, which the simplifier weighs and a destructive level rewrites.
         constexpr uint32 kSimplifyAttributeCount = 5u;
         constexpr float  kSimplifyAttributeWeights[kSimplifyAttributeCount] = { 1.0f, 1.0f, 1.0f, 0.5f, 0.5f };
@@ -445,11 +427,8 @@ namespace Lumina::Import::Mesh
             TVector<float>           UpdatedAttributes;
             float                    Error = 0.0f;
 
-            // One per meshlet on a cluster hierarchy level, empty on a discrete LOD.
+            // One per meshlet on a cluster hierarchy level, empty on a level that is its own root.
             TVector<FMeshletLODBounds> LODBounds;
-
-            // A voxel splat level, whose meshlets skip the material's opacity clip.
-            bool                     bVoxel = false;
         };
 
         // One surface's LOD slots as the pack writes them, the result cell each draws from and what each tells the cull.
@@ -466,13 +445,7 @@ namespace Lumina::Import::Mesh
                 Error.Add(InError);
                 ParentError.Add(InParentError);
             }
-
-            void MarkVoxelSlot(uint32 Slot)   { Flags |= 1u << (SURFACE_DESC_VOXEL_SHIFT + Slot); }
-            void MarkVoxelParent(uint32 Slot) { Flags |= 1u << (SURFACE_DESC_VOXEL_PARENT_SHIFT + Slot); }
         };
-
-        // Levels a 128 voxel grid halves through before it stops at two a side.
-        constexpr uint32 kMaxVoxelLevels = 7;
 
         uint64 PositionKey(const FVector3& Position)
         {
@@ -579,325 +552,6 @@ namespace Lumina::Import::Mesh
             });
 
             return Inputs;
-        }
-
-        FVector3 ClosestPointOnTriangle(const FVector3& P, const FVector3& A, const FVector3& B, const FVector3& C)
-        {
-            const FVector3 AB = B - A;
-            const FVector3 AC = C - A;
-            const FVector3 AP = P - A;
-            const float D1 = Math::Dot(AB, AP);
-            const float D2 = Math::Dot(AC, AP);
-            if (D1 <= 0.0f && D2 <= 0.0f)
-            {
-                return A;
-            }
-
-            const FVector3 BP = P - B;
-            const float D3 = Math::Dot(AB, BP);
-            const float D4 = Math::Dot(AC, BP);
-            if (D3 >= 0.0f && D4 <= D3)
-            {
-                return B;
-            }
-
-            const float VC = D1 * D4 - D3 * D2;
-            if (VC <= 0.0f && D1 >= 0.0f && D3 <= 0.0f)
-            {
-                return A + AB * (D1 / (D1 - D3));
-            }
-
-            const FVector3 CP = P - C;
-            const float D5 = Math::Dot(AB, CP);
-            const float D6 = Math::Dot(AC, CP);
-            if (D6 >= 0.0f && D5 <= D6)
-            {
-                return C;
-            }
-
-            const float VB = D5 * D2 - D1 * D6;
-            if (VB <= 0.0f && D2 >= 0.0f && D6 <= 0.0f)
-            {
-                return A + AC * (D2 / (D2 - D6));
-            }
-
-            const float VA = D3 * D6 - D5 * D4;
-            if (VA <= 0.0f && (D4 - D3) >= 0.0f && (D5 - D6) >= 0.0f)
-            {
-                return B + (C - B) * ((D4 - D3) / ((D4 - D3) + (D5 - D6)));
-            }
-
-            const float Denom = 1.0f / (VA + VB + VC);
-            return A + AB * (VB * Denom) + AC * (VC * Denom);
-        }
-
-        // Uniform cells over a triangle list, for the nearest-surface queries the LOD error measurement runs.
-        class FTriangleGrid
-        {
-        public:
-
-            FTriangleGrid(const TVector<FVector3>& InPositions, const uint32* InIndices, size_t IndexCount)
-                : Positions(InPositions)
-                , Indices(InIndices)
-                , NumTriangles(IndexCount / 3u)
-            {
-                if (NumTriangles == 0)
-                {
-                    return;
-                }
-
-                FVector3 Min(FLT_MAX);
-                FVector3 Max(-FLT_MAX);
-                for (size_t i = 0; i < NumTriangles * 3u; ++i)
-                {
-                    Min = Math::Min(Min, Positions[Indices[i]]);
-                    Max = Math::Max(Max, Positions[Indices[i]]);
-                }
-
-                const FVector3 Extent    = Math::Max(Max - Min, FVector3(1e-4f));
-                const float    LongAxis  = Math::Max(Extent.x, Math::Max(Extent.y, Extent.z));
-                const uint32   LongCells = (uint32)Math::Clamp(std::cbrt((float)NumTriangles) * 2.0f, 1.0f, 128.0f);
-                CellSize = LongAxis / (float)LongCells;
-                Origin   = Min;
-                for (int Axis = 0; Axis < 3; ++Axis)
-                {
-                    Dim[Axis] = (int32)Math::Clamp(std::ceil(Extent[Axis] / CellSize), 1.0f, 128.0f);
-                }
-
-                TVector<uint32> Counts(IntCastChecked<int32>(static_cast<int64>(Dim[0]) * Dim[1] * Dim[2] + 1u), 0u);
-                ForEachTriangleCell([&](size_t, uint32 Cell) { ++Counts[Cell]; });
-
-                CellStart.SetNum(Counts.Num(), 0u);
-                for (int32 c = 1; c < Counts.Num(); ++c)
-                {
-                    CellStart[c] = CellStart[c - 1] + Counts[c - 1];
-                }
-                CellTriangles.SetNum(CellStart.Last());
-
-                TVector<uint32> Cursor(CellStart.begin(), CellStart.end() - 1);
-                ForEachTriangleCell([&](size_t Triangle, uint32 Cell) { CellTriangles[Cursor[Cell]++] = (uint32)Triangle; });
-            }
-
-            // FLT_MAX when the grid holds no triangles.
-            float Distance(const FVector3& P) const
-            {
-                if (NumTriangles == 0)
-                {
-                    return FLT_MAX;
-                }
-
-                int32 Center[3];
-                for (int Axis = 0; Axis < 3; ++Axis)
-                {
-                    Center[Axis] = Math::Clamp((int32)std::floor((P[Axis] - Origin[Axis]) / CellSize), 0, Dim[Axis] - 1);
-                }
-
-                const int32 MaxRing = Math::Max(Dim[0], Math::Max(Dim[1], Dim[2]));
-                float BestSq = FLT_MAX;
-                for (int32 Ring = 0; Ring <= MaxRing; ++Ring)
-                {
-                    for (int32 z = Center[2] - Ring; z <= Center[2] + Ring; ++z)
-                    {
-                        for (int32 y = Center[1] - Ring; y <= Center[1] + Ring; ++y)
-                        {
-                            for (int32 x = Center[0] - Ring; x <= Center[0] + Ring; ++x)
-                            {
-                                const bool bOnShell = Math::Abs(x - Center[0]) == Ring || Math::Abs(y - Center[1]) == Ring || Math::Abs(z - Center[2]) == Ring;
-                                if (!bOnShell || x < 0 || y < 0 || z < 0 || x >= Dim[0] || y >= Dim[1] || z >= Dim[2])
-                                {
-                                    continue;
-                                }
-                                const uint32 Cell = CellIndex(x, y, z);
-                                for (uint32 i = CellStart[Cell]; i < CellStart[Cell + 1]; ++i)
-                                {
-                                    const uint32*  Tri     = Indices + (size_t)CellTriangles[i] * 3u;
-                                    const FVector3 Closest = ClosestPointOnTriangle(P, Positions[Tri[0]], Positions[Tri[1]], Positions[Tri[2]]);
-                                    BestSq = Math::Min(BestSq, Math::LengthSquared(P - Closest));
-                                }
-                            }
-                        }
-                    }
-
-                    const float Unvisited = UnvisitedDistance(P, Center, Ring);
-                    if (Unvisited == FLT_MAX || BestSq <= Unvisited * Unvisited)
-                    {
-                        break;
-                    }
-                }
-                return std::sqrt(BestSq);
-            }
-
-        private:
-
-            // How near anything outside the searched block can be, where a block face on the grid boundary hides nothing.
-            float UnvisitedDistance(const FVector3& P, const int32 Center[3], int32 Ring) const
-            {
-                float Nearest = FLT_MAX;
-                for (int Axis = 0; Axis < 3; ++Axis)
-                {
-                    if (Center[Axis] - Ring > 0)
-                    {
-                        const float Face = Origin[Axis] + (float)(Center[Axis] - Ring) * CellSize;
-                        Nearest = Math::Min(Nearest, Math::Max(P[Axis] - Face, 0.0f));
-                    }
-                    if (Center[Axis] + Ring < Dim[Axis] - 1)
-                    {
-                        const float Face = Origin[Axis] + (float)(Center[Axis] + Ring + 1) * CellSize;
-                        Nearest = Math::Min(Nearest, Math::Max(Face - P[Axis], 0.0f));
-                    }
-                }
-                return Nearest;
-            }
-
-            uint32 CellIndex(int32 x, int32 y, int32 z) const
-            {
-                return (uint32)((z * Dim[1] + y) * Dim[0] + x);
-            }
-
-            template<typename TVisit>
-            void ForEachTriangleCell(TVisit&& Visit) const
-            {
-                for (size_t t = 0; t < NumTriangles; ++t)
-                {
-                    const FVector3& A = Positions[Indices[t * 3u + 0u]];
-                    const FVector3& B = Positions[Indices[t * 3u + 1u]];
-                    const FVector3& C = Positions[Indices[t * 3u + 2u]];
-                    int32 Lo[3];
-                    int32 Hi[3];
-                    for (int Axis = 0; Axis < 3; ++Axis)
-                    {
-                        const float TriMin = Math::Min(A[Axis], Math::Min(B[Axis], C[Axis]));
-                        const float TriMax = Math::Max(A[Axis], Math::Max(B[Axis], C[Axis]));
-                        Lo[Axis] = Math::Clamp((int32)std::floor((TriMin - Origin[Axis]) / CellSize), 0, Dim[Axis] - 1);
-                        Hi[Axis] = Math::Clamp((int32)std::floor((TriMax - Origin[Axis]) / CellSize), 0, Dim[Axis] - 1);
-                    }
-                    for (int32 z = Lo[2]; z <= Hi[2]; ++z)
-                    {
-                        for (int32 y = Lo[1]; y <= Hi[1]; ++y)
-                        {
-                            for (int32 x = Lo[0]; x <= Hi[0]; ++x)
-                            {
-                                Visit(t, CellIndex(x, y, z));
-                            }
-                        }
-                    }
-                }
-            }
-
-            const TVector<FVector3>& Positions;
-            const uint32*            Indices;
-            size_t                   NumTriangles;
-            FVector3                 Origin = FVector3(0.0f);
-            float                    CellSize = 1.0f;
-            int32                    Dim[3] = { 1, 1, 1 };
-            TVector<uint32>          CellStart;
-            TVector<uint32>          CellTriangles;
-        };
-
-        // Triangles past this are sampled at a stride, which bounds the import cost of a very dense surface.
-        constexpr int32 kMaxDistanceSampleTriangles = 131072;
-
-        // The farther of source-to-result and result-to-source surface distance, sampled at vertices, edge midpoints and centroids.
-        float MeasureSimplificationDistance(const TVector<FVector3>& SourcePositions, const TVector<uint32>& SourceIndices,
-                                            const TVector<FVector3>& ResultPositions, const uint32* ResultIndices, size_t ResultCount)
-        {
-            LUMINA_PROFILE_SCOPE();
-
-            const FTriangleGrid ResultGrid(ResultPositions, ResultIndices, ResultCount);
-            const FTriangleGrid SourceGrid(SourcePositions, SourceIndices.GetData(), SourceIndices.Num());
-
-            float Worst = 0.0f;
-            auto Sample = [&](const FTriangleGrid& Grid, const FVector3& P)
-            {
-                Worst = Math::Max(Worst, Grid.Distance(P));
-            };
-
-            // A card that collapsed away leaves its corners and center far from any surviving surface.
-            const int32 SourceTriangles = SourceIndices.Num() / 3;
-            const int32 SourceStride    = Math::Max(SourceTriangles / kMaxDistanceSampleTriangles, 1);
-            for (int32 t = 0; t < SourceTriangles; t += SourceStride)
-            {
-                const FVector3& A = SourcePositions[SourceIndices[t * 3u]];
-                const FVector3& B = SourcePositions[SourceIndices[t * 3u + 1u]];
-                const FVector3& C = SourcePositions[SourceIndices[t * 3u + 2u]];
-                Sample(ResultGrid, A);
-                Sample(ResultGrid, B);
-                Sample(ResultGrid, C);
-                Sample(ResultGrid, (A + B + C) * (1.0f / 3.0f));
-            }
-
-            // A surviving triangle can bridge the gap between cards, which only its interior reveals.
-            const size_t ResultTriangles = ResultCount / 3u;
-            const size_t ResultStride    = Math::Max<size_t>(ResultTriangles / kMaxDistanceSampleTriangles, 1u);
-            for (size_t t = 0; t < ResultTriangles; t += ResultStride)
-            {
-                const size_t    i = t * 3u;
-                const FVector3& A = ResultPositions[ResultIndices[i]];
-                const FVector3& B = ResultPositions[ResultIndices[i + 1u]];
-                const FVector3& C = ResultPositions[ResultIndices[i + 2u]];
-                Sample(SourceGrid, (A + B + C) * (1.0f / 3.0f));
-                Sample(SourceGrid, (A + B) * 0.5f);
-                Sample(SourceGrid, (B + C) * 0.5f);
-                Sample(SourceGrid, (C + A) * 0.5f);
-            }
-            return Worst;
-        }
-
-        // Simplifies from the whole surface rather than the level above, so every error is measured against the source.
-        void SimplifySurfaceLOD(const FSurfaceSimplifyInput& In, size_t TargetIndices, bool bDestructive,
-                                TVector<uint32>& OutIndices, FSurfaceMeshletResult& Out)
-        {
-            LUMINA_PROFILE_SCOPE();
-
-            const int32 SourceCount     = In.Indices.Num();
-            const int32 VertexCount     = In.Positions.Num();
-            const size_t AttributeStride = kSimplifyAttributeCount * sizeof(float);
-            const uint8* Locks           = In.Locks.IsEmpty() ? nullptr : In.Locks.GetData();
-
-            float  RelativeError = 0.0f;
-            size_t NewCount      = 0;
-
-            if (bDestructive)
-            {
-                Out.UpdatedPositions  = In.Positions;
-                Out.UpdatedAttributes = In.Attributes;
-                OutIndices            = In.Indices;
-                NewCount = meshopt_simplifyWithUpdate(
-                    OutIndices.GetData(), SourceCount,
-                    &Out.UpdatedPositions[0].x, VertexCount, sizeof(FVector3),
-                    Out.UpdatedAttributes.GetData(), AttributeStride,
-                    kSimplifyAttributeWeights, kSimplifyAttributeCount,
-                    Locks, TargetIndices, kLODMaxRelativeError, 0u, &RelativeError);
-            }
-            else
-            {
-                OutIndices.SetNum(SourceCount);
-                NewCount = meshopt_simplifyWithAttributes(
-                    OutIndices.GetData(), In.Indices.GetData(), SourceCount,
-                    &In.Positions[0].x, VertexCount, sizeof(FVector3),
-                    In.Attributes.GetData(), AttributeStride,
-                    kSimplifyAttributeWeights, kSimplifyAttributeCount,
-                    Locks, TargetIndices, kLODMaxRelativeError, 0u, &RelativeError);
-            }
-
-            // Leaf cards are separate quads whose every edge is a border, so edge collapse cannot touch them and only clustering reduces them.
-            if (NewCount > TargetIndices * 2u)
-            {
-                Out.UpdatedPositions.Reset();
-                Out.UpdatedAttributes.Reset();
-                OutIndices.SetNum(SourceCount);
-                NewCount = meshopt_simplifySloppy(
-                    OutIndices.GetData(), In.Indices.GetData(), SourceCount,
-                    &In.Positions[0].x, VertexCount, sizeof(FVector3),
-                    Locks, TargetIndices, kLODMaxRelativeError, &RelativeError);
-            }
-
-            OutIndices.SetNum(IntCastChecked<int32>(NewCount));
-
-            // A collapsed card costs only its own size in the simplifier's error, however sparse the canopy gets, so the distance is measured.
-            const TVector<FVector3>& ResultPositions = Out.UpdatedPositions.IsEmpty() ? In.Positions : Out.UpdatedPositions;
-            const float Measured = MeasureSimplificationDistance(In.Positions, In.Indices, ResultPositions, OutIndices.GetData(), NewCount);
-            Out.Error = Math::Max(RelativeError * In.ErrorScale, Measured < FLT_MAX ? Measured : In.ErrorScale);
         }
 
         // Build meshlets for one (LOD, Surface) cell; quantization deferred to the serial pack pass.
@@ -1142,6 +796,18 @@ namespace Lumina::Import::Mesh
 
     namespace
     {
+        // A level without bounds of its own is always its own finest and coarsest, so the cut keeps it.
+        FMeshletLODBounds GetPackedLODBounds(const FSurfaceMeshletResult& Result, uint32 MeshletIdx)
+        {
+            if (!Result.LODBounds.IsEmpty())
+            {
+                return Result.LODBounds[MeshletIdx];
+            }
+            FMeshletLODBounds Bounds{};
+            Bounds.ParentError = kMeshletLODErrorInfinite;
+            return Bounds;
+        }
+
         struct FLevelVertex
         {
             uint32 MeshVertex;
@@ -1176,7 +842,6 @@ namespace Lumina::Import::Mesh
             TVector<FPackSlot> PackSlots;
             uint32 RefCursor      = 0;
             uint32 TriangleCursor = 0;
-            bool   bAnyLODBounds  = false;
 
             // Surface-major, so a cluster surface's slots form one contiguous run a view can take a slice of.
             for (uint32 SurfaceIdx = 0; SurfaceIdx < NumSurfaces; ++SurfaceIdx)
@@ -1198,7 +863,6 @@ namespace Lumina::Import::Mesh
                     Section.LODError[Slot]         = Table.Error[Slot];
                     Section.LODParentError[Slot]   = Table.ParentError[Slot];
                     Section.NumLODs                = Slot + 1u;
-                    bAnyLODBounds                  = bAnyLODBounds || !Result.LODBounds.IsEmpty();
 
                     for (int32 MeshletIdx = 0; MeshletIdx < Result.OutMeshlets.Num(); ++MeshletIdx)
                     {
@@ -1298,10 +962,8 @@ namespace Lumina::Import::Mesh
             Data.MeshletCones.SetNum(PackSlots.Num());
             Data.MeshletTriangles.SetNum(TriangleCursor);
             Data.MeshletVertexRefs.Reserve(RefCursor);
-            if (bAnyLODBounds)
-            {
-                Data.MeshletLODBounds.SetNum(PackSlots.Num());
-            }
+            // Every static mesh is a hierarchy, a level of its own when built without one.
+            Data.MeshletLODBounds.SetNum(PackSlots.Num());
 
             {
                 LUMINA_PROFILE_SECTION("Pack Static Meshlets");
@@ -1312,19 +974,8 @@ namespace Lumina::Import::Mesh
 
                     FMeshlet Out = Result.OutMeshlets[Pack.MeshletIdx];
                     Out.LODIndex = Math::Min(Pack.LOD, (uint32)MESHLET_LOD_MASK);
-                    Out.bVoxel   = Result.bVoxel ? 1u : 0u;
 
-                    if (bAnyLODBounds)
-                    {
-                        // A level without bounds of its own is always its own finest and coarsest, so the cut keeps it.
-                        FMeshletLODBounds Bounds{};
-                        Bounds.ParentError = kMeshletLODErrorInfinite;
-                        if (!Result.LODBounds.IsEmpty())
-                        {
-                            Bounds = Result.LODBounds[Pack.MeshletIdx];
-                        }
-                        Data.MeshletLODBounds[PackIdx] = Bounds;
-                    }
+                    Data.MeshletLODBounds[PackIdx] = GetPackedLODBounds(Result, Pack.MeshletIdx);
 
                     const uint8* TriSrc = Result.Triangles.GetData() + Out.TriangleOffset;
                     for (uint32 t = 0; t < Out.TriangleCount; ++t)
@@ -1408,8 +1059,6 @@ namespace Lumina::Import::Mesh
 
         const uint32 NumSurfaces = (uint32)MeshResource.GeometrySurfaces.Num();
 
-        // Callers that rebuild often (dynamic meshes) trade distant-draw quality for build time here.
-        const uint32 LODCount          = Math::Clamp(MeshResource.MaxLODs, 1u, MAX_MESH_LODS);
         const bool   bConeCulling      = MeshResource.bMeshletConeCulling;
         const bool   bOptimizeMeshlets = MeshResource.bOptimizeMeshlets;
         const bool   bFastMeshletBuild = MeshResource.bFastMeshletBuild;
@@ -1443,153 +1092,20 @@ namespace Lumina::Import::Mesh
             });
         }
 
-        // A skinned vertex that moved would keep the skin weights of the place it left.
-        const bool bDestructiveLODs = MeshResource.bDestructiveLODs && !MeshResource.bSkinnedMesh;
+        // Callers that rebuild often (dynamic meshes) keep only the source level, a hierarchy of one.
+        const bool bBuildHierarchy = MeshResource.bLODHierarchy;
 
-        // Both virtual geometry paths want the compact per-surface space, and neither applies to skinning.
-        const bool   bClusterLOD     = MeshResource.bClusterLODs && !MeshResource.bSkinnedMesh;
-        const uint32 VoxelResolution = !MeshResource.bSkinnedMesh && MeshResource.VoxelFarResolution >= 4u
-                                     ? (uint32)Math::NextPowerOfTwo((int)Math::Min(MeshResource.VoxelFarResolution, 128u)) : 0u;
-        const float  VoxelErrorScale = Math::Clamp(MeshResource.VoxelErrorScale, 0.25f, 8.0f);
+        const TVector<FSurfaceSimplifyInput> SimplifyInputs = bBuildHierarchy ? BuildSurfaceSimplifyInputs(MeshResource) : TVector<FSurfaceSimplifyInput>();
 
-        const TVector<FSurfaceSimplifyInput> SimplifyInputs = (LODCount > 1u || bClusterLOD || VoxelResolution > 0u)
-            ? BuildSurfaceSimplifyInputs(MeshResource)
-            : TVector<FSurfaceSimplifyInput>();
-
-        // One grid for the whole mesh, so splats of neighboring surfaces line up.
-        FVector3 VoxelGridMin(0.0f);
-        float    VoxelSize = 0.0f;
-        if (VoxelResolution > 0u)
-        {
-            FVector3 BoundsMin(FLT_MAX);
-            FVector3 BoundsMax(-FLT_MAX);
-            for (const FVector3& P : MeshResource.Positions)
-            {
-                BoundsMin = Math::Min(BoundsMin, P);
-                BoundsMax = Math::Max(BoundsMax, P);
-            }
-            const FVector3 Extent    = BoundsMax - BoundsMin;
-            const float    MaxExtent = Math::Max(Extent.x, Math::Max(Extent.y, Extent.z));
-            // Grown a little so a face on the bounds lands inside the last voxel rather than on its edge.
-            VoxelSize    = MaxExtent > 0.0f ? MaxExtent * 1.001f / (float)VoxelResolution : 0.0f;
-            VoxelGridMin = BoundsMin - FVector3(MaxExtent * 0.0005f);
-        }
-
-        // Cells are slot-major, every slot a mesh can hold, since a cluster surface fills them from the hierarchy rather than from MaxLODs.
+        // Cells are slot-major, every slot a mesh can hold, since a cluster surface fills them from the hierarchy.
         TVector<FSurfaceMeshletResult> Results(MAX_MESH_LODS * NumSurfaces);
-        TVector<size_t> CellIndexCount(MAX_MESH_LODS * NumSurfaces, 0u);
-
-        // Voxel levels build into their own cells and their own vertex spaces, placed into slots once the LODs are accepted.
-        TVector<FSurfaceSimplifyInput>  VoxelSources(VoxelResolution > 0u ? NumSurfaces * kMaxVoxelLevels : 0u);
-        TVector<FSurfaceMeshletResult>  VoxelResults(VoxelResolution > 0u ? NumSurfaces * kMaxVoxelLevels : 0u);
-        TVector<TInlineVector<float, kMaxVoxelLevels>> SurfaceVoxelErrors(NumSurfaces);
-
-        auto BuildVoxelLevels = [&](uint32 SurfaceIdx)
-        {
-            if (VoxelResolution == 0u || !(VoxelSize > 0.0f))
-            {
-                return;
-            }
-            const FSurfaceSimplifyInput& Input = SimplifyInputs[SurfaceIdx];
-            if (Input.Indices.IsEmpty())
-            {
-                return;
-            }
-
-            VoxelFar::FBuildInput In;
-            In.Indices        = TSpan<const uint32>(Input.Indices.GetData(), Input.Indices.Num());
-            In.Positions      = TSpan<const FVector3>(Input.Positions.GetData(), Input.Positions.Num());
-            In.Attributes     = TSpan<const float>(Input.Attributes.GetData(), Input.Attributes.Num());
-            In.AttributeCount = kSimplifyAttributeCount;
-            In.GridMin        = VoxelGridMin;
-            In.VoxelSize      = VoxelSize;
-            In.Resolution     = VoxelResolution;
-
-            TVector<VoxelFar::FLevel> Levels;
-            VoxelFar::Build(In, Levels);
-
-            uint32 Kept = 0;
-            for (int32 LevelIdx = 0; LevelIdx < Levels.Num() && Kept < kMaxVoxelLevels; ++LevelIdx)
-            {
-                VoxelFar::FLevel& Level = Levels[LevelIdx];
-
-                // An empty level would leave the slot below it parented to an error no slot carries, and half the triangles saves nothing.
-                if (Level.Indices.IsEmpty() || Level.Indices.Num() * 2 >= Input.Indices.Num())
-                {
-                    continue;
-                }
-
-                FSurfaceSimplifyInput&  Source = VoxelSources[SurfaceIdx * kMaxVoxelLevels + Kept];
-                FSurfaceMeshletResult&  Out    = VoxelResults[SurfaceIdx * kMaxVoxelLevels + Kept];
-                ++Kept;
-                Out.bVoxel = true;
-
-                // The splat vertices stand in for mesh vertices, which is where their color and second UV come from.
-                Source.SourceVertex.SetNum(Level.SourceVertex.Num());
-                for (int32 v = 0; v < Level.SourceVertex.Num(); ++v)
-                {
-                    Source.SourceVertex[v] = Input.SourceVertex[Level.SourceVertex[v]];
-                }
-                Source.Positions  = Level.Positions;
-                Source.ErrorScale = Input.ErrorScale;
-
-                Out.Source            = &Source;
-                Out.UpdatedPositions  = Move(Level.Positions);
-                Out.UpdatedAttributes = Move(Level.Attributes);
-                Out.Error             = Level.Error * VoxelErrorScale;
-
-                const FVector3* LevelPositions = Out.UpdatedPositions.GetData();
-                BuildLODMeshletsForRange(
-                    Level.Indices.GetData(), Level.Indices.Num(),
-                    &LevelPositions[0].x, Out.UpdatedPositions.Num(), PositionStride,
-                    /*bConeCulling*/ false, bOptimizeMeshlets, /*bFastBuild*/ false,
-                    [LevelPositions](uint32 LocalIdx) { return LevelPositions[LocalIdx]; }, Out);
-
-                SurfaceVoxelErrors[SurfaceIdx].Add(Level.Error);
-            }
-        };
-
-        // Levels past the finest voxel one are the hierarchy's, each raising the error over the one below.
-        auto VoxelLevelErrors = [&](uint32 SurfaceIdx, float BaseError, TInlineVector<float, kMaxVoxelLevels>& OutErrors)
-        {
-            OutErrors.Reset();
-            float Last = BaseError;
-            for (float LevelError : SurfaceVoxelErrors[SurfaceIdx])
-            {
-                Last = Math::Max(LevelError * VoxelErrorScale, Last * 1.0001f + 1e-7f);
-                OutErrors.Add(Last);
-            }
-        };
-
-        // Appends the surface's voxel levels as the coarsest slots, each a voxel parent to the one below it.
-        auto AppendVoxelSlots = [&](uint32 SurfaceIdx, FSurfaceLODTable& Table, float BaseError)
-        {
-            TInlineVector<float, kMaxVoxelLevels> Errors;
-            VoxelLevelErrors(SurfaceIdx, BaseError, Errors);
-            for (int32 LevelIdx = 0; LevelIdx < Errors.Num(); ++LevelIdx)
-            {
-                const uint32 Slot = (uint32)Table.Accepted.Num();
-                if (Slot >= MAX_MESH_LODS)
-                {
-                    break;
-                }
-                Results[Slot * NumSurfaces + SurfaceIdx] = Move(VoxelResults[SurfaceIdx * kMaxVoxelLevels + LevelIdx]);
-                const bool bHasCoarser = LevelIdx + 1 < Errors.Num() && Slot + 1u < MAX_MESH_LODS;
-                Table.Add(Slot, Errors[LevelIdx], bHasCoarser ? Errors[LevelIdx + 1] : kMeshletLODErrorInfinite);
-                Table.MarkVoxelSlot(Slot);
-                if (bHasCoarser)
-                {
-                    Table.MarkVoxelParent(Slot);
-                }
-            }
-        };
 
         TVector<FSurfaceLODTable> Tables(NumSurfaces);
 
         // A hierarchy's levels index its own vertex space, the surface's vertices plus those area preservation grew.
-        TVector<FSurfaceSimplifyInput> DagSources(bClusterLOD ? NumSurfaces : 0u);
+        TVector<FSurfaceSimplifyInput> DagSources(bBuildHierarchy ? NumSurfaces : 0u);
 
-        if (bClusterLOD)
+        if (bBuildHierarchy)
         {
             Jobs::ParallelFor(NumSurfaces, [&](uint32 SurfaceIdx)
             {
@@ -1613,10 +1129,6 @@ namespace Lumina::Import::Mesh
                 In.bConeCulling      = bConeCulling;
                 In.bOptimizeMeshlets = bOptimizeMeshlets;
 
-                // Built first, since a hierarchy level coarser than the finest splats would never be drawn over them.
-                BuildVoxelLevels(SurfaceIdx);
-                In.MaxLevelError = SurfaceVoxelErrors[SurfaceIdx].IsEmpty() ? 0.0f : SurfaceVoxelErrors[SurfaceIdx][0] * VoxelErrorScale;
-
                 ClusterLOD::FBuildOutput Dag;
                 if (!ClusterLOD::Build(In, Dag))
                 {
@@ -1633,18 +1145,8 @@ namespace Lumina::Import::Mesh
                     DagSource.SourceVertex[v] = Input.SourceVertex[Dag.SourceVertex[v]];
                 }
 
-                TInlineVector<float, kMaxVoxelLevels> VoxelErrors;
-                VoxelLevelErrors(SurfaceIdx, Dag.MaxRootError, VoxelErrors);
-                const uint32 NumVoxelLevels = (uint32)VoxelErrors.Num();
-
-                // The voxel levels keep their own slots, and the hierarchy's levels share what is left.
-                const uint32 DagSlots = Math::Clamp(MAX_MESH_LODS - Math::Min(NumVoxelLevels, MAX_MESH_LODS - 1u), 1u, Dag.NumLevels);
-                const uint32 UsedVoxelLevels = Math::Min(NumVoxelLevels, MAX_MESH_LODS - DagSlots);
-
-                if (UsedVoxelLevels > 0u)
-                {
-                    ClusterLOD::SetRootParents(Dag, Dag.BoundsCenter, Dag.BoundsRadius, VoxelErrors[0], true);
-                }
+                // The hierarchy's levels share the slots, finest first.
+                const uint32 DagSlots = Math::Clamp(MAX_MESH_LODS, 1u, Dag.NumLevels);
 
                 FSurfaceLODTable& Table = Tables[SurfaceIdx];
                 Table.Flags |= SURFACE_DESC_CLUSTER_LOD;
@@ -1659,9 +1161,8 @@ namespace Lumina::Import::Mesh
                     FSurfaceMeshletResult& Out = Results[Slot * NumSurfaces + SurfaceIdx];
                     Out.Source = &DagSource;
 
-                    float MinSelf    = FLT_MAX;
-                    float MaxParent  = 0.0f;
-                    bool  bVoxelRoot = false;
+                    float MinSelf   = FLT_MAX;
+                    float MaxParent = 0.0f;
                     for (uint32 m = Begin; m < End; ++m)
                     {
                         const FMeshlet&          M      = Dag.Meshlets[m];
@@ -1677,39 +1178,13 @@ namespace Lumina::Import::Mesh
                         Out.Cones.Add(Dag.Cones[m]);
                         Out.LODBounds.Add(Bounds);
 
-                        MinSelf    = Math::Min(MinSelf, Bounds.SelfError);
-                        MaxParent  = Math::Max(MaxParent, Bounds.ParentError);
-                        bVoxelRoot = bVoxelRoot || (Bounds.Flags & MESHLET_LOD_FLAG_VOXEL_PARENT) != 0u;
+                        MinSelf   = Math::Min(MinSelf, Bounds.SelfError);
+                        MaxParent = Math::Max(MaxParent, Bounds.ParentError);
                     }
                     Out.bHasData = !Out.OutMeshlets.IsEmpty();
 
                     Table.Add(Slot, MinSelf < FLT_MAX ? MinSelf : 0.0f, MaxParent);
-                    if (bVoxelRoot)
-                    {
-                        Table.MarkVoxelParent(Slot);
-                    }
                 }
-
-                // Every voxel level shares the surface sphere, so the cut between them is one decision for the whole surface.
-                for (uint32 LevelIdx = 0; LevelIdx < UsedVoxelLevels; ++LevelIdx)
-                {
-                    FSurfaceMeshletResult& Voxel = VoxelResults[SurfaceIdx * kMaxVoxelLevels + LevelIdx];
-                    const bool bHasCoarser = LevelIdx + 1u < UsedVoxelLevels;
-                    for (int32 m = 0; m < Voxel.OutMeshlets.Num(); ++m)
-                    {
-                        FMeshletLODBounds Bounds{};
-                        Bounds.SelfCenter   = Dag.BoundsCenter;
-                        Bounds.SelfRadius   = Dag.BoundsRadius;
-                        Bounds.SelfError    = VoxelErrors[LevelIdx];
-                        Bounds.ParentCenter = Dag.BoundsCenter;
-                        Bounds.ParentRadius = Dag.BoundsRadius;
-                        Bounds.ParentError  = bHasCoarser ? VoxelErrors[LevelIdx + 1] : kMeshletLODErrorInfinite;
-                        Bounds.Flags        = MESHLET_LOD_FLAG_VOXEL | (bHasCoarser ? MESHLET_LOD_FLAG_VOXEL_PARENT : 0u);
-                        Bounds.Level        = Dag.NumLevels + LevelIdx;
-                        Voxel.LODBounds.Add(Bounds);
-                    }
-                }
-                AppendVoxelSlots(SurfaceIdx, Table, Dag.MaxRootError);
             });
 
             if (Progress)
@@ -1718,13 +1193,13 @@ namespace Lumina::Import::Mesh
             }
         }
 
-        Jobs::ParallelFor(bClusterLOD ? 0u : LODCount * NumSurfaces, [&](uint32 Cell)
+        // Only the source level, for a mesh built without a hierarchy.
+        Jobs::ParallelFor(bBuildHierarchy ? 0u : NumSurfaces, [&](uint32 Cell)
         {
-            LUMINA_PROFILE_SECTION("Process Surfaces and LODs");
+            LUMINA_PROFILE_SECTION("Process Surfaces");
             LUMINA_MEMORY_SCOPE("Meshes");
 
-            const uint32 lod        = Cell / NumSurfaces;
-            const uint32 SurfaceIdx = Cell % NumSurfaces;
+            const uint32 SurfaceIdx = Cell;
 
             const FGeometrySurface& Section = MeshResource.GeometrySurfaces[SurfaceIdx];
             if (Section.IndexCount == 0)
@@ -1735,158 +1210,44 @@ namespace Lumina::Import::Mesh
             const uint32*          SurfaceIndices = &MeshResource.Indices[Section.StartIndex];
             FSurfaceMeshletResult& Out            = Results[Cell];
 
-            if (lod == 0)
+            if (ShouldChunkSurface(Section, bFastMeshletBuild))
             {
-                if (ShouldChunkSurface(Section, bFastMeshletBuild))
+                const uint32 NumChunks = (uint32)((Section.IndexCount + kChunkedBuildIndices - 1u) / kChunkedBuildIndices);
+                TVector<FSurfaceMeshletResult> Chunks(NumChunks);
+                Jobs::ParallelFor(NumChunks, [&](uint32 Chunk)
                 {
-                    const uint32 NumChunks = (uint32)((Section.IndexCount + kChunkedBuildIndices - 1u) / kChunkedBuildIndices);
-                    TVector<FSurfaceMeshletResult> Chunks(NumChunks);
-                    Jobs::ParallelFor(NumChunks, [&](uint32 Chunk)
-                    {
-                        const size_t Begin = (size_t)Chunk * kChunkedBuildIndices;
-                        const size_t Count = Math::Min(kChunkedBuildIndices, (size_t)Section.IndexCount - Begin);
-                        BuildLODMeshletsForRange(
-                            SurfaceIndices + Begin, Count,
-                            VertexPositions, NumVertices, PositionStride,
-                            bConeCulling, bOptimizeMeshlets, bFastMeshletBuild,
-                            ReadPosition, Chunks[Chunk]);
-                    });
-                    for (FSurfaceMeshletResult& Chunk : Chunks)
-                    {
-                        AppendMeshletResult(Out, Chunk);
-                    }
-                }
-                else
-                {
+                    const size_t Begin = (size_t)Chunk * kChunkedBuildIndices;
+                    const size_t Count = Math::Min(kChunkedBuildIndices, (size_t)Section.IndexCount - Begin);
                     BuildLODMeshletsForRange(
-                        SurfaceIndices, Section.IndexCount,
+                        SurfaceIndices + Begin, Count,
                         VertexPositions, NumVertices, PositionStride,
                         bConeCulling, bOptimizeMeshlets, bFastMeshletBuild,
-                        ReadPosition, Out);
+                        ReadPosition, Chunks[Chunk]);
+                });
+                for (FSurfaceMeshletResult& Chunk : Chunks)
+                {
+                    AppendMeshletResult(Out, Chunk);
                 }
-                CellIndexCount[Cell] = Section.IndexCount;
-                return;
             }
-
-            // Snap to whole triangles; floor at kLODMinIndices so sloppy LODs don't degenerate.
-            size_t TargetIndices = (size_t)((double)Section.IndexCount * Math::Pow((double)kLODTriangleRatio, (double)lod));
-            TargetIndices = (TargetIndices / 3u) * 3u;
-            if (TargetIndices < kLODMinIndices)
+            else
             {
-                return;
+                BuildLODMeshletsForRange(
+                    SurfaceIndices, Section.IndexCount,
+                    VertexPositions, NumVertices, PositionStride,
+                    bConeCulling, bOptimizeMeshlets, bFastMeshletBuild,
+                    ReadPosition, Out);
             }
-
-            const FSurfaceSimplifyInput& Input = SimplifyInputs[SurfaceIdx];
-            if (Input.Indices.IsEmpty())
-            {
-                return;
-            }
-
-            TVector<uint32> Simplified;
-            SimplifySurfaceLOD(Input, TargetIndices, bDestructiveLODs, Simplified, Out);
-
-            const int32 NewCount = Simplified.Num();
-            CellIndexCount[Cell] = NewCount;
-            if (static_cast<size_t>(NewCount) < kLODMinIndices)
-            {
-                Out = FSurfaceMeshletResult{};
-                return;
-            }
-
-            const int32 LocalVertexCount = Input.Positions.Num();
-
-            // Restore vertex-cache locality after simplifiers reorder by collapse/cluster priority.
-            {
-                LUMINA_PROFILE_SECTION("meshopt_optimizeVertexCache");
-                meshopt_optimizeVertexCache(
-                    Simplified.GetData(),
-                    Simplified.GetData(),
-                    NewCount, LocalVertexCount);
-            }
-
-            const FVector3* LevelPositions = Out.UpdatedPositions.IsEmpty() ? Input.Positions.GetData() : Out.UpdatedPositions.GetData();
-            Out.Source = &Input;
-
-            BuildLODMeshletsForRange(
-                Simplified.GetData(), NewCount,
-                &LevelPositions[0].x, LocalVertexCount, PositionStride,
-                bConeCulling, bOptimizeMeshlets, bFastMeshletBuild,
-                [LevelPositions](uint32 LocalIdx) { return LevelPositions[LocalIdx]; }, Out);
         });
 
-        // Voxel levels of a discrete LOD mesh, built apart from the LOD cells since they index their own vertices.
-        if (!bClusterLOD && VoxelResolution > 0u)
+        // The source level alone, which still flags as a hierarchy so the cull treats every mesh alike.
+        for (uint32 SurfaceIdx = 0; !bBuildHierarchy && SurfaceIdx < NumSurfaces; ++SurfaceIdx)
         {
-            Jobs::ParallelFor(NumSurfaces, [&](uint32 SurfaceIdx)
-            {
-                LUMINA_MEMORY_SCOPE("Meshes");
-                BuildVoxelLevels(SurfaceIdx);
-            });
-        }
-
-        for (uint32 SurfaceIdx = 0; !bClusterLOD && SurfaceIdx < NumSurfaces; ++SurfaceIdx)
-        {
-            const FGeometrySurface& Section = MeshResource.GeometrySurfaces[SurfaceIdx];
-
             FSurfaceLODTable& Table = Tables[SurfaceIdx];
-            TInlineVector<uint32, MAX_MESH_LODS>& Accepted = Table.Accepted;
-            if (Results[0 * NumSurfaces + SurfaceIdx].bHasData)
+            if (Results[SurfaceIdx].bHasData)
             {
-                Table.Add(0u, 0.0f, 0.0f);
+                Table.Add(0u, 0.0f, kMeshletLODErrorInfinite);
             }
-            size_t LastIndexCount = Section.IndexCount;
-            float  LastError      = 0.0f;
-
-            // The voxel levels take the coarsest slots, so the discrete chain stops short of them.
-            const uint32 VoxelLevelCount   = Math::Min((uint32)SurfaceVoxelErrors[SurfaceIdx].Num(), MAX_MESH_LODS - 1u);
-            const uint32 MaxDiscreteSlots  = MAX_MESH_LODS - VoxelLevelCount;
-
-            for (uint32 lod = 1; lod < LODCount && (uint32)Accepted.Num() < MaxDiscreteSlots; ++lod)
-            {
-                const uint32                 Cell   = lod * NumSurfaces + SurfaceIdx;
-                const FSurfaceMeshletResult& Result = Results[Cell];
-
-                const size_t NewCount = CellIndexCount[Cell];
-                if (!Result.bHasData || NewCount < kLODMinIndices)
-                {
-                    continue;
-                }
-
-                // Measured against the last accepted level, so skipping one keeps the bar where it was.
-                if ((float)NewCount > (float)LastIndexCount * kLODMinReduction)
-                {
-                    continue;
-                }
-
-                if (!(Result.Error >= 0.0f && Result.Error < FLT_MAX))
-                {
-                    continue;
-                }
-
-                // Every level is measured against the source, so a coarser one can report less; selection needs it non-decreasing.
-                LastError      = Math::Max(LastError, Result.Error);
-                LastIndexCount = NewCount;
-                Table.Add(lod, LastError, 0.0f);
-            }
-
-            // Drop every level that did not make the cut so the pack pass cannot fold one back in.
-            for (uint32 lod = 0; lod < LODCount; ++lod)
-            {
-                if (!Algo::Contains(Accepted, lod))
-                {
-                    Results[lod * NumSurfaces + SurfaceIdx] = FSurfaceMeshletResult{};
-                }
-            }
-
-            // The LOD cells past the accepted count are free, which is where the voxel levels go.
-            if (VoxelResolution > 0u && !MeshResource.bSkinnedMesh)
-            {
-                for (uint32 Slot = (uint32)Accepted.Num(); Slot < MAX_MESH_LODS; ++Slot)
-                {
-                    Results[Slot * NumSurfaces + SurfaceIdx] = FSurfaceMeshletResult{};
-                }
-                AppendVoxelSlots(SurfaceIdx, Table, LastError);
-            }
+            Table.Flags |= SURFACE_DESC_CLUSTER_LOD;
 
             if (Progress)
             {
@@ -1986,26 +1347,27 @@ namespace Lumina::Import::Mesh
         }
         else
         {
-            // Skinned levels never move a vertex, so the source positions bound every level.
-            MeshResource.MeshletData.PositionGrid = ComputeMeshPositionGrid(MeshResource.Positions.GetData(), MeshResource.Positions.Num());
+            // Area preservation can move a hierarchy vertex past the source, so the grid takes every level's positions.
+            TVector<FVector3> GridPositions = MeshResource.Positions;
+            for (const FSurfaceSimplifyInput& DagSource : DagSources)
+            {
+                GridPositions.Append(DagSource.Positions.GetData(), DagSource.Positions.Num());
+            }
+            MeshResource.MeshletData.PositionGrid = ComputeMeshPositionGrid(GridPositions.GetData(), GridPositions.Num());
         }
 
-        for (uint32 Slot = 0; MeshResource.bSkinnedMesh && Slot < LODCount; ++Slot)
+        // Surface-major, so a surface's slots form one contiguous run the camera's slice can take.
+        for (uint32 SurfaceIdx = 0; MeshResource.bSkinnedMesh && SurfaceIdx < NumSurfaces; ++SurfaceIdx)
         {
-            LUMINA_PROFILE_SECTION("Serial Pack Skinned LODs");
+            LUMINA_PROFILE_SECTION("Serial Pack Skinned Surfaces");
 
-            for (uint32 SurfaceIdx = 0; SurfaceIdx < NumSurfaces; ++SurfaceIdx)
+            const FSurfaceLODTable& Table   = Tables[SurfaceIdx];
+            FGeometrySurface&       Section = MeshResource.GeometrySurfaces[SurfaceIdx];
+            Section.LODFlags = Table.Flags;
+
+            for (uint32 Slot = 0; Slot < static_cast<uint32>(Table.Accepted.Num()); ++Slot)
             {
-                const FSurfaceLODTable& Table = Tables[SurfaceIdx];
-                if (Slot >= static_cast<uint32>(Table.Accepted.Num()))
-                {
-                    continue;
-                }
-                const uint32 SourceLOD = Table.Accepted[Slot];
-
-                FGeometrySurface&      Section = MeshResource.GeometrySurfaces[SurfaceIdx];
-                FSurfaceMeshletResult& Result  = Results[SourceLOD * NumSurfaces + SurfaceIdx];
-
+                FSurfaceMeshletResult& Result = Results[Table.Accepted[Slot] * NumSurfaces + SurfaceIdx];
                 if (!Result.bHasData)
                 {
                     continue;
@@ -2014,6 +1376,7 @@ namespace Lumina::Import::Mesh
                 Section.LODMeshletOffset[Slot] = (uint32)MeshResource.MeshletData.Meshlets.Num();
                 Section.LODMeshletCount[Slot]  = (uint32)Result.OutMeshlets.Num();
                 Section.LODError[Slot]         = Table.Error[Slot];
+                Section.LODParentError[Slot]   = Table.ParentError[Slot];
                 Section.NumLODs                = Slot + 1u;
 
                 FMeshletPaletteScratch Palette;
@@ -2080,6 +1443,8 @@ namespace Lumina::Import::Mesh
                     MeshResource.MeshletData.Meshlets.Add(Out);
                     MeshResource.MeshletData.MeshletSpheres.Add(Result.Spheres[MeshletIdx]);
                     MeshResource.MeshletData.MeshletCones.Add(Result.Cones[MeshletIdx]);
+
+                    MeshResource.MeshletData.MeshletLODBounds.Add(GetPackedLODBounds(Result, MeshletIdx));
                 }
             }
         }
@@ -2443,7 +1808,6 @@ namespace Lumina::Import::Mesh
             {
                 OptimizeNewlyImportedMesh(M, Progress);
             }
-            ApplyVirtualGeometrySettings(M, Options.VirtualGeometry);
             // It runs tangent generation internally and advances progress per surface it meshletizes.
             GenerateMeshlets(M, Progress, StepPerSurface);
         });

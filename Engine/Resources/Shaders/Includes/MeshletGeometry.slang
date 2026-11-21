@@ -45,10 +45,17 @@ FMeshletRef ResolveMeshlet(uint MeshletSlot)
     }
 
     // The draw entry names the meshlet outright, since the cull picks the LOD per view and the raster cannot know which.
-    Ref.SkinnedVertexBase    = Ref.Inst.SkinnedVertexBase;
+    return ResolveInstanceMeshlet(Draw.InstanceID, Draw.MeshletIndex);
+}
+
+FMeshletRef ResolveInstanceMeshlet(uint InstanceID, uint MeshletIndex)
+{
+    FMeshletRef Ref;
+    Ref.InstanceID           = InstanceID;
+    Ref.SkinnedVertexBase    = ResolvePreSkinBase(Ref.Inst.SkinnedVertexBase);
 
     // Also bounded by the header count (0 for a dead mesh's null header), since these counts reach SetMeshOutputCounts.
-    if (Draw.MeshletIndex >= min(Ref.Inst.MeshletTotalCount, Ref.Header.MeshletCount))
+    if (MeshletIndex >= min(Ref.Inst.MeshletTotalCount, Ref.Header.MeshletCount))
     {
         Ref.SkinnedVertexBase = kNoPreSkinBase;
         Ref.GlobalMeshletIdx  = 0u;
@@ -56,7 +63,7 @@ FMeshletRef ResolveMeshlet(uint MeshletSlot)
         return Ref;
     }
 
-    Ref.GlobalMeshletIdx     = Draw.MeshletIndex;
+    Ref.GlobalMeshletIdx     = MeshletIndex;
     Ref.M                    = loadAligned<16>(Ref.Header.Meshlets + Ref.GlobalMeshletIdx);
 
     // Counts past the declared array sizes are garbage, so drop the meshlet rather than overrun.
@@ -89,7 +96,7 @@ struct FMeshletPassArgs
     uint                    MaxMeshGroups;     // sub-draw d covers meshlets [d*MaxMeshGroups, (d+1)*...)
     uint                    CullViewIndex;
     int                     ShadowDataIndex;   // Shadow raster variants only
-    int                     ViewIndex;         // Shadow raster variants only (cascade, face or spot)
+    int                     ViewIndex;         // Shadow raster variants only (sun level, face or spot)
     // The atlas tile size for a shadow pass, as two scalars so neither block layout pads.
     float                   ViewportW;
     float                   ViewportH;
@@ -409,8 +416,6 @@ struct FBaseVertexOutput
     nointerpolation uint MaterialIndex : MATERIAL_INDEX;
     nointerpolation uint InstanceFlags : INSTANCE_FLAGS;
     nointerpolation uint MeshletIndex  : MESHLET_INDEX;
-    // FMeshlet::PackedCounts, which carries the voxel splat bit the masked clip reads.
-    nointerpolation uint MeshletFlags  : MESHLET_FLAGS;
     precise float4 Position            : SV_Position;
 };
 
@@ -451,16 +456,9 @@ struct FMaskedVertexOutput
     nointerpolation uint InstanceFlags : INSTANCE_FLAGS;
 #endif
     nointerpolation uint MaterialIndex : MATERIAL_INDEX;
-    nointerpolation uint MeshletFlags  : MESHLET_FLAGS;
     precise float4 Position            : SV_Position;
 };
 #endif
-
-// A voxel splat stands for a surface rather than showing it, so its pixels keep whatever the opacity graph says.
-bool MaskedIsVoxelSplat(FMaskedVertexOutput Input)
-{
-    return ((Input.MeshletFlags >> MESHLET_VOXEL_SHIFT) & 1u) != 0u;
-}
 
 // FinalWorldPos already includes Material.WorldPositionOffset.
 FBaseVertexOutput MakeBaseVertexOutput(FMeshletRef Ref, FMeshletWorldVertex W, float3 FinalWorldPos,
@@ -482,7 +480,6 @@ FBaseVertexOutput MakeBaseVertexOutput(FMeshletRef Ref, FMeshletWorldVertex W, f
     O.MaterialIndex = Ref.Inst.MaterialIndex;
     O.InstanceFlags = (uint)Ref.InstFlags;
     O.MeshletIndex  = Ref.GlobalMeshletIdx;
-    O.MeshletFlags  = Ref.M.PackedCounts;
     O.Position      = CameraClipPosition(ViewPos, CameraProj);
     return O;
 }
@@ -527,7 +524,6 @@ FMaskedVertexOutput MakeMaskedVertexOutput(FMeshletRef Ref, FMeshletWorldVertex 
     O.InstanceFlags = (uint)Ref.InstFlags;
 #endif
     O.MaterialIndex = MaterialIndex;
-    O.MeshletFlags  = Ref.M.PackedCounts;
     O.Position      = CameraClipPosition(ViewPos, CameraProj);
     return O;
 #endif

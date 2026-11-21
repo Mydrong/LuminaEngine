@@ -100,6 +100,7 @@ namespace Lumina
         uint32          MaterialIndex;
         EInstanceFlags  MaterialFlags;
         bool            bMaterialCastsShadows;
+        bool            bWorldPositionOffset = false;
         // Held so the release decrements the same counter the bind incremented, whatever the primitive has become since.
         bool            bSkinned = false;
 
@@ -152,13 +153,13 @@ namespace Lumina
         uint32                              ResolveHandle = INVALID_MESH_RESOLVE_HANDLE;
         uint32                              ResolveGeneration = 0;
 
-        int32                               ForcedLODIndex = -1;
         // PackCustomDepthStencil, zero when it draws no custom depth.
         uint32                              CustomDepthStencil = 0;
         EInstanceFlags                      BaseFlags = EInstanceFlags::None;
         EPrimitiveSource                    Source = EPrimitiveSource::StaticMesh;
         bool                                bCastShadow = true;
-        bool                                bCastFarShadow = false;
+                bool                                bShadowWPO = true;
+        float                               WPODisableDistance = 0.0f;
         // Whether ForegroundKeys holds this primitive, so tracking it is one test rather than a search.
         bool                                bForegroundTracked = false;
 
@@ -282,13 +283,14 @@ namespace Lumina
             const CGrassType* Type       = nullptr;
             uint32            LayerIndex = 0;
             uint32            Occurrence = 0;
+            bool              bPatch     = false;
 
             bool operator==(const FGrassSpeciesKey&) const = default;
 
             friend uint64 GetTypeHash(const FGrassSpeciesKey& Key)
             {
                 const uint64 TypeBits = (uint64)(uintptr_t)Key.Type * 0x9E3779B97F4A7C15ull;
-                return ECS::GetTypeHash(Key.Terrain) ^ TypeBits ^ ((uint64)Key.LayerIndex << 48) ^ ((uint64)Key.Occurrence << 40);
+                return ECS::GetTypeHash(Key.Terrain) ^ TypeBits ^ ((uint64)Key.LayerIndex << 48) ^ ((uint64)Key.Occurrence << 40) ^ ((uint64)Key.bPatch << 39);
             }
         };
 
@@ -312,6 +314,8 @@ namespace Lumina
         };
 
         // A contiguous run of retained slots the GPU scatter fills each frame, leaving unused ones inactive. Idempotent per key while the mesh is the same and Capacity fits.
+        // True when the species already holds a block of this mesh at least this large, so acquiring it allocates no slots.
+        bool GrassSpeciesFits(const FGrassSpeciesKey& Key, const CStaticMesh* Mesh, uint32 Capacity) const;
         FGrassSpeciesBinding AcquireGrassSpecies(const FGrassSpeciesKey& Key, CStaticMesh* Mesh, uint32 ResolveHandle, uint32 Capacity);
 
         // Frees every block no AcquireGrassSpecies asked for since the last call, which covers dead, disabled and grassless terrains alike.
@@ -344,7 +348,7 @@ namespace Lumina
         void BindGrassSurface(FGrassSpeciesBinding& Binding, const FResolvedMesh& Resolved);
         void ReleaseGrassBlock(const FGrassSpeciesBinding& Binding);
         uint32 TakeGrassBlock(uint32 Capacity);
-        void   AddGrassFreeBlock(uint32 Base, uint32 Count);
+        void   AddFreeSlotBlock(uint32 Base, uint32 Count);
 
         // Touches only Primitives[Index], so this half is parallel-safe; kNoBoneSlice means it needs one.
         uint32                      TouchBoneSlice(uint32 Index, uint32 Count, uint32 FrameNumber);
@@ -367,7 +371,9 @@ namespace Lumina
         const TVector<uint32>&      GetDirtyInstanceSlots() const { return DirtyInstanceSlots; }
         const TVector<uint32>&      GetDirtyStaticSlots() const   { return DirtyStaticSlots; }
         const TVector<uint32>&      GetDeactivatedSlots() const   { return DeactivatedSlots; }
-        void                        ClearDirtyInstanceSlots()     { DirtyInstanceSlots.Reset(); DirtyStaticSlots.Reset(); DeactivatedSlots.Reset(); }
+        // Slot ranges (base, count) whose device entries clear to zero, matching CPU entries that already are.
+        const TVector<FUIntVector2>& GetZeroedSlotRanges() const  { return ZeroedSlotRanges; }
+        void                        ClearDirtyInstanceSlots()     { DirtyInstanceSlots.Reset(); DirtyStaticSlots.Reset(); DeactivatedSlots.Reset(); ZeroedSlotRanges.Reset(); }
         // True after a reset or when most slots changed at once, so the whole array is re-sent.
         bool                        NeedsFullInstanceUpload() const { return bFullInstanceUpload; }
         // The partial paths send only the dirty slots, so re-sending all of them pays once nearly every slot changed.
@@ -379,6 +385,9 @@ namespace Lumina
         void                        AssignMeshletVisibility();
         uint32                      GetMeshletVisibilityExtent() const { return MeshletVisibilityExtent; }
         uint64                      GetLargestLODMeshletTotal() const { return LargestLODMeshletTotal; }
+
+        // Gives the free run at the end of the retained arrays back, so a grass or streaming peak does not hold every per-slot buffer for the session.
+        void                        TrimRetainedTail();
 
         void                        NotifyResolveTableChanged() { bResolveTableChanged = true; }
 
@@ -541,6 +550,7 @@ namespace Lumina
         // Freed, so only the active bit changes.
         TVector<uint32>                     DeactivatedSlots;
         TVector<uint32>                     DirtyStaticSlots;
+        TVector<FUIntVector2>               ZeroedSlotRanges;
         bool                                bFullInstanceUpload = true;
         // Tracked apart from the transforms, so a moving crowd does not re-send payload that never changed.
         bool                                bFullStaticUpload = true;
@@ -555,9 +565,9 @@ namespace Lumina
         uint32                              MaxSurfaceDescMeshlets = 0;
 
         void    UpdateMeshletVisibility(uint32 Slot);
-        // Meshlets in the slot's largest LOD, zero for an inactive slot.
-        uint32  LargestLODMeshletsOf(uint32 Slot) const;
-        uint32  LargestLODMeshletsOfSurface(uint32 SurfaceDescIndex) const;
+        // Meshlets the slot's visibility words cover, its whole hierarchy and run offset, zero for an inactive slot.
+        uint32  VisibilityMeshletsOf(uint32 Slot) const;
+        uint32  VisibilityMeshletsOfSurface(uint32 SurfaceDescIndex) const;
         void    ReleaseMeshletVisibility(uint32 Slot);
         void    FreeMeshletVisibilityRange(uint32 Base, uint32 Words);
 
@@ -575,7 +585,9 @@ namespace Lumina
         THashMap<FGrassSpeciesKey, FGrassSpeciesBinding> GrassSpecies;
         uint32                              GrassSlotCount = 0;
         uint32                              GrassSerial = 1;
-        TVector<FUIntVector2>               GrassFreeBlocks;
+        // Released grass blocks, kept whole for the next block and carved from the front for single slots.
+        TVector<FUIntVector2>               FreeSlotBlocks;
+        uint32                              RetainedTrimCountdown = 0;
 
         //~ Per entity
 
@@ -715,9 +727,10 @@ namespace Lumina
             float                               MaxDrawDistance = 0.0f;
             EInstanceFlags                      BaseFlags = EInstanceFlags::None;
             bool                                bCastShadow = true;
-            bool                                bCastFarShadow = false;
+                        bool                                bShadowWPO = true;
             bool                                bChanged = false;
             float                               ThinningStartDistance = 0.0f;
+            float                               WPODisableDistance = 0.0f;
             // Instances of this type a fresh bind gives a span, counted so its batch references are taken in one add.
             uint32                              FreshInstances = 0;
         };
@@ -901,22 +914,11 @@ namespace Lumina
         // A streamed mover that stopped still holds CPU copies from before it streamed, so it takes the CPU path once.
         void CatchUpStoppedStreams(const FSyncPools& Pools, uint32 MovedStamp, bool bNoneStopped);
 
-        enum class EStreamKind : uint32
-        {
-            Skip,
-            CPUPath,
-            Stream,
-        };
-        // What the stream needs of one entity this frame, read from its record.
-        struct FStreamCacheEntry
-        {
-            EStreamKind Kind = EStreamKind::Skip;
-            uint32      Slot = kNoStreamSlot;
-            FVector3    LocalCenter = FVector3(0.0f);
-            float       Radius = 0.0f;
-        };
-        FStreamCacheEntry LookupStreamCacheEntry(ECS::FEntity Entity);
+        // The entity's record with its stream cache current, or null when nothing of it is drawn; a StreamSlot of kNoStreamSlot takes the CPU path.
+        FEntityRecord* FindStreamRecord(ECS::FEntity Entity);
         void BuildStreamCacheEntry(FEntityRecord& Record) const;
+        // Writes the record the GPU scatters, plus the CPU bounds a skeletal primitive's gather culls and picks LODs with.
+        void WriteStreamRecord(const FEntityRecord& Stamp, uint32 Record, const FMatrix4& Matrix);
         // A structural sync of the entity, which may move its slot or bounds.
         void InvalidateStreamCache(ECS::FEntity Entity);
         // Everything at once, for a rescan, a reset or a foreground toggle.
@@ -969,6 +971,8 @@ namespace Lumina
         FStreamedLists              StreamedLastFrame;
         TVector<ECS::FEntity>       StoppedScratch;
         TVector<uint32>             StreamedBlocks;
+        // One bit per cull block, which orders and dedupes StreamedBlocks in a single pass.
+        TVector<uint64>             StreamedBlockBits;
         // Drops every streamed list and record count, for a reset or a rescan that rebuilt the CPU copies.
         void ResetStreamState();
 

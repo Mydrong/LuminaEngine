@@ -48,9 +48,13 @@ namespace Lumina
         PROPERTY(Editable, Category = "Shadows")
         bool bCastShadow = true;
 
-        // Also casts into the sun's far cascade. Meant for large landmarks seen from far away.
+        // Shadows follow the material's world position offset. Off casts from the still mesh, which is cheaper and keeps the shadow cacheable.
         PROPERTY(Editable, Category = "Shadows")
-        bool bCastFarShadow = false;
+        bool bShadowWorldPositionOffset = true;
+
+        // Past this camera distance the material's world position offset is skipped in every pass. 0 always applies it.
+        PROPERTY(Editable, Category = "Rendering", ClampMin = 0.0f, Units = "m")
+        float WorldPositionOffsetDisableDistance = 0.0f;
 
         /** When true, this mesh samples and applies shadowing from shadow-casting lights. */
         PROPERTY(Editable, Category = "Shadows")
@@ -71,10 +75,6 @@ namespace Lumina
         uint32          CachedMeshletHeaderSlot = 0;
         EInstanceFlags  CachedBaseFlags = EInstanceFlags::None;
 
-        // -1 picks the LOD by distance; anything else pins it, clamped to the surface's coarsest LOD.
-        PROPERTY(Editable, Category = "Rendering")
-        int32 ForcedLODIndex = -1;
-        
         /** Per-slot material overrides applied on top of the mesh's default materials. */
         PROPERTY(Editable, Category = "Rendering")
         TVector<TStrongObjectPtr<CMaterialInterface>> MaterialOverrides;

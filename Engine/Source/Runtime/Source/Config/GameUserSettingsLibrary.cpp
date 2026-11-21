@@ -2,6 +2,7 @@
 #include "GameUserSettingsLibrary.h"
 
 #include "Core/Windows/Window.h"
+#include "Renderer/RenderManager.h"
 #include "World/Scene/RenderScene/SceneUpscaler.h"
 
 namespace Lumina
@@ -137,6 +138,32 @@ namespace Lumina
         CGameUserSettings::Get().bVSync = bEnabled;
     }
 
+    EHDROutput CGameUserSettingsLibrary::GetHDROutput()
+    {
+        return CGameUserSettings::Get().HDROutput;
+    }
+
+    void CGameUserSettingsLibrary::SetHDROutput(EHDROutput Mode)
+    {
+        CGameUserSettings::Get().HDROutput = Mode;
+    }
+
+    float CGameUserSettingsLibrary::GetHDRPaperWhiteNits()
+    {
+        return CGameUserSettings::Get().HDRPaperWhiteNits;
+    }
+
+    void CGameUserSettingsLibrary::SetHDRPaperWhiteNits(float Nits)
+    {
+        CGameUserSettings::Get().HDRPaperWhiteNits = Math::Max(Nits, 0.0f);
+    }
+
+    bool CGameUserSettingsLibrary::IsHDROutputActive()
+    {
+        const FRenderManager* Manager = TryRender();
+        return Manager != nullptr && Manager->GetHDROutput().bActive;
+    }
+
     int32 CGameUserSettingsLibrary::GetFrameRateLimit()
     {
         return CGameUserSettings::Get().FrameRateLimit;
@@ -230,7 +257,8 @@ namespace Lumina
             TVector<IUpscaler*> Registered;
             FUpscalerRegistry::GetRegistered(Registered);
 
-            TVector<EUpscaler> Types;
+            // Built into every renderer rather than registered, so it is always on offer.
+            TVector<EUpscaler> Types = { EUpscaler::TAA };
             for (IUpscaler* Upscaler : Registered)
             {
                 if (Upscaler != nullptr && Upscaler->IsSupported())

@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include <meshoptimizer.h>
 #include "Containers/Span.h"
@@ -10,7 +10,6 @@
 #include "Platform/Platform.h"
 #include "Renderer/Format.h"
 #include "Renderer/MeshDistanceField.h"
-#include "Renderer/VirtualGeometrySettings.h"
 #include "Renderer/RHITexture.h"
 #include "Assets/AssetTypes/Textures/Texture.h"
 #include "Renderer/SkeletonResource.h"
@@ -19,6 +18,7 @@ namespace Lumina
 {
     struct FAnimationResource;
     struct FMeshResource;
+    struct FMeshletData;
     struct FSkeletonResource;
     struct FSourceVertex;
     class FScopedSlowTask;
@@ -174,13 +174,7 @@ namespace Lumina::Import
              *  voxelization pass in FinalizeMeshImportData. Off by default: the build is the single most
              *  expensive step of a mesh import, and most meshes never need a field. */
             SDistanceFieldBuildSettings DistanceField;
-
-            // Seeds CMesh::VirtualGeometrySettings and picks the meshlet build GenerateMeshlets runs.
-            SVirtualGeometryBuildSettings VirtualGeometry;
         };
-
-        // Copies the virtual geometry settings onto the resource's build inputs, which is all GenerateMeshlets reads.
-        RUNTIME_API void ApplyVirtualGeometrySettings(FMeshResource& Resource, const SVirtualGeometryBuildSettings& Settings);
 
         /** One source image, deduplicated by Key during parse. Embedded payloads are a VIEW into the
          *  parser's own buffer (Bytes) so a GLB's textures are never copied; a parser that cannot keep its
@@ -322,11 +316,6 @@ namespace Lumina::Import
 
             /** Indexed by EMaterialTextureSlot. */
             EImportSampler      Samplers[(size_t)EMaterialTextureSlot::Count] = {};
-
-            NODISCARD const FTextureUVTransform& GetUVTransform(EMaterialTextureSlot Slot) const
-            {
-                return UVTransforms[(size_t)Slot];
-            }
         };
 
         /** The resources one deduplicated source mesh produced. A source mesh whose primitives are a mix of
@@ -458,9 +447,6 @@ namespace Lumina::Import
              *  (then a slot index is itself the Materials index). */
             TVector<int16>                              MergedMaterialSlotToSource;
 
-            /** Populated by the dialog at commit; drives FinalizeMeshImportData and per-asset creation gates. */
-            FMeshImportOptions                          CommitOptions;
-
             /** Source-node count before dedup, for the import report. */
             uint32                                      SourceNodeCount = 0;
 
@@ -488,6 +474,7 @@ namespace Lumina::Import
         RUNTIME_API void OptimizeNewlyImportedMesh(FMeshResource& MeshResource, FScopedSlowTask* Progress = nullptr);
         /** When Progress is set, advances StepPerSurface of progress for each surface meshletized. */
         RUNTIME_API void GenerateMeshlets(FMeshResource& MeshResource, FScopedSlowTask* Progress = nullptr, float StepPerSurface = 0.0f);
+
         RUNTIME_API void AnalyzeMeshStatistics(FMeshResource& MeshResource, FMeshStatistics& OutMeshStats);
         // Pieces that share a source material share one merged slot, so a merge never adds slots per object.
         RUNTIME_API int16 FindOrAddMergedMaterialSlot(TVector<int16>& SlotToSource, int16 SourceMaterial);

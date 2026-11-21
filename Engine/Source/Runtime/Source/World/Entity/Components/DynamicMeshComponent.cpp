@@ -369,7 +369,7 @@ namespace Lumina
 
         TUniquePtr<FMeshResource> Resource = MakeUnique<FMeshResource>();
         Resource->bSkinnedMesh          = false;
-        Resource->MaxLODs               = Math::Clamp(Options.MaxLODs, 1u, (uint32)MAX_MESH_LODS);
+        Resource->bLODHierarchy         = Options.bLODHierarchy;
         Resource->bGenerateTangents     = Options.bGenerateTangents;
         Resource->bMeshletConeCulling   = Options.bMeshletConeCulling;
         Resource->bOptimizeMeshlets     = Options.bOptimizeMeshlets;
@@ -504,7 +504,7 @@ namespace Lumina
         LUMINA_MEMORY_SCOPE("Meshes");
 
         FMeshBuildOptions Options;
-        Options.MaxLODs             = (uint32)Math::Max(MaxLODs, 1);
+        Options.bLODHierarchy       = bLODHierarchy;
         Options.bGenerateTangents   = bGenerateTangents;
         Options.bMeshletConeCulling = bMeshletConeCulling;
         Options.bOptimizeMeshlets   = bOptimizeMeshlets;
@@ -526,7 +526,15 @@ namespace Lumina
 
         Import::Mesh::GenerateMeshlets(*Resource);
         NewData->Resource = Move(*Resource);
+        PublishBuilt(Move(NewData));
 
+        // Staging is consumed; the next edit re-stages from scratch.
+        BuildData.reset();
+        return true;
+    }
+
+    void SDynamicMeshComponent::PublishBuilt(TSharedPtr<FDynamicMeshRenderData> NewData)
+    {
         // A hidden mesh uploads when shown, keeping its meshlets until then.
         const bool bUpload = RenderLayers.Bits != 0;
         if (bUpload)
@@ -567,9 +575,5 @@ namespace Lumina
 
         // Single publish point. The extract later this tick already reads the new addresses
         PublishRenderData(Move(NewData));
-
-        // Staging is consumed; the next edit re-stages from scratch.
-        BuildData.reset();
-        return true;
     }
 }

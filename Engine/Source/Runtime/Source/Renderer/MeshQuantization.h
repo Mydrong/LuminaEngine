@@ -1,12 +1,10 @@
 #pragma once
 
-#include "Lumina.h"
-#include "Renderer/MeshData.h"
-#include "Renderer/Vertex.h"
-#include "Shared/SharedConstants.h"
-#include "meshoptimizer.h"
-
 #include <bit>
+#include "Lumina.h"
+#include "meshoptimizer.h"
+#include "Renderer/MeshData.h"
+#include "Shared/SharedConstants.h"
 
 namespace Lumina
 {

@@ -1,6 +1,8 @@
 ﻿#pragma once
 #include "Common.slang"
 #include "GlobalRHI.slang"
+#include "TerrainTypes.slang"
+#include "VirtualShadowTypes.slang"
 
 // The mip count rides in the top byte, so a roughness LOD range needs no per-pixel GetDimensions.
 struct FMippedTextureCube
@@ -19,7 +21,7 @@ struct FMippedTextureCubeArray
     uint MipCount()             { return Packed >> 24; }
 };
 
-// Must match FSceneRoot in SceneRenderTypes.h (416 B, scalar layout).
+// Must match FSceneRoot in SceneRenderTypes.h (576 B, scalar layout).
 struct FSceneRoot
 {
     GPUSpan<FBoneTransform>      Bones;
@@ -52,6 +54,8 @@ struct FSceneRoot
     GPUSpan<FMeshletCone>        SkinnedMeshletCones;
     // Parallel to PreSkinnedVertices, and empty when no view wants motion vectors.
     GPUSpan<FPrevSkinnedPosition> PreSkinnedPrevPositions;
+    // Read by the draw path to resolve an instance that shares another's pre-skin slice.
+    GPUSpan<FSkinnedFrameData>    SkinnedFrameData;
 
     // The retained slot arrays, read by the far proxy pass since a proxy has no compacted instance.
     GPUSpan<FTransform3x4>       RetainedTransforms;
@@ -59,16 +63,29 @@ struct FSceneRoot
     GPUSpan<FInstanceProxy>      RetainedProxies;
     // Retained slots CullInstances turned into proxies this frame, in proxy draw order.
     GPUSpan<uint>                ProxyList;
+    // One bit per retained slot the sun's shadow cache holds, empty while the cache is off.
+    GPUSpan<uint>                ShadowCacheBits;
+    // Every terrain the frame draws, in the order their VisID slot ranges follow.
+    GPUSpan<FTerrainRecord>      Terrains;
+    // The sun's virtual shadow pages, level by level, each level's mask mips, and the levels themselves.
+    GPUSpan<FVirtualShadowPage>  VirtualShadowPages;
+    GPUSpan<uint>                VirtualShadowMasks;
+    GPUSpan<FVirtualShadowLevel> VirtualShadowLevels;
 
     FTexture2D         BRDFLut;
     FTextureCube       SkyIrradiance;
     FMippedTextureCube SkyPrefilter;
-    FTexture2D         ShadowCascadeTexture;
     FTexture2D         ShadowAtlasTexture;
     // Full resolution, for sharp near-mirror reflections.
     FTextureCube            SkyCube;
     FMippedTextureCubeArray ProbeCubeArray;
+    FTexture2DUInt          VirtualShadowPool;
+    FRWTexture2DUInt        VirtualShadowPoolRW;
+    // Page rows per layer of the pool, with the dynamic layer below the static one.
+    uint                    VirtualShadowPoolRows;
     uint                    _Pad0;
+    uint                    _Pad1;
+    uint                    _Pad2;
 };
 
 FSceneRoot* GetSceneRoot() { return GetSceneRootPointer<FSceneRoot>(); }
@@ -109,6 +126,12 @@ bool CullViewHasFlag(uint ViewIndex, uint Flag)
 {
     return (asuint(CullViews().At(ViewIndex).ViewOriginAndFlags.w) & Flag) == Flag;
 }
+
+// A shadow level's view, whose blocks and meshlets wait for this frame's depth to say which pages need them.
+bool IsDeferredShadowView(uint ViewIndex)
+{
+    return CullViewHasFlag(ViewIndex, CULL_VIEW_FLAG_VIRTUAL_SHADOW);
+}
 GPUSpan<FMeshletHeader>      MeshletHeaders()        { return GetSceneRoot().MeshletHeaders; }
 
 // Slot 0 is the null header and the slot is clamped, so this always returns something readable even off a garbage instance.
@@ -129,10 +152,34 @@ extension FInstanceStatic
 GPUSpan<FMeshletDraw>        MeshletDrawList()       { return GetSceneRoot().MeshletDrawList; }
 GPUSpan<FPreSkinnedVertex>   PreSkinnedVertices()    { return GetSceneRoot().PreSkinnedVertices; }
 GPUSpan<FPrevSkinnedPosition> PreSkinnedPrevPositions() { return GetSceneRoot().PreSkinnedPrevPositions; }
+
+// A sharer's base names the skinned index whose entry holds the slice the cull granted its group.
+uint ResolvePreSkinBase(uint Base)
+{
+    if (!IsPreSkinShare(Base))
+    {
+        return Base;
+    }
+    const GPUSpan<FSkinnedFrameData> Data = GetSceneRoot().SkinnedFrameData;
+    const uint Owner = Base & ~kPreSkinShareBit;
+    if (!Data.Contains(Owner))
+    {
+        return kNoPreSkinBase;
+    }
+    const uint Resolved = Data.Get(Owner).SkinnedVertexBase;
+    return HasPreSkinSlice(Resolved) ? Resolved : kNoPreSkinBase;
+}
 GPUSpan<FTransform3x4>       RetainedTransforms()    { return GetSceneRoot().RetainedTransforms; }
 GPUSpan<FInstanceStatic>     RetainedStatic()        { return GetSceneRoot().RetainedStatic; }
 GPUSpan<FInstanceProxy>      RetainedProxies()       { return GetSceneRoot().RetainedProxies; }
 GPUSpan<uint>                ProxyList()             { return GetSceneRoot().ProxyList; }
+
+bool IsShadowCached(uint RetainedSlot)
+{
+    const GPUSpan<uint> Bits = GetSceneRoot().ShadowCacheBits;
+    const uint Word = RetainedSlot >> 5u;
+    return Bits.Contains(Word) && ((Bits.Get(Word) >> (RetainedSlot & 31u)) & 1u) != 0u;
+}
 GPUSpan<FMeshletSphere>      SkinnedMeshletBounds()  { return GetSceneRoot().SkinnedMeshletBounds; }
 GPUSpan<FMeshletCone>        SkinnedMeshletCones()   { return GetSceneRoot().SkinnedMeshletCones; }
 GPUSpan<FWidgetInstance>     Widgets()               { return GetSceneRoot().Widgets; }
@@ -678,6 +725,54 @@ float3 ReconstructViewPos(float2 UV, float Depth, float4x4 InvProj)
 float3 ReconstructWorldPos(float2 UV, float Depth)
 {
     return mul(GetInverseCameraView(), float4(ReconstructViewPos(UV, Depth, GetInverseCameraProjection()), 1.0)).xyz;
+}
+
+// GTAO keeps how far its bent normal leans from the depth normal, in world space, biased so an unbent pixel stores exactly zero.
+float3 EncodeBentNormalOffset(float3 Offset)
+{
+    return saturate(Offset * (127.0 / 255.0) + (128.0 / 255.0));
+}
+
+float3 DecodeBentNormalOffset(float3 Encoded)
+{
+    return Encoded * (255.0 / 127.0) - (128.0 / 127.0);
+}
+
+struct FScreenAO
+{
+    float  Visibility;
+    float3 BentNormal;
+};
+
+// Distance field sky visibility alone, open where it is not traced.
+float SampleDistanceFieldAO(float2 ScreenUV)
+{
+    return Scene().GTAOSettings.SkyOcclusion.IsValid() ? Scene().GTAOSettings.SkyOcclusion.SampleLevel(Samplers::LinearClamp, ScreenUV, 0.0).r : 1.0;
+}
+
+// GTAO's small scale and the distance fields' large scale visibility, their leans applied to shading normal N so a normal map keeps its detail.
+FScreenAO SampleScreenAO(float2 ScreenUV, float3 N)
+{
+    float  Visibility = 1.0;
+    float3 Lean       = float3(0.0, 0.0, 0.0);
+    if (Scene().GTAOSettings.AOTexture.IsValid())
+    {
+        const float4 Packed = Scene().GTAOSettings.AOTexture.SampleLevel(Samplers::LinearClamp, ScreenUV, 0.0);
+        Visibility *= Packed.r;
+        Lean       += DecodeBentNormalOffset(Packed.gba);
+    }
+    if (Scene().GTAOSettings.SkyOcclusion.IsValid())
+    {
+        const float4 Packed = Scene().GTAOSettings.SkyOcclusion.SampleLevel(Samplers::LinearClamp, ScreenUV, 0.0);
+        Visibility *= Packed.r;
+        Lean       += DecodeBentNormalOffset(Packed.gba);
+    }
+
+    const float3 Bent = N + Lean;
+    FScreenAO AO;
+    AO.Visibility = Visibility;
+    AO.BentNormal = dot(Bent, N) > 1e-3 ? normalize(Bent) : N;
+    return AO;
 }
 
 // The surface's true orientation from its depth neighbors, which a normal map cannot tilt into the surface.

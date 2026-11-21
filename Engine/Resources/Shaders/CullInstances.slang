@@ -3,13 +3,13 @@
 
 // The reject set and the LOD pick must match BuildMeshletBlocks exactly.
 
-#define LOCAL_SIZE_X 64
+#define LOCAL_SIZE_X INSTANCE_CULL_BLOCK_SIZE
 
 struct FCullInstancesArgs
 {
     uint  NumViews;
     uint  NumBatches;
-    uint  bUseLODs;
+    uint  _Pad0;
     // A skinned slot whose side data lacks this tag was not gathered this frame and must not be emitted.
     uint  SkinFrameTag;
 
@@ -75,15 +75,6 @@ uint ClaimPreSkinSlice(FMeshletHeader* Header, uint MeshletOffset, uint MeshletC
     // Fold in the span start so the writer and the reader can both index by the meshlet's own VertexOffset.
     return Slot - FirstVertex;
 }
-
-// Mirror of Lumina::FInstanceBlockBounds, the distance bounds of one workgroup's slots.
-struct FInstanceBlockBounds
-{
-    float3 Min;
-    float  Reach;
-    float3 Max;
-    uint   bAlwaysScan;
-};
 
 // Conservative, so a passing block still tests each of its instances.
 bool IsBlockInReach(FInstanceBlockBounds Block, float3 CamPos)
@@ -190,13 +181,13 @@ void ComputeMain(uint3 GlobalID : SV_DispatchThreadID, uint3 GroupID : SV_GroupI
 
     // Thinned foliage keeps a share falling with distance squared, so the count on screen stays level, and every view sees the same choice.
     FTransform3x4 Transform = (FTransform3x4)0;
-    bool bWidened = false;
+    bool bHasTransform = false;
     const float Keep = bNoCull ? 1.0 : ThinningKeep(DistSq, Cull.ThinningStartDistance);
     if (Keep < 1.0)
     {
         // Hashed on the pivot, the one position the proxy pass rebuilds bit for bit from the same transform.
         Transform = Pass().RetainedTransforms.Get(SlotIdx);
-        bWidened  = true;
+        bHasTransform = true;
         const float3 Pivot = float3(Transform.Row0.w, Transform.Row1.w, Transform.Row2.w);
         const float3 Scale = ThinningScale(Keep, Pivot);
         if (Scale.y <= 0.0)
@@ -215,15 +206,36 @@ void ComputeMain(uint3 GlobalID : SV_DispatchThreadID, uint3 GroupID : SV_GroupI
 
     // Too small for its meshlets, the camera sees the instance as one splat the proxy pass draws off the retained slot alone.
     const bool bProxyCandidate = !bSkinned && !bNoCull && !Cull.HasFlag(EInstanceFlags::ShadowOnly) && Cull.HasFlag(EInstanceFlags::HasGeometry)
-                              && Pass().OutProxyList.Count > 0u && (Scene().CullData.VirtualGeometryFlags & VG_FLAG_PROXIES) != 0u
-                              && Scene().CullData.ProxyTransitionPixels > 0.0;
-    const bool bProxied = bProxyCandidate && IsProxySized(Center, Radius, Cull.SphereBounds.xyz);
-    if (bProxied)
+                              && Pass().OutProxyList.Count > 0u && (Scene().CullData.VirtualGeometryFlags & VG_FLAG_PROXIES) != 0u;
+    bool   bProxied     = false;
+    bool   bDrawsProxy  = true;
+    float3 ProxyCenter  = Center;
+    float  ProxyRadius  = Radius;
+    if (bProxyCandidate && Cull.HasFlag(EInstanceFlags::Impostor) && RetainedProxies().Contains(SlotIdx))
+    {
+        // Every surface measures the mesh's whole sphere and hashes the pivot, so the instance swaps to its one impostor at once.
+        if (!bHasTransform)
+        {
+            Transform = Pass().RetainedTransforms.Get(SlotIdx);
+            bHasTransform = true;
+        }
+        const FInstanceProxy Proxy = RetainedProxies().GetAligned(SlotIdx);
+        ProxyCenter = mul(Transform.ToMatrix(), float4(Proxy.LocalCenter, 1.0)).xyz;
+        ProxyRadius = abs(Proxy.SplatHalfSize) * TransformMaxScale(Transform);
+        bDrawsProxy = Proxy.SplatHalfSize > 0.0;
+        bProxied    = Scene().CullData.ImpostorTransitionPixels > 0.0
+                   && IsProxySized(ProxyCenter, ProxyRadius, float3(Transform.Row0.w, Transform.Row1.w, Transform.Row2.w), Scene().CullData.ImpostorTransitionPixels);
+    }
+    else if (bProxyCandidate && Scene().CullData.ProxyTransitionPixels > 0.0)
+    {
+        bProxied = IsProxySized(Center, Radius, Cull.SphereBounds.xyz, Scene().CullData.ProxyTransitionPixels);
+    }
+    if (bProxied && bDrawsProxy)
     {
         // Only what the camera could see, since the proxy pass draws the list without a cull of its own.
         const FCullView Camera = GetCullView(0u);
         if (NumViews > 0u && (Camera.LayerMask & Layers) != 0u && !Camera.HasFlag(CULL_VIEW_FLAG_CAST_SHADOW_ONLY)
-            && FrustumContainsSphere(Camera.FrustumPlanes, Center, Radius))
+            && FrustumContainsSphere(Camera.FrustumPlanes, ProxyCenter, ProxyRadius))
         {
             const uint ProxySlot = AppendReserve(Pass().OutProxyDrawArgs.At(1u), Pass().OutProxyList.Count, 0u);
             if (ProxySlot != kAppendFull)
@@ -244,19 +256,17 @@ void ComputeMain(uint3 GlobalID : SV_DispatchThreadID, uint3 GroupID : SV_GroupI
     // Bounds every LODMeshlet* index below, whatever else the table gets wrong.
     const uint NumLODs = min(Desc.NumLODs, (uint)MESHLET_MAX_LODS);
 
-    // Never per-view for skinned, since the pre-skin slice was assigned against the CPU's LOD pick.
-    const bool bSelectPerView = !bSkinned && Cull.ForcedLODIndex < 0 && Pass().bUseLODs != 0u;
-
-    // A per-view instance starts from LOD 0 here only to test it has geometry; its picks come after visibility.
-    const uint FixedLODIndex = Cull.ForcedLODIndex >= 0 ? min((uint)Cull.ForcedLODIndex, NumLODs > 0u ? NumLODs - 1u : 0u) : 0u;
+    // Never per-view for skinned, since the pre-skin slice was assigned against the CPU's camera pick.
+    const bool bSelectPerView = !bSkinned;
 
     // A flag rather than a null-pointer test, since a slot that rejects here never loads the static payload.
     const bool bHasGeometry = Cull.HasFlag(EInstanceFlags::HasGeometry);
 
     // Skinned ranges already fold in the header-resident test, so bHasGeometry is not applied again.
-    uint SurfaceMeshletOffset = bSkinned ? Skin.SurfaceMeshletOffset : Desc.LODMeshletOffset[FixedLODIndex];
+    // A static instance starts from slot 0 here only to test it has geometry; its picks come after visibility.
+    uint SurfaceMeshletOffset = bSkinned ? Skin.SurfaceMeshletOffset : Desc.LODMeshletOffset[0];
     uint SurfaceMeshletCount  = bSkinned ? Skin.SurfaceMeshletCount
-                                         : (bHasGeometry ? Desc.LODMeshletCount[FixedLODIndex] : 0u);
+                                         : (bHasGeometry && NumLODs > 0u ? Desc.LODMeshletCount[0] : 0u);
 
     if (SurfaceMeshletCount == 0u)
     {
@@ -266,12 +276,12 @@ void ComputeMain(uint3 GlobalID : SV_DispatchThreadID, uint3 GroupID : SV_GroupI
     // No early break, since every view the instance is visible to has to reserve room.
     const bool bCaster     = Cull.HasFlag(EInstanceFlags::CastShadow);
     const bool bShadowOnly = Cull.HasFlag(EInstanceFlags::ShadowOnly);
-    const bool bFarCaster  = Cull.HasFlag(EInstanceFlags::CastFarShadow);
     const bool bFoliage    = Cull.HasFlag(EInstanceFlags::Foliage);
     const uint CustomDepthStencil = Cull.CustomDepthStencil;
     const bool bCustomDepth       = (CustomDepthStencil & CUSTOM_DEPTH_ENABLED_BIT) != 0u;
     const uint DrawID   = Cull.DrawID;
     const bool bInRange = DrawID < Pass().NumBatches;
+    const bool bShadowCached = IsShadowCached(SlotIdx);
 
     // A skinned instance needs a pre-skin slice only when some view emits it.
     bool bNeedsSkin = false;
@@ -288,7 +298,7 @@ void ComputeMain(uint3 GlobalID : SV_DispatchThreadID, uint3 GroupID : SV_GroupI
     {
         const FCullView View = GetCullView(v);
         if (!IsCameraProxyView(View, v, bProxied)
-            && IsInstanceVisibleToView(View, Center, Radius, bNoCull, bCaster, bShadowOnly, bFarCaster, bFoliage, bCustomDepth, Layers))
+            && IsInstanceVisibleToView(View, Center, Radius, bNoCull, bCaster, bShadowOnly, bFoliage, bCustomDepth, Layers, bShadowCached))
         {
             FirstVisibleView = v;
             break;
@@ -316,7 +326,7 @@ void ComputeMain(uint3 GlobalID : SV_DispatchThreadID, uint3 GroupID : SV_GroupI
     // Bounded by the header's own count, since a run no mesh can back becomes BuildMeshletBlocks' trip count and hangs the GPU.
     const uint MeshletTotal = min(LODMeshletTotal, Static.MeshletHeader.MeshletCount);
 
-    if (!bWidened)
+    if (!bHasTransform)
     {
         Transform = Pass().RetainedTransforms.Get(SlotIdx);
     }
@@ -346,7 +356,7 @@ void ComputeMain(uint3 GlobalID : SV_DispatchThreadID, uint3 GroupID : SV_GroupI
         // Views before the first visible one already failed the test above, and that view already passed it.
         const bool bVisible = v == FirstVisibleView
                            || (v > FirstVisibleView && !IsCameraProxyView(View, v, bProxied)
-                               && IsInstanceVisibleToView(View, Center, Radius, bNoCull, bCaster, bShadowOnly, bFarCaster, bFoliage, bCustomDepth, Layers));
+                               && IsInstanceVisibleToView(View, Center, Radius, bNoCull, bCaster, bShadowOnly, bFoliage, bCustomDepth, Layers, bShadowCached));
         if (bVisible)
         {
             // View 0 reuses the camera's pick above.
@@ -375,8 +385,8 @@ void ComputeMain(uint3 GlobalID : SV_DispatchThreadID, uint3 GroupID : SV_GroupI
             // One reservation per meshlet the cut can draw, since every pass that rasterizes the batch draws the same list.
             InterlockedAdd(Bucket.DrawCapacity, min(DrawBound, Emitted));
 
-            // Rounded up per instance because blocks never span instances.
-            const uint Blocks = (Emitted + (MESHLET_CULL_GROUP_SIZE - 1u)) / MESHLET_CULL_GROUP_SIZE;
+            // Rounded up per instance because blocks never span instances, and split on runs as BuildMeshletBlocks splits them.
+            const uint Blocks = RangeBlockCount(uint2(Range.x, Emitted), bSelectPerView);
             // Doubled for a two-phase view, whose early-drawn instances are built again at the back for the late re-test.
             InterlockedAdd(Bucket.BlockCapacity, View.HasFlag(CULL_VIEW_FLAG_MESHLET_HIZ) ? Blocks * 2u : Blocks);
         }
@@ -390,14 +400,26 @@ void ComputeMain(uint3 GlobalID : SV_DispatchThreadID, uint3 GroupID : SV_GroupI
     // Slot 0 is the null header, so this asks whether the header describes geometry.
     if (bSkinned && Static.MeshletHeader.MeshletCount != 0u)
     {
-        // An unclaimed slice is not dropped, since the draw path blends its bones inline instead.
-        if (bNeedsSkin)
-        {
-            SkinBase = ClaimPreSkinSlice(Static.MeshletHeader, SurfaceMeshletOffset, SurfaceMeshletCount, MeshletTotal);
-        }
+        // The CPU marks every instance of a group but one with that one's index, and the group's first visible member claims the slice there.
+        const uint Seeded = Skin.SkinnedVertexBase;
+        const uint Owner  = IsPreSkinShare(Seeded) ? (Seeded & ~kPreSkinShareBit) : SkinnedIndex;
 
-        // Written back so the skinning passes see the base the draw path reads off the compacted instance.
-        Pass().SkinnedFrameData.At(SkinnedIndex).SkinnedVertexBase = SkinBase;
+        // An unclaimed slice is not dropped, since the draw path blends its bones inline instead.
+        if (bNeedsSkin && Pass().SkinnedFrameData.Contains(Owner))
+        {
+            uint Previous;
+            InterlockedCompareExchange(Pass().SkinnedFrameData.At(Owner).SkinnedVertexBase, kNoPreSkinBase, kPreSkinClaiming, Previous);
+            if (Previous == kNoPreSkinBase)
+            {
+                SkinBase = ClaimPreSkinSlice(Static.MeshletHeader, SurfaceMeshletOffset, SurfaceMeshletCount, MeshletTotal);
+                // Written back so the skinning passes see the base the draw path reads off the compacted instance.
+                InterlockedExchange(Pass().SkinnedFrameData.At(Owner).SkinnedVertexBase, SkinBase, Previous);
+            }
+            else
+            {
+                SkinBase = kPreSkinShareBit | Owner;
+            }
+        }
     }
 
     // Safe to assemble in a local because FGPUInstance holds a header slot, not an address.
@@ -417,12 +439,21 @@ void ComputeMain(uint3 GlobalID : SV_DispatchThreadID, uint3 GroupID : SV_GroupI
     Inst.SkinnedBoundsBase       = bSkinned ? Skin.SkinnedBoundsBase : kNoSkinnedBounds;
     Inst.SurfaceMeshletOffset    = SurfaceMeshletOffset;
     Inst.SurfaceMeshletCount     = SurfaceMeshletCount;
-    Inst.SurfaceDescIndex        = bSelectPerView ? Cull.SurfaceDescIndex : kNoSurfaceDesc;
+    // A skinned mesh keeps its desc too, for the camera's cut within the slice the CPU pre-skinned.
+    Inst.SurfaceDescIndex        = Cull.SurfaceDescIndex;
     Inst.MeshletTotalCount       = MeshletTotal;
     // Survives compaction, unlike OutSlot, and keys the two-phase visibility flags.
     Inst.RetainedSlot            = SlotIdx;
     Inst.RenderLayers            = Layers;
-    Inst.CustomDepthStencil      = CustomDepthStencil;
+
+    // Decided once from the camera, so the visbuffer, shadow and deferred passes all draw the instance with the same offset.
+    uint FrameBits = (Cull.bNoShadowWPO ? GPU_INSTANCE_NO_SHADOW_WPO_BIT : 0u) | (bShadowCached ? GPU_INSTANCE_SHADOW_CACHED_BIT : 0u);
+    const float WPODisableDistance = Static.WPODisableDistance;
+    if (WPODisableDistance > 0.0 && DistSq > WPODisableDistance * WPODisableDistance)
+    {
+        FrameBits |= GPU_INSTANCE_NO_WPO_BIT;
+    }
+    Inst.CustomDepthStencil      = CustomDepthStencil | FrameBits;
 
     Pass().OutInstances.Set(OutSlot, Inst);
 }

@@ -46,13 +46,15 @@ namespace Lumina
         uint64          MaterialID    = 0;
         uint32          MaterialIdx   = 0;
         bool            bMaterialCastsShadows = true;
+        // The material moves its vertices, so its shadow changes every frame unless the instance casts from the still mesh.
+        bool            bWorldPositionOffset = false;
 
         uint32  NumLODs                             = 1;
         uint32  LODMeshletOffset[MAX_MESH_LODS]     = {};
         uint32  LODMeshletCount[MAX_MESH_LODS]      = {};
         // Mesh-local error per LOD, raw, which LODErrorMultiplier scales at selection time.
         float   LODError[MAX_MESH_LODS]             = {};
-        // A cluster slot largest parent error, raw like LODError; zero on discrete LODs.
+        // A cluster slot largest parent error, raw like LODError.
         float   LODParentError[MAX_MESH_LODS]       = {};
         // SURFACE_DESC_* bits copied from the surface.
         uint32  LODFlags                            = 0;

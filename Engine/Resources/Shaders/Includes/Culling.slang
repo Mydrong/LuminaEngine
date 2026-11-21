@@ -1,5 +1,6 @@
 #pragma once
 #include "SceneGlobals.slang"
+#include "VirtualShadow.slang"
 
 // Hi-Z math here must match the depth pyramid build (min-reduction sampler, reverse-Z).
 
@@ -159,73 +160,12 @@ static const float kProxyTransitionBand = 0.25;
 // Seeded apart from thinning, whose survivors would otherwise all draw from the low end of the band.
 static const uint kProxyTransitionSeed = 0x9e3779b9u;
 
-// Whether the camera sees an instance as a splat, each instance crossing at its own size inside the band so no row of them swaps together.
-bool IsProxySized(float3 Center, float Radius, float3 Position)
+// Whether the camera sees an instance as its proxy, each instance crossing at its own size inside the band so no row of them swaps together.
+bool IsProxySized(float3 Center, float Radius, float3 Position, float TransitionPixels)
 {
     const float Dither    = 2.0 * PositionHash(Position, kProxyTransitionSeed) - 1.0;
-    const float Threshold = Scene().CullData.ProxyTransitionPixels * (1.0 + kProxyTransitionBand * Dither);
+    const float Threshold = TransitionPixels * (1.0 + kProxyTransitionBand * Dither);
     return ProjectedDiameterPixels(Center, Radius) < Threshold;
-}
-
-// The project's runtime toggle for the baked voxel levels.
-bool VoxelFarEnabled()
-{
-    return (Scene().CullData.VirtualGeometryFlags & VG_FLAG_VOXEL_FAR) != 0u;
-}
-
-// Slots a view may pick from, which stops short of the voxel levels while they are off for it.
-uint SelectableLODCount(FSurfaceDesc Desc, bool bVoxels)
-{
-    const uint NumLODs = min(Desc.NumLODs, (uint)MESHLET_MAX_LODS);
-    if (bVoxels)
-    {
-        return NumLODs;
-    }
-    for (uint i = 0u; i < NumLODs; ++i)
-    {
-        if (Desc.IsVoxelSlot(i))
-        {
-            return i;
-        }
-    }
-    return NumLODs;
-}
-
-// The coarsest LOD whose projected error the view tolerates, mirrored by SelectLODForView in SceneRenderer_Extract.cpp.
-uint SelectLODForView(FSurfaceDesc Desc, FCullView View, float4 SphereBounds, float MaxScale)
-{
-    const uint NumLODs = SelectableLODCount(Desc, VoxelFarEnabled());
-    if (NumLODs <= 1u || View.LODErrorScale <= 0.0)
-    {
-        return 0u;
-    }
-
-    // Nearest point of the bounds, so a large mesh is never coarser than its closest part allows.
-    const float Reach = View.HasFlag(CULL_VIEW_FLAG_ORTHOGRAPHIC_LOD)
-                      ? 1.0
-                      : max(length(SphereBounds.xyz - View.ViewOrigin) - SphereBounds.w, 0.0);
-    const float ErrorScale = View.LODErrorScale * MaxScale * Desc.LODErrorMultiplier;
-
-    uint Picked = 0u;
-    for (uint i = 1u; i < NumLODs; ++i)
-    {
-        if (Desc.LODError[i] * ErrorScale > Reach)
-        {
-            break;
-        }
-        Picked = i;
-    }
-    return Picked;
-}
-
-// A root whose parent is a voxel level has no parent at all while those levels are off.
-float ClusterSlotParentError(FSurfaceDesc Desc, uint Slot, bool bVoxels)
-{
-    if (!bVoxels && Desc.HasVoxelParent(Slot))
-    {
-        return MESHLET_LOD_ERROR_INFINITE;
-    }
-    return Desc.LODParentError[Slot];
 }
 
 // Group spheres nest loosely inside the instance sphere, so the reach bounds give them this much room.
@@ -234,8 +174,7 @@ static const float kClusterReachSlack = 1.25;
 // The slots of a cluster surface that can hold part of this view's cut, x the first and y the last.
 uint2 SelectClusterSlotRange(FSurfaceDesc Desc, FCullView View, float4 SphereBounds, float MaxScale)
 {
-    const bool bVoxels  = VoxelFarEnabled();
-    const uint NumSlots = SelectableLODCount(Desc, bVoxels);
+    const uint NumSlots = min(Desc.NumLODs, (uint)MESHLET_MAX_LODS);
     if (NumSlots <= 1u || View.LODErrorScale <= 0.0)
     {
         return uint2(0u, 0u);
@@ -249,7 +188,7 @@ uint2 SelectClusterSlotRange(FSurfaceDesc Desc, FCullView View, float4 SphereBou
 
     // A slot whose every parent the view accepts draws nothing, and parents only grow with the slot.
     uint Lo = 0u;
-    while (Lo + 1u < NumSlots && ClusterSlotParentError(Desc, Lo, bVoxels) * ErrorScale <= ReachNear)
+    while (Lo + 1u < NumSlots && Desc.LODParentError[Lo] * ErrorScale <= ReachNear)
     {
         ++Lo;
     }
@@ -263,42 +202,104 @@ uint2 SelectClusterSlotRange(FSurfaceDesc Desc, FCullView View, float4 SphereBou
     return uint2(Lo, Hi);
 }
 
+// A cluster mesh's ranges split on runs, MESHLET_CULL_GROUP_SIZE meshlets aligned on the mesh-global index, so each block has one run's bounds.
+uint RangeBlockCount(uint2 Range, bool bRuns)
+{
+    if (Range.y == 0u)
+    {
+        return 0u;
+    }
+    if (!bRuns)
+    {
+        return (Range.y + (MESHLET_CULL_GROUP_SIZE - 1u)) / MESHLET_CULL_GROUP_SIZE;
+    }
+    return (Range.x + Range.y - 1u) / MESHLET_CULL_GROUP_SIZE - Range.x / MESHLET_CULL_GROUP_SIZE + 1u;
+}
+
+// Block b of a range, x its first meshlet and y its count.
+uint2 RangeBlock(uint2 Range, uint Block, bool bRuns)
+{
+    if (!bRuns)
+    {
+        const uint First = Block * MESHLET_CULL_GROUP_SIZE;
+        return uint2(Range.x + First, min(MESHLET_CULL_GROUP_SIZE, Range.y - First));
+    }
+    const uint Run   = Range.x / MESHLET_CULL_GROUP_SIZE + Block;
+    const uint Begin = max(Range.x, Run * MESHLET_CULL_GROUP_SIZE);
+    const uint End   = min(Range.x + Range.y, (Run + 1u) * MESHLET_CULL_GROUP_SIZE);
+    return uint2(Begin, End - Begin);
+}
+
+// True when no meshlet of the run can survive the view, from the two bounds MeshBuffers appends per run after the per-meshlet ones.
+bool IsMeshletRunCulled(FMeshletHeader* Header, uint Run, FCullView View, float4x4 Model, float MaxScale, float LODErrorMultiplier, bool bFrustum, bool bCut)
+{
+    const uint Entry = Header.MeshletCount + Run * 2u;
+    const FMeshletLODBounds Lod    = loadAligned<16>(Header.LODBounds + Entry);
+    const FMeshletLODBounds Extent = loadAligned<16>(Header.LODBounds + Entry + 1u);
+
+    if (bFrustum && !FrustumContainsSphere(View.FrustumPlanes, mul(Model, float4(Extent.SelfCenter, 1.0)).xyz, Extent.SelfRadius * MaxScale))
+    {
+        return true;
+    }
+    if (!bCut)
+    {
+        return false;
+    }
+
+    const float ErrorScale = View.LODErrorScale * MaxScale * LODErrorMultiplier;
+    if (ErrorScale <= 0.0)
+    {
+        return Lod.SelfError > 0.0;
+    }
+
+    const bool bOrtho = View.HasFlag(CULL_VIEW_FLAG_ORTHOGRAPHIC_LOD);
+    // Even the finest group rejected from the run's far side means every meshlet's own group is rejected.
+    const float3 SelfCenter = mul(Model, float4(Lod.SelfCenter, 1.0)).xyz;
+    const float  FarReach   = bOrtho ? 1.0 : length(SelfCenter - View.ViewOrigin) + Lod.SelfRadius * MaxScale;
+    if (Lod.SelfError * ErrorScale > FarReach)
+    {
+        return true;
+    }
+
+    if (Lod.ParentError >= MESHLET_LOD_ERROR_INFINITE)
+    {
+        return false;
+    }
+    // Even the coarsest parent accepted from the run's near side means every meshlet's parent draws instead.
+    const float3 ParentCenter = mul(Model, float4(Lod.ParentCenter, 1.0)).xyz;
+    const float  NearReach    = bOrtho ? 1.0 : max(length(ParentCenter - View.ViewOrigin) - Lod.ParentRadius * MaxScale, 0.0);
+    return Lod.ParentError * ErrorScale <= NearReach;
+}
+
 // The pick's meshlet range, x the mesh-global offset and y the count, and the most of it one cut can draw. A cluster surface's slots are contiguous, so a slot span is one range.
 uint2 SelectViewMeshletRange(FSurfaceDesc Desc, FCullView View, float4 SphereBounds, float MaxScale, out uint DrawBound)
 {
-    if (Desc.bClusterLOD)
+    const uint2 Slots = SelectClusterSlotRange(Desc, View, SphereBounds, MaxScale);
+    const uint  Begin = Desc.LODMeshletOffset[Slots.x];
+    const uint  End   = Desc.LODMeshletOffset[Slots.y] + Desc.LODMeshletCount[Slots.y];
+    const uint  Count = End > Begin ? End - Begin : 0u;
+
+    // The cut gathers around the slot the instance center picks and spreads a slot either way, which is what the list is reserved for; the survivors the readback reports grow it from there.
+    const float Dist = View.HasFlag(CULL_VIEW_FLAG_ORTHOGRAPHIC_LOD) ? 1.0 : length(SphereBounds.xyz - View.ViewOrigin);
+    const float ES   = View.LODErrorScale * MaxScale * Desc.LODErrorMultiplier;
+    uint Mid = Slots.x;
+    for (uint s = Slots.x + 1u; s <= Slots.y; ++s)
     {
-        const uint2 Slots = SelectClusterSlotRange(Desc, View, SphereBounds, MaxScale);
-        const uint  Begin = Desc.LODMeshletOffset[Slots.x];
-        const uint  End   = Desc.LODMeshletOffset[Slots.y] + Desc.LODMeshletCount[Slots.y];
-        const uint  Count = End > Begin ? End - Begin : 0u;
-
-        // The cut gathers around the slot the instance center picks and spreads a slot either way, which is what the list is reserved for; the survivors the readback reports grow it from there.
-        const float Dist = View.HasFlag(CULL_VIEW_FLAG_ORTHOGRAPHIC_LOD) ? 1.0 : length(SphereBounds.xyz - View.ViewOrigin);
-        const float ES   = View.LODErrorScale * MaxScale * Desc.LODErrorMultiplier;
-        uint Mid = Slots.x;
-        for (uint s = Slots.x + 1u; s <= Slots.y; ++s)
+        if (Desc.LODError[s] * ES > Dist)
         {
-            if (Desc.LODError[s] * ES > Dist)
-            {
-                break;
-            }
-            Mid = s;
+            break;
         }
-        const uint First = Mid > Slots.x ? Mid - 1u : Slots.x;
-        const uint Last  = min(Mid + 1u, Slots.y);
-        uint Expected = MESHLET_CULL_GROUP_SIZE;
-        for (uint s = First; s <= Last; ++s)
-        {
-            Expected += Desc.LODMeshletCount[s];
-        }
-        DrawBound = min(Count, Expected);
-        return uint2(Begin, Count);
+        Mid = s;
     }
-
-    const uint LOD = SelectLODForView(Desc, View, SphereBounds, MaxScale);
-    DrawBound = Desc.LODMeshletCount[LOD];
-    return uint2(Desc.LODMeshletOffset[LOD], Desc.LODMeshletCount[LOD]);
+    const uint First = Mid > Slots.x ? Mid - 1u : Slots.x;
+    const uint Last  = min(Mid + 1u, Slots.y);
+    uint Expected = MESHLET_CULL_GROUP_SIZE;
+    for (uint s = First; s <= Last; ++s)
+    {
+        Expected += Desc.LODMeshletCount[s];
+    }
+    DrawBound = min(Count, Expected);
+    return uint2(Begin, Count);
 }
 
 // Diameter of a world sphere in pixels of the cull camera, unbounded when the camera is inside it.
@@ -395,66 +396,23 @@ bool IsHiZOccluded(FCullSphereProjection P)
     return DepthSphere < PyramidDepth;
 }
 
-// The previous frame's cascade depth is standard Z, so the reduction is max. bMid picks the pyramid and its transforms together.
-bool IsCascadeHZBOccluded(uint CascadeIndex, float3 CenterWS, float RadiusWS, bool bMid = false)
+// A shadow level splits its casters between its static and dynamic views, so each instance lands in exactly one.
+bool IsShadowCacheSplitRejected(FCullView View, bool bShadowCached)
 {
-    const uint bValid = bMid ? Scene().CullData.bCascadeHZBMidValid : Scene().CullData.bCascadeHZBValid;
-    if (bValid == 0u || CascadeIndex >= (uint)NUM_CASCADES)
-    {
-        return false;
-    }
-
-    const float4x4 CascadeVP = bMid ? Scene().CullData.CascadeHZBViewProjectionMid[CascadeIndex]
-                                    : Scene().CullData.CascadeHZBViewProjection[CascadeIndex];
-    const float3   NdcScale  = bMid ? Scene().CullData.CascadeHZBNdcScaleMid[CascadeIndex].xyz
-                                    : Scene().CullData.CascadeHZBNdcScale[CascadeIndex].xyz;
-
-    // Ortho w is 1, so clip space is already NDC.
-    const float3 Ndc       = mul(CascadeVP, float4(CenterWS, 1.0)).xyz;
-    const float3 NdcRadius = RadiusWS * NdcScale;
-
-    const float2 MinNdc = Ndc.xy - NdcRadius.xy;
-    const float2 MaxNdc = Ndc.xy + NdcRadius.xy;
-    const float  NearZ  = Ndc.z - NdcRadius.z;
-
-    // A sphere partly outside the cascade volume was clipped by the raster, so the pyramid cannot prove it hidden.
-    if (any(MinNdc < -1.0) || any(MaxNdc > 1.0) || NearZ < 0.0)
-    {
-        return false;
-    }
-
-    // The ortho projection already bakes Vulkan +Y-down, so NDC maps to the tile directly.
-    const float4 Tile     = Scene().CullData.CascadeHZBTile[CascadeIndex];
-    const float2 LocalMin = MinNdc * 0.5 + 0.5;
-    const float2 LocalMax = MaxNdc * 0.5 + 0.5;
-
-    const float2 UvMin = Tile.xy + LocalMin * Tile.zw;
-    const float2 UvMax = Tile.xy + LocalMax * Tile.zw;
-
-    const float Level    = HiZOcclusionMip(float4(UvMin, UvMax),
-                                           float2(Scene().CullData.CascadePyramidWidth, Scene().CullData.CascadePyramidHeight));
-    const float MaxLevel = max((float)Scene().CullData.CascadePyramidMipCount - 1.0, 0.0);
-
-    // Past the allocated chain one tap no longer covers the footprint, so it cannot prove anything.
-    if (Level > MaxLevel)
-    {
-        return false;
-    }
-
-    const float2 SampleUV = (UvMin + UvMax) * 0.5;
-
-    // Standard Z needs max reduction, the opposite of the camera's reverse-Z pyramid.
-    const float PyramidDepth = Scene().CullData.CascadePyramid.SampleLevel(Samplers::MaxReduction, SampleUV, Level).x;
-
-    // Occluded when the whole sphere sits behind the farthest depth in its footprint.
-    return NearZ > PyramidDepth;
+    return (View.HasFlag(CULL_VIEW_FLAG_SHADOW_CACHE_STATIC) && !bShadowCached)
+        || (View.HasFlag(CULL_VIEW_FLAG_SHADOW_CACHE_DYNAMIC) && bShadowCached);
 }
 
 // CullInstances sizes buckets from this and BuildMeshletBlocks appends against it, so they must agree.
 bool IsInstanceVisibleToView(FCullView View, float3 Center, float Radius, bool bNoCull, bool bCaster,
-                             bool bShadowOnly, bool bFarCaster, bool bFoliage, bool bCustomDepth, uint Layers)
+                             bool bShadowOnly, bool bFoliage, bool bCustomDepth, uint Layers, bool bShadowCached)
 {
     if ((View.LayerMask & Layers) == 0u)
+    {
+        return false;
+    }
+
+    if (IsShadowCacheSplitRejected(View, bShadowCached))
     {
         return false;
     }
@@ -476,10 +434,6 @@ bool IsInstanceVisibleToView(FCullView View, float3 Center, float Radius, bool b
     {
         return false;
     }
-    if (View.HasFlag(CULL_VIEW_FLAG_FAR_CASCADE) && !bFarCaster)
-    {
-        return false;
-    }
 
     // The mirror of the line above, so a shadow-only instance reaches shadow maps and nothing else.
     if (!bShadowView && bShadowOnly)
@@ -497,18 +451,10 @@ bool IsInstanceVisibleToView(FCullView View, float3 Center, float Radius, bool b
         return false;
     }
 
-    if (View.HasFlag(CULL_VIEW_FLAG_CASCADE))
+    // A shadow level keeps what lands in last frame's requested pages grown by two, and the fresh pages it misses draw again next frame.
+    if (View.HasFlag(CULL_VIEW_FLAG_VIRTUAL_SHADOW) && IsVirtualShadowPageCulled(View.ShadowLevel, VSM_MASK_HOT, Center, Radius))
     {
-        // Cascade ortho boxes overlap, so test the camera slice swept toward the sun instead.
-        if (!FrustumContainsSphere(Scene().CullData.CascadeFrustum[View.CascadeIndex], Center, Radius))
-        {
-            return false;
-        }
-        if (Scene().CullData.bShadowOcclusionCull != 0u &&
-            IsCascadeHZBOccluded(View.CascadeIndex, Center, Radius))
-        {
-            return false;
-        }
+        return false;
     }
 
     // No camera Hi-Z here since only last frame's pyramid exists and a reject is unrecoverable. MeshletCull's late phase tests it.

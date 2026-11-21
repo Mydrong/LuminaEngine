@@ -8,6 +8,7 @@
 #include "Containers/String.h"
 #include "Input/Key.h"
 #include "Physics/PhysicsTypes.h"
+#include "Renderer/HDROutput.h"
 #include "Renderer/PresentMode.h"
 #include "EngineSettings.generated.h"
 
@@ -306,6 +307,8 @@ namespace Lumina
         None,
         DLSS,
         FSR,
+        // The engine's own temporal anti-aliasing, which also upscales when the render resolution is below the display.
+        TAA,
     };
 
     // The standard upscaler quality modes, which each upscaler maps onto its own, plus a free percentage.
@@ -362,6 +365,18 @@ namespace Lumina
         PROPERTY(Editable, Category = "Display")
         bool bLowLatencyMode = false;
 
+        // Presents the primary window in HDR10, which lets highlights run brighter than SDR white.
+        PROPERTY(Editable, Category = "Display")
+        EHDROutput HDROutput = EHDROutput::Auto;
+
+        // Brightness of SDR white and the UI in HDR, where 0 follows the Windows SDR content brightness.
+        PROPERTY(Editable, Category = "Display", ClampMin = 0.0f, ClampMax = 1000.0f, Units = "nits")
+        float HDRPaperWhiteNits = 0.0f;
+
+        // Brightest highlight sent to the display in HDR, where 0 uses the peak the monitor reports.
+        PROPERTY(Editable, Category = "Display", ClampMin = 0.0f, ClampMax = 10000.0f, Units = "nits")
+        float HDRPeakNits = 0.0f;
+
         void PostInitSettings() override;
 
         // Pushes PresentMode to the RHI, rebuilding the primary swapchain if one already exists.
@@ -396,22 +411,6 @@ namespace Lumina
         PROPERTY(Editable, Category = "Shadows", ClampMin = 128, ClampMax = 1024)
         int32 PointShadowResolution = 512;
 
-        // New meshes import with a cluster hierarchy the GPU cuts per meshlet, in place of a discrete LOD chain. Existing meshes rebuild from the mesh editor.
-        PROPERTY(Editable, Category = "Virtual Geometry")
-        bool bClusterLODByDefault = true;
-
-        // New meshes import with voxel splat levels past their coarsest geometry.
-        PROPERTY(Editable, Category = "Virtual Geometry")
-        bool bVoxelFarByDefault = true;
-
-        // Voxels along the longest side at the finest voxel level a new mesh bakes.
-        PROPERTY(Editable, Category = "Virtual Geometry", ClampMin = 4, ClampMax = 128)
-        int32 DefaultVoxelResolution = 128;
-
-        // Draws the baked voxel levels once a mesh is far enough; off keeps every mesh on its coarsest triangles.
-        PROPERTY(Editable, Category = "Virtual Geometry")
-        bool bVoxelFarRepresentation = true;
-
         // Replaces an instance smaller than ProxyTransitionPixels on screen with one splat carrying no transform or meshlet data of its own.
         PROPERTY(Editable, Category = "Virtual Geometry")
         bool bFarProxies = true;
@@ -420,9 +419,21 @@ namespace Lumina
         PROPERTY(Editable, Category = "Virtual Geometry", ClampMin = 0.0f, ClampMax = 16.0f, Delta = 0.25f)
         float ProxyTransitionPixels = 2.0f;
 
+        // Projected diameter in pixels under which an instance whose mesh has a baked impostor draws it instead of its meshlets.
+        PROPERTY(Editable, Category = "Virtual Geometry", ClampMin = 0.0f, ClampMax = 1024.0f, Delta = 1.0f)
+        float ImpostorTransitionPixels = 96.0f;
+
         // Sun shadow filtering and contact march steps, with the march off at Low; a low sun stretches each shadow texel along the ground, which only more taps hide.
         PROPERTY(Editable, Category = "Shadows")
         EShadowQuality ShadowQuality = EShadowQuality::High;
+
+        // Small opaque sun shadow casters rasterize in compute, where tiny triangles cost far less than in the hardware rasterizer.
+        PROPERTY(Editable, Category = "Shadows")
+        bool bVirtualShadowComputeRaster = true;
+
+        // The camera's small opaque meshlets rasterize in compute too, where triangles of a pixel or two cost far less than in the hardware rasterizer.
+        PROPERTY(Editable, Category = "Virtual Geometry")
+        bool bVisBufferComputeRaster = true;
 
         // At 1 a mesh switches LOD once its simplification error shrinks to one display pixel, and 2 waits for half a pixel.
         PROPERTY(Editable, Category = "Level of Detail", ClampMin = 0.25f, ClampMax = 16.0f, Delta = 0.25f)
@@ -481,7 +492,7 @@ namespace Lumina
         float ScreenPercentage = 100.0f;
 
         PROPERTY(Editable, Category = "Resolution")
-        EUpscaler Upscaler = EUpscaler::None;
+        EUpscaler Upscaler = EUpscaler::TAA;
 
         // Sharpening on the built-in spatial upscale, which softens the image it enlarges.
         PROPERTY(Editable, Category = "Resolution", ClampMin = 0.0f, ClampMax = 1.0f)
@@ -535,6 +546,14 @@ namespace Lumina
         PROPERTY(Editable, Category = "Anti-Aliasing", ClampMin = 0.01f, ClampMax = 1.0f)
         float TemporalMaxReprojection = 0.25f;
 
+        // TAA's share of the new frame on a still pixel. Lower resolves finer and smooths more, higher keeps it sharper and less stable.
+        PROPERTY(Editable, Category = "Anti-Aliasing", ClampMin = 0.02f, ClampMax = 0.5f)
+        float TemporalAACurrentWeight = 0.04f;
+
+        // Standard deviations of the local color range TAA keeps its history inside. Larger ghosts more, smaller flickers more.
+        PROPERTY(Editable, Category = "Anti-Aliasing", ClampMin = 0.5f, ClampMax = 3.0f)
+        float TemporalAAClipGamma = 1.25f;
+
         // VRS rate for opted-in passes; coarser is fewer PS invocations but softer, and a no-op without pipeline FSR.
         PROPERTY(ReadOnly, Category = "Variable Rate Shading")
         EVariableRateShading VariableRateShading = EVariableRateShading::Off;
@@ -586,6 +605,18 @@ namespace Lumina
         /** Trades depth-pyramid bandwidth against thin-object accuracy and temporal stability. */
         PROPERTY(Editable, Category = "Ambient Occlusion|Heuristics", ClampMin = 0.0f, ClampMax = 30.0f)
         float GTAODepthMipSamplingOffset = 3.3f;
+
+        // Large scale sky occlusion from cones traced through the mesh distance fields, under canopies, in alleys and indoors.
+        PROPERTY(Editable, Category = "Ambient Occlusion|Distance Field")
+        bool bDistanceFieldAO = true;
+
+        // How far from a surface a mesh can still block its sky.
+        PROPERTY(Editable, Category = "Ambient Occlusion|Distance Field", ClampMin = 0.5f, ClampMax = 50.0f)
+        float DistanceFieldAOMaxDistance = 8.0f;
+
+        // Camera distance the occlusion fades out by, which also sizes the grid its casters are binned into.
+        PROPERTY(Editable, Category = "Ambient Occlusion|Distance Field", ClampMin = 10.0f, ClampMax = 1000.0f)
+        float DistanceFieldAOViewDistance = 150.0f;
 
         // Half resolution indirect diffuse gathered along GTAO's horizon slices from last frame's lit color; needs GTAO on.
         PROPERTY(Editable, Category = "Global Illumination")
